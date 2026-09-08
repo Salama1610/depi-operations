@@ -1,0 +1,5 @@
+export const hex=(b:ArrayBuffer)=>Array.from(new Uint8Array(b)).map(v=>v.toString(16).padStart(2,'0')).join('');
+export async function digest(value:string){return hex(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value)))}
+export async function sign(secret:string,message:string){const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);return hex(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(message)))}
+export function equal(a:string,b:string){if(a.length!==b.length)return false;let d=0;for(let i=0;i<a.length;i++)d|=a.charCodeAt(i)^b.charCodeAt(i);return d===0;}
+export async function verifyRequest(secret:string,body:string,timestamp:string,event:string,signature:string,at=Date.now()){if(!secret||secret.length<32||!/^[\w-]{8,100}$/.test(event)||!/^\d{10,13}$/.test(timestamp)||!/^[a-f0-9]{64}$/.test(signature))return false;const time=Number(timestamp)*(timestamp.length===10?1000:1);if(Math.abs(at-time)>5*60000)return false;return equal(await sign(secret,timestamp+'\n'+event+'\n'+await digest(body)),signature);}

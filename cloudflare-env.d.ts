@@ -3,4 +3,4 @@ interface D1PreparedStatement {bind(...values:unknown[]):D1PreparedStatement;fir
 interface D1Database {prepare(query:string):D1PreparedStatement;batch(statements:D1PreparedStatement[]):Promise<D1Result[]>}
 interface Fetcher {fetch(input:RequestInfo|URL,init?:RequestInit):Promise<Response>}
 interface R2Bucket {put(key:string,value:ArrayBuffer|ArrayBufferView,options?:{httpMetadata?:{contentType:string}}):Promise<unknown>;get(key:string):Promise<{body:ReadableStream}|null>;delete(key:string):Promise<void>}
-declare module 'cloudflare:workers' {export const env:{DB:D1Database;BUCKET:R2Bucket}}
+declare module 'cloudflare:workers' {export const env:{DB:D1Database;BUCKET:R2Bucket;AUTOMATION_HMAC_SECRET?:string;AUTOMATION_ACTOR_EMAIL?:string;VAULT_URL?:string;VAULT_TOKEN?:string;BACKUP_ENCRYPTION_KEY?:string}}

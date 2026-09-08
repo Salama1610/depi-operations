@@ -1,6 +1,6 @@
 # DEPI Coaching & Freelancing Operations
 
-Private staff-only pilot for Career180 and Freelance Yard, implementing the core of the supplied Round 5 build specification. This release is a working application, not a claim that all 78 sections are production-complete.
+Private staff-only pilot for Career180 and Freelance Yard, implementing the core of the supplied Round 5 build specification. This release is a working application, not a claim that all 78 sections are production-complete. Connections and recovery are documented in `docs/connections-and-recovery.md`.
 
 ## Run and validate
 
@@ -34,9 +34,20 @@ The initializing owner receives Project Operations and Operations Systems / Admi
 - Immutable audit and review history; actor-bound idempotency keys for successful mutations.
 - A staff-triggered policy check creates contact/recovery tasks, supervisor interventions and review-SLA escalations in bounded, retry-safe batches.
 
+## Added integration features
+
+- Signed scheduled-job API, replay protection, run history and controlled failed-job retry.
+- Inactive self-hosted n8n workflow files and a signing runner for hourly policy checks and weekly reports.
+- Persistent per-recipient notifications with read state.
+- Date-window activity reports, review SLA backlog, platform account capacity and explicit graduation scenarios.
+- Restricted credential-vault adapter with purpose audit, timed display and exposure incident creation.
+- AES-GCM encrypted database/evidence export and an offline recovery verifier; local restore drill passed.
+
+These features need protected connection settings to run against real services. They have not been activated or published.
+
 ## Pilot boundaries that remain before production
 
-See `docs/production-readiness.md`. Key unfinished requirements: full weekly journey gates, scheduled execution and notification delivery, full task bank and account credential-vault integration, FX conversion, import updates/conflict reconciliation, true server pagination, file retention/deletion and signed-link expiry, backup automation/restore drill, production observability, full accessibility and load testing, and staff UAT. The retained SOP was not present in this build; the attached Markdown is the implemented business reference and must be reconciled with the current SOP before live student use.
+See `docs/production-readiness.md`. Key unfinished requirements: full weekly journey gates, live scheduler activation, full task bank and provider-specific vault connection, FX conversion, import updates/conflict reconciliation, true server pagination, file retention/deletion and signed-link expiry, independent production backup storage and hosted restore drill, production observability, full accessibility and load testing, and staff UAT. The retained SOP was not present in this build; the attached Markdown is the implemented business reference and must be reconciled with the current SOP before live student use.
 
 ## Source layout
 
