@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { graduation,validateContact,nextGig,can,risk,csvCell } from '../lib/domain/rules.ts';
+const gig=(value,status='Accepted')=>({status,gig_status:'Paid',currency:'USD',value});
+test('graduation uses only accepted paid qualifying gigs',()=>{assert.equal(graduation([gig(5),gig(5),gig(5)]),'Graduated');assert.equal(graduation([gig(5),gig(5),gig(4)]),'2/3');assert.equal(graduation([gig(300,'Quality Review')]),'0/3');assert.equal(graduation([gig(300)]),'$300 Graduate');assert.equal(graduation([{...gig(300),gig_status:'Delivered'}]),'0/3');assert.equal(graduation([{...gig(300),currency:'EGP'}]),'0/3')});
+test('proof and next action cannot be omitted from completed contact',()=>{const c={student_id:'S1',outcome:'Responded',proof_id:'A1',next_action:'Check progress',owner:'U1',due:'2027-01-01',occurred_at:'2026-01-01',channel:'WhatsApp'};validateContact(c);for(const k of ['proof_id','outcome','next_action','owner','due'])assert.throws(()=>validateContact({...c,[k]:''}));});
+test('client activity rejects invalid skips and absent screenshots',()=>{assert.throws(()=>nextGig('Gig Opened','Paid',true));assert.throws(()=>nextGig('Delivered','Paid',false));nextGig('Delivered','Paid',true);assert.throws(()=>nextGig('Cancelled','Paid',true));});
+test('admin is not implicitly a quality approver',()=>{assert.equal(can(['Operations Systems / Admin'],['Quality Member','Quality Lead']),false);assert.equal(can(['Operations Coordinator'],['Higher Board']),false)});
+test('missing contact does not itself imply unresponsive',()=>{assert.equal(risk({last_contact:null,milestone:4},4,null,0,0).status,'At Risk');assert.equal(risk({last_contact:null,milestone:4},4,null,5,0).status,'Critical');});
+test('spreadsheet export neutralizes formula injection',()=>assert.equal(csvCell('=HYPERLINK("x")'),'"\'=HYPERLINK(""x"")"'));
