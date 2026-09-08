@@ -12,3 +12,9 @@
 10. Inspect the Student 360 record, read-only computed graduation and audit trail. CSV/XLSX exports retain stable identifiers and exclude credential fields.
 
 File delivery is authenticated on each request, private and non-cacheable. URLs are not public capability links. The pilot accepts PNG/JPEG screenshot evidence only; a PDF attachment flow has not been implemented.
+
+## Policy maintenance and checks
+
+Create a numeric policy draft in Administration → Policy versions. Drafts validate percentage bounds, count fields and threshold ordering. A separate Project Operations user must approve it before it can become Effective. Select it when creating a new group; existing groups keep their policy. Review correction deadlines use the evidence's recorded policy version.
+
+Select **Run policy checks** in Administration to create overdue-contact actions, recovery plans, critical supervisor cases and review SLA escalation tasks. Each request processes at most 250 actions and reports remaining work; repeat until complete. Existing open work is retained, and repeated requests do not duplicate generated actions. If no Coach Operations or Quality Lead user exists, an SLA escalation goes to the group's supervisor for routing; that does not grant review approval authority. This is staff-triggered processing, not a claim that a recurring external scheduler has been installed.

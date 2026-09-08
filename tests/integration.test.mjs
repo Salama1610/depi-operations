@@ -38,3 +38,22 @@ test('full seeded backend workflow and permission gates',async()=>{
  assert.throws(()=>sqlite.exec("UPDATE audit_events SET action='tampered'"),/immutable/);assert.throws(()=>sqlite.exec('DELETE FROM evidence_reviews'),/immutable/);
 });
 test('database allocation guard protects stale concurrent eligibility',()=>{const now=new Date().toISOString();assert.throws(()=>sqlite.prepare('INSERT INTO account_assignments VALUES(?,?,?,?,?,?)').run('ASN-late','ACC-102','S10026','G102','REQ2',now),/eligibility/)});
+test('policy versions require separate approval and apply to new groups',async()=>{
+ current={id:'owner',email:'owner@example.com'};
+ await check('policy',{id:'P2',name:'Round 5 test policy',config:{contactDays:3,failedAttempts:3,failedWindowDays:7},reason:'Test configurable thresholds'});
+ await check('policy_edit',{id:'P2',config:{contactDays:2,failedAttempts:3,failedWindowDays:7},reason:'Tighten contact cadence'});
+ await check('policy_transition',{id:'P2',status:'Reviewed',reason:'Reviewed the change'});
+ assert.match((await post('policy_transition',{id:'P2',status:'Approved',reason:'Self approval'})).error,/different/);
+ await check('staff',{name:'Independent approver',email:'approver@example.com',roles:['Project Operations'],reason:'Independent policy approver'});
+ current={id:'approver',email:'approver@example.com'};await check('policy_transition',{id:'P2',status:'Approved',reason:'Independently approved'});await check('policy_transition',{id:'P2',status:'Effective',reason:'Effective for new groups'});
+ current={id:'owner',email:'owner@example.com'};assert.match((await post('policy_edit',{id:'P2',config:{contactDays:1},reason:'Try changing effective policy'})).error,/draft/);
+ await check('group',{id:'GNEW',name:'New policy group',track:'Design',provider:'Career180',coordinator:'staff-sara',supervisor:'staff-nour',coach:'staff-coach',pathway:'Outcome',start_date:'2026-09-01',policy_id:'P2'});
+ assert.equal(sqlite.prepare("SELECT policy_id FROM groups WHERE id='GNEW'").get().policy_id,'P2');assert.equal(sqlite.prepare("SELECT policy_id FROM groups WHERE id='G101'").get().policy_id,'R5-v1');
+});
+test('policy checks create recovery and supervisor actions without duplicates',async()=>{
+ current={id:'owner',email:'owner@example.com'};
+ let first=await check('policy_check');assert.ok(first.summary.processed>0);let runs=1;while(first.summary.remaining>0){assert.ok(runs++<10,'Policy batches must converge');first=await check('policy_check');}
+ const n=sqlite.prepare("SELECT count(*) n FROM tasks WHERE source LIKE 'policy-%'").get().n;const c=sqlite.prepare("SELECT count(*) n FROM cases WHERE source LIKE 'policy-critical:%'").get().n;assert.ok(c>0);
+ const second=await check('policy_check');assert.equal(second.summary.processed,0);assert.equal(sqlite.prepare("SELECT count(*) n FROM tasks WHERE source LIKE 'policy-%'").get().n,n);assert.equal(sqlite.prepare("SELECT count(*) n FROM cases WHERE source LIKE 'policy-critical:%'").get().n,c);
+ current={id:'coordinator',email:'staff-sara@example.invalid'};assert.match((await post('policy_check')).error,/role/);
+});

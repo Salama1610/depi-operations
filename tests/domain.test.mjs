@@ -8,3 +8,5 @@ test('client activity rejects invalid skips and absent screenshots',()=>{assert.
 test('admin is not implicitly a quality approver',()=>{assert.equal(can(['Operations Systems / Admin'],['Quality Member','Quality Lead']),false);assert.equal(can(['Operations Coordinator'],['Higher Board']),false)});
 test('missing contact does not itself imply unresponsive',()=>{assert.equal(risk({last_contact:null,milestone:4},4,null,0,0).status,'At Risk');assert.equal(risk({last_contact:null,milestone:4},4,null,5,0).status,'Critical');});
 test('spreadsheet export neutralizes formula injection',()=>assert.equal(csvCell('=HYPERLINK("x")'),'"\'=HYPERLINK(""x"")"'));
+import {validatePolicy} from '../lib/domain/rules.ts';
+test('policy rejects invalid percentages, inverted thresholds and fractional counts',()=>{assert.throws(()=>validatePolicy({target:110}));assert.throws(()=>validatePolicy({criticalAttendance:80,riskAttendance:70}));assert.throws(()=>validatePolicy({gigCount:2.5}));assert.throws(()=>validatePolicy({unknown:5}));assert.equal(validatePolicy({contactDays:3}).contactDays,3)});

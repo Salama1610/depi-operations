@@ -8,16 +8,16 @@ This release is a functional synthetic-data pilot. Do not describe it as fully c
 | Platform | Worker + React/Vinext + D1 + private R2 | Confirm platform adaptation or port services to PostgreSQL/Supabase with RLS |
 | Identity | Trusted dispatch identity plus explicit staff membership and backend roles | Staff access UAT, MFA policy, session/security review, formal role matrix |
 | Privacy | Private byte-validated image uploads and authorized proxy reads | Signed-link expiry if required, retention policy, antivirus if required, deletion workflow and file access logging |
-| Policy | Baseline version, immutable approved content, review lifecycle | Complete policy editor and effective assignment UI; evaluate every operational threshold from the applied policy |
+| Policy | Validated numeric draft editor, independent approval, new-group assignment; group-based contact/attempt thresholds and evidence-based correction SLA | Full weekly journey, platform, evidence and account policy configuration; advanced historical policy migration |
 | Journey | Group-relative week, milestone and risk display | Full weekly entry/exit gates, milestone definitions, pathway exceptions, recovery playbooks |
-| Risk | Read-time recommendations; documented operational status override | Scheduled risk checks and automatic supervisor case creation for every critical trigger |
+| Risk | Read-time recommendations, documented overrides and staff-triggered idempotent policy checks that create recovery tasks and supervisor cases | Scheduled execution and delivery of per-recipient notifications |
 | Accounts | Atomic allocation, reuse constraints, basic status changes | Reservations/timeouts, credit ledger/refunds, task bank, vault references and audited credential access |
 | Evidence | Coach/L1/Quality stages, rejection tasks, L3 routing and ledger | Separate delivery/payment packages, revision-specific attachment history, stronger duplicate/fraud detection, final-resolution checklist |
 | Graduation | Accepted paid USD gigs only | Approved FX rates and conversion evidence; policy transfer/recalculation rules and revocation handling |
 | Spreadsheets | XLSX/CSV creation; first-sheet value import; rule-checked creates | Upsert/update conflict review, field mapping, all requested module round-trips, background large imports |
 | Reporting | Current scope, contact compliance, risk and graduation | Forecasting, capacity planning, date-window metrics, SLA charts and proof audit score |
 | Notifications | Current overdue task list, derived without duplicate persistence | Per-recipient durable notification center, read state, escalation delivery, scheduled digest |
-| Automation | Safe successful-request idempotency and server transactions | n8n workflows, signed machine endpoint, retry/outbox, scheduled SLA alerts |
+| Automation | Safe request idempotency, transactions and bounded policy-action batches including review SLA escalations | n8n workflows, signed machine endpoint, retry/outbox and scheduled execution |
 | Scale | 1,000 students; client filters and 25-row visual pagination | Server pagination, bounded query projections, 1,000+/5,000+ load tests, <2-second performance verification |
 | Cases | Ownership, sequential states and separate verifier | Full subtype SLA matrix, linked account/gig proof, intervention playbook |
 | Audit | Immutable database audit/review triggers; before/after for key edits | Failed-attempt security logs, immutable privileged infrastructure retention and export access review |

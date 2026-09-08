@@ -30,12 +30,13 @@ The initializing owner receives Project Operations and Operations Systems / Admi
 - Atomic graduation ledger entries based on accepted paid USD gigs and the group's policy.
 - Auditable attendance, student transfers, controlled group closure and cases with separate verification.
 - XLSX/CSV exports and imports for supported mutable operational modules; templates, validation preview, commit revalidation, reconciliation and error CSV.
-- Draft policy versions and reviewed/approved/effective lifecycle; protected policy contents; explicit access change audit.
+- Editable draft policy versions, independent approval, effective-policy selection for new groups, protected approved contents and explicit access-change audit.
 - Immutable audit and review history; actor-bound idempotency keys for successful mutations.
+- A staff-triggered policy check creates contact/recovery tasks, supervisor interventions and review-SLA escalations in bounded, retry-safe batches.
 
 ## Pilot boundaries that remain before production
 
-See `docs/production-readiness.md`. Key unfinished requirements: complete policy/journey editor and assignment, scheduled risk/SLA processing and notifications, full task bank and account credential-vault integration, FX conversion, import updates/conflict reconciliation, true server pagination, file retention/deletion and signed-link expiry, backup automation/restore drill, production observability, full accessibility and load testing, and staff UAT. The retained SOP was not present in this build; the attached Markdown is the implemented business reference and must be reconciled with the current SOP before live student use.
+See `docs/production-readiness.md`. Key unfinished requirements: full weekly journey gates, scheduled execution and notification delivery, full task bank and account credential-vault integration, FX conversion, import updates/conflict reconciliation, true server pagination, file retention/deletion and signed-link expiry, backup automation/restore drill, production observability, full accessibility and load testing, and staff UAT. The retained SOP was not present in this build; the attached Markdown is the implemented business reference and must be reconciled with the current SOP before live student use.
 
 ## Source layout
 
