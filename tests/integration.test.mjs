@@ -37,6 +37,7 @@ test('full seeded backend workflow and permission gates',async()=>{
  current={id:'coordinator-login',email:'staff-omar@example.invalid'};r=await post('contact',c);assert.ok(r.error);r=await post('review',{id:'EV1',decision:'Reopen',notes:'Unauthorized'});assert.ok(r.error);
  assert.throws(()=>sqlite.exec("UPDATE audit_events SET action='tampered'"),/immutable/);assert.throws(()=>sqlite.exec('DELETE FROM evidence_reviews'),/immutable/);
 });
+test('verified hosted email recovers identity when the user-id header is absent',async()=>{current={id:'',email:'owner@example.com'};const data=await(await api.GET()).json();assert.equal(data.user.email,'owner@example.com');assert.equal(data.error,undefined);current={id:'owner',email:'owner@example.com'};});
 test('database allocation guard protects stale concurrent eligibility',()=>{const now=new Date().toISOString();assert.throws(()=>sqlite.prepare('INSERT INTO account_assignments VALUES(?,?,?,?,?,?)').run('ASN-late','ACC-102','S10002','G101','REQ2',now),/eligibility/)});
 test('policy versions require separate approval and apply to new groups',async()=>{
  current={id:'owner',email:'owner@example.com'};
