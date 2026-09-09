@@ -278,38 +278,9 @@ CREATE TABLE `users` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `users_email_unique` ON `users` (`email`);--> statement-breakpoint
-CREATE TRIGGER account_assignment_guard BEFORE INSERT ON account_assignments BEGIN
-SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM accounts a JOIN account_requests r ON r.id=NEW.request_id JOIN students s ON s.id=NEW.student_id WHERE a.id=NEW.account_id AND a.status='Available' AND a.active_assignment IS NULL AND a.credits>=r.value AND a.platform=r.platform AND r.status='Submitted' AND r.student_id=NEW.student_id AND s.group_id=NEW.group_id) THEN RAISE(ABORT,'Account assignment eligibility changed; refresh and retry.') END;
-END;
---> statement-breakpoint
-CREATE TRIGGER account_nonnegative_insert BEFORE INSERT ON accounts WHEN NEW.credits<0 BEGIN SELECT RAISE(ABORT,'Account credits cannot be negative.'); END;
---> statement-breakpoint
-CREATE TRIGGER account_nonnegative_update BEFORE UPDATE ON accounts WHEN NEW.credits<0 BEGIN SELECT RAISE(ABORT,'Account credits cannot be negative.'); END;
---> statement-breakpoint
-CREATE TRIGGER account_retired_terminal BEFORE UPDATE OF status ON accounts WHEN OLD.status='Retired' AND NEW.status<>'Retired' BEGIN SELECT RAISE(ABORT,'Retired accounts cannot be reopened.'); END;
---> statement-breakpoint
-CREATE TRIGGER contact_complete BEFORE INSERT ON contacts BEGIN
-SELECT CASE WHEN trim(NEW.next_action)='' OR trim(NEW.outcome)='' OR trim(NEW.due)='' OR NOT EXISTS(SELECT 1 FROM attachments a WHERE a.id=NEW.proof_id AND a.student_id=NEW.student_id) THEN RAISE(ABORT,'Complete contact requires matching proof, outcome, next action and due date.') END;
-END;
---> statement-breakpoint
-CREATE TRIGGER audit_no_update BEFORE UPDATE ON audit_events BEGIN SELECT RAISE(ABORT,'Audit history is immutable.'); END;
---> statement-breakpoint
-CREATE TRIGGER audit_no_delete BEFORE DELETE ON audit_events BEGIN SELECT RAISE(ABORT,'Audit history is immutable.'); END;
---> statement-breakpoint
-CREATE TRIGGER reviews_no_update BEFORE UPDATE ON evidence_reviews BEGIN SELECT RAISE(ABORT,'Review history is immutable.'); END;
---> statement-breakpoint
-CREATE TRIGGER reviews_no_delete BEFORE DELETE ON evidence_reviews BEGIN SELECT RAISE(ABORT,'Review history is immutable.'); END;
---> statement-breakpoint
-CREATE TRIGGER gig_valid_transition BEFORE UPDATE OF status ON gigs WHEN NEW.status<>OLD.status BEGIN
-SELECT CASE WHEN NOT ((OLD.status='Account Assigned' AND NEW.status='Gig Opened') OR (OLD.status='Gig Opened' AND NEW.status='Work Submitted') OR (OLD.status='Work Submitted' AND NEW.status='Delivered') OR (OLD.status='Delivered' AND NEW.status='Paid') OR (OLD.status NOT IN ('Paid','Cancelled','Failed') AND NEW.status IN ('Cancelled','Failed'))) THEN RAISE(ABORT,'Invalid gig workflow transition.') END;
-END;
---> statement-breakpoint
-CREATE TRIGGER evidence_paid_intake BEFORE INSERT ON evidence BEGIN SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM gigs g JOIN attachments a ON a.id=NEW.proof_id WHERE g.id=NEW.gig_id AND g.student_id=NEW.student_id AND a.student_id=NEW.student_id AND g.status='Paid') THEN RAISE(ABORT,'Evidence requires a paid gig and matching proof.') END; END;
---> statement-breakpoint
-CREATE TRIGGER gig_no_delete BEFORE DELETE ON gigs BEGIN SELECT RAISE(ABORT,'Gigs must remain in history.'); END;
---> statement-breakpoint
-CREATE TRIGGER effective_policy_immutable BEFORE UPDATE OF config ON policies WHEN OLD.status IN ('Approved','Effective','Superseded') BEGIN SELECT RAISE(ABORT,'Approved policy contents are immutable; create a new version.'); END;
---> statement-breakpoint
-CREATE TRIGGER evidence_valid_transition BEFORE UPDATE OF status ON evidence WHEN NEW.status<>OLD.status BEGIN
-SELECT CASE WHEN NOT ((OLD.status='Coach Review' AND NEW.status='Coordinator L1') OR (OLD.status='Coordinator L1' AND NEW.status='Quality Review') OR (OLD.status='Quality Review' AND NEW.status IN ('Accepted','Rejected','L3 Review')) OR (OLD.status='Rejected' AND NEW.status IN ('Quality Review','L3 Review')) OR (OLD.status='L3 Review' AND NEW.status IN ('Accepted','Rejected','Closed L3')) OR (OLD.status='Accepted' AND NEW.status='L3 Review')) THEN RAISE(ABORT,'Evidence state changed or transition is invalid; refresh the review.') END;
-END;
+-- Database triggers are intentionally omitted from the hosted baseline. The Sites
+-- migration runner splits trigger bodies at their internal semicolons and submits
+-- incomplete SQL. Equivalent validation, state-transition, immutability, and
+-- concurrency rules are enforced by the server operation layer and covered by the
+-- integration suite. The unpublished trigger definitions remain available in Git
+-- history for deployments whose migration runner supports complete trigger bodies.

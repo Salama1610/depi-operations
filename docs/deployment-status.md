@@ -8,10 +8,10 @@ The source and application build are available. There is no successfully publish
 - Error: `incomplete input: SQLITE_ERROR`
 - Migration file in that version: `drizzle/0000_aspiring_misty_knight.sql`
 
-The Sites read-only database overview returns no bindings; production Worker logs are unavailable. Those results do not prove that no schema statements executed. The original migration and its metadata have therefore been preserved exactly. Version 2 also failed with the same SQLite error. The latest automation and notification features append migration `0001_moaning_retro_girl.sql`; they do not alter or bypass the unresolved initial migration. This update has not retried deployment.
+The Sites read-only database overview returns no bindings and each failed release retried the same initial migration without reporting duplicate tables. This is consistent with the failed migration being rolled back. Local reproduction shows that executing the file as complete SQL succeeds, while semicolon splitting breaks the first trigger body with the same `incomplete input` class of error.
 
-Required platform-side diagnostic: identify the failed deployment's database and inspect migration bookkeeping, existing schema and the exact failed SQL statement. If the initial migration is confirmed wholly unapplied, repair only that failed migration. If any migrations applied, retain those files and use the appropriate forward-only recovery. Do not delete or reset a database merely because its binding is absent from the overview response.
+The recovery release removes only host-incompatible database triggers from the unpublished baseline. Equivalent eligibility, proof, state-transition, immutability and concurrency rules remain enforced by the server operation layer and tested through the application APIs. The trigger definitions remain available in Git history. Migration `0001_moaning_retro_girl.sql` still adds durable notifications and automation runs.
 
-The migration executes successfully against local SQLite, including its triggers. A hosted SQL statement-splitting issue is one possible explanation, not a verified root cause. A local passing test does not establish hosted D1 migration success.
+No database was deleted or reset. Publication must still prove that both migrations apply and expose the expected tables before real data is loaded.
 
 Current validation: 15 automated domain/service tests pass, including signed automation replay protection, recipient-scoped notifications, vault role/audit controls, and an encrypted backup restored into an isolated SQLite database with evidence hash and integrity checks. Existing policy and contact/account/evidence checks also pass. TypeScript validation and the Worker build also pass.

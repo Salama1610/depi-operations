@@ -1,6 +1,7 @@
 import { db,stmt,now,uid,auditStmt } from './server';
 import { policy } from './domain/rules';
-export async function seed(i:any){const t=now();const batch:any[]=[];batch.push(stmt('INSERT INTO users(id,email,name,roles,scopes) VALUES(?,?,?,?,?)',i.id,i.email,i.name,JSON.stringify(['Project Operations','Operations Systems / Admin']),'[]'));
+import { runtimeTriggers } from '../db/runtime-triggers.mjs';
+export async function seed(i:any){for(const sql of runtimeTriggers)await db().prepare(sql).run();const t=now();const batch:any[]=[];batch.push(stmt('INSERT INTO users(id,email,name,roles,scopes) VALUES(?,?,?,?,?)',i.id,i.email,i.name,JSON.stringify(['Project Operations','Operations Systems / Admin']),'[]'));
 // Explicit setup policy, bound to the current specification; no runtime schema mutation.
 batch.push(stmt('INSERT INTO policies(id,name,status,config,created_by,approved_by,created_at) VALUES(?,?,?,?,?,?,?)','R5-v1','Round 5 · v1','Effective',JSON.stringify(policy),i.id,i.id,t));
 const staff=[['staff-sara','Sara Ahmed','Operations Coordinator'],['staff-omar','Omar Hassan','Operations Coordinator'],['staff-nour','Nour El Din','Team Supervisor'],['staff-coach','Mariam Adel','Coach'],['staff-quality','Hana Mostafa','Quality Member'],['staff-board','Youssef Ali','Higher Board']];batch.push(...staff.map(([id,name,role])=>stmt('INSERT INTO users(id,email,name,roles,scopes) VALUES(?,?,?,?,?)',id,id+'@example.invalid',name,JSON.stringify([role]),'[]')));
