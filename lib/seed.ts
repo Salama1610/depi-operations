@@ -116,7 +116,7 @@ export async function seed(i: any, mode: "demo" | "production" = "demo") {
         `TRK-${i + 1}`,
         track,
         i % 2 ? "Freelance Yard" : "Career180",
-        250,
+        300,
         t,
       ),
     ),

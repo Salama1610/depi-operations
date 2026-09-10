@@ -465,6 +465,26 @@ test("complete program flow governs intake, assessment, withdrawal, certificate 
     ],
     reason: "Test-authorized reporting handoff",
   });
+  assert.match(
+    (await programPost("approve_report_definition", {
+      id: "RDEF-FLOW",
+      reason: "Self approval is not permitted",
+    })).error,
+    /cannot approve their own/i,
+  );
+  await check("staff", {
+    name: "Independent report approver",
+    email: "report-approver@example.com",
+    roles: ["Project Operations"],
+    reason: "Independent Ministry reporting approval",
+  });
+  const reportApprover = sqlite.prepare("SELECT id FROM users WHERE email='report-approver@example.com'").get().id;
+  current = { id: reportApprover, email: "report-approver@example.com" };
+  await programCheck("approve_report_definition", {
+    id: "RDEF-FLOW",
+    reason: "Matched the Ministry-supplied field order",
+  });
+  current = { id: "owner", email: "owner@example.com" };
   const data = await (
     await programApi.GET(new Request("https://test.local/api/program"))
   ).json();
@@ -479,6 +499,148 @@ test("complete program flow governs intake, assessment, withdrawal, certificate 
   );
   assert.equal(exportResponse.status, 200);
   assert.match(await exportResponse.text(), /student_id/);
+  const xlsxResponse = await programApi.GET(
+    new Request("https://test.local/api/program?format=ministry_xlsx&definition=RDEF-FLOW"),
+  );
+  assert.equal(xlsxResponse.status, 200);
+  assert.match(xlsxResponse.headers.get("content-type"), /spreadsheetml/);
+  assert.equal(sqlite.prepare("SELECT count(*) n FROM report_runs WHERE definition_id='RDEF-FLOW'").get().n, 2);
+  const lifecycleExport = await programApi.GET(
+    new Request("https://test.local/api/program?format=xlsx&dataset=lifecycle"),
+  );
+  assert.equal(lifecycleExport.status, 200);
+  assert.match(lifecycleExport.headers.get("content-disposition"), /program-lifecycle\.xlsx/);
+});
+test("safe bulk controls are atomic and dangerous approvals stay individual", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  await programCheck("bulk_tasks", {
+    student_ids: ["S10002", "S10003"],
+    title: "Prepare weekly evidence package",
+    owner: "staff-sara",
+    due: "2027-01-15T10:00:00Z",
+    priority: "High",
+    reason: "Weekly readiness batch",
+  });
+  assert.equal(
+    sqlite.prepare("SELECT count(*) n FROM tasks WHERE title='Prepare weekly evidence package'").get().n,
+    2,
+  );
+  await programCheck("bulk_classification", {
+    student_ids: ["S10002", "S10003"],
+    status: "At Risk",
+    reason: "Shared progress threshold reached",
+  });
+  assert.equal(
+    sqlite.prepare("SELECT count(*) n FROM students WHERE id IN ('S10002','S10003') AND engagement='At Risk'").get().n,
+    2,
+  );
+  await programCheck("bulk_group_owner", {
+    group_ids: ["G101", "G102"],
+    owner_type: "Coordinator",
+    owner: "staff-sara",
+    reason: "Approved workload rebalance",
+  });
+  assert.equal(
+    sqlite.prepare("SELECT count(*) n FROM groups WHERE id IN ('G101','G102') AND coordinator='staff-sara'").get().n,
+    2,
+  );
+  const rejected = await programPost("bulk_classification", {
+    student_ids: ["S10002", "missing-student"],
+    status: "Critical",
+    reason: "Atomic validation test",
+  });
+  assert.match(rejected.error, /not found|scope/i);
+  assert.equal(sqlite.prepare("SELECT engagement FROM students WHERE id='S10002'").get().engagement, "At Risk");
+});
+test("track capacity blocks direct and admitted roster growth", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  const enrolled = sqlite.prepare("SELECT count(*) n FROM students s JOIN groups g ON g.id=s.group_id WHERE g.track='Digital Marketing' AND s.lifecycle NOT IN ('Transferred','Withdrawn','Removed')").get().n;
+  sqlite.prepare("UPDATE tracks SET capacity=? WHERE name='Digital Marketing'").run(enrolled);
+  assert.match(
+    (await post("student", { id: "S-CAPACITY", name: "Capacity Test", group_id: "G101" })).error,
+    /capacity/,
+  );
+  assert.equal(sqlite.prepare("SELECT count(*) n FROM students WHERE id='S-CAPACITY'").get().n, 0);
+  sqlite.prepare("UPDATE tracks SET capacity=300 WHERE name='Digital Marketing'").run();
+});
+test("program roles enforce functional coach and approval boundaries", async () => {
+  current = { id: "staff-support-coach", email: "staff-support-coach@example.invalid" };
+  assert.match(
+    (await programPost("post_program_outcome", {
+      student_id: "S10001",
+      type: "Freelancing",
+      title: "Unauthorized support-coach outcome",
+      status: "Reported",
+      follow_up_at: "2027-03-01T00:00:00Z",
+    })).error,
+    /Outcome Coach/,
+  );
+  assert.match(
+    (await programPost("screen_application", {
+      application_id: "APP-FLOW",
+      decision: "Eligible",
+      criteria: ["Identity and registration record checked"],
+      reason: "Unauthorized screening",
+    })).error,
+    /role/,
+  );
+  current = { id: "staff-coach", email: "staff-coach@example.invalid" };
+  await programCheck("post_program_outcome", {
+    student_id: "S10001",
+    type: "Freelancing",
+    title: "Outcome-coach follow-up",
+    status: "Reported",
+    follow_up_at: "2027-03-01T00:00:00Z",
+  });
+  current = { id: "quality-login", email: "staff-quality@example.invalid" };
+  assert.match(
+    (await programPost("bulk_tasks", {
+      student_ids: ["S10002"],
+      title: "Unauthorized batch",
+      owner: "staff-sara",
+      due: "2027-01-15T10:00:00Z",
+      reason: "Unauthorized",
+    })).error,
+    /role/,
+  );
+  current = { id: "owner", email: "owner@example.com" };
+});
+test("second evidence rejection routes through L3 and closes correction work", async () => {
+  const created = new Date().toISOString();
+  for (const [id, key, hash] of [
+    ["L3-DELIVERY-1", "l3-delivery-1", "l3hash1"],
+    ["L3-PAYMENT-1", "l3-payment-1", "l3hash2"],
+    ["L3-DELIVERY-2", "l3-delivery-2", "l3hash3"],
+    ["L3-PAYMENT-2", "l3-payment-2", "l3hash4"],
+  ]) {
+    sqlite.prepare("INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)").run(
+      id, "S10002", key, `${id}.png`, "image/png", 120, hash, "owner", created,
+    );
+  }
+  sqlite.prepare("INSERT INTO gigs(id,student_id,platform,title,value,currency,status,due,created_at) VALUES(?,?,?,?,?,?,?,?,?)").run(
+    "GIG-L3", "S10002", "Upwork", "L3 recovery test", 15, "USD", "Paid", "2027-01-01T00:00:00Z", created,
+  );
+  sqlite.prepare("INSERT INTO evidence(id,student_id,gig_id,proof_id,source,status,rejections,code,requirements,recorder,stage_at,created_at,policy_id) VALUES(?,?,?,?,?, 'Quality Review',1,'EV01','First correction','owner',?,?,?)").run(
+    "EV-L3", "S10002", "GIG-L3", "L3-DELIVERY-1", "Platform", created, created, "R5-v1",
+  );
+  sqlite.prepare("INSERT INTO evidence_packages VALUES(?,?,?,?,?,?)").run("EPK-L3-1", "EV-L3", 1, "Submitted", "owner", created);
+  sqlite.prepare("INSERT INTO evidence_package_items VALUES(?,?,?,?,?)").run("EPI-L3-1", "EPK-L3-1", "Delivery", "L3-DELIVERY-1", created);
+  sqlite.prepare("INSERT INTO evidence_package_items VALUES(?,?,?,?,?)").run("EPI-L3-2", "EPK-L3-1", "Payment", "L3-PAYMENT-1", created);
+  current = { id: "quality-login", email: "staff-quality@example.invalid" };
+  await check("review", { id: "EV-L3", decision: "Reject", code: "EV07", notes: "Second rejection requires L3 review" });
+  current = { id: "owner", email: "owner@example.com" };
+  await check("review", {
+    id: "EV-L3",
+    proof_id: "L3-DELIVERY-2",
+    payment_proof_id: "L3-PAYMENT-2",
+    notes: "Corrected evidence package resubmitted",
+  });
+  assert.equal(sqlite.prepare("SELECT status FROM evidence WHERE id='EV-L3'").get().status, "L3 Review");
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  await check("review", { id: "EV-L3", decision: "Final resolution", notes: "Final non-qualifying resolution recorded" });
+  assert.equal(sqlite.prepare("SELECT status FROM evidence WHERE id='EV-L3'").get().status, "Closed L3");
+  assert.ok(sqlite.prepare("SELECT id FROM cases WHERE source='L3-EV-L3'").get());
+  current = { id: "owner", email: "owner@example.com" };
 });
 test("database allocation guard protects stale concurrent eligibility", () => {
   const now = new Date().toISOString();
@@ -546,6 +708,13 @@ test("policy versions require separate approval and apply to new groups", async 
     ).error,
     /draft/,
   );
+  await programCheck("track", {
+    id: "TRK-DESIGN",
+    name: "Design",
+    provider: "Career180",
+    capacity: 100,
+    reason: "Approved track setup for the new group",
+  });
   await check("group", {
     id: "GNEW",
     name: "New policy group",
@@ -809,6 +978,15 @@ test("global search is bounded to the signed-in staff scope", async () => {
   assert.ok(
     !result.results.some((x) => x.type === "student" && x.id === "S10001"),
   );
+  current = { id: "owner", email: "owner@example.com" };
+  result = await (
+    await api.GET(new Request("https://test.local/api/search?q=MIN-R5-FLOW"))
+  ).json();
+  assert.ok(result.results.some((x) => x.type === "application" && x.id === "APP-FLOW"));
+  result = await (
+    await api.GET(new Request("https://test.local/api/search?q=CERT-R5-FLOW"))
+  ).json();
+  assert.ok(result.results.some((x) => x.type === "certificate" && x.id === "CERT-FLOW"));
 });
 test("retention policy records approved periods without deleting data", async () => {
   const api = await route("retention");

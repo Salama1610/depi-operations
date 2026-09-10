@@ -855,6 +855,8 @@ export const reportDefinitions = sqliteTable("report_definitions", {
     .notNull()
     .references(() => users.id),
   createdAt: text("created_at").notNull(),
+  approvedBy: text("approved_by").references(() => users.id),
+  approvedAt: text("approved_at"),
   updatedAt: text("updated_at").notNull(),
 });
 export const reportRuns = sqliteTable("report_runs", {

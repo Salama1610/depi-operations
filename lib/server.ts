@@ -109,7 +109,7 @@ export function scopeSql(u: any, alias = "g") {
 export async function student(u: any, id: string) {
   const q = scopeSql(u);
   const s: any = await stmt(
-    `SELECT s.*,g.coordinator,g.supervisor,g.coach,g.policy_id,g.status group_status FROM students s JOIN groups g ON g.id=s.group_id WHERE s.id=? AND ${q.sql}`,
+    `SELECT s.*,g.track,g.coordinator,g.supervisor,g.coach,g.policy_id,g.status group_status FROM students s JOIN groups g ON g.id=s.group_id WHERE s.id=? AND ${q.sql}`,
     id,
     ...q.args,
   ).first();
@@ -362,6 +362,7 @@ export async function loadData(u: any) {
       : "production";
   } catch {}
   const [
+    tracks,
     taskBank,
     savedViews,
     gates,
@@ -374,6 +375,7 @@ export async function loadData(u: any) {
     evidencePackages,
     evidencePackageItems,
   ] = await Promise.all([
+    all("SELECT * FROM tracks WHERE active=1 ORDER BY name"),
     all("SELECT * FROM task_bank WHERE active=1 ORDER BY track,title"),
     all(
       "SELECT * FROM saved_views WHERE user_id=? ORDER BY created_at DESC",
@@ -432,6 +434,7 @@ export async function loadData(u: any) {
     workspaceMode,
     students,
     groups,
+    tracks,
     tasks,
     contacts,
     gigs,

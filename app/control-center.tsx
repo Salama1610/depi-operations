@@ -434,6 +434,9 @@ export function GlobalSearch({
           evidence: "evidence",
           case: "cases",
           account: "accounts",
+          application: "program",
+          certificate: "program",
+          outcome: "program",
         } as any
       )[r.type] || "students";
     window.location.href = "/" + module + "?q=" + encodeURIComponent(r.id);
@@ -452,8 +455,8 @@ export function GlobalSearch({
           <DialogHeader>
             <DialogTitle>Search the workspace</DialogTitle>
             <DialogDescription>
-              Find scoped students, groups, gigs, evidence, cases and authorized
-              accounts.
+              Find scoped students, applications, groups, gigs, evidence,
+              certificates, outcomes, cases and authorized accounts.
             </DialogDescription>
           </DialogHeader>
           <label className="search-box">

@@ -12,12 +12,24 @@ import {
   uid,
 } from "@/lib/server";
 import { can, ensure } from "@/lib/domain/rules";
-import { toCSV } from "@/lib/spreadsheet";
+import { toCSV, toXLSX } from "@/lib/spreadsheet";
 
 export const dynamic = "force-dynamic";
 
 const operations = ["Project Operations", "Operations Coordinator"];
 const programLeads = ["Project Operations", "Team Supervisor"];
+const onboardingChecklist = [
+  "Role boundaries acknowledged",
+  "Group roster reviewed",
+  "Session and attendance process reviewed",
+  "Evidence SLA and escalation process reviewed",
+];
+const screeningChecklist = [
+  "Identity and registration record checked",
+  "Contact details confirmed",
+  "Track prerequisites reviewed",
+  "Program availability confirmed",
+];
 const reportFields: Record<string, string> = {
   student_id: "student_id",
   name: "name",
@@ -40,8 +52,38 @@ function requireWritableLearner(learner: any) {
   return learner;
 }
 
+function ids(value: unknown, label: string) {
+  const result = Array.isArray(value)
+    ? [...new Set(value.map(String).map((v) => v.trim()).filter(Boolean))]
+    : [];
+  ensure(result.length > 0 && result.length <= 100, `${label} requires 1–100 unique records.`);
+  return result;
+}
+
+async function requireAssignedCoach(u: any, groupId: string, coachType?: string) {
+  if (!can(u.roles, ["Coach"])) return;
+  if (can(u.roles, ["Project Operations", "Coach Operations", "Quality Member", "Quality Lead"])) return;
+  const configured: any = await stmt(
+    "SELECT count(*) n FROM group_coaches WHERE group_id=? AND status='Active'",
+    groupId,
+  ).first();
+  const assignment = await stmt(
+    `SELECT id FROM group_coaches WHERE group_id=? AND user_id=? AND status='Active' AND onboarding_status='Complete'${coachType ? " AND coach_type=?" : ""}`,
+    groupId,
+    u.id,
+    ...(coachType ? [coachType] : []),
+  ).first();
+  const legacy = !configured?.n && !coachType
+    ? await stmt("SELECT id FROM groups WHERE id=? AND coach=?", groupId, u.id).first()
+    : null;
+  ensure(assignment || legacy, coachType
+    ? `Only the onboarded ${coachType} assigned to this group can perform this action.`
+    : "Only an onboarded coach assigned to this group can perform this action.");
+}
+
 async function programData(u: any) {
   const q = scopeSql(u);
+  const tracks = await all("SELECT * FROM tracks WHERE active=1 ORDER BY name");
   const groups = await all(
     `SELECT g.*,c.name coordinator_name,s.name supervisor_name FROM groups g
      JOIN users c ON c.id=g.coordinator JOIN users s ON s.id=g.supervisor
@@ -53,7 +95,8 @@ async function programData(u: any) {
       (SELECT l.result FROM graduation_ledger l WHERE l.student_id=s.id ORDER BY l.calculated_at DESC LIMIT 1) graduation,
       (SELECT c.status FROM certificates c WHERE c.student_id=s.id ORDER BY c.issued_at DESC LIMIT 1) certificate_status,
       (SELECT ar.outcome FROM assessment_results ar JOIN assessments a ON a.id=ar.assessment_id WHERE ar.student_id=s.id AND a.type='Final' ORDER BY ar.assessed_at DESC LIMIT 1) final_assessment,
-      (SELECT o.type||': '||o.status FROM post_program_outcomes o WHERE o.student_id=s.id ORDER BY o.created_at DESC LIMIT 1) post_program_outcome
+      (SELECT o.type||': '||o.status FROM post_program_outcomes o WHERE o.student_id=s.id ORDER BY o.created_at DESC LIMIT 1) post_program_outcome,
+      (SELECT t.id FROM tasks t WHERE t.student_id=s.id AND t.status='Open' ORDER BY t.due LIMIT 1) next_task
      FROM students s JOIN groups g ON g.id=s.group_id WHERE ${q.sql} ORDER BY s.created_at DESC`,
     ...q.args,
   );
@@ -63,11 +106,27 @@ async function programData(u: any) {
     "Operations Systems / Admin",
   ])
     ? await all(
-        "SELECT * FROM applications ORDER BY updated_at DESC LIMIT 1000",
+        can(u.roles, ["Operations Coordinator"]) &&
+          !can(u.roles, ["Project Operations", "Team Supervisor", "Operations Systems / Admin"])
+          ? "SELECT * FROM applications WHERE owner=? ORDER BY updated_at DESC LIMIT 1000"
+          : "SELECT * FROM applications ORDER BY updated_at DESC LIMIT 1000",
+        ...(can(u.roles, ["Operations Coordinator"]) &&
+        !can(u.roles, ["Project Operations", "Team Supervisor", "Operations Systems / Admin"])
+          ? [u.id]
+          : []),
       )
     : [];
   const screenings = applications.length
-    ? await all("SELECT * FROM screenings ORDER BY reviewed_at DESC LIMIT 2000")
+    ? await all(
+        can(u.roles, ["Operations Coordinator"]) &&
+          !can(u.roles, ["Project Operations", "Team Supervisor", "Operations Systems / Admin"])
+          ? "SELECT s.* FROM screenings s JOIN applications a ON a.id=s.application_id WHERE a.owner=? ORDER BY s.reviewed_at DESC LIMIT 2000"
+          : "SELECT * FROM screenings ORDER BY reviewed_at DESC LIMIT 2000",
+        ...(can(u.roles, ["Operations Coordinator"]) &&
+        !can(u.roles, ["Project Operations", "Team Supervisor", "Operations Systems / Admin"])
+          ? [u.id]
+          : []),
+      )
     : [];
   const [
     groupCoaches,
@@ -117,12 +176,13 @@ async function programData(u: any) {
       ...q.args,
     ),
   ]);
-  const [staff, definitions, retention, attachments] = await Promise.all([
+  const [staff, definitions, reportRuns, retention, attachments, accountControls] = await Promise.all([
     all(
       "SELECT id,name,email,roles,active FROM users WHERE active=1 ORDER BY name",
     ),
+    all("SELECT * FROM report_definitions ORDER BY updated_at DESC"),
     can(u.roles, ["Project Operations", "Operations Systems / Admin"])
-      ? all("SELECT * FROM report_definitions ORDER BY updated_at DESC")
+      ? all("SELECT * FROM report_runs ORDER BY created_at DESC LIMIT 50")
       : Promise.resolve([]),
     can(u.roles, ["Project Operations", "Operations Systems / Admin"])
       ? all(
@@ -133,6 +193,9 @@ async function programData(u: any) {
       `SELECT a.id,a.student_id,a.name,a.mime,a.created_at FROM attachments a JOIN students s ON s.id=a.student_id JOIN groups g ON g.id=s.group_id WHERE ${q.sql} ORDER BY a.created_at DESC LIMIT 3000`,
       ...q.args,
     ),
+    can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin"])
+      ? stmt("SELECT count(*) total,count(CASE WHEN status<>'Retired' AND (secret_ref IS NULL OR trim(secret_ref)='') THEN 1 END) missing_vault,count(CASE WHEN status='Available' AND credits>0 THEN 1 END) ready FROM accounts").first()
+      : Promise.resolve(null),
   ]);
   const activeGroups = groups.filter((g) => g.status === "Active");
   const missingCoachGroups = activeGroups.filter((g) => {
@@ -160,9 +223,26 @@ async function programData(u: any) {
     "Operations Systems / Admin",
   ];
   const missingRoles = requiredRoles.filter((r) => !roleSet.has(r));
+  const conflictingStaff = staff.filter((member) => {
+    const memberRoles: string[] = JSON.parse(member.roles);
+    const quality = memberRoles.some((role) => ["Quality Member", "Quality Lead"].includes(role));
+    const deliveryOrAllocation = memberRoles.some((role) => [
+      "Operations Coordinator",
+      "Coach",
+      "Coach Operations",
+      "Higher Board",
+    ].includes(role));
+    return quality && deliveryOrAllocation;
+  });
+  const ownerlessStudents = students.filter((s) =>
+    s.lifecycle === "Active" && !(s.next_task || false),
+  );
   const unreportedSessions = sessions.filter(
     (s) =>
       s.starts_at < now() && !sessionReports.some((r) => r.session_id === s.id),
+  );
+  const approvedReport = definitions.find(
+    (d) => d.status === "Active" && d.approved_by && d.approved_at,
   );
   const readiness = [
     {
@@ -172,6 +252,14 @@ async function programData(u: any) {
       detail: missingRoles.length
         ? `Missing: ${missingRoles.join(", ")}`
         : "All required roles have an active staff owner.",
+    },
+    {
+      key: "role_conflicts",
+      label: "Independent approval roles separated",
+      status: conflictingStaff.length ? "Block" : "Pass",
+      detail: conflictingStaff.length
+        ? `${conflictingStaff.length} staff record(s) combine Quality with delivery or account-allocation duties.`
+        : "Quality approval remains independent from delivery and account allocation.",
     },
     {
       key: "tracks",
@@ -197,13 +285,31 @@ async function programData(u: any) {
         : "Past sessions have delivery reports.",
     },
     {
+      key: "ownership",
+      label: "Every active learner has a next action",
+      status: ownerlessStudents.length ? "Warn" : "Pass",
+      detail: ownerlessStudents.length
+        ? `${ownerlessStudents.length} active learner(s) have no open owned action.`
+        : "Every active learner has an open action with an owner and due date.",
+    },
+    {
       key: "ministry_report",
       label: "Ministry reporting handoff configured",
-      status: definitions.some((d) => d.status === "Active") ? "Pass" : "Block",
-      detail: definitions.some((d) => d.status === "Active")
-        ? "An approved field mapping is active."
-        : "Create the Ministry-provided report format before launch.",
+      status: approvedReport ? "Pass" : "Block",
+      detail: approvedReport
+        ? "An independently approved field mapping is active."
+        : "Create and independently approve the Ministry-provided report format before launch.",
     },
+    ...(accountControls
+      ? [{
+          key: "account_controls",
+          label: "Controlled accounts use vault references",
+          status: Number(accountControls.missing_vault) ? "Block" : Number(accountControls.ready) ? "Pass" : "Warn",
+          detail: Number(accountControls.missing_vault)
+            ? `${accountControls.missing_vault} non-retired account(s) are missing a protected credential reference.`
+            : `${accountControls.ready} funded account(s) are ready for controlled allocation.`,
+        }]
+      : []),
     {
       key: "retention",
       label: "Retention authority recorded",
@@ -222,6 +328,7 @@ async function programData(u: any) {
   ];
   return {
     user: u,
+    tracks,
     applications,
     screenings,
     groups,
@@ -238,6 +345,7 @@ async function programData(u: any) {
     staff,
     attachments,
     reportDefinitions: definitions,
+    reportRuns,
     reportFields: Object.keys(reportFields),
     readiness,
     counts: {
@@ -259,14 +367,58 @@ export async function GET(req: Request) {
     await rateLimit(`program:${u.id}`, 90, 60);
     const data = await programData(u);
     const q = new URL(req.url).searchParams;
-    if (q.get("format") === "ministry_csv") {
+    if (["csv", "xlsx"].includes(q.get("format") || "")) {
+      const dataset = q.get("dataset") || "lifecycle";
+      const datasets: Record<string, any[]> = {
+        lifecycle: data.students,
+        applications: data.applications,
+        screenings: data.screenings,
+        coach_assignments: data.groupCoaches,
+        session_reports: data.sessionReports,
+        assessments: data.assessments,
+        assessment_results: data.results,
+        certificates: data.certificates,
+        outcomes: data.outcomes,
+        withdrawals: data.withdrawals,
+        closures: data.closures,
+      };
+      ensure(dataset in datasets, "Choose a supported program dataset.");
+      if (["applications", "screenings", "closures"].includes(dataset))
+        permit(u, ["Project Operations", "Operations Systems / Admin", "Team Supervisor"]);
+      const rows = datasets[dataset];
+      const format = q.get("format") === "xlsx" ? "xlsx" : "csv";
+      await db().batch([
+        stmt(
+          "INSERT INTO export_jobs VALUES(?,?,?,?,?,?,?)",
+          uid("EXPORT"),
+          u.id,
+          `program:${dataset}`,
+          format,
+          JSON.stringify({ scope: "current authorized groups" }),
+          rows.length,
+          now(),
+        ),
+        auditStmt(u, "Program dataset exported", dataset, { format, count: rows.length }),
+      ]);
+      const xlsx = format === "xlsx";
+      return new Response(xlsx ? (toXLSX(rows).buffer as ArrayBuffer) : toCSV(rows), {
+        headers: {
+          "Content-Type": xlsx
+            ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            : "text/csv;charset=utf-8",
+          "Content-Disposition": `attachment; filename="depi-program-${dataset}.${format}"`,
+          "Cache-Control": "private,no-store",
+        },
+      });
+    }
+    if (["ministry_csv", "ministry_xlsx"].includes(q.get("format") || "")) {
       permit(u, ["Project Operations", "Operations Systems / Admin"]);
       const definition = data.reportDefinitions.find(
         (d: any) => d.id === q.get("definition"),
       );
       ensure(
-        definition && definition.status === "Active",
-        "Choose an active Ministry report definition.",
+        definition && definition.status === "Active" && definition.approved_by && definition.approved_at,
+        "Choose an independently approved active Ministry report definition.",
       );
       const columns: string[] = JSON.parse(definition.columns);
       const rows = data.students.map((s: any) =>
@@ -287,10 +439,13 @@ export async function GET(req: Request) {
           count: rows.length,
         }),
       ]);
-      return new Response(toCSV(rows), {
+      const xlsx = q.get("format") === "ministry_xlsx";
+      return new Response(xlsx ? (toXLSX(rows).buffer as ArrayBuffer) : toCSV(rows), {
         headers: {
-          "Content-Type": "text/csv;charset=utf-8",
-          "Content-Disposition": `attachment; filename="depi-ministry-handoff.csv"`,
+          "Content-Type": xlsx
+            ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            : "text/csv;charset=utf-8",
+          "Content-Disposition": `attachment; filename="depi-ministry-handoff.${xlsx ? "xlsx" : "csv"}"`,
           "Cache-Control": "private,no-store",
         },
       });
@@ -331,6 +486,24 @@ export async function POST(req: Request) {
     let entity = id;
     let previous: any = null;
     switch (x.action) {
+      case "track": {
+        permit(u, ["Project Operations", "Operations Systems / Admin"]);
+        ensure(x.name?.trim() && x.provider?.trim(), "Track name and provider are required.");
+        ensure(Number.isInteger(Number(x.capacity)) && Number(x.capacity) > 0 && Number(x.capacity) <= 100000, "Track capacity must be a positive whole number.");
+        ensure(x.reason?.trim(), "Record the approved track setup reason.");
+        const existing: any = await stmt("SELECT * FROM tracks WHERE name=?", x.name.trim()).first();
+        if (existing) {
+          jobs.push(stmt("UPDATE tracks SET provider=?,capacity=?,active=1 WHERE id=?", x.provider.trim(), Number(x.capacity), existing.id));
+          entity = existing.id;
+          previous = existing;
+        } else {
+          jobs.push(stmt(
+            "INSERT INTO tracks(id,name,provider,capacity,active,created_at) VALUES(?,?,?,?,1,?)",
+            id, x.name.trim(), x.provider.trim(), Number(x.capacity), t,
+          ));
+        }
+        break;
+      }
       case "application": {
         permit(u, [...operations, "Operations Systems / Admin"]);
         ensure(
@@ -344,6 +517,15 @@ export async function POST(req: Request) {
         ensure(
           !x.email || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x.email),
           "Enter a valid applicant email.",
+        );
+        const applicationOwner: any = await stmt("SELECT * FROM users WHERE id=? AND active=1", x.owner || u.id).first();
+        ensure(
+          applicationOwner && can(JSON.parse(applicationOwner.roles), operations),
+          "Choose an active Project Operations or Operations Coordinator owner.",
+        );
+        ensure(
+          await stmt("SELECT id FROM tracks WHERE name=? AND active=1", x.preferred_track.trim()).first(),
+          "Choose an active approved technical track.",
         );
         jobs.push(
           stmt(
@@ -380,9 +562,14 @@ export async function POST(req: Request) {
           ["Eligible", "Ineligible", "Waitlisted"].includes(x.decision),
           "Choose an eligibility decision.",
         );
+        const criteria: string[] = Array.isArray(x.criteria)
+          ? [...new Set<string>(x.criteria.filter((item: unknown): item is string => typeof item === "string"))]
+          : [];
         ensure(
-          Array.isArray(x.criteria) && x.criteria.length && x.reason?.trim(),
-          "Record completed screening checks and a decision reason.",
+          screeningChecklist.every((item) => criteria.includes(item)) &&
+            criteria.every((item) => screeningChecklist.includes(item)) &&
+            x.reason?.trim(),
+          "Complete all four eligibility checks and record a decision reason.",
         );
         previous = app;
         entity = app.id;
@@ -392,7 +579,7 @@ export async function POST(req: Request) {
             id,
             app.id,
             x.decision,
-            JSON.stringify(x.criteria),
+            JSON.stringify(criteria),
             x.reason.trim(),
             u.id,
             t,
@@ -425,6 +612,13 @@ export async function POST(req: Request) {
           group.track === app.preferred_track,
           "The destination group must match the screened track.",
         );
+        const track: any = await stmt("SELECT capacity FROM tracks WHERE name=? AND active=1", app.preferred_track).first();
+        ensure(track, "The admitted track is no longer active.");
+        const admitted: any = await stmt(
+          "SELECT count(*) n FROM students s JOIN groups g ON g.id=s.group_id WHERE g.track=? AND s.lifecycle NOT IN ('Transferred','Withdrawn','Removed')",
+          app.preferred_track,
+        ).first();
+        ensure(track.capacity == null || Number(admitted.n) < Number(track.capacity), "The approved track capacity has been reached.");
         ensure(
           /^S[\w-]{1,60}$/.test(x.student_id || ""),
           "Enter a valid unique student ID beginning with S.",
@@ -489,10 +683,14 @@ export async function POST(req: Request) {
           ["Outcome Coach", "Support Coach"].includes(x.coach_type),
           "Choose the coach function.",
         );
-        const checklist = Array.isArray(x.checklist)
-          ? [...new Set(x.checklist)]
+        const checklist: string[] = Array.isArray(x.checklist)
+          ? [...new Set<string>(x.checklist.filter((item: unknown): item is string => typeof item === "string"))]
           : [];
-        const complete = checklist.length === 4;
+        ensure(
+          checklist.every((item) => onboardingChecklist.includes(item)),
+          "The onboarding checklist contains an unsupported item.",
+        );
+        const complete = onboardingChecklist.every((item) => checklist.includes(item));
         jobs.push(
           stmt(
             "INSERT INTO group_coaches(id,group_id,user_id,coach_type,status,onboarding_status,checklist,assigned_by,assigned_at,onboarded_at) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(group_id,user_id,coach_type) DO UPDATE SET status='Active',onboarding_status=excluded.onboarding_status,checklist=excluded.checklist,assigned_by=excluded.assigned_by,onboarded_at=excluded.onboarded_at",
@@ -529,16 +727,7 @@ export async function POST(req: Request) {
           group?.status === "Active",
           "Archived or closed groups are read-only.",
         );
-        if (can(u.roles, ["Coach"])) {
-          ensure(
-            await stmt(
-              "SELECT id FROM group_coaches WHERE group_id=? AND user_id=? AND status='Active' AND onboarding_status='Complete'",
-              group.id,
-              u.id,
-            ).first(),
-            "Only an onboarded coach assigned to this group can submit delivery notes.",
-          );
-        }
+        await requireAssignedCoach(u, group.id);
         const active: any = await stmt(
           "SELECT count(*) n FROM students WHERE group_id=? AND lifecycle='Active'",
           group.id,
@@ -625,6 +814,7 @@ export async function POST(req: Request) {
         ).first();
         ensure(assessment, "Choose an open assessment.");
         const learner = requireWritableLearner(await student(u, x.student_id));
+        await requireAssignedCoach(u, learner.group_id);
         ensure(
           learner.group_id === assessment.group_id,
           "The learner is outside this assessment group.",
@@ -723,6 +913,7 @@ export async function POST(req: Request) {
       case "post_program_outcome": {
         permit(u, [...operations, "Coach"]);
         const learner = requireWritableLearner(await student(u, x.student_id));
+        await requireAssignedCoach(u, learner.group_id, "Outcome Coach");
         ensure(
           [
             "Graduate Closed",
@@ -761,6 +952,10 @@ export async function POST(req: Request) {
         ensure(
           x.follow_up_at && !Number.isNaN(Date.parse(x.follow_up_at)),
           "Record the next outcome follow-up date.",
+        );
+        ensure(
+          await stmt("SELECT id FROM users WHERE id=? AND active=1", x.owner || u.id).first(),
+          "Choose an active outcome owner.",
         );
         jobs.push(
           stmt(
@@ -906,6 +1101,70 @@ export async function POST(req: Request) {
         previous = group;
         break;
       }
+      case "bulk_group_owner": {
+        const groupIds = ids(x.group_ids, "Bulk ownership");
+        ensure(["Coordinator", "Supervisor"].includes(x.owner_type), "Choose coordinator or supervisor ownership.");
+        if (x.owner_type === "Supervisor") permit(u, ["Project Operations"]);
+        else permit(u, ["Project Operations", "Team Supervisor"]);
+        const requiredRole = x.owner_type === "Coordinator" ? "Operations Coordinator" : "Team Supervisor";
+        const owner: any = await stmt("SELECT * FROM users WHERE id=? AND active=1", x.owner).first();
+        ensure(owner && JSON.parse(owner.roles).includes(requiredRole), `Choose an active ${requiredRole}.`);
+        ensure(x.reason?.trim(), "Record the bulk ownership reason.");
+        const marks = groupIds.map(() => "?").join(",");
+        const scoped = can(u.roles, ["Project Operations"])
+          ? await all(`SELECT id,status FROM groups WHERE id IN (${marks})`, ...groupIds)
+          : await all(`SELECT id,status FROM groups WHERE id IN (${marks}) AND supervisor=?`, ...groupIds, u.id);
+        ensure(scoped.length === groupIds.length, "One or more groups are missing, archived, or outside your scope.");
+        ensure(scoped.every((g) => g.status !== "Archived"), "Archived groups are read-only.");
+        jobs.push(stmt(
+          `UPDATE groups SET ${x.owner_type === "Coordinator" ? "coordinator" : "supervisor"}=? WHERE id IN (${marks})`,
+          owner.id,
+          ...groupIds,
+        ));
+        entity = groupIds.join(",");
+        break;
+      }
+      case "bulk_classification": {
+        permit(u, ["Project Operations", "Team Supervisor"]);
+        const studentIds = ids(x.student_ids, "Bulk classification");
+        ensure(["Active", "At Risk", "Critical"].includes(x.status), "Choose a safe engagement classification.");
+        ensure(x.reason?.trim(), "Record the classification reason.");
+        const learners = [];
+        for (const studentId of studentIds) learners.push(requireWritableLearner(await student(u, studentId)));
+        for (const learner of learners) {
+          jobs.push(
+            stmt("UPDATE students SET engagement=? WHERE id=?", x.status, learner.id),
+            stmt(
+              "INSERT INTO student_status_events VALUES(?,?,?,?,?,?,?,?)",
+              uid("STATUS"), learner.id, "Engagement", learner.engagement, x.status, u.id, x.reason.trim(), t,
+            ),
+          );
+          if (x.status === "Critical") jobs.push(stmt(
+            "INSERT OR IGNORE INTO cases(id,student_id,title,type,severity,status,owner,due,source,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            uid("CASE"), learner.id, "Supervisor intervention", "Student", "S2 High", "Open", learner.supervisor,
+            new Date(Date.now() + 86400000).toISOString(), `critical-${learner.id}`, t,
+          ));
+        }
+        entity = studentIds.join(",");
+        break;
+      }
+      case "bulk_tasks": {
+        permit(u, [...operations, "Team Supervisor", "Coach"]);
+        const studentIds = ids(x.student_ids, "Bulk task creation");
+        ensure(x.title?.trim() && x.owner && x.due && !Number.isNaN(Date.parse(x.due)), "Task title, owner and due date are required.");
+        ensure(x.reason?.trim(), "Record why this bulk action is required.");
+        ensure(await stmt("SELECT id FROM users WHERE id=? AND active=1", x.owner).first(), "Choose an active task owner.");
+        for (const studentId of studentIds) {
+          requireWritableLearner(await student(u, studentId));
+          jobs.push(stmt(
+            "INSERT INTO tasks VALUES(?,?,?,?,?,?,?,?,?,?)",
+            uid("TSK"), studentId, x.title.trim(), x.owner, new Date(x.due).toISOString(),
+            x.category || "Follow-up", x.priority || "Normal", "Open", null, t,
+          ));
+        }
+        entity = studentIds.join(",");
+        break;
+      }
       case "report_definition": {
         permit(u, ["Project Operations", "Operations Systems / Admin"]);
         const columns: string[] = Array.isArray(x.columns)
@@ -925,19 +1184,36 @@ export async function POST(req: Request) {
           x.reason?.trim(),
           "Record the reporting-format authority or change reason.",
         );
+        const existing: any = await stmt("SELECT * FROM report_definitions WHERE name=?", x.name.trim()).first();
+        if (existing) {
+          ensure(existing.status === "Draft", "Approved report formats are immutable; create a new named version.");
+          jobs.push(stmt(
+            "UPDATE report_definitions SET columns=?,updated_at=? WHERE id=?",
+            JSON.stringify(columns), t, existing.id,
+          ));
+          entity = existing.id;
+          previous = existing;
+        } else {
+          jobs.push(stmt(
+            "INSERT INTO report_definitions(id,name,status,columns,created_by,created_at,approved_by,approved_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            id, x.name.trim(), "Draft", JSON.stringify(columns), u.id, t, null, null, t,
+          ));
+          entity = id;
+        }
+        break;
+      }
+      case "approve_report_definition": {
+        permit(u, ["Project Operations", "Operations Systems / Admin"]);
+        const definition: any = await stmt("SELECT * FROM report_definitions WHERE id=?", x.id).first();
+        ensure(definition?.status === "Draft", "Choose a draft report format awaiting approval.");
+        ensure(definition.created_by !== u.id, "The report-format author cannot approve their own definition.");
+        ensure(x.reason?.trim(), "Record the approval authority and reason.");
         jobs.push(
-          stmt(
-            "INSERT INTO report_definitions(id,name,status,columns,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET status='Active',columns=excluded.columns,created_by=excluded.created_by,updated_at=excluded.updated_at",
-            id,
-            x.name.trim(),
-            "Active",
-            JSON.stringify(columns),
-            u.id,
-            t,
-            t,
-          ),
+          stmt("UPDATE report_definitions SET status='Superseded',updated_at=? WHERE status='Active'", t),
+          stmt("UPDATE report_definitions SET status='Active',approved_by=?,approved_at=?,updated_at=? WHERE id=?", u.id, t, t, definition.id),
         );
-        entity = x.name.trim();
+        entity = definition.id;
+        previous = definition;
         break;
       }
       default:

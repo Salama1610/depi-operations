@@ -2490,7 +2490,11 @@ export default function Operations({ module }: { module: string }) {
                   <>
                     {field("id", "Group ID")}
                     {field("name", "Group name")}
-                    {field("track", "Track")}
+                    {choice(
+                      "track",
+                      "Track",
+                      (d.tracks || []).map((track: Row) => track.name),
+                    )}
                     {choice("provider", "Provider", [
                       "Career180",
                       "Freelance Yard",

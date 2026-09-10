@@ -332,9 +332,23 @@ export async function POST(req: Request) {
           x.name?.trim() && x.group_id && /^S[\w-]{1,60}$/.test(id),
           "Student ID, name and group are required.",
         );
+        const destination: any = await stmt(
+          "SELECT * FROM groups WHERE id=? AND status='Active'",
+          x.group_id,
+        ).first();
+        ensure(destination, "Choose an active group.");
+        const trackCapacity: any = await stmt(
+          "SELECT capacity FROM tracks WHERE name=? AND active=1",
+          destination.track,
+        ).first();
+        ensure(trackCapacity, "The destination group track is not active.");
+        const trackEnrollment: any = await stmt(
+          "SELECT count(*) n FROM students s JOIN groups g ON g.id=s.group_id WHERE g.track=? AND s.lifecycle NOT IN ('Transferred','Withdrawn','Removed')",
+          destination.track,
+        ).first();
         ensure(
-          await stmt("SELECT id FROM groups WHERE id=?", x.group_id).first(),
-          "Group not found.",
+          trackCapacity.capacity == null || Number(trackEnrollment.n) < Number(trackCapacity.capacity),
+          "The approved track capacity has been reached.",
         );
         if (!can(u.roles, ["Project Operations", ...admin])) {
           ensure(
@@ -366,15 +380,26 @@ export async function POST(req: Request) {
           "New group and transfer reason are required.",
         );
         const g: any = await stmt(
-          "SELECT * FROM groups WHERE id=?",
+          "SELECT * FROM groups WHERE id=? AND status='Active'",
           x.group_id,
         ).first();
-        ensure(g, "Destination group not found.");
+        ensure(g, "Choose an active destination group.");
         if (!can(u.roles, ["Project Operations"]))
           ensure(
             g.supervisor === u.id,
             "Destination group is outside your scope.",
           );
+        if (g.track !== s.track) {
+          const trackCapacity: any = await stmt("SELECT capacity FROM tracks WHERE name=? AND active=1", g.track).first();
+          const trackEnrollment: any = await stmt(
+            "SELECT count(*) n FROM students z JOIN groups y ON y.id=z.group_id WHERE y.track=? AND z.lifecycle NOT IN ('Transferred','Withdrawn','Removed')",
+            g.track,
+          ).first();
+          ensure(
+            trackCapacity && (trackCapacity.capacity == null || Number(trackEnrollment.n) < Number(trackCapacity.capacity)),
+            "The destination track capacity has been reached.",
+          );
+        }
         auditPrevious = s;
         jobs.push(
           stmt("UPDATE students SET group_id=? WHERE id=?", x.group_id, sid),
@@ -400,6 +425,15 @@ export async function POST(req: Request) {
         ])
           ensure(x[k], `${k} is required.`);
         ensure(["Outcome", "Support"].includes(x.pathway), "Invalid pathway.");
+        const approvedTrack: any = await stmt(
+          "SELECT * FROM tracks WHERE name=? AND active=1",
+          x.track,
+        ).first();
+        ensure(approvedTrack, "Choose an active approved technical track.");
+        ensure(
+          !approvedTrack.provider || approvedTrack.provider === x.provider,
+          "The group provider must match the approved track setup.",
+        );
         const selectedPolicy: any = await stmt(
           x.policy_id
             ? "SELECT id FROM policies WHERE id=? AND status='Effective'"
@@ -1010,7 +1044,7 @@ export async function POST(req: Request) {
         const balance = Number(account.credits) + amount;
         jobs.push(
           stmt(
-            "UPDATE accounts SET credits=? WHERE id=?",
+            "UPDATE accounts SET credits=?,status=CASE WHEN status='Assigned' THEN 'Cooldown' ELSE status END WHERE id=?",
             balance,
             gig.account_id,
           ),
@@ -1123,6 +1157,19 @@ export async function POST(req: Request) {
         let next = "";
         if (e.status === "Coach Review") {
           permit(u, ["Coach"]);
+          const configured: any = await stmt(
+            "SELECT count(*) n FROM group_coaches WHERE group_id=? AND status='Active'",
+            st.group_id,
+          ).first();
+          const assigned = await stmt(
+            "SELECT id FROM group_coaches WHERE group_id=? AND user_id=? AND status='Active' AND onboarding_status='Complete'",
+            st.group_id,
+            u.id,
+          ).first();
+          ensure(
+            assigned || (!configured?.n && st.coach === u.id),
+            "Only an onboarded coach assigned to this group can complete first evidence review.",
+          );
           next = "Coordinator L1";
         } else if (e.status === "Coordinator L1") {
           permit(u, ops);
