@@ -18,6 +18,12 @@ export const runtimeTriggers = [
   `CREATE TRIGGER IF NOT EXISTS audit_no_delete BEFORE DELETE ON audit_events BEGIN SELECT RAISE(ABORT,'Audit history is immutable.'); END`,
   `CREATE TRIGGER IF NOT EXISTS reviews_no_update BEFORE UPDATE ON evidence_reviews BEGIN SELECT RAISE(ABORT,'Review history is immutable.'); END`,
   `CREATE TRIGGER IF NOT EXISTS reviews_no_delete BEFORE DELETE ON evidence_reviews BEGIN SELECT RAISE(ABORT,'Review history is immutable.'); END`,
+  `CREATE TRIGGER IF NOT EXISTS credit_ledger_no_update BEFORE UPDATE ON account_credit_ledger BEGIN SELECT RAISE(ABORT,'Account credit history is immutable.'); END`,
+  `CREATE TRIGGER IF NOT EXISTS credit_ledger_no_delete BEFORE DELETE ON account_credit_ledger BEGIN SELECT RAISE(ABORT,'Account credit history is immutable.'); END`,
+  `CREATE TRIGGER IF NOT EXISTS withdrawal_no_update BEFORE UPDATE ON withdrawal_decisions BEGIN SELECT RAISE(ABORT,'Ministry withdrawal decisions are immutable.'); END`,
+  `CREATE TRIGGER IF NOT EXISTS withdrawal_no_delete BEFORE DELETE ON withdrawal_decisions BEGIN SELECT RAISE(ABORT,'Ministry withdrawal decisions are immutable.'); END`,
+  `CREATE TRIGGER IF NOT EXISTS group_closure_no_update BEFORE UPDATE ON group_closures BEGIN SELECT RAISE(ABORT,'Group closure history is immutable.'); END`,
+  `CREATE TRIGGER IF NOT EXISTS group_closure_no_delete BEFORE DELETE ON group_closures BEGIN SELECT RAISE(ABORT,'Group closure history is immutable.'); END`,
   `CREATE TRIGGER IF NOT EXISTS gig_valid_transition BEFORE UPDATE OF status ON gigs WHEN NEW.status<>OLD.status BEGIN
     SELECT CASE WHEN NOT ((OLD.status='Account Assigned' AND NEW.status='Gig Opened') OR (OLD.status='Gig Opened' AND NEW.status='Work Submitted') OR (OLD.status='Work Submitted' AND NEW.status='Delivered') OR (OLD.status='Delivered' AND NEW.status='Paid') OR (OLD.status NOT IN ('Paid','Cancelled','Failed') AND NEW.status IN ('Cancelled','Failed'))) THEN RAISE(ABORT,'Invalid gig workflow transition.') END;
   END`,
