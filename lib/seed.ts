@@ -125,7 +125,7 @@ export async function seed(i: any, mode: "demo" | "production" = "demo") {
   batch.push(
     ...Array.from({ length: 40 }, (_, i) =>
       stmt(
-        "INSERT INTO groups(id,name,track,provider,coordinator,supervisor,coach,pathway,start_date,status,policy_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO groups(id,name,track,provider,coordinator,supervisor,coach,pathway,delivery_model,start_date,status,policy_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
         "G" + (101 + i),
         tracks[i % 4] + " " + (Math.floor(i / 4) + 1),
         tracks[i % 4],
@@ -134,6 +134,7 @@ export async function seed(i: any, mode: "demo" | "production" = "demo") {
         "staff-nour",
         "staff-coach",
         i % 3 ? "Outcome" : "Support",
+        i % 4 === 0 ? "Industry" : "Regular",
         start,
         "Active",
         "R5-v1",
@@ -308,17 +309,24 @@ export async function seed(i: any, mode: "demo" | "production" = "demo") {
     ),
   );
   batch.push(
-    ...Array.from({ length: 40 }, (_, i) =>
-      stmt(
-        "INSERT INTO sessions VALUES(?,?,?,?,?,?)",
+    ...Array.from({ length: 40 }, (_, i) => {
+      const start = new Date(Date.now() + (i + 1) * 86400000);
+      start.setUTCHours(10, 0, 0, 0);
+      const startsAt = start.toISOString();
+      return stmt(
+        "INSERT INTO sessions(id,group_id,coach_id,title,starts_at,session_day,duration_minutes,status,week,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
         "SES-" + (101 + i),
         "G" + (101 + i),
+        i % 3 ? "staff-coach" : "staff-support-coach",
         "Week 4 · Client delivery clinic",
-        new Date(Date.now() + (i % 7) * 86400000 + 3600000).toISOString(),
+        startsAt,
+        startsAt.slice(0, 10),
+        policy.sessionMinutes,
         "Scheduled",
         4,
-      ),
-    ).map((s) => s),
+        t,
+      );
+    }),
   );
   batch.push(
     auditStmt(

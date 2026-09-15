@@ -10,6 +10,7 @@ The application implementation is reconciled with **DEPI Round 5 Operational Con
 | Identity and scope | Trusted ChatGPT identity, active-staff membership, backend role checks, group scope, functional Outcome/Support Coach assignments, role-conflict launch gate, separation of policy/FX/report creation and approval, and no student accounts. |
 | Complete program flow | Registration, eligibility screening, admission/group assignment, coach matching/onboarding, session reconciliation, assessments, certificates, post-program outcomes, Ministry withdrawal decisions, group closure and read-only archive. |
 | Journey control | Group-relative week, configurable milestones and lag thresholds, trajectory explanations, weekly gates, engagement/lifecycle history, transfer and closure gates. |
+| Session operations | Regular/Industry delivery limits, policy-controlled duration, active onboarded coach assignment, same-day coach conflict and duplicate-week protection, coach confirmation, reasoned reschedule/cancellation, complete attendance reconciliation, delivery notes, SLA backlog and coverage-gap monitoring. |
 | Student operations | Screenshot-backed contacts, mandatory next actions, attendance, milestone history, scoped Student 360, global search and personal saved views. |
 | Controlled accounts | V3 platforms (Kafeel, Nafezly, Khamsat), track task bank, Support-path-only requests, job profile/gig sequence, atomic eligibility/allocation, reuse and credit controls, vault adapter and exposure response. |
 | Gigs and evidence | Ordered gig states, screenshot requirement for client activity, structured group/gig/account/activity/platform/time/source/performer linkage, duplicate checks, Coach/L1/Quality/L3 review, corrections and immutable history. |
@@ -23,7 +24,7 @@ The application implementation is reconciled with **DEPI Round 5 Operational Con
 
 ## Validation evidence
 
-- 25 automated domain, permission, workflow, search, retention, security, backup and restore tests pass.
+- 32 automated domain, permission, workflow, import, search, retention, security, backup, restore, rendering and UI-component tests pass.
 - TypeScript validation passes.
 - The bounded production Worker build passes and includes every application and API route.
 - Migrations are host-compatible; safeguards are installed at workspace initialization and restore.

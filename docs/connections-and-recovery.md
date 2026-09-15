@@ -1,6 +1,6 @@
 # Connections, scheduled work, and recovery
 
-These integrations are implemented and tested locally. They are not connected to live services in this release. No external messages have been sent. The Site's original migration error still prevents live publication.
+These integrations are implemented and tested locally. The private Site is published, but the optional vault, scheduler and independent backup destination are not connected in this release. No external messages have been sent.
 
 ## Deployment settings
 

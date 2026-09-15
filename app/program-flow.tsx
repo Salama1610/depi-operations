@@ -490,18 +490,26 @@ export function ProgramFlow() {
                 </button>
               </div>
               {(d.sessions || [])
-                .filter((s: Row) => !sessionReports.has(s.id))
+                .filter(
+                  (s: Row) =>
+                    s.status !== "Cancelled" && !sessionReports.has(s.id),
+                )
                 .slice(0, 30)
                 .map((s: Row) => (
                   <div className="info-box" key={s.id}>
                     <strong>{s.title}</strong>
                     <span>
-                      {s.group_id} · {new Date(s.starts_at).toLocaleString()}
+                      {s.group_id} · {s.coach_name || "Coach not assigned"} ·{" "}
+                      {new Date(s.starts_at).toLocaleString()}
                     </span>
+                    <Badge value={s.status} />
                     {allowed(["Coach", "Coach Operations", "Project Operations"]) && (
                       <button
                         className="small-btn"
-                        disabled={s.starts_at > new Date().toISOString()}
+                        disabled={
+                          s.starts_at > new Date().toISOString() ||
+                          s.status !== "Confirmed"
+                        }
                         onClick={() => open("complete_session", { session_id: s.id })}
                       >
                         Notes & reconciliation
@@ -509,9 +517,9 @@ export function ProgramFlow() {
                     )}
                   </div>
                 ))}
-              {(d.sessions || []).every((s: Row) =>
-                sessionReports.has(s.id),
-              ) && (
+              {(d.sessions || [])
+                .filter((s: Row) => s.status !== "Cancelled")
+                .every((s: Row) => sessionReports.has(s.id)) && (
                 <Empty text="All started sessions have delivery notes and attendance reconciliation." />
               )}
             </section>

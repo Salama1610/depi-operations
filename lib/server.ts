@@ -211,13 +211,17 @@ export async function loadData(u: any) {
         ),
       ]),
   );
-  const [reviews, sessions, p, fxApplications] = await Promise.all([
+  const [reviews, sessions, groupCoaches, p, fxApplications] = await Promise.all([
     all(
       `SELECT r.* FROM evidence_reviews r JOIN evidence e ON e.id=r.evidence_id JOIN students s ON s.id=e.student_id JOIN groups g ON g.id=s.group_id WHERE ${q.sql}`,
       ...q.args,
     ),
     all(
       `SELECT t.* FROM sessions t JOIN groups g ON g.id=t.group_id WHERE ${q.sql}`,
+      ...q.args,
+    ),
+    all(
+      `SELECT x.*,u.name coach_name FROM group_coaches x JOIN users u ON u.id=x.user_id JOIN groups g ON g.id=x.group_id WHERE ${q.sql} ORDER BY x.assigned_at DESC`,
       ...q.args,
     ),
     all("SELECT * FROM policies"),
@@ -446,6 +450,7 @@ export async function loadData(u: any) {
     attendance,
     reviews,
     sessions,
+    groupCoaches,
     taskBank,
     savedViews,
     gates,

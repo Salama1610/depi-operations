@@ -8,4 +8,4 @@ The previous migration failure was resolved without deleting or resetting a data
 
 The release includes a blank-production first-run choice and a separate clearly labelled synthetic pilot. No user records exist until an authorized owner completes that choice.
 
-Current release validation: 19 automated tests, TypeScript validation, production Worker build, host-compatible migration generation and encrypted restore verification all pass.
+Current release validation: 32 automated tests, TypeScript validation, production Worker build, host-compatible additive migration generation and encrypted restore verification all pass.

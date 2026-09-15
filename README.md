@@ -22,6 +22,7 @@ The initializing owner receives Project Operations and Operations Systems / Admi
 ## Working features
 
 - Responsive operations overview, complete program flow, work queues, student directory/360, groups, sessions, accounts, gigs, evidence, Quality, cases, reports and administration.
+- Coach Operations session control with Regular (8) and Industry (5) delivery plans, policy-locked 180-minute duration, onboarded coach assignment, Cairo-day conflict prevention, coach confirmation, reasoned reschedule/cancellation, attendance completion, delivery notes and SLA/coverage dashboards.
 - Staff identity from trusted hosting dispatch; backend role and assigned-group checks; no student registration.
 - Screenshot-backed contact logging, next actions, valid-contact compliance and risk recommendations.
 - Private image storage, byte-signature checks, 8 MB upload limit, hashes, authorized file delivery and upload audit.
@@ -59,5 +60,5 @@ See `docs/production-readiness.md`. Before loading real student data, the organi
 - `lib/server.ts`: centralized database, identity, scope, audit and graduation helpers.
 - `lib/seed.ts`: synthetic, atomic pilot initialization.
 - `db/schema.ts`, `drizzle/`: normalized schema, migrations and integrity triggers.
-- `tests/`: executable domain and service integration tests.
+- `tests/`: executable domain, service integration, rendering and UI component tests.
 - `docs/`: setup, deployment, metric definitions and remaining release gates.

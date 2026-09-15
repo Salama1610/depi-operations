@@ -23,6 +23,7 @@ const allowed: Record<string, string[]> = {
     "supervisor",
     "coach",
     "pathway",
+    "delivery_model",
     "start_date",
   ],
   contacts: [
@@ -37,7 +38,15 @@ const allowed: Record<string, string[]> = {
     "notes",
   ],
   tasks: ["student_id", "title", "owner", "due", "category", "priority"],
-  sessions: ["id", "group_id", "title", "starts_at", "week"],
+  sessions: [
+    "id",
+    "group_id",
+    "coach_id",
+    "title",
+    "starts_at",
+    "week",
+    "duration_minutes",
+  ],
   attendance: ["session_id", "student_id", "status", "source"],
   task_bank: ["id", "track", "title", "platform", "value"],
   accounts: ["id", "label", "platform", "credits"],
@@ -130,6 +139,90 @@ const actions: Record<string, string> = {
   withdrawals: "withdrawal_decision",
   post_program_outcomes: "post_program_outcome",
 };
+const required: Record<string, string[]> = {
+  students: ["id", "name", "group_id"],
+  groups: [
+    "id",
+    "name",
+    "track",
+    "provider",
+    "coordinator",
+    "supervisor",
+    "coach",
+    "pathway",
+    "delivery_model",
+    "start_date",
+  ],
+  contacts: [
+    "student_id",
+    "channel",
+    "outcome",
+    "occurred_at",
+    "proof_id",
+    "next_action",
+    "owner",
+    "due",
+  ],
+  tasks: ["title", "owner", "due"],
+  sessions: [
+    "id",
+    "group_id",
+    "coach_id",
+    "title",
+    "starts_at",
+    "week",
+    "duration_minutes",
+  ],
+  attendance: ["session_id", "student_id", "status", "source"],
+  task_bank: ["id", "track", "title", "platform", "value"],
+  accounts: ["id", "label", "platform", "credits"],
+  requests: ["student_id", "task_bank_id", "job_profile", "gig_number"],
+  gigs: [
+    "id",
+    "student_id",
+    "platform",
+    "title",
+    "value",
+    "order_ref",
+    "due",
+  ],
+  evidence: [
+    "student_id",
+    "gig_id",
+    "proof_id",
+    "payment_proof_id",
+    "source",
+  ],
+  cases: ["student_id", "title", "type", "severity", "owner", "due"],
+  applications: ["id", "name", "preferred_track", "source", "owner"],
+  assessments: [
+    "id",
+    "group_id",
+    "title",
+    "type",
+    "max_score",
+    "pass_score",
+    "due_at",
+  ],
+  assessment_results: ["id", "assessment_id", "student_id", "score"],
+  withdrawals: [
+    "id",
+    "student_id",
+    "ministry_reference",
+    "decision",
+    "decided_at",
+    "reason",
+  ],
+  post_program_outcomes: [
+    "id",
+    "student_id",
+    "type",
+    "title",
+    "status",
+    "follow_up_at",
+    "owner",
+  ],
+};
 const programModules = new Set([
   "applications",
   "assessments",
@@ -166,13 +259,6 @@ export async function POST(req: Request) {
             expected: columns.join(", "),
           });
       if (x.module === "students") {
-        if (!row.id || !row.name || !row.group_id)
-          errors.push({
-            row: i + 2,
-            field: "id/name/group_id",
-            error: "Required fields missing",
-            expected: "Stable student ID, name, existing group ID",
-          });
         if (
           seen.has(row.id) ||
           (await stmt(
@@ -203,33 +289,7 @@ export async function POST(req: Request) {
           });
         seen.add(row.id);
       }
-      for (const k of columns.filter((k) =>
-        [
-          "student_id",
-          "name",
-          "title",
-          "owner",
-          "due",
-          "proof_id",
-          "next_action",
-          "outcome",
-          "track",
-          "platform",
-          "value",
-          "task_bank_id",
-          "job_profile",
-          "gig_number",
-          "preferred_track",
-          "assessment_id",
-          "max_score",
-          "pass_score",
-          "score",
-          "ministry_reference",
-          "decision",
-          "decided_at",
-          "follow_up_at",
-        ].includes(k),
-      ))
+      for (const k of required[x.module])
         if (
           row[k] === undefined ||
           row[k] === null ||
@@ -241,6 +301,13 @@ export async function POST(req: Request) {
             error: "Required field missing",
             expected: "Non-empty value",
           });
+      if (x.module === "applications" && !row.email && !row.phone)
+        errors.push({
+          row: i + 2,
+          field: "email/phone",
+          error: "Applicant contact method missing",
+          expected: "At least one email address or phone number",
+        });
       checked.push({
         row: i + 2,
         data: row,

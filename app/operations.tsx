@@ -134,6 +134,8 @@ const titles: Row = {
   student: "Add student",
   group: "Create group",
   session: "Schedule session",
+  session_reschedule: "Reschedule session",
+  session_cancel: "Cancel session",
   account_request: "Request a client account",
   account: "Add client account",
   reserve_account: "Reserve eligible account",
@@ -170,6 +172,12 @@ const actionCopy: Row = {
     "Attach a screenshot of this activity before progressing the gig.",
   staff: "Access changes take effect immediately and are audited.",
   evidence: "Only completed, paid gigs can enter the review pipeline.",
+  session:
+    "Sessions follow the group delivery model, approved duration and coach-assignment controls.",
+  session_reschedule:
+    "Changing the date or coach requires a reason and resets coach confirmation.",
+  session_cancel:
+    "Cancelled sessions remain in the operational history and require a reason.",
 };
 const fmt = (v: string) =>
   v
@@ -179,6 +187,17 @@ const fmt = (v: string) =>
       })
     : "Not recorded";
 const today = () => new Date().toISOString().slice(0, 10);
+const programDay = (value: Date = new Date()) => {
+  const parts = new Intl.DateTimeFormat("en", {
+    timeZone: "Africa/Cairo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const part = (type: string) =>
+    parts.find((item) => item.type === type)?.value || "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+};
 const future = () => new Date(Date.now() + 86400000).toISOString().slice(0, 16);
 const weeklyGateChecks = [
   "Current statuses recorded",
@@ -300,6 +319,9 @@ export default function Operations({ module }: { module: string }) {
   const tasks: Row[] = d.tasks || [];
   const evidence: Row[] = d.evidence || [];
   const gigs: Row[] = d.gigs || [];
+  const sessions: Row[] = d.sessions || [];
+  const attendance: Row[] = d.attendance || [];
+  const groupCoaches: Row[] = d.groupCoaches || [];
   const openTasks = tasks.filter((t) => t.status === "Open");
   const overdue = openTasks.filter((t) => t.due < new Date().toISOString());
   const dueToday = openTasks.filter((t) => t.due.slice(0, 10) === today());
@@ -351,7 +373,13 @@ export default function Operations({ module }: { module: string }) {
       channel: "WhatsApp",
       outcome: "Responded",
       pathway: "Outcome",
+      delivery_model: row.delivery_model || "Regular",
       currency: "USD",
+      coach_id: row.coach_id || "",
+      duration_minutes:
+        row.duration_minutes || baselinePolicy.sessionMinutes,
+      starts_at: row.starts_at?.slice(0, 16) || "",
+      reason: "",
       status: row.status || "",
       checklist: [],
       config: row.config ? JSON.parse(row.config) : { ...baselinePolicy },
@@ -765,6 +793,8 @@ export default function Operations({ module }: { module: string }) {
               "L3 Review",
               "Accepted",
             ]
+          : module === "sessions"
+            ? ["All", "Scheduled", "Confirmed", "Completed", "Cancelled"]
           : ["All"];
   let content: any;
   if (module === "home") {
@@ -1075,7 +1105,7 @@ export default function Operations({ module }: { module: string }) {
               </small>
               <h2>{g.name}</h2>
               <p>
-                {g.pathway} pathway · Week {g.week}
+                {g.pathway} pathway · {g.delivery_model || "Regular"} delivery · Week {g.week}
               </p>
               <p className="footnote">{g.trajectory_reason}</p>
               <div className="group-metrics">
@@ -1125,10 +1155,87 @@ export default function Operations({ module }: { module: string }) {
       </div>
     );
   } else if (module === "sessions") {
-    content = panel(
-      "Session schedule",
-      generic(
-        (d.sessions || []).filter(qMatch),
+    const activeSessions = sessions.filter((s) => s.status !== "Cancelled");
+    const missingAttendance = activeSessions.filter((session) => {
+      if (Date.parse(session.starts_at) > Date.now()) return false;
+      const expected = students.filter(
+        (student) =>
+          student.group_id === session.group_id &&
+          student.lifecycle === "Active",
+      ).length;
+      const recorded = new Set(
+        attendance
+          .filter((row) => row.session_id === session.id)
+          .map((row) => row.student_id),
+      ).size;
+      return expected > recorded;
+    });
+    const coverageGaps = groups.filter(
+      (group) =>
+        group.status === "Active" &&
+        !groupCoaches.some(
+          (coach) =>
+            coach.group_id === group.id &&
+            coach.status === "Active" &&
+            coach.onboarding_status === "Complete",
+        ),
+    );
+    const sessionRows = sessions
+      .filter(qMatch)
+      .filter((session) => filter === "All" || session.status === filter)
+      .sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+    content = (
+      <>
+        <div className="mini-stats session-stats">
+          <span>
+            <strong>
+              {
+                activeSessions.filter(
+                  (session) =>
+                    (session.session_day ||
+                      programDay(new Date(session.starts_at))) === programDay(),
+                ).length
+              }
+            </strong>
+            Sessions today
+          </span>
+          <span>
+            <strong>
+              {sessions.filter((session) => session.status === "Scheduled").length}
+            </strong>
+            Unconfirmed coaches
+          </span>
+          <span>
+            <strong>{missingAttendance.length}</strong>
+            Missing attendance
+          </span>
+          <span>
+            <strong>
+              {sessions.filter((session) => session.status === "Cancelled").length}
+            </strong>
+            Cancelled sessions
+          </span>
+          <span>
+            <strong>
+              {
+                evidence.filter(
+                  (item) =>
+                    item.status === "Coach Review" &&
+                    Date.now() - Date.parse(item.stage_at) > 24 * 3600000,
+                ).length
+              }
+            </strong>
+            Coach evidence &gt;24h
+          </span>
+          <span>
+            <strong>{coverageGaps.length}</strong>
+            Coverage gaps
+          </span>
+        </div>
+        {panel(
+          "Session schedule",
+          generic(
+            sessionRows,
         [
           {
             key: "starts_at",
@@ -1147,18 +1254,63 @@ export default function Operations({ module }: { module: string }) {
           },
           { key: "title", label: "Session" },
           { key: "group_id", label: "Group" },
+          {
+            key: "coach_id",
+            label: "Coach",
+            render: (r) => owner(r.coach_id),
+          },
           { key: "week", label: "Week" },
+          {
+            key: "duration_minutes",
+            label: "Duration",
+            render: (r) => `${r.duration_minutes || 180} min`,
+          },
           statusCol,
         ],
-        (r) => (
-          <button
-            className="small-btn"
-            onClick={() => open("attendance", { session_id: r.id })}
-          >
-            Attendance
-          </button>
-        ),
-      ),
+            (r) => (
+          <div className="detail-actions">
+            {r.status === "Scheduled" &&
+              r.coach_id === user.id &&
+              can(user.roles, ["Coach"]) && (
+                <button
+                  className="small-btn"
+                  disabled={busy}
+                  onClick={() => quick("session_confirm", { id: r.id })}
+                >
+                  Confirm
+                </button>
+              )}
+            {["Scheduled", "Confirmed"].includes(r.status) &&
+              can(user.roles, ["Coach Operations", "Project Operations"]) && (
+                <>
+                  <button
+                    className="small-btn"
+                    onClick={() => open("session_reschedule", r)}
+                  >
+                    Reschedule
+                  </button>
+                  <button
+                    className="small-btn"
+                    onClick={() => open("session_cancel", r)}
+                  >
+                    Cancel
+                  </button>
+                </>
+              )}
+            {r.status !== "Cancelled" &&
+              Date.parse(r.starts_at) <= Date.now() && (
+              <button
+                className="small-btn"
+                onClick={() => open("attendance", { session_id: r.id })}
+              >
+                Attendance
+              </button>
+            )}
+          </div>
+            ),
+          ),
+        )}
+      </>
     );
   } else if (module === "accounts") {
     content = (
@@ -2503,6 +2655,10 @@ export default function Operations({ module }: { module: string }) {
                     {staffPick("supervisor", "Supervisor")}
                     {staffPick("coach", "Coach")}
                     {choice("pathway", "Pathway", ["Outcome", "Support"])}
+                    {choice("delivery_model", "Delivery model", [
+                      "Regular",
+                      "Industry",
+                    ])}
                     {field("start_date", "Start date", "date")}
                     {choice(
                       "policy_id",
@@ -2520,24 +2676,100 @@ export default function Operations({ module }: { module: string }) {
                     {choice(
                       "group_id",
                       "Group",
-                      groups.map((g) => g.id),
+                      groups
+                        .filter((g) => g.status === "Active")
+                        .map((g) => ({
+                          value: g.id,
+                          label: `${g.id} · ${g.delivery_model || "Regular"}`,
+                        })),
+                    )}
+                    {choice(
+                      "coach_id",
+                      "Assigned coach",
+                      (d.groupCoaches || [])
+                        .filter(
+                          (coach: Row) =>
+                            coach.group_id === form.group_id &&
+                            coach.status === "Active" &&
+                            coach.onboarding_status === "Complete",
+                        )
+                        .map((coach: Row) => ({
+                          value: coach.user_id,
+                          label: `${coach.coach_name} · ${coach.coach_type}`,
+                        })),
                     )}
                     {field("starts_at", "Start date & time", "datetime-local")}
                     {field("week", "Journey week", "number")}
+                    {field(
+                      "duration_minutes",
+                      "Duration in minutes",
+                      "number",
+                    )}
+                    <p className="footnote">
+                      Regular delivery supports 8 weekly sessions; Industry
+                      delivery supports 5. The Round 5 duration is 180 minutes.
+                    </p>
                   </>
                 );
-              if (a === "attendance")
+              if (a === "session_reschedule")
                 return (
                   <>
                     {choice(
+                      "coach_id",
+                      "Assigned coach",
+                      (d.groupCoaches || [])
+                        .filter(
+                          (coach: Row) =>
+                            coach.group_id === form.group_id &&
+                            coach.status === "Active" &&
+                            coach.onboarding_status === "Complete",
+                        )
+                        .map((coach: Row) => ({
+                          value: coach.user_id,
+                          label: `${coach.coach_name} · ${coach.coach_type}`,
+                        })),
+                    )}
+                    {field("starts_at", "New date & time", "datetime-local")}
+                    {field("reason", "Reason for rescheduling")}
+                  </>
+                );
+              if (a === "session_cancel")
+                return <>{field("reason", "Reason for cancellation")}</>;
+              if (a === "attendance")
+                {
+                  const selectedSession = sessions.find(
+                    (session) => session.id === form.session_id,
+                  );
+                  return (
+                    <>
+                    {choice(
                       "session_id",
                       "Session",
-                      (d.sessions || []).map((s: Row) => ({
-                        value: s.id,
-                        label: s.group_id + " · " + s.title,
-                      })),
+                      sessions
+                        .filter(
+                          (session) =>
+                            session.status !== "Cancelled" &&
+                            Date.parse(session.starts_at) <= Date.now(),
+                        )
+                        .map((session) => ({
+                          value: session.id,
+                          label: session.group_id + " · " + session.title,
+                        })),
                     )}
-                    {studentPick()}
+                    {choice(
+                      "student_id",
+                      "Student",
+                      students
+                        .filter(
+                          (student) =>
+                            !selectedSession ||
+                            student.group_id === selectedSession.group_id,
+                        )
+                        .map((student) => ({
+                          value: student.id,
+                          label: student.name + " · " + student.id,
+                        })),
+                    )}
                     {choice("status", "Attendance", [
                       "Present",
                       "Absent",
@@ -2547,6 +2779,7 @@ export default function Operations({ module }: { module: string }) {
                     {field("source", "Source", "text", false)}
                   </>
                 );
+                }
               if (a === "account_request")
                 return (
                   <>
@@ -3096,6 +3329,12 @@ export default function Operations({ module }: { module: string }) {
                                   milestoneWeek6: "Week 6 milestone",
                                   milestoneWeek7: "Week 7 milestone",
                                   milestoneWeek8: "Week 8 milestone",
+                                  regularSessionCount:
+                                    "Regular session count",
+                                  industrySessionCount:
+                                    "Industry session count",
+                                  sessionMinutes:
+                                    "Session duration (minutes)",
                                 } as Row
                               )[key]
                             }
@@ -3111,6 +3350,9 @@ export default function Operations({ module }: { module: string }) {
                                   "gigCount",
                                   "journeyDelayedLag",
                                   "journeyCriticalLag",
+                                  "regularSessionCount",
+                                  "industrySessionCount",
+                                  "sessionMinutes",
                                 ].includes(key)
                                   ? "1"
                                   : "any"
@@ -3267,6 +3509,7 @@ export default function Operations({ module }: { module: string }) {
                     supervisor: staff[0]?.id,
                     coach: staff[0]?.id,
                     pathway: "Outcome",
+                    delivery_model: "Regular",
                     start_date: today(),
                   },
                   contacts: {
@@ -3291,9 +3534,11 @@ export default function Operations({ module }: { module: string }) {
                   sessions: {
                     id: "SES-new",
                     group_id: "G101",
+                    coach_id: "staff-coach",
                     title: "Coaching session",
                     starts_at: new Date().toISOString(),
                     week: 1,
+                    duration_minutes: 180,
                   },
                   attendance: {
                     session_id: d.sessions?.[0]?.id,

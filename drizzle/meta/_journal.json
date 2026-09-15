@@ -57,6 +57,13 @@
       "when": 1789056052739,
       "tag": "0007_sharp_dragon_lord",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1789464381141,
+      "tag": "0008_woozy_jackal",
+      "breakpoints": true
     }
   ]
 }

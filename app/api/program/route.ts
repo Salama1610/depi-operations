@@ -144,7 +144,7 @@ async function programData(u: any) {
       ...q.args,
     ),
     all(
-      `SELECT x.* FROM sessions x JOIN groups g ON g.id=x.group_id WHERE ${q.sql} ORDER BY x.starts_at DESC LIMIT 1000`,
+      `SELECT x.*,u.name coach_name FROM sessions x JOIN groups g ON g.id=x.group_id LEFT JOIN users u ON u.id=x.coach_id WHERE ${q.sql} ORDER BY x.starts_at DESC LIMIT 1000`,
       ...q.args,
     ),
     all(
@@ -716,8 +716,8 @@ export async function POST(req: Request) {
           x.session_id,
         ).first();
         ensure(
-          session && session.starts_at <= t,
-          "Only a started session can be completed.",
+          session && session.starts_at <= t && session.status === "Confirmed",
+          "Only a started, coach-confirmed session can be completed.",
         );
         const group: any = await stmt(
           "SELECT * FROM groups WHERE id=?",
@@ -728,6 +728,14 @@ export async function POST(req: Request) {
           "Archived or closed groups are read-only.",
         );
         await requireAssignedCoach(u, group.id);
+        if (
+          can(u.roles, ["Coach"]) &&
+          !can(u.roles, ["Project Operations", "Coach Operations"])
+        )
+          ensure(
+            !session.coach_id || session.coach_id === u.id,
+            "Only the coach assigned to this session can complete it.",
+          );
         const active: any = await stmt(
           "SELECT count(*) n FROM students WHERE group_id=? AND lifecycle='Active'",
           group.id,
@@ -754,7 +762,11 @@ export async function POST(req: Request) {
             1,
             t,
           ),
-          stmt("UPDATE sessions SET status='Completed' WHERE id=?", session.id),
+          stmt(
+            "UPDATE sessions SET status='Completed',updated_at=? WHERE id=?",
+            t,
+            session.id,
+          ),
         );
         entity = session.id;
         break;

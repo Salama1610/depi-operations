@@ -104,6 +104,32 @@ await build({
   ],
 });
 const programApi = await import("/tmp/depi-program-test.mjs");
+await build({
+  entryPoints: ["app/api/import/route.ts"],
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  outfile: "/tmp/depi-import-test.mjs",
+  plugins: [
+    {
+      name: "test-bindings",
+      setup(b) {
+        b.onResolve(
+          { filter: /^(cloudflare:workers|next\/headers)$/ },
+          (a) => ({ path: a.path, namespace: "mock" }),
+        );
+        b.onLoad({ filter: /.*/, namespace: "mock" }, (a) => ({
+          contents:
+            a.path === "cloudflare:workers"
+              ? "export const env=globalThis.__testEnv"
+              : "export const headers=async()=>globalThis.__testHeaders()",
+          loader: "js",
+        }));
+      },
+    },
+  ],
+});
+const importApi = await import("/tmp/depi-import-test.mjs");
 const post = async (action, x = {}) => {
   const r = await api.POST(
     new Request("https://test.local/api/operations", {
@@ -133,6 +159,16 @@ const programCheck = async (action, x = {}) => {
   const result = await programPost(action, x);
   assert.equal(result.error, undefined, result.error);
   return result;
+};
+const importPost = async (payload) => {
+  const response = await importApi.POST(
+    new Request("https://test.local/api/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  );
+  return await response.json();
 };
 test("full seeded backend workflow and permission gates", async () => {
   await check("setup", { mode: "demo" });
@@ -170,6 +206,20 @@ test("full seeded backend workflow and permission gates", async () => {
       "owner",
       new Date().toISOString(),
     );
+  sqlite
+    .prepare("INSERT INTO attachment_context VALUES(?,?,?,?,?,?,?,?,?,?)")
+    .run(
+      "PROOF-1",
+      "G101",
+      null,
+      null,
+      "Supporting evidence",
+      "WhatsApp",
+      new Date().toISOString(),
+      "Test upload",
+      "STAFF",
+      null,
+    );
   const c = {
     student_id: "S10001",
     outcome: "Responded",
@@ -188,6 +238,14 @@ test("full seeded backend workflow and permission gates", async () => {
       .prepare("SELECT count(*) n FROM contacts WHERE student_id='S10001'")
       .get().n,
     1,
+  );
+  assert.equal(
+    sqlite
+      .prepare(
+        "SELECT activity_type FROM attachment_context WHERE attachment_id='PROOF-1'",
+      )
+      .get().activity_type,
+    "Student contact",
   );
   await check("account_request", {
     id: "REQ1",
@@ -341,6 +399,214 @@ test("verified hosted email recovers identity when the user-id header is absent"
   assert.equal(data.user.email, "owner@example.com");
   assert.equal(data.error, undefined);
   current = { id: "owner", email: "owner@example.com" };
+});
+test("session delivery enforces model limits, coach coverage and lifecycle controls", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  const startsAt = new Date(Date.now() + 90 * 86400000).toISOString();
+  const rescheduledAt = new Date(Date.now() + 92 * 86400000).toISOString();
+  await check("session", {
+    id: "SES-RULE-1",
+    group_id: "G101",
+    coach_id: "staff-coach",
+    title: "Industry coaching session 1",
+    starts_at: startsAt,
+    week: 1,
+    duration_minutes: 180,
+  });
+  const created = sqlite
+    .prepare("SELECT * FROM sessions WHERE id='SES-RULE-1'")
+    .get();
+  assert.equal(created.status, "Scheduled");
+  assert.equal(created.coach_id, "staff-coach");
+  assert.equal(created.duration_minutes, 180);
+  let r = await post("session", {
+    id: "SES-DUPLICATE-WEEK",
+    group_id: "G101",
+    coach_id: "staff-support-coach",
+    title: "Duplicate week",
+    starts_at: new Date(Date.now() + 91 * 86400000).toISOString(),
+    week: 1,
+    duration_minutes: 180,
+  });
+  assert.match(r.error, /already has an active session/);
+  r = await post("session", {
+    id: "SES-COACH-CONFLICT",
+    group_id: "G102",
+    coach_id: "staff-coach",
+    title: "Conflicting coach day",
+    starts_at: startsAt,
+    week: 1,
+    duration_minutes: 180,
+  });
+  assert.match(r.error, /already has a group session/);
+  await check("session", {
+    id: "SES-RULE-2",
+    group_id: "G102",
+    coach_id: "staff-support-coach",
+    title: "Regular coaching session 1",
+    starts_at: startsAt,
+    week: 1,
+    duration_minutes: 180,
+  });
+  r = await post("session", {
+    id: "SES-BAD-INDUSTRY-WEEK",
+    group_id: "G101",
+    coach_id: "staff-support-coach",
+    title: "Industry week outside policy",
+    starts_at: new Date(Date.now() + 94 * 86400000).toISOString(),
+    week: 6,
+    duration_minutes: 180,
+  });
+  assert.match(r.error, /weeks 1–5/);
+  r = await post("session", {
+    id: "SES-BAD-DURATION",
+    group_id: "G103",
+    coach_id: "staff-support-coach",
+    title: "Wrong duration",
+    starts_at: new Date(Date.now() + 95 * 86400000).toISOString(),
+    week: 1,
+    duration_minutes: 60,
+  });
+  assert.match(r.error, /180 minutes/);
+  current = { id: "coach-login", email: "staff-coach@example.invalid" };
+  await check("session_confirm", { id: "SES-RULE-1" });
+  assert.ok(
+    sqlite
+      .prepare("SELECT confirmed_at FROM sessions WHERE id='SES-RULE-1'")
+      .get().confirmed_at,
+  );
+  r = await post("session_reschedule", {
+    id: "SES-RULE-1",
+    starts_at: rescheduledAt,
+    reason: "Coach availability changed",
+  });
+  assert.match(r.error, /role/);
+  current = { id: "owner", email: "owner@example.com" };
+  await check("session_reschedule", {
+    id: "SES-RULE-1",
+    coach_id: "staff-coach",
+    starts_at: rescheduledAt,
+    reason: "Coach availability changed",
+  });
+  const moved = sqlite
+    .prepare("SELECT status,confirmed_at,starts_at FROM sessions WHERE id='SES-RULE-1'")
+    .get();
+  assert.equal(moved.status, "Scheduled");
+  assert.equal(moved.confirmed_at, null);
+  assert.equal(moved.starts_at, rescheduledAt);
+  await check("session_cancel", {
+    id: "SES-RULE-1",
+    reason: "Group requested a replacement date",
+  });
+  assert.equal(
+    sqlite.prepare("SELECT status FROM sessions WHERE id='SES-RULE-1'").get()
+      .status,
+    "Cancelled",
+  );
+  r = await post("attendance", {
+    session_id: "SES-RULE-1",
+    student_id: "S10001",
+    status: "Present",
+    source: "Coach roll call",
+  });
+  assert.match(r.error, /non-cancelled/);
+  const deliveredAt = new Date(Date.now() - 86400000).toISOString();
+  await check("session", {
+    id: "SES-RULE-COMPLETE",
+    group_id: "G103",
+    coach_id: "staff-support-coach",
+    title: "Completed delivery control",
+    starts_at: deliveredAt,
+    week: 2,
+    duration_minutes: 180,
+  });
+  current = {
+    id: "support-coach-login",
+    email: "staff-support-coach@example.invalid",
+  };
+  await check("session_confirm", { id: "SES-RULE-COMPLETE" });
+  r = await programPost("complete_session", {
+    session_id: "SES-RULE-COMPLETE",
+    notes: "Delivery completed with documented follow-up actions.",
+  });
+  assert.match(r.error, /attendance/i);
+  current = { id: "owner", email: "owner@example.com" };
+  const activeStudents = sqlite
+    .prepare(
+      "SELECT id FROM students WHERE group_id='G103' AND lifecycle='Active'",
+    )
+    .all();
+  for (const student of activeStudents)
+    await check("attendance", {
+      session_id: "SES-RULE-COMPLETE",
+      student_id: student.id,
+      status: "Present",
+      source: "Coach roll call",
+    });
+  current = {
+    id: "support-coach-login",
+    email: "staff-support-coach@example.invalid",
+  };
+  await programCheck("complete_session", {
+    session_id: "SES-RULE-COMPLETE",
+    notes: "Delivery completed with documented follow-up actions.",
+  });
+  assert.equal(
+    sqlite
+      .prepare("SELECT status FROM sessions WHERE id='SES-RULE-COMPLETE'")
+      .get().status,
+    "Completed",
+  );
+  assert.equal(
+    sqlite
+      .prepare(
+        "SELECT attendance_reconciled FROM session_reports WHERE session_id='SES-RULE-COMPLETE'",
+      )
+      .get().attendance_reconciled,
+    1,
+  );
+  current = { id: "owner", email: "owner@example.com" };
+});
+test("session spreadsheet preview and commit retain the governed controls", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  const row = {
+    id: "SES-IMPORT-1",
+    group_id: "G104",
+    coach_id: "staff-support-coach",
+    title: "Imported governed session",
+    starts_at: new Date(Date.now() + 110 * 86400000).toISOString(),
+    week: 1,
+    duration_minutes: 180,
+  };
+  const incomplete = await importPost({
+    module: "sessions",
+    rows: [{ ...row, coach_id: "" }],
+  });
+  assert.equal(incomplete.rows[0].status, "Rejected");
+  assert.ok(
+    incomplete.rows[0].errors.some((error) => error.field === "coach_id"),
+  );
+  const preview = await importPost({ module: "sessions", rows: [row] });
+  assert.equal(preview.rows[0].status, "Ready");
+  const committed = await importPost({
+    module: "sessions",
+    rows: [row],
+    confirm: true,
+    batch_id: "IMPORT-SESSION-CONTROL",
+  });
+  assert.equal(committed.created, 1);
+  assert.equal(
+    sqlite.prepare("SELECT coach_id FROM sessions WHERE id='SES-IMPORT-1'").get()
+      .coach_id,
+    "staff-support-coach",
+  );
+  const replay = await importPost({
+    module: "sessions",
+    rows: [row],
+    confirm: true,
+    batch_id: "IMPORT-SESSION-CONTROL",
+  });
+  assert.deepEqual(replay, committed);
 });
 test("complete program flow governs intake, assessment, withdrawal, certificate and reporting", async () => {
   current = { id: "owner", email: "owner@example.com" };

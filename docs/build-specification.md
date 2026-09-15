@@ -1273,11 +1273,23 @@ Session record:
 - Coach
 - date/time
 - session number/week
+- delivery model (Regular or Industry)
+- policy-controlled duration
 - status
 - attendance
 - notes
 - student flags
 - milestone update.
+
+Session controls:
+
+- Regular groups support 8 weekly sessions;
+- Industry groups support 5 weekly sessions;
+- Round 5 sessions are 180 minutes unless a new approved policy version changes the duration;
+- the coach must be active, fully onboarded and assigned to the group;
+- one active session is allowed per group/week and one group session per coach/Cairo day;
+- the assigned Coach confirms; Coach Operations or Project Operations can reschedule or cancel with a reason;
+- rescheduling resets Coach confirmation, while cancellation preserves history and blocks attendance.
 
 Coach Operations dashboard:
 
@@ -1490,6 +1502,8 @@ Fields can include:
 - account capacity rules;
 - sampling rules;
 - journey milestones.
+- Regular and Industry session counts;
+- session duration.
 
 Policy lifecycle:
 

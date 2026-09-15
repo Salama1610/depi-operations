@@ -33,6 +33,87 @@ import { seed } from "@/lib/seed";
 export const dynamic = "force-dynamic";
 const ops = ["Project Operations", "Operations Coordinator"];
 const admin = ["Operations Systems / Admin"];
+
+function programDay(value: string) {
+  const date = new Date(value);
+  ensure(!Number.isNaN(date.getTime()), "Choose a valid session date and time.");
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Africa/Cairo",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    })
+      .formatToParts(date)
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  );
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+async function validateSessionSlot(x: any, excludeId?: string) {
+  ensure(
+    x.group_id && x.coach_id && x.title?.trim() && x.starts_at,
+    "Group, assigned coach, title and date are required.",
+  );
+  const group: any = await stmt(
+    "SELECT g.*,p.config policy_config FROM groups g JOIN policies p ON p.id=g.policy_id WHERE g.id=? AND g.status='Active'",
+    x.group_id,
+  ).first();
+  ensure(group, "Choose an active group.");
+  const assigned = await stmt(
+    "SELECT gc.id FROM group_coaches gc JOIN users u ON u.id=gc.user_id WHERE gc.group_id=? AND gc.user_id=? AND gc.status='Active' AND gc.onboarding_status='Complete' AND u.active=1",
+    group.id,
+    x.coach_id,
+  ).first();
+  ensure(
+    assigned,
+    "Choose an active, fully onboarded coach assigned to this group.",
+  );
+  const config = { ...policy, ...JSON.parse(group.policy_config || "{}") };
+  const deliveryModel = group.delivery_model || "Regular";
+  ensure(
+    ["Regular", "Industry"].includes(deliveryModel),
+    "The group delivery model is invalid.",
+  );
+  const limit =
+    deliveryModel === "Industry"
+      ? config.industrySessionCount
+      : config.regularSessionCount;
+  const week = Number(x.week);
+  ensure(
+    Number.isInteger(week) && week >= 1 && week <= limit,
+    `${deliveryModel} groups support session weeks 1–${limit}.`,
+  );
+  const duration = Number(x.duration_minutes || config.sessionMinutes);
+  ensure(
+    Number.isInteger(duration) && duration === config.sessionMinutes,
+    `Session duration must match the approved policy: ${config.sessionMinutes} minutes.`,
+  );
+  const startsAt = new Date(x.starts_at).toISOString();
+  const day = programDay(startsAt);
+  const groupConflict = await stmt(
+    `SELECT id FROM sessions WHERE group_id=? AND week=? AND status<>'Cancelled'${excludeId ? " AND id<>?" : ""}`,
+    group.id,
+    week,
+    ...(excludeId ? [excludeId] : []),
+  ).first();
+  ensure(
+    !groupConflict,
+    `This group already has an active session for Week ${week}. Reschedule the existing session instead.`,
+  );
+  const coachConflict = await stmt(
+    `SELECT id FROM sessions WHERE coach_id=? AND session_day=? AND status<>'Cancelled'${excludeId ? " AND id<>?" : ""}`,
+    x.coach_id,
+    day,
+    ...(excludeId ? [excludeId] : []),
+  ).first();
+  ensure(
+    !coachConflict,
+    "This coach already has a group session on that day.",
+  );
+  return { startsAt, day, week, duration };
+}
 export async function GET() {
   try {
     await identity();
@@ -425,6 +506,11 @@ export async function POST(req: Request) {
         ])
           ensure(x[k], `${k} is required.`);
         ensure(["Outcome", "Support"].includes(x.pathway), "Invalid pathway.");
+        const deliveryModel = x.delivery_model || "Regular";
+        ensure(
+          ["Regular", "Industry"].includes(deliveryModel),
+          "Choose the Regular or Industry delivery model.",
+        );
         const approvedTrack: any = await stmt(
           "SELECT * FROM tracks WHERE name=? AND active=1",
           x.track,
@@ -443,7 +529,7 @@ export async function POST(req: Request) {
         ensure(selectedPolicy, "Choose an effective approved policy.");
         jobs.push(
           stmt(
-            "INSERT INTO groups VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO groups(id,name,track,provider,coordinator,supervisor,coach,pathway,delivery_model,start_date,status,policy_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
             id,
             x.name,
             x.track,
@@ -452,6 +538,7 @@ export async function POST(req: Request) {
             x.supervisor,
             x.coach,
             x.pathway,
+            deliveryModel,
             x.start_date,
             "Active",
             selectedPolicy.id,
@@ -461,19 +548,116 @@ export async function POST(req: Request) {
       }
       case "session": {
         permit(u, ["Coach Operations", "Project Operations"]);
-        ensure(
-          x.group_id && x.title && Date.parse(x.starts_at),
-          "Group, title and date are required.",
-        );
+        const session = await validateSessionSlot(x);
         jobs.push(
           stmt(
-            "INSERT INTO sessions VALUES(?,?,?,?,?,?)",
+            "INSERT INTO sessions(id,group_id,coach_id,title,starts_at,session_day,duration_minutes,status,week,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
             id,
             x.group_id,
-            x.title,
-            x.starts_at,
+            x.coach_id,
+            x.title.trim(),
+            session.startsAt,
+            session.day,
+            session.duration,
             "Scheduled",
-            Number(x.week) || 1,
+            session.week,
+            t,
+          ),
+        );
+        break;
+      }
+      case "session_confirm": {
+        permit(u, ["Coach"]);
+        const session: any = await stmt(
+          "SELECT * FROM sessions WHERE id=?",
+          id,
+        ).first();
+        ensure(session, "Session not found.");
+        ensure(
+          session.coach_id === u.id,
+          "Only the coach assigned to this session can confirm it.",
+        );
+        ensure(
+          session.status === "Scheduled",
+          "Only a scheduled session can be confirmed.",
+        );
+        auditPrevious = session;
+        jobs.push(
+          stmt(
+            "UPDATE sessions SET status='Confirmed',confirmed_at=?,updated_at=? WHERE id=?",
+            t,
+            t,
+            id,
+          ),
+        );
+        break;
+      }
+      case "session_reschedule": {
+        permit(u, ["Coach Operations", "Project Operations"]);
+        const current: any = await stmt(
+          "SELECT * FROM sessions WHERE id=?",
+          id,
+        ).first();
+        ensure(
+          current && ["Scheduled", "Confirmed"].includes(current.status),
+          "Only a scheduled or confirmed session can be rescheduled.",
+        );
+        ensure(
+          x.reason?.trim().length >= 5,
+          "Record a rescheduling reason.",
+        );
+        const session = await validateSessionSlot(
+          {
+            ...x,
+            group_id: current.group_id,
+            title: current.title,
+            coach_id: x.coach_id || current.coach_id,
+            week: current.week,
+            duration_minutes: current.duration_minutes,
+          },
+          id,
+        );
+        auditPrevious = current;
+        jobs.push(
+          stmt(
+            "UPDATE sessions SET coach_id=?,starts_at=?,session_day=?,status='Scheduled',confirmed_at=NULL,cancel_reason=NULL,updated_at=? WHERE id=?",
+            x.coach_id || current.coach_id,
+            session.startsAt,
+            session.day,
+            t,
+            id,
+          ),
+        );
+        break;
+      }
+      case "session_cancel": {
+        permit(u, ["Coach Operations", "Project Operations"]);
+        const current: any = await stmt(
+          "SELECT * FROM sessions WHERE id=?",
+          id,
+        ).first();
+        ensure(
+          current && ["Scheduled", "Confirmed"].includes(current.status),
+          "Only a scheduled or confirmed session can be cancelled.",
+        );
+        ensure(
+          x.reason?.trim().length >= 5,
+          "Record a cancellation reason.",
+        );
+        ensure(
+          !(await stmt(
+            "SELECT session_id FROM session_reports WHERE session_id=?",
+            id,
+          ).first()),
+          "A completed session report prevents cancellation.",
+        );
+        auditPrevious = current;
+        jobs.push(
+          stmt(
+            "UPDATE sessions SET status='Cancelled',cancel_reason=?,updated_at=? WHERE id=?",
+            x.reason.trim(),
+            t,
+            id,
           ),
         );
         break;
@@ -488,6 +672,18 @@ export async function POST(req: Request) {
           session && s && session.group_id === s.group_id,
           "Student must belong to the session group.",
         );
+        ensure(
+          session.status !== "Cancelled" && session.starts_at <= t,
+          "Attendance can only be recorded after a non-cancelled session starts.",
+        );
+        if (
+          can(u.roles, ["Coach"]) &&
+          !can(u.roles, ["Coach Operations", "Project Operations"])
+        )
+          ensure(
+            !session.coach_id || session.coach_id === u.id,
+            "Only the coach assigned to this session can record attendance.",
+          );
         ensure(
           ["Present", "Absent", "Late", "Excused"].includes(x.status),
           "Invalid attendance status.",

@@ -6,6 +6,7 @@ import {
   uniqueIndex,
   index,
 } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   email: text("email").notNull().unique(),
@@ -38,6 +39,7 @@ export const groups = sqliteTable("groups", {
     .notNull()
     .references(() => users.id),
   pathway: text("pathway").notNull(),
+  deliveryModel: text("delivery_model").notNull().default("Regular"),
   startDate: text("start_date").notNull(),
   status: text("status").notNull().default("Active"),
   policyId: text("policy_id")
@@ -250,16 +252,34 @@ export const cases = sqliteTable("cases", {
   source: text("source").unique(),
   createdAt: text("created_at").notNull(),
 });
-export const sessions = sqliteTable("sessions", {
-  id: text("id").primaryKey(),
-  groupId: text("group_id")
-    .notNull()
-    .references(() => groups.id),
-  title: text("title").notNull(),
-  startsAt: text("starts_at").notNull(),
-  status: text("status").notNull(),
-  week: integer("week").notNull(),
-});
+export const sessions = sqliteTable(
+  "sessions",
+  {
+    id: text("id").primaryKey(),
+    groupId: text("group_id")
+      .notNull()
+      .references(() => groups.id),
+    coachId: text("coach_id").references(() => users.id),
+    title: text("title").notNull(),
+    startsAt: text("starts_at").notNull(),
+    sessionDay: text("session_day").notNull().default(""),
+    durationMinutes: integer("duration_minutes").notNull().default(180),
+    status: text("status").notNull(),
+    week: integer("week").notNull(),
+    confirmedAt: text("confirmed_at"),
+    cancelReason: text("cancel_reason"),
+    updatedAt: text("updated_at"),
+  },
+  (t) => [
+    uniqueIndex("one_active_session_per_group_week")
+      .on(t.groupId, t.week)
+      .where(sql`${t.status} <> 'Cancelled'`),
+    uniqueIndex("one_active_coach_session_per_day")
+      .on(t.coachId, t.sessionDay)
+      .where(sql`${t.coachId} IS NOT NULL AND ${t.status} <> 'Cancelled'`),
+    index("idx_sessions_start").on(t.startsAt),
+  ],
+);
 export const attendance = sqliteTable(
   "attendance",
   {
