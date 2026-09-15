@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { stmt,db,now,permit } from '@/lib/server';
+import { stmt,now,permit } from '@/lib/server';
 import { verifyRequest,digest } from '@/lib/domain/signatures';
 import { ensure } from '@/lib/domain/rules';
 import { policyChecks } from '@/lib/automation';

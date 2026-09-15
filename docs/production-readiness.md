@@ -6,7 +6,7 @@ The application implementation is reconciled with **DEPI Round 5 Operational Con
 
 | Area | Implemented behavior |
 |---|---|
-| Initialization | The first authorized owner chooses a blank production workspace or a visibly labelled 1,000-student synthetic pilot. Production mode creates no fake operational records. |
+| Initialization | The first authorized owner chooses a blank production workspace or a visibly labelled 1,000-student synthetic pilot. An admin-only guard can append that pilot later only if the operational footprint is still empty; it preserves the owner/policy and refuses mixed live/synthetic data. |
 | Identity and scope | Trusted ChatGPT identity, active-staff membership, backend role checks, group scope, functional Outcome/Support Coach assignments, role-conflict launch gate, separation of policy/FX/report creation and approval, and no student accounts. |
 | Complete program flow | Registration, eligibility screening, admission/group assignment, coach matching/onboarding, session reconciliation, assessments, certificates, post-program outcomes, Ministry withdrawal decisions, group closure and read-only archive. |
 | Journey control | Group-relative week, configurable milestones and lag thresholds, trajectory explanations, weekly gates, engagement/lifecycle history, transfer and closure gates. |

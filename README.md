@@ -15,7 +15,7 @@ The hosted application uses managed D1 relational storage and a private R2 bucke
 
 ## Initial use
 
-Open the private Site while signed in and choose a blank production workspace or the synthetic pilot. Initialization is one atomic database batch. The pilot creates 1,000 synthetic students, 40 groups, 1,000 tasks, role-specific staff profiles, 40 sessions and 20 account metadata records. No screenshots, payments, accepted evidence or graduation are fabricated. All students therefore initially need valid contact; zero accepted evidence is intentional.
+Open the private Site while signed in and choose a blank production workspace or the synthetic pilot. An administrator can also append the pilot later from Administration, but only while the production workspace still has no operational footprint. The guarded, retry-safe pilot keeps the existing owner and effective policy, then creates 1,000 synthetic students, 40 groups, 1,000 tasks, role-specific staff profiles, 40 sessions and 20 controlled-account metadata records. Representative synthetic records cover intake, attendance, account reservation/allocation, gigs, review stages, rejection correction, graduation, certification, outcomes, withdrawals, cases, reporting, retention and notifications. Fifteen tiny private PNG fixtures make proof links testable. Everything remains visibly labelled synthetic.
 
 The initializing owner receives Project Operations and Operations Systems / Admin roles. Quality and Higher Board powers are not silently granted. Add or explicitly modify staff access in Administration, with a reason. Example staff addresses end in `example.invalid` and cannot be used as real accounts. Access remains owner-private at the hosting layer until explicitly shared. App staff membership does not itself broaden the Site audience.
 
@@ -58,7 +58,7 @@ See `docs/production-readiness.md`. Before loading real student data, the organi
 - `app/api`: authenticated service interfaces, uploads, spreadsheets.
 - `lib/domain/rules.ts`: business rules and baseline policy.
 - `lib/server.ts`: centralized database, identity, scope, audit and graduation helpers.
-- `lib/seed.ts`: synthetic, atomic pilot initialization.
+- `lib/seed.ts`: synthetic, atomic pilot initialization and guarded blank-workspace append.
 - `db/schema.ts`, `drizzle/`: normalized schema, migrations and integrity triggers.
 - `tests/`: executable domain, service integration, rendering and UI component tests.
 - `docs/`: setup, deployment, metric definitions and remaining release gates.

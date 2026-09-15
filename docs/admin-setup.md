@@ -1,6 +1,6 @@
 # Staff setup and pilot operation
 
-1. Initialize the private synthetic workspace from the first-run screen. Do not enter live student data in this pilot until readiness gates are complete.
+1. Initialize the private synthetic workspace from the first-run screen. If a blank workspace was already initialized, use **Administration → Load synthetic pilot** before creating any operational records. The action refuses a non-empty workspace and preserves the owner and effective policy. Do not enter live student data in this pilot.
 2. In Administration, inspect your Project Operations and Systems Admin roles. To exercise account allocation or Quality workflows, explicitly assign the required role with an audit reason; keep independent staff separation for live operations.
 3. Add real staff email addresses. Authentication is platform-owned; there are no application passwords. A staff email must match the authenticated account. The Site itself remains owner-private until the owner deliberately shares access.
 4. Assign the correct coordinator and supervisor when creating a group, then use **Program flow → Coaching team** to assign and complete onboarding for both an Outcome Coach and Support Coach. Existing demo groups are owned by synthetic staff.

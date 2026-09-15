@@ -8,7 +8,7 @@ import {
   RetentionPanel,
 } from "./control-center";
 import { ProgramFlow } from "./program-flow";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import {
   Home,
   CheckCheck,
@@ -38,11 +38,8 @@ import {
   Paperclip,
   ExternalLink,
   RefreshCw,
-  BookOpen,
   GraduationCap,
   LockKeyhole,
-  LifeBuoy,
-  X,
 } from "lucide-react";
 import {
   SidebarProvider,
@@ -425,6 +422,8 @@ export default function Operations({ module }: { module: string }) {
       toast.success(
         action === "policy_check"
           ? `${result.summary.processed} policy actions processed${result.summary.remaining ? " · Run again for " + result.summary.remaining + " remaining" : ""}`
+          : action === "load_demo_data"
+            ? `Synthetic pilot loaded · ${result.summary.students} students across ${result.summary.groups} groups`
           : "Updated",
       );
       await refresh();
@@ -560,7 +559,7 @@ export default function Operations({ module }: { module: string }) {
     </div>
   );
   function routeQueue(q: string) {
-    window.location.href = "/work?queue=" + encodeURIComponent(q);
+    window.location.assign("/work?queue=" + encodeURIComponent(q));
   }
   useEffect(() => {
     const p = new URLSearchParams(window.location.search),
@@ -1002,7 +1001,7 @@ export default function Operations({ module }: { module: string }) {
   } else if (module === "program") {
     content = <ProgramFlow />;
   } else if (module === "students") {
-    let rows = students
+    const rows = students
       .filter(qMatch)
       .filter(
         (s) =>
@@ -2101,14 +2100,27 @@ export default function Operations({ module }: { module: string }) {
                       </p>
                     </div>
                     {module === "administration" && (
-                      <button
-                        className="small-btn"
-                        disabled={busy}
-                        onClick={() => quick("policy_check", {})}
-                      >
-                        <RefreshCw size={16} />
-                        Run policy checks
-                      </button>
+                      <div className="detail-actions">
+                        {d.workspaceMode === "production" &&
+                          students.length === 0 && (
+                            <button
+                              className="primary"
+                              disabled={busy}
+                              onClick={() => quick("load_demo_data", {})}
+                            >
+                              <Plus size={16} />
+                              Load synthetic pilot
+                            </button>
+                          )}
+                        <button
+                          className="small-btn"
+                          disabled={busy}
+                          onClick={() => quick("policy_check", {})}
+                        >
+                          <RefreshCw size={16} />
+                          Run policy checks
+                        </button>
+                      </div>
                     )}
                     {moduleAction[module] && (
                       <button

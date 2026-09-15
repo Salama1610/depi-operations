@@ -357,7 +357,7 @@ export async function loadData(u: any) {
         u.id,
       );
   const initialized: any = await stmt(
-    "SELECT value FROM audit_events WHERE action IN ('Workspace initialized with 1,000 synthetic students','Blank production workspace initialized') ORDER BY created_at LIMIT 1",
+    "SELECT value FROM audit_events WHERE action IN ('Workspace initialized with 1,000 synthetic students','Blank production workspace initialized') ORDER BY CASE WHEN action='Workspace initialized with 1,000 synthetic students' THEN 0 ELSE 1 END,created_at DESC LIMIT 1",
   ).first();
   let workspaceMode = "production";
   try {

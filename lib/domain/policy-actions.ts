@@ -5,7 +5,7 @@ export function planPolicyActions(data:any,at=Date.now()):PolicyAction[]{
  const planned:PolicyAction[]=[];const tasks=data.tasks||[],cases=data.cases||[];
  const due=(hours:number)=>new Date(at+hours*3600000).toISOString();
  for(const s of data.students){if(s.lifecycle!=='Active')continue;
- const p=s.policy||baseline;const owned=tasks.filter((t:any)=>t.student_id===s.id);
+ const owned=tasks.filter((t:any)=>t.student_id===s.id);
  if(s.contact_due&&!owned.some((t:any)=>t.status==='Open'&&['Contact','Follow-up'].includes(t.category))){const previous=owned.filter((t:any)=>t.category==='Contact').length;planned.push({kind:'task',student_id:s.id,owner:s.coordinator,title:'Complete overdue student contact with screenshot proof',category:'Contact',priority:'High',due:due(24),source:`policy-contact:${s.id}:${s.policy_id}:${s.last_contact||'never'}:${previous}`});}
  if(s.risk.status==='At Risk'&&!owned.some((t:any)=>t.status==='Open'&&t.category==='Recovery')){planned.push({kind:'task',student_id:s.id,owner:s.coordinator,title:'Recovery plan: '+s.risk.reasons.join('; '),category:'Recovery',priority:'High',due:due(24),source:`policy-recovery:${s.id}:${s.policy_id}:${owned.filter((t:any)=>t.category==='Recovery').length}`});}
  if(s.risk.status==='Critical'&&!cases.some((c:any)=>c.student_id===s.id&&c.source?.startsWith('policy-critical:')&&c.status!=='Closed')){planned.push({kind:'case',student_id:s.id,owner:s.supervisor,title:'Supervisor intervention: '+s.risk.reasons.join('; '),type:'Student',severity:'S2 High',due:due(24),source:`policy-critical:${s.id}:${s.policy_id}:${cases.filter((c:any)=>c.student_id===s.id&&c.source?.startsWith('policy-critical:')).length}`});}

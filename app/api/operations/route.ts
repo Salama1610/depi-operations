@@ -1,9 +1,7 @@
-import { policyChecks, notify } from "@/lib/automation";
-import { planPolicyActions } from "@/lib/domain/policy-actions";
+import { policyChecks } from "@/lib/automation";
 import {
   actor,
   identity,
-  all,
   stmt,
   db,
   now,
@@ -13,7 +11,6 @@ import {
   permit,
   auditStmt,
   loadData,
-  recalc,
   graduationStmt,
   appliedPolicy,
   rateLimit,
@@ -169,7 +166,7 @@ export async function POST(req: Request) {
     }
     const id = x.id || uid();
     const t = now();
-    let jobs: any[] = [];
+    const jobs: any[] = [];
     let auditPrevious: any = null;
     let auditValue: any = { ...x };
     delete auditValue.request_id;
@@ -1826,6 +1823,54 @@ export async function POST(req: Request) {
       }
       case "policy_check": {
         return Response.json({ ok: true, summary: await policyChecks(u, key) });
+      }
+      case "load_demo_data": {
+        permit(u, admin);
+        const initialized = await stmt(
+          "SELECT id FROM audit_events WHERE action='Blank production workspace initialized' LIMIT 1",
+        ).first();
+        ensure(
+          initialized,
+          "Synthetic data can only be appended to a blank production workspace.",
+        );
+        const footprint: any = await stmt(
+          `SELECT
+            (SELECT count(*) FROM users WHERE id<>?) +
+            (SELECT count(*) FROM groups) +
+            (SELECT count(*) FROM students) +
+            (SELECT count(*) FROM tracks) +
+            (SELECT count(*) FROM task_bank) +
+            (SELECT count(*) FROM accounts) +
+            (SELECT count(*) FROM sessions) +
+            (SELECT count(*) FROM applications) +
+            (SELECT count(*) FROM attachments) +
+            (SELECT count(*) FROM contacts) +
+            (SELECT count(*) FROM gigs) +
+            (SELECT count(*) FROM evidence) +
+            (SELECT count(*) FROM cases) AS n`,
+          u.id,
+        ).first();
+        ensure(
+          Number(footprint?.n) === 0,
+          "This workspace already contains operational records, so synthetic data was not added.",
+        );
+        ensure(
+          await stmt(
+            "SELECT id FROM policies WHERE id='R5-v1' AND status='Effective'",
+          ).first(),
+          "The effective Round 5 policy is required before loading the pilot.",
+        );
+        await seed(u, "demo", true, key);
+        return Response.json({
+          ok: true,
+          summary: {
+            students: 1000,
+            groups: 40,
+            sessions: 40,
+            evidence: 7,
+            cases: 3,
+          },
+        });
       }
       case "policy_transition": {
         permit(u, ["Project Operations"]);

@@ -171,11 +171,15 @@ const importPost = async (payload) => {
   return await response.json();
 };
 test("full seeded backend workflow and permission gates", async () => {
-  await check("setup", { mode: "demo" });
+  await check("setup", { mode: "production" });
+  assert.equal(sqlite.prepare("SELECT count(*) n FROM students").get().n, 0);
+  await check("load_demo_data", { request_id: "load-synthetic-pilot-once" });
+  await check("load_demo_data", { request_id: "load-synthetic-pilot-once" });
   assert.equal(sqlite.prepare("SELECT count(*) n FROM students").get().n, 1000);
   assert.equal(sqlite.prepare("SELECT count(*) n FROM tasks").get().n, 1000);
   const data = await (await api.GET()).json();
   assert.equal(data.students.length, 1000);
+  assert.equal(data.workspaceMode, "demo");
   assert.equal(data.students[0].graduation, "0/3");
   assert.ok(data.students[0].next_task);
   let r = await post("contact", { student_id: "S10001" });

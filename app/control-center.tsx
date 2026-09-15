@@ -150,7 +150,17 @@ export function ReportsPanel() {
     }
   }
   useEffect(() => {
-    load();
+    async function initialLoad() {
+      try {
+        const r = await fetch("/api/reports?from=&to=");
+        const x = await r.json();
+        if (x.error) throw Error(x.error);
+        setData(x);
+      } catch (e: any) {
+        setError(e.message);
+      }
+    }
+    void initialLoad();
   }, []);
   return (
     <section className="panel">
@@ -439,7 +449,7 @@ export function GlobalSearch({
           outcome: "program",
         } as any
       )[r.type] || "students";
-    window.location.href = "/" + module + "?q=" + encodeURIComponent(r.id);
+    window.location.assign("/" + module + "?q=" + encodeURIComponent(r.id));
   }
   return (
     <>
@@ -522,7 +532,7 @@ export function RetentionPanel() {
     );
     if (!x.error) load();
   }
-  const field = (key: string, value: string) => (e: any) =>
+  const field = (key: string) => (e: any) =>
     setForm({ ...form, [key]: e.target.value });
   return (
     <div className="prose">
@@ -534,7 +544,7 @@ export function RetentionPanel() {
       <div className="form-grid">
         <label className="field">
           Data scope
-          <select value={form.scope} onChange={field("scope", form.scope)}>
+          <select value={form.scope} onChange={field("scope")}>
             {[
               "audit_events",
               "attachments",
@@ -551,7 +561,7 @@ export function RetentionPanel() {
           Approved action
           <select
             value={form.retention_action}
-            onChange={field("retention_action", form.retention_action)}
+            onChange={field("retention_action")}
           >
             {["archive", "anonymize", "secure_delete"].map((x) => (
               <option key={x}>{x}</option>
@@ -565,20 +575,20 @@ export function RetentionPanel() {
             min="1"
             max="36500"
             value={form.days}
-            onChange={field("days", form.days)}
+            onChange={field("days")}
           />
         </label>
         <label className="field">
           Policy / legal authority
           <input
             value={form.authority}
-            onChange={field("authority", form.authority)}
+            onChange={field("authority")}
           />
         </label>
       </div>
       <label className="field">
         Decision reason
-        <input value={form.reason} onChange={field("reason", form.reason)} />
+        <input value={form.reason} onChange={field("reason")} />
       </label>
       <button
         className="small-btn"

@@ -1,8 +1,6 @@
 import {
   actor,
   stmt,
-  all,
-  permit,
   auditStmt,
   db,
   uid,
@@ -339,8 +337,8 @@ export async function POST(req: Request) {
     };
     const rowRecords: any[] = [];
     for (const c of checked) {
-      let status = "Created",
-        recordId = c.data.id || null;
+      let status = "Created";
+      const recordId = c.data.id || null;
       if (c.errors.length) {
         result.rejected++;
         result.errors.push(...c.errors);
