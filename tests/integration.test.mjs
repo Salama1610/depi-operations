@@ -1,8 +1,13 @@
-import test from "node:test";
+import test, { after } from "node:test";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import { build } from "esbuild";
+const testDirectory = fs.mkdtempSync(join(tmpdir(), "depi-test-"));
+after(() => fs.rmSync(testDirectory, { recursive: true, force: true }));
 const sqlite = new DatabaseSync(":memory:");
 sqlite.exec("PRAGMA foreign_keys=ON");
 for (const file of fs
@@ -57,7 +62,7 @@ await build({
   bundle: true,
   platform: "node",
   format: "esm",
-  outfile: "/tmp/depi-operations-test.mjs",
+  outfile: join(testDirectory, "operations.mjs"),
   plugins: [
     {
       name: "test-bindings",
@@ -77,13 +82,13 @@ await build({
     },
   ],
 });
-const api = await import("/tmp/depi-operations-test.mjs");
+const api = await import(pathToFileURL(join(testDirectory, "operations.mjs")).href);
 await build({
   entryPoints: ["app/api/program/route.ts"],
   bundle: true,
   platform: "node",
   format: "esm",
-  outfile: "/tmp/depi-program-test.mjs",
+  outfile: join(testDirectory, "program.mjs"),
   plugins: [
     {
       name: "test-bindings",
@@ -103,13 +108,13 @@ await build({
     },
   ],
 });
-const programApi = await import("/tmp/depi-program-test.mjs");
+const programApi = await import(pathToFileURL(join(testDirectory, "program.mjs")).href);
 await build({
   entryPoints: ["app/api/import/route.ts"],
   bundle: true,
   platform: "node",
   format: "esm",
-  outfile: "/tmp/depi-import-test.mjs",
+  outfile: join(testDirectory, "import.mjs"),
   plugins: [
     {
       name: "test-bindings",
@@ -129,7 +134,7 @@ await build({
     },
   ],
 });
-const importApi = await import("/tmp/depi-import-test.mjs");
+const importApi = await import(pathToFileURL(join(testDirectory, "import.mjs")).href);
 const post = async (action, x = {}) => {
   const r = await api.POST(
     new Request("https://test.local/api/operations", {
@@ -1144,7 +1149,7 @@ test("controlled platforms and separately approved FX applications are enforced"
   );
 });
 async function route(name) {
-  const output = "/tmp/depi-route-" + name + ".mjs";
+  const output = join(testDirectory, "route-" + name + ".mjs");
   await build({
     entryPoints: ["app/api/" + name + "/route.ts"],
     bundle: true,
@@ -1170,8 +1175,30 @@ async function route(name) {
       },
     ],
   });
-  return import(output);
+  return import(pathToFileURL(output).href);
 }
+test("student service resubmissions preserve completion and QC errors return JSON", async () => {
+  const servicesApi = await route("student-services");
+  const student = sqlite.prepare("SELECT id,email FROM students WHERE id='S10903'").get();
+  current = { id: student.id, email: student.email };
+  const call = (body) => servicesApi.POST(new Request("https://test.local/api/student-services", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  }));
+  const links = sqlite.prepare("SELECT url FROM service_links WHERE student_id=? ORDER BY slot").all(student.id);
+  const response = await call({ action: "submit_services", services: links.map((link) => link.url) });
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.submission.status, "Complete");
+  assert.ok(result.submission.qc_completed_at);
+  const denied = await call({ action: "qc_review", service_id: "missing", decision: "Lock" });
+  assert.equal(denied.status, 400);
+  assert.ok((await denied.json()).error);
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  const missing = await call({ action: "qc_review", service_id: "missing", decision: "Lock" });
+  assert.equal(missing.status, 400);
+  assert.match((await missing.json()).error, /not found/);
+  current = { id: "owner", email: "owner@example.com" };
+});
 test("signed automation rejects tampering and replays without duplicate execution", async () => {
   const { createHash, createHmac } = await import("node:crypto");
   globalThis.__testEnv.AUTOMATION_HMAC_SECRET =

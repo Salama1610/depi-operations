@@ -89,7 +89,7 @@ node --experimental-strip-types --test tests/*.test.mjs
 node /root/.codex/plugins/cache/openai-curated-remote/sites/0.1.62/scripts/build-site.mjs
 ```
 
-All 32 tests, lint, TypeScript and the bounded production Worker build must pass before publishing. Do not modify already-applied migration files; generate an additive migration for schema changes.
+All 33 tests, lint, TypeScript and the bounded production Worker build must pass before publishing. The portable commands are `npm run lint`, `npm run typecheck`, `npm run build`, and then `npm run test:all`. Do not modify already-applied migration files; generate an additive migration for schema changes.
 
 ## Deployment notes
 

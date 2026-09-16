@@ -78,7 +78,7 @@ export async function POST(req: Request) {
         throw new Error("Cross-site requests are not allowed.");
     }
     const x = await req.json();
-    if (x.action === "qc_review") return qcReview(x);
+    if (x.action === "qc_review") return await qcReview(x);
     if (x.action !== "submit_services") throw new Error("Choose a service-link action.");
     const s = await currentStudent();
     await rateLimit("student-services:" + s.id, 30, 60);
@@ -157,6 +157,15 @@ export async function POST(req: Request) {
         );
       }
     }
+    jobs.push(stmt(
+      `UPDATE service_submissions SET status=CASE
+         WHEN (SELECT count(*) FROM service_links WHERE student_id=? AND qc_status='Locked')=3 THEN 'Complete'
+         WHEN EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status='Needs Correction') THEN 'Needs Correction'
+         ELSE 'Pending QC' END,
+         qc_completed_at=CASE WHEN (SELECT count(*) FROM service_links WHERE student_id=? AND qc_status='Locked')=3
+           THEN (SELECT max(qc_at) FROM service_links WHERE student_id=?) ELSE NULL END
+       WHERE student_id=?`, s.id, s.id, s.id, s.id, s.id,
+    ));
     jobs.push(auditStmt(s, "Student service links submitted", s.id, { slots: 3 }, null, uid("REQ")));
     await db().batch(jobs);
     return Response.json({ ok: true, ...(await studentView(s.id)) });

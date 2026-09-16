@@ -1,15 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { build } from "esbuild";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const developmentPreviewMeta =
   /<meta(?=[^>]*\bname=["']codex-preview["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;
 
 test("renders development preview metadata", async () => {
-  const outfile = `/tmp/depi-render-worker-${process.pid}-${Date.now()}.mjs`;
+  const outfile = join(tmpdir(), `depi-render-worker-${process.pid}-${Date.now()}.mjs`);
   globalThis.__renderEnv = {};
   await build({
-    entryPoints: [new URL("../dist/server/index.js", import.meta.url).pathname],
+    entryPoints: [fileURLToPath(new URL("../dist/server/index.js", import.meta.url))],
     bundle: true,
     platform: "node",
     format: "esm",
@@ -30,7 +33,7 @@ test("renders development preview metadata", async () => {
       },
     ],
   });
-  const { default: worker } = await import(`file://${outfile}`);
+  const { default: worker } = await import(pathToFileURL(outfile).href);
 
   const response = await worker.fetch(
     new Request("http://localhost/", {

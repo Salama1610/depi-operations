@@ -1,13 +1,13 @@
 # Production readiness — Round 5 V3
 
-The application implementation is reconciled with **DEPI Round 5 Operational Control Manual V3.0 (8 September 2026)**. It is a private, staff-only system; students never sign in.
+The application implementation is reconciled with **DEPI Round 5 Operational Control Manual V3.0 (8 September 2026)**. Staff use the operations workspace; registered students sign in to a separate service-link portal. Hosting audience settings do not replace server-side authorization.
 
 ## Implemented controls
 
 | Area | Implemented behavior |
 |---|---|
 | Initialization | The first authorized owner chooses a blank production workspace or a visibly labelled 1,000-student synthetic pilot. An admin-only guard can append that pilot later only if the operational footprint is still empty; it preserves the owner/policy and refuses mixed live/synthetic data. |
-| Identity and scope | Trusted ChatGPT identity, active-staff membership, backend role checks, group scope, functional Outcome/Support Coach assignments, role-conflict launch gate, separation of policy/FX/report creation and approval, and no student accounts. |
+| Identity and scope | Trusted ChatGPT identity, active-staff membership, backend role checks, group scope, functional Outcome/Support Coach assignments, role-conflict launch gate, separation of policy/FX/report creation and approval, and student access linked to registered identity. |
 | Complete program flow | Registration, eligibility screening, admission/group assignment, coach matching/onboarding, session reconciliation, assessments, certificates, post-program outcomes, Ministry withdrawal decisions, group closure and read-only archive. |
 | Journey control | Group-relative week, configurable milestones and lag thresholds, trajectory explanations, weekly gates, engagement/lifecycle history, transfer and closure gates. |
 | Session operations | Regular/Industry delivery limits, policy-controlled duration, active onboarded coach assignment, same-day coach conflict and duplicate-week protection, coach confirmation, reasoned reschedule/cancellation, complete attendance reconciliation, delivery notes, SLA backlog and coverage-gap monitoring. |
@@ -24,7 +24,7 @@ The application implementation is reconciled with **DEPI Round 5 Operational Con
 
 ## Validation evidence
 
-- 32 automated domain, permission, workflow, import, search, retention, security, backup, restore, rendering and UI-component tests pass.
+- 33 automated domain, permission, workflow, student service QC, import, search, retention, security, backup, restore, rendering and UI-component tests pass in the Windows verification run on 16 September 2026.
 - TypeScript validation passes.
 - The bounded production Worker build passes and includes every application and API route.
 - Migrations are host-compatible; safeguards are installed at workspace initialization and restore.

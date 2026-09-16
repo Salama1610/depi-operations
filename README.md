@@ -1,14 +1,15 @@
 # DEPI Coaching & Freelancing Operations
 
-Private staff-only operations system for Career180 and Freelance Yard, implementing the supplied Round 5 V3 operating model end to end. Connections and recovery are documented in `docs/connections-and-recovery.md`.
+Operations system for Career180 and Freelance Yard, implementing the supplied Round 5 V3 operating model end to end, with a separate authenticated student service-link portal. Staff permissions and student-record ownership are enforced server-side. Connections and recovery are documented in `docs/connections-and-recovery.md`.
 
 ## Run and validate
 
 - Node 22.13+; install with `npm run install:ci`.
-- `npm run dev` uses the bundled Sites development environment.
+- `npm run dev` starts the local Vite development server on Windows, macOS or Linux.
 - `npm run build` emits a Cloudflare-compatible Worker and assets.
 - `node --experimental-strip-types --test tests/domain.test.mjs tests/integration.test.mjs` validates the actual service against SQLite plus domain rules.
 - `npx tsc --noEmit` validates TypeScript.
+- `npm run lint` checks source quality; after building, `npm run test:all` also checks generated HTML and UI components.
 - `npm run db:generate` generates additive migrations after schema changes. Do not change previously applied migrations.
 
 The hosted application uses managed D1 relational storage and a private R2 bucket. This is an intentional platform adaptation of the preferred PostgreSQL/Supabase architecture. Database constraints and triggers protect account allocation, contact completeness, audit immutability, gig transitions and paid evidence intake. Row restrictions and role authorization are enforced by server services; D1 does not provide PostgreSQL RLS.
@@ -23,7 +24,7 @@ The initializing owner receives Project Operations and Operations Systems / Admi
 
 - Responsive operations overview, complete program flow, work queues, student directory/360, groups, sessions, accounts, gigs, evidence, Quality, cases, reports and administration.
 - Coach Operations session control with Regular (8) and Industry (5) delivery plans, policy-locked 180-minute duration, onboarded coach assignment, Cairo-day conflict prevention, coach confirmation, reasoned reschedule/cancellation, attendance completion, delivery notes and SLA/coverage dashboards.
-- Staff identity from trusted hosting dispatch; backend role and assigned-group checks; no student registration.
+- Identity from trusted hosting dispatch; backend staff role and assigned-group checks; students access `/student` through their registered email without self-registration.
 - Screenshot-backed contact logging, next actions, valid-contact compliance and risk recommendations.
 - Private image storage, byte-signature checks, 8 MB upload limit, hashes, authorized file delivery and upload audit.
 - Account request/allocation with database-enforced duplicate student/group use and concurrent eligibility protection.
