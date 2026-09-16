@@ -22,7 +22,7 @@ The initializing owner receives Project Operations and Operations Systems / Admi
 
 ## Supabase authentication setup
 
-Create the authorized staff and student users in Supabase Auth, then configure `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` in the hosted Site environment. Add `https://depi-coaching-operations.abdelrhman-shoman62.chatgpt.site/auth/callback` to the Supabase redirect allowlist for password recovery. Each Supabase user email must exactly match one active staff or student record; self-registration is intentionally disabled.
+Pre-provision the authorized staff and student users in Supabase Auth, then configure `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` in the hosted Site environment. Add `https://depi-coaching-operations.abdelrhman-shoman62.chatgpt.site/auth/callback` to the Supabase redirect allowlist for password recovery. Each Supabase user email must exactly match one active staff or student record; public self-registration is intentionally disabled. `scripts/provision-supabase-users.py` creates roster identities without sending bulk email, and each student activates access through the password-reset flow.
 
 ## Working features
 

@@ -42,9 +42,10 @@ The first authenticated administrator initializes the imported production worksp
 ## D1 import order
 
 1. Apply every file in `drizzle/` through migration `0012`.
-2. Import `depi-r5-roster-data.sql` into an empty database.
+2. Deploy the application and configure the Supabase runtime variables.
 3. Sign in with the intended first administrator and choose production setup.
-4. Add real staff users, replace all unassigned group ownership, and confirm group start dates.
-5. Compare D1 totals with `depi-r5-reconciliation.json`.
+4. Run `scripts/import-roster-api.py` with the private SQLite database and bootstrap credentials. This sends the roster directly to the authenticated Site API without placing PII in Git history.
+5. Add real staff users, replace all unassigned group ownership, and confirm group start dates.
+6. Compare D1 totals with `depi-r5-reconciliation.json`.
 
 Never run the data SQL twice. The batch, student, and source-file identities are unique and the second import is expected to fail rather than duplicate records.

@@ -44,11 +44,17 @@ export default async function Page(){
   let destination: "student" | "staff" | "denied" = "denied";
   try {
     const i = await identity();
-    if (await studentByIdentity(i)) destination = "student";
+    const userCount = await stmt(
+      "SELECT count(*) n FROM users WHERE id NOT LIKE 'system-unassigned-%'",
+    ).first<{ n: number }>();
+    if (!userCount?.n) destination = "staff";
     else {
-      const userCount = await stmt("SELECT count(*) n FROM users").first<{ n: number }>();
-      if (userCount?.n) await actor();
-      destination = "staff";
+      try {
+        await actor();
+        destination = "staff";
+      } catch {
+        if (await studentByIdentity(i)) destination = "student";
+      }
     }
   } catch {}
 
