@@ -2,7 +2,7 @@
 
 ## Product state
 
-This repository contains the complete private, staff-only DEPI Round 5 coaching and freelancing operations application. The hosted Site is:
+This repository contains the DEPI Round 5 coaching/freelancing operations application and the student service-link portal. The hosted Site is:
 
 <https://depi-coaching-operations.abdelrhman-shoman62.chatgpt.site>
 
@@ -12,7 +12,7 @@ The active workspace is intentionally populated with synthetic pilot data. Never
 
 - Next/Vinext application compiled to a Cloudflare Worker.
 - Managed D1 relational database plus private R2 evidence storage.
-- Trusted ChatGPT hosting identity; no application passwords and no student login.
+- Trusted ChatGPT hosting identity; students are linked server-side by their registered email (no application passwords).
 - Main UI: `app/operations.tsx` and `app/program-flow.tsx`.
 - Operations API: `app/api/operations/route.ts`.
 - Program lifecycle API: `app/api/program/route.ts`.
@@ -40,6 +40,7 @@ The active workspace is intentionally populated with synthetic pilot data. Never
 15. Private byte-validated screenshots, authenticated no-store reads, encrypted database/evidence backup and offline restore verification.
 16. Retention-policy recording without automatic deletion, connection status and recovery controls.
 17. Admin-only synthetic pilot loader that works only on an empty operational workspace, preserves the existing owner/effective policy, is retry-safe and refuses mixed live/synthetic data.
+18. Student service portal with exactly three service-link slots, automatic URL/marketplace checks, per-link QC locking, correction comments, editable rejected links only, and immutable QC review history.
 
 ## Core workflows
 
@@ -59,6 +60,10 @@ Schedule valid group week → validate assigned/onboarded coach and Cairo-day av
 
 Approved task request → eligible account reservation → independent allocation → ordered gig events with proof → payment → evidence package → Coach review → Coordinator L1 → Quality decision → correction/L3 when required → graduation recalculation.
 
+### Student service links
+
+Student sign-in → three distinct public service URLs → automatic format/marketplace check → QC reviews each slot → correct links locked → incorrect links returned with a comment → student edits only returned slots → resubmission → all three locked → complete.
+
 ### Data and governance
 
 Role-scoped mutation → origin/rate/idempotency checks → database constraints/triggers → immutable audit. Imports use template → preview → revalidation → commit → reconciliation. Ministry exports require an active independently approved field mapping.
@@ -70,6 +75,7 @@ Role-scoped mutation → origin/rate/idempotency checks → database constraints
 - Completed, confirmed, scheduled and cancelled sessions plus reconciled attendance and notes.
 - Submitted/reserved/allocated account examples, credit history and gigs in several states.
 - Evidence in Coach, L1, Quality, Rejected and Accepted states, with private proof fixtures and review history.
+- Service-link examples for `S10902` (one locked, one correction request, one awaiting QC) and `S10903` (all three locked), using Kafiil and Khamsat URL patterns.
 - A qualifying graduate, certificate, verified outcome, withdrawal, assessment results, cases, group gates, FX, report mapping/run, retention example, automation run and notifications.
 
 Useful showcase records: `S10901` is the graduated end-to-end learner; `DEMO-EV-4` is the overdue Coach review; `DEMO-EV-7` is rejected evidence; `DEMO-REQ-RESERVED` is ready for account approval; `SES-101` is completed with attendance.
@@ -87,7 +93,7 @@ All 32 tests, lint, TypeScript and the bounded production Worker build must pass
 
 ## Deployment notes
 
-The Site uses owner-only custom access. Publishing must preserve that audience. Push the exact tested commit to the Sites remote, package the same commit, save a Site version, then deploy privately. Do not deploy a dirty worktree or a package that differs from the pushed commit.
+The Site audience is being expanded for student access. Keep app-level authorization server-side: a signed-in identity must match a student email or an active staff user. Push the exact tested commit to the Sites remote, package the same commit, save a Site version, then deploy with the configured audience. Do not deploy a dirty worktree or a package that differs from the pushed commit.
 
 ## Organization-owned activation still required
 

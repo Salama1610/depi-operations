@@ -1824,6 +1824,70 @@ export async function POST(req: Request) {
       case "policy_check": {
         return Response.json({ ok: true, summary: await policyChecks(u, key) });
       }
+      case "service_qc_review": {
+        permit(u, ["Quality Member", "Quality Lead"]);
+        const link: any = await stmt(
+          "SELECT * FROM service_links WHERE id=?",
+          x.service_id || id,
+        ).first();
+        ensure(link, "Service link not found.");
+        ensure(
+          ["Lock", "Needs Correction"].includes(x.decision),
+          "Choose Lock or Needs Correction.",
+        );
+        const comment = String(x.comment || "").trim();
+        ensure(
+          x.decision === "Lock" || comment,
+          "Add a correction comment for the student.",
+        );
+        ensure(link.qc_status !== "Locked", "This service link is already locked.");
+        const next = x.decision === "Lock" ? "Locked" : "Needs Correction";
+        auditValue = {
+          service_id: link.id,
+          student_id: link.student_id,
+          decision: next,
+          comment,
+        };
+        sid = link.student_id;
+        s = await student(u, sid);
+        auditPrevious = link;
+        jobs.push(
+          stmt(
+            "UPDATE service_links SET qc_status=?,qc_comment=?,qc_actor=?,qc_at=?,updated_at=? WHERE id=? AND qc_status<>'Locked'",
+            next,
+            comment || null,
+            u.id,
+            t,
+            t,
+            link.id,
+          ),
+          stmt(
+            "INSERT INTO service_link_reviews(id,service_link_id,revision,decision,comment,reviewed_by,reviewed_at) VALUES(?,?,?,?,?,?,?)",
+            uid("SLR"),
+            link.id,
+            link.revision,
+            next,
+            comment || "Verified by QC.",
+            u.id,
+            t,
+          ),
+          stmt(
+            `UPDATE service_submissions SET status=CASE
+               WHEN (SELECT count(*) FROM service_links WHERE student_id=? AND qc_status='Locked')=3 THEN 'Complete'
+               WHEN EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status='Needs Correction') THEN 'Needs Correction'
+               ELSE 'Pending QC' END,
+               qc_completed_at=CASE WHEN (SELECT count(*) FROM service_links WHERE student_id=? AND qc_status='Locked')=3 THEN ? ELSE NULL END,
+               updated_at=? WHERE student_id=?`,
+            link.student_id,
+            link.student_id,
+            link.student_id,
+            t,
+            t,
+            link.student_id,
+          ),
+        );
+        break;
+      }
       case "load_demo_data": {
         permit(u, admin);
         const initialized = await stmt(

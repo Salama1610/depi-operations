@@ -891,3 +891,71 @@ export const reportRuns = sqliteTable("report_runs", {
   count: integer("count").notNull(),
   createdAt: text("created_at").notNull(),
 });
+
+export const serviceSubmissions = sqliteTable(
+  "service_submissions",
+  {
+    id: text("id").primaryKey(),
+    studentId: text("student_id")
+      .notNull()
+      .unique()
+      .references(() => students.id),
+    status: text("status").notNull().default("Pending QC"),
+    submittedAt: text("submitted_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    qcCompletedAt: text("qc_completed_at"),
+  },
+  (t) => [index("idx_service_submissions_status").on(t.status)],
+);
+
+export const serviceLinks = sqliteTable(
+  "service_links",
+  {
+    id: text("id").primaryKey(),
+    studentId: text("student_id")
+      .notNull()
+      .references(() => students.id),
+    slot: integer("slot").notNull(),
+    url: text("url").notNull(),
+    normalizedUrl: text("normalized_url").notNull(),
+    platform: text("platform").notNull(),
+    autoStatus: text("auto_status").notNull().default("Needs Review"),
+    autoResult: text("auto_result").notNull().default("{}"),
+    autoCheckedAt: text("auto_checked_at"),
+    qcStatus: text("qc_status").notNull().default("Pending"),
+    qcComment: text("qc_comment"),
+    qcActor: text("qc_actor").references(() => users.id),
+    qcAt: text("qc_at"),
+    revision: integer("revision").notNull().default(1),
+    submittedAt: text("submitted_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("service_link_student_slot").on(t.studentId, t.slot),
+    index("idx_service_links_qc_status").on(t.qcStatus, t.updatedAt),
+    index("idx_service_links_student").on(t.studentId),
+  ],
+);
+
+export const serviceLinkReviews = sqliteTable(
+  "service_link_reviews",
+  {
+    id: text("id").primaryKey(),
+    serviceLinkId: text("service_link_id")
+      .notNull()
+      .references(() => serviceLinks.id),
+    revision: integer("revision").notNull(),
+    decision: text("decision").notNull(),
+    comment: text("comment").notNull(),
+    reviewedBy: text("reviewed_by")
+      .notNull()
+      .references(() => users.id),
+    reviewedAt: text("reviewed_at").notNull(),
+  },
+  (t) => [
+    index("idx_service_link_reviews_link_date").on(
+      t.serviceLinkId,
+      t.reviewedAt,
+    ),
+  ],
+);

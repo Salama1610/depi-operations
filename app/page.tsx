@@ -1,2 +1,13 @@
 import Operations from './operations';
-export default function Page(){return <Operations module="home"/>}
+import StudentServicesPage from './student/page';
+import { identity, studentByIdentity } from '@/lib/server';
+export const dynamic = "force-dynamic";
+export default async function Page(){
+  let isStudent = false;
+  try {
+    const i = await identity();
+    isStudent = Boolean(await studentByIdentity(i));
+  } catch {}
+  if (isStudent) return <StudentServicesPage />;
+  return <Operations module="home"/>;
+}

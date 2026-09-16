@@ -86,6 +86,28 @@ export async function actor() {
   );
   return { ...u, roles: JSON.parse(u.roles), scopes: JSON.parse(u.scopes) };
 }
+export async function studentByIdentity(i: { id: string; email: string }) {
+  return (await stmt(
+    "SELECT s.*,g.track,g.provider,g.pathway,g.status group_status FROM students s JOIN groups g ON g.id=s.group_id WHERE (s.id=? OR lower(coalesce(s.email,''))=?)",
+    i.id,
+    i.email,
+  ).first()) as any;
+}
+export async function currentStudent() {
+  const i = await identity();
+  const s: any = await studentByIdentity(i);
+  ensure(
+    s,
+    "Your account has not been linked to a student record yet. Ask the program team to verify your email.",
+  );
+  ensure(
+    !["Removed", "Withdrawn", "Graduate Closed", "Non-Graduate Closed"].includes(
+      s.lifecycle,
+    ),
+    "This student record is closed and can no longer be updated.",
+  );
+  return { ...s, identity: i };
+}
 export function permit(u: any, allowed: string[]) {
   ensure(can(u.roles, allowed), "Your staff role does not permit this action.");
 }
@@ -230,6 +252,20 @@ export async function loadData(u: any) {
       ...q.args,
     ),
   ]);
+  const serviceLinks = can(u.roles, [
+    "Quality Member",
+    "Quality Lead",
+    "Project Operations",
+  ])
+    ? await all(
+        `SELECT l.*,s.name student_name,s.email student_email,ss.status submission_status
+         FROM service_links l
+         JOIN students s ON s.id=l.student_id
+         LEFT JOIN service_submissions ss ON ss.student_id=l.student_id
+         WHERE l.qc_status<>'Locked'
+         ORDER BY CASE WHEN l.qc_status='Needs Correction' THEN 0 ELSE 1 END,l.updated_at ASC`,
+      )
+    : [];
   const policyMap = Object.fromEntries(
     p.map((p) => [p.id, JSON.parse(p.config)]),
   );
@@ -462,6 +498,7 @@ export async function loadData(u: any) {
     creditLedger,
     evidencePackages,
     evidencePackageItems,
+    serviceLinks,
     accounts: can(u.roles, [
       "Higher Board",
       "Project Operations",

@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "DEPI Operations · Round 5",
-  description: "Staff-only coaching and freelancing operations for Career180 and Freelance Yard.",
+  description: "DEPI Round 5 operations and student service-link verification.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

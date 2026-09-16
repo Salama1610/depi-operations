@@ -160,6 +160,7 @@ const titles: Row = {
   refund_credit: "Refund account credit",
   policy_transition: "Progress policy review",
   group_close: "Close group",
+  service_qc_review: "Review student service link",
 };
 const actionCopy: Row = {
   contact: "Screenshot proof, an outcome and a next action are required.",
@@ -175,6 +176,8 @@ const actionCopy: Row = {
     "Changing the date or coach requires a reason and resets coach confirmation.",
   session_cancel:
     "Cancelled sessions remain in the operational history and require a reason.",
+  service_qc_review:
+    "Lock a correct link or leave a clear correction comment for the student.",
 };
 const fmt = (v: string) =>
   v
@@ -319,6 +322,7 @@ export default function Operations({ module }: { module: string }) {
   const sessions: Row[] = d.sessions || [];
   const attendance: Row[] = d.attendance || [];
   const groupCoaches: Row[] = d.groupCoaches || [];
+  const serviceLinks: Row[] = d.serviceLinks || [];
   const openTasks = tasks.filter((t) => t.status === "Open");
   const overdue = openTasks.filter((t) => t.due < new Date().toISOString());
   const dueToday = openTasks.filter((t) => t.due.slice(0, 10) === today());
@@ -1513,6 +1517,29 @@ export default function Operations({ module }: { module: string }) {
       .sort((a, b) => a.stage_at.localeCompare(b.stage_at));
     content = (
       <>
+        {module === "quality" && (
+          <>
+            <div className="mini-stats service-qc-stats">
+              <span><strong>{serviceLinks.filter((r) => r.qc_status === "Pending").length}</strong>Awaiting QC</span>
+              <span><strong>{serviceLinks.filter((r) => r.qc_status === "Needs Correction").length}</strong>Need student correction</span>
+              <span><strong>{serviceLinks.filter((r) => r.auto_status === "Failed").length}</strong>Automatic check failed</span>
+            </div>
+            {panel(
+              "Student service-link verification",
+              generic(
+                serviceLinks.filter(qMatch),
+                [
+                  { key: "student_name", label: "Student", render: (r) => <span><strong>{r.student_name}</strong><small className="table-subline">{r.student_id}</small></span> },
+                  { key: "slot", label: "Slot", render: (r) => `Service ${r.slot}` },
+                  { key: "url", label: "Link", render: (r) => <a className="text-link" href={r.url} target="_blank" rel="noreferrer">{r.platform} <ExternalLink size={14} /></a> },
+                  { key: "auto_status", label: "Automatic check", render: (r) => <Badge value={r.auto_status} /> },
+                  { key: "qc_status", label: "QC state", render: (r) => <Badge value={r.qc_status} /> },
+                ],
+                (r) => <button className="small-btn" onClick={() => open("service_qc_review", { ...r, service_id: r.id, student_id: r.student_id, decision: r.qc_status === "Needs Correction" ? "Lock" : "" })}>Review</button>,
+              ),
+            )}
+          </>
+        )}
         <div className="mini-stats">
           <span>
             <strong>{reviews.length}</strong> Awaiting review
@@ -3135,6 +3162,27 @@ export default function Operations({ module }: { module: string }) {
                       </>
                     )}
                     {field("notes", "Decision notes / correction requirements")}
+                  </>
+                );
+              if (a === "service_qc_review")
+                return (
+                  <>
+                    <div className="info-box">
+                      <strong>{modal!.student_name || name(modal!.student_id)}</strong>
+                      <Badge value={`Service ${modal!.slot}`} />
+                      <a className="text-link" href={modal!.url} target="_blank" rel="noreferrer">
+                        Open submitted service <ExternalLink size={16} />
+                      </a>
+                    </div>
+                    <div className="info-box">
+                      <span>Automatic check: <Badge value={modal!.auto_status} /></span>
+                      <small>{modal!.platform} · revision {modal!.revision}</small>
+                    </div>
+                    {choice("decision", "QC decision", ["Lock", "Needs Correction"])}
+                    {field("comment", "QC comment / correction guidance", "text", form.decision === "Needs Correction")}
+                    <p className="footnote">
+                      Lock only when the service page is correct and belongs to the student. A correction comment is required when the link is rejected.
+                    </p>
                   </>
                 );
               if (a === "case")

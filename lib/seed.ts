@@ -10,6 +10,11 @@ export async function seed(
   for (const sql of runtimeTriggers) await db().prepare(sql).run();
   const t = now();
   const batch: any[] = [];
+  const at = (days: number, hour = 9) => {
+    const value = new Date(Date.now() + days * 86400000);
+    value.setUTCHours(hour, 0, 0, 0);
+    return value.toISOString();
+  };
   if (!preserveWorkspace) {
     batch.push(
       stmt(
@@ -55,6 +60,158 @@ export async function seed(
     ["staff-quality", "Hana Mostafa", "Quality Member"],
     ["staff-quality-lead", "Mona Fathy", "Quality Lead"],
     ["staff-board", "Youssef Ali", "Higher Board"],
+  ];
+  const serviceJobs: any[] = [
+    stmt(
+      "INSERT INTO service_submissions(id,student_id,status,submitted_at,updated_at,qc_completed_at) VALUES(?,?,?,?,?,?)",
+      "DEMO-SUB-S10902",
+      "S10902",
+      "Needs Correction",
+      at(-4),
+      at(-1),
+      null,
+    ),
+    stmt(
+      "INSERT INTO service_submissions(id,student_id,status,submitted_at,updated_at,qc_completed_at) VALUES(?,?,?,?,?,?)",
+      "DEMO-SUB-S10903",
+      "S10903",
+      "Complete",
+      at(-8),
+      at(-5),
+      at(-5),
+    ),
+    stmt(
+      "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,submitted_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      "DEMO-SLK-10902-1",
+      "S10902",
+      1,
+      "http://kafiil.com/service/217168-%D8%B3%D8%A3%D9%82%D9%88%D9%85-%D8%AA%D8%AD%D9%84%D9%8A%D9%84-%D8%A8%D9%8A%D8%A7%D9%86%D8%A7%D8%AA%D9%83",
+      "http://kafiil.com/service/217168-%D8%B3%D8%A3%D9%82%D9%88%D9%85-%D8%AA%D8%AD%D9%84%D9%8A%D9%84-%D8%A8%D9%8A%D8%A7%D9%86%D8%A7%D8%AA%D9%83",
+      "Kafiil",
+      "Needs Review",
+      JSON.stringify({ message: "Link format passed; QC still needs to confirm the service." }),
+      at(-4),
+      "Locked",
+      "Service page matches the submitted offering.",
+      "staff-quality",
+      at(-3),
+      1,
+      at(-4),
+      at(-3),
+    ),
+    stmt(
+      "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,submitted_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      "DEMO-SLK-10902-2",
+      "S10902",
+      2,
+      "https://khamsat.com/data/data-analytics/4123366-%D8%AA%D8%AD%D9%88%D9%8A%D9%84-%D8%A8%D9%8A%D8%A7%D9%86%D8%A7%D8%AA%D9%83-%D9%84%D8%AA%D9%82%D8%A7%D8%B1%D9%8A%D8%B1-%D8%AA%D9%81%D8%A7%D8%B9%D9%84%D9%8A%D8%A9-%D9%88%D9%82%D8%B1%D8%A7%D8%B1%D8%A7%D8%AA-%D8%B0%D9%83%D9%8A%D8%A9",
+      "https://khamsat.com/data/data-analytics/4123366-%D8%AA%D8%AD%D9%88%D9%8A%D9%84-%D8%A8%D9%8A%D8%A7%D9%86%D8%A7%D8%AA%D9%83-%D9%84%D8%AA%D9%82%D8%A7%D8%B1%D9%8A%D8%B1-%D8%AA%D9%81%D8%A7%D8%B9%D9%84%D9%8A%D8%A9-%D9%88%D9%82%D8%B1%D8%A7%D8%B1%D8%A7%D8%AA-%D8%B0%D9%83%D9%8A%D8%A9",
+      "Khamsat",
+      "Needs Review",
+      JSON.stringify({ message: "Link format passed; QC still needs to confirm the service." }),
+      at(-4),
+      "Needs Correction",
+      "Please update the description or link so the offered service is clear.",
+      "staff-quality",
+      at(-2),
+      1,
+      at(-4),
+      at(-2),
+    ),
+    stmt(
+      "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,submitted_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      "DEMO-SLK-10902-3",
+      "S10902",
+      3,
+      "https://khamsat.com/business/accounting-bookkeeping/4098136-%D8%B3%D8%A7%D9%82%D9%88%D9%85-%D8%A8%D8%A7%D9%86%D8%B4%D8%A7%D8%A1-%D9%86%D8%B8%D8%A7%D9%85-%D9%85%D8%AD%D8%A7%D8%B3%D8%A8%D9%87-%D9%88-erp",
+      "https://khamsat.com/business/accounting-bookkeeping/4098136-%D8%B3%D8%A7%D9%82%D9%88%D9%85-%D8%A8%D8%A7%D9%86%D8%B4%D8%A7%D8%A1-%D9%86%D8%B8%D8%A7%D9%85-%D9%85%D8%AD%D8%A7%D8%B3%D8%A8%D9%87-%D9%88-erp",
+      "Khamsat",
+      "Needs Review",
+      JSON.stringify({ message: "Link format passed; QC still needs to confirm the service." }),
+      at(-4),
+      "Pending",
+      null,
+      null,
+      null,
+      1,
+      at(-4),
+      at(-4),
+    ),
+    stmt(
+      "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,submitted_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      "DEMO-SLK-10903-1",
+      "S10903",
+      1,
+      "https://khamsat.com/data/data-analytics/4010001-dashboard-service",
+      "https://khamsat.com/data/data-analytics/4010001-dashboard-service",
+      "Khamsat",
+      "Needs Review",
+      JSON.stringify({ message: "Link format passed; QC still needs to confirm the service." }),
+      at(-8),
+      "Locked",
+      "Verified service page.",
+      "staff-quality-lead",
+      at(-7),
+      1,
+      at(-8),
+      at(-7),
+    ),
+    stmt(
+      "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,qc_status,qc_comment,qc_actor,qc_at,revision,submitted_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      "DEMO-SLK-10903-2",
+      "S10903",
+      2,
+      "https://kafiil.com/service/217169-dashboard-design",
+      "https://kafiil.com/service/217169-dashboard-design",
+      "Kafiil",
+      "Needs Review",
+      JSON.stringify({ message: "Link format passed; QC still needs to confirm the service." }),
+      "Locked",
+      "Verified service page.",
+      "staff-quality-lead",
+      at(-7),
+      1,
+      at(-8),
+      at(-7),
+    ),
+    stmt(
+      "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,qc_status,qc_comment,qc_actor,qc_at,revision,submitted_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      "DEMO-SLK-10903-3",
+      "S10903",
+      3,
+      "https://khamsat.com/business/accounting-bookkeeping/4098137-erp-setup",
+      "https://khamsat.com/business/accounting-bookkeeping/4098137-erp-setup",
+      "Khamsat",
+      "Needs Review",
+      JSON.stringify({ message: "Link format passed; QC still needs to confirm the service." }),
+      "Locked",
+      "Verified service page.",
+      "staff-quality-lead",
+      at(-7),
+      1,
+      at(-8),
+      at(-7),
+    ),
+    stmt(
+      "INSERT INTO service_link_reviews(id,service_link_id,revision,decision,comment,reviewed_by,reviewed_at) VALUES(?,?,?,?,?,?,?)",
+      "DEMO-SLR-10902-1",
+      "DEMO-SLK-10902-1",
+      1,
+      "Locked",
+      "Service page matches the submitted offering.",
+      "staff-quality",
+      at(-3),
+    ),
+    stmt(
+      "INSERT INTO service_link_reviews(id,service_link_id,revision,decision,comment,reviewed_by,reviewed_at) VALUES(?,?,?,?,?,?,?)",
+      "DEMO-SLR-10902-2",
+      "DEMO-SLK-10902-2",
+      1,
+      "Needs Correction",
+      "Please update the description or link so the offered service is clear.",
+      "staff-quality",
+      at(-2),
+    ),
   ];
   batch.push(
     ...staff.map(([id, name, role]) =>
@@ -293,6 +450,7 @@ export async function seed(
       ),
     );
   }
+  batch.push(...serviceJobs);
   for (let n = 0; n < 1000; n += 10) {
     const rows = tr.slice(n, n + 10);
     batch.push(
@@ -349,11 +507,6 @@ export async function seed(
     }),
   );
 
-  const at = (days: number, hour = 9) => {
-    const value = new Date(Date.now() + days * 86400000);
-    value.setUTCHours(hour, 0, 0, 0);
-    return value.toISOString();
-  };
   const proofStudentIds = [
     "S10901",
     "S10901",
