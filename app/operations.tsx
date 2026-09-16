@@ -2082,9 +2082,9 @@ export default function Operations({ module }: { module: string }) {
               <span className="brand-mark">D↗</span>
               <h1>Set up your operations workspace</h1>
               <p>
-                Choose a blank production workspace for real operations, or a
-                separate synthetic pilot dataset for training and workflow
-                testing.
+                {d.importedRoster
+                  ? "Initialize the imported Round 5 roster as the production workspace."
+                  : "Choose a blank production workspace for real operations, or a separate synthetic pilot dataset for training and workflow testing."}
               </p>
               <p>
                 You will receive Project Operations and Systems Admin access.
@@ -2099,20 +2099,24 @@ export default function Operations({ module }: { module: string }) {
                 >
                   {busy
                     ? "Preparing workspace…"
-                    : "Start blank production workspace"}
+                    : d.importedRoster
+                      ? "Initialize imported production roster"
+                      : "Start blank production workspace"}
                 </button>
-                <button
-                  className="small-btn"
-                  disabled={busy}
-                  onClick={() => quick("setup", { mode: "demo" })}
-                >
-                  Load synthetic pilot
-                </button>
+                {!d.importedRoster && (
+                  <button
+                    className="small-btn"
+                    disabled={busy}
+                    onClick={() => quick("setup", { mode: "demo" })}
+                  >
+                    Load synthetic pilot
+                  </button>
+                )}
               </div>
               <p className="footnote">
                 Initialization is permanent for this workspace. Production mode
-                creates only the controlled policy and your administrator
-                account.
+                records your administrator account and preserves the imported
+                roster and reconciliation history.
               </p>
             </div>
           ) : (

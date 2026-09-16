@@ -6,6 +6,7 @@ export async function seed(
   mode: "demo" | "production" = "demo",
   preserveWorkspace = false,
   requestId?: string,
+  bootstrapOwner = false,
 ) {
   for (const sql of runtimeTriggers) await db().prepare(sql).run();
   const t = now();
@@ -15,7 +16,7 @@ export async function seed(
     value.setUTCHours(hour, 0, 0, 0);
     return value.toISOString();
   };
-  if (!preserveWorkspace) {
+  if (!preserveWorkspace || bootstrapOwner) {
     batch.push(
       stmt(
         "INSERT INTO users(id,email,name,roles,scopes) VALUES(?,?,?,?,?)",
@@ -26,6 +27,8 @@ export async function seed(
         "[]",
       ),
     );
+  }
+  if (!preserveWorkspace) {
     // Explicit setup policy, bound to the current specification; no runtime schema mutation.
     batch.push(
       stmt(
@@ -42,10 +45,18 @@ export async function seed(
   }
   if (mode === "production") {
     batch.push(
-      auditStmt(i, "Blank production workspace initialized", "workspace", {
-        synthetic: false,
-        mode,
-      }),
+      auditStmt(
+        i,
+        preserveWorkspace
+          ? "Imported production workspace initialized"
+          : "Blank production workspace initialized",
+        "workspace",
+        {
+          synthetic: false,
+          mode,
+          importedRoster: preserveWorkspace,
+        },
+      ),
     );
     await db().batch(batch);
     return;

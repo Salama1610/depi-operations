@@ -50,12 +50,21 @@ export const students = sqliteTable(
   "students",
   {
     id: text("id").primaryKey(),
+    tpId: text("tp_id"),
+    nationalId: text("national_id"),
     name: text("name").notNull(),
+    nameAr: text("name_ar"),
     groupId: text("group_id")
       .notNull()
       .references(() => groups.id),
     email: text("email"),
     phone: text("phone"),
+    jobProfile: text("job_profile"),
+    studentType: text("student_type"),
+    sourceStatus: text("source_status"),
+    serial: text("serial"),
+    round1: text("round_1"),
+    sourceRow: integer("source_row"),
     lifecycle: text("lifecycle").notNull().default("Active"),
     engagement: text("engagement").notNull().default("Active"),
     coaching: text("coaching").notNull().default("In Progress"),
@@ -68,6 +77,12 @@ export const students = sqliteTable(
     uniqueIndex("student_email_identity")
       .on(sql`lower(${t.email})`)
       .where(sql`${t.email} IS NOT NULL AND trim(${t.email}) <> ''`),
+    uniqueIndex("student_tp_identity")
+      .on(t.tpId)
+      .where(sql`${t.tpId} IS NOT NULL AND trim(${t.tpId}) <> ''`),
+    uniqueIndex("student_national_identity")
+      .on(t.nationalId)
+      .where(sql`${t.nationalId} IS NOT NULL AND trim(${t.nationalId}) <> ''`),
   ],
 );
 export const tasks = sqliteTable(
@@ -480,6 +495,38 @@ export const importRows = sqliteTable(
     recordId: text("record_id"),
   },
   (t) => [uniqueIndex("import_row_once").on(t.importId, t.rowNumber)],
+);
+
+export const rosterImports = sqliteTable("roster_imports", {
+  id: text("id").primaryKey(),
+  sourceName: text("source_name").notNull(),
+  sourceSheet: text("source_sheet").notNull(),
+  sourceSha256: text("source_sha256").notNull().unique(),
+  totalRows: integer("total_rows").notNull(),
+  canonicalStudents: integer("canonical_students").notNull(),
+  duplicateRows: integer("duplicate_rows").notNull(),
+  status: text("status").notNull(),
+  summary: text("summary").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
+export const rosterSourceRows = sqliteTable(
+  "roster_source_rows",
+  {
+    id: text("id").primaryKey(),
+    importId: text("import_id")
+      .notNull()
+      .references(() => rosterImports.id),
+    rowNumber: integer("row_number").notNull(),
+    studentId: text("student_id").references(() => students.id),
+    disposition: text("disposition").notNull(),
+    reason: text("reason"),
+    payload: text("payload").notNull(),
+  },
+  (t) => [
+    uniqueIndex("roster_source_import_row").on(t.importId, t.rowNumber),
+    index("idx_roster_source_student").on(t.studentId),
+  ],
 );
 export const caseEvents = sqliteTable(
   "case_events",

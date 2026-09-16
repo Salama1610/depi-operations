@@ -114,8 +114,16 @@ async function validateSessionSlot(x: any, excludeId?: string) {
 export async function GET() {
   try {
     await identity();
-    if (!(await stmt("SELECT count(*) n FROM users").first<any>())?.n)
-      return Response.json({ setup: true });
+    if (
+      !(await stmt(
+        "SELECT count(*) n FROM users WHERE id NOT LIKE 'system-unassigned-%'",
+      ).first<any>())?.n
+    ) {
+      const roster: any = await stmt(
+        "SELECT count(*) n FROM roster_imports",
+      ).first();
+      return Response.json({ setup: true, importedRoster: Boolean(roster?.n) });
+    }
     return Response.json(await loadData(await actor()));
   } catch (e: any) {
     return Response.json({ error: e.message }, { status: 403 });
@@ -136,10 +144,23 @@ export async function POST(req: Request) {
         "Choose a demo or production workspace.",
       );
       ensure(
-        !(await stmt("SELECT count(*) n FROM users").first<any>())?.n,
+        !(await stmt(
+          "SELECT count(*) n FROM users WHERE id NOT LIKE 'system-unassigned-%'",
+        ).first<any>())?.n,
         "Workspace is already initialized.",
       );
-      await seed(i, x.mode);
+      const roster: any = await stmt(
+        "SELECT count(*) n FROM roster_imports",
+      ).first();
+      if (roster?.n) {
+        ensure(
+          x.mode === "production",
+          "An imported roster can only initialize a production workspace.",
+        );
+        await seed(i, "production", true, undefined, true);
+      } else {
+        await seed(i, x.mode);
+      }
       return Response.json({ ok: true });
     }
     const u = await actor();
