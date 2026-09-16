@@ -7,7 +7,8 @@ The application implementation is reconciled with **DEPI Round 5 Operational Con
 | Area | Implemented behavior |
 |---|---|
 | Initialization | The first authorized owner chooses a blank production workspace or a visibly labelled 1,000-student synthetic pilot. An admin-only guard can append that pilot later only if the operational footprint is still empty; it preserves the owner/policy and refuses mixed live/synthetic data. |
-| Identity and scope | Trusted ChatGPT identity, active-staff membership, backend role checks, group scope, functional Outcome/Support Coach assignments, role-conflict launch gate, separation of policy/FX/report creation and approval, and student access linked to registered identity. |
+| Identity and scope | Trusted ChatGPT identity, active-staff membership, backend role checks, group scope, functional Outcome/Support Coach assignments, role-conflict launch gate, separation of policy/FX/report creation and approval, and student access linked to a unique normalized roster email. Shared demo passwords are prohibited. |
+| Student service links | Exactly three direct HTTPS Kafiil/Khamsat service pages, normalized duplicate prevention, confirmation and draft recovery, timestamps and history, correction-only editing, per-link lock, scoped/assigned/paginated QC, 48-hour reminders, Quality Lead overrides, metrics/exports, roster health and recovery coverage. |
 | Complete program flow | Registration, eligibility screening, admission/group assignment, coach matching/onboarding, session reconciliation, assessments, certificates, post-program outcomes, Ministry withdrawal decisions, group closure and read-only archive. |
 | Journey control | Group-relative week, configurable milestones and lag thresholds, trajectory explanations, weekly gates, engagement/lifecycle history, transfer and closure gates. |
 | Session operations | Regular/Industry delivery limits, policy-controlled duration, active onboarded coach assignment, same-day coach conflict and duplicate-week protection, coach confirmation, reasoned reschedule/cancellation, complete attendance reconciliation, delivery notes, SLA backlog and coverage-gap monitoring. |
@@ -24,7 +25,7 @@ The application implementation is reconciled with **DEPI Round 5 Operational Con
 
 ## Validation evidence
 
-- 33 automated domain, permission, workflow, student service QC, import, search, retention, security, backup, restore, rendering and UI-component tests pass in the Windows verification run on 16 September 2026.
+- 38 automated domain, permission, workflow, student identity/isolation, service-link validation, concurrency and query-plan checks, 1,000-row roster preview, import, search, retention, security, backup/restore, rendering and UI-component tests pass in the Windows verification run on 16 September 2026.
 - TypeScript validation passes.
 - The bounded production Worker build passes and includes every application and API route.
 - Migrations are host-compatible; safeguards are installed at workspace initialization and restore.
@@ -37,6 +38,7 @@ These are deployment decisions or credentials, not unfinished application featur
 - Configure the approved vault, automation signer/HMAC secret and independent backup encryption key/destination.
 - Enter approved retention periods and authorities; the product intentionally ships with none.
 - Create the Ministry-supplied report mapping as a draft and have a different authorized staff member approve it.
+- Import the approved 3,000-student roster as three reconciled batches and obtain program-owner approval for marketplace ownership/track-fit decision standards.
 - Activate the supplied scheduler workflows if scheduled notifications are required.
 - Complete organizational security, accessibility/mobile, staff UAT and recovery-objective sign-off before loading real personal data.
 

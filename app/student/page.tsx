@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Check, ExternalLink, LockKeyhole, RefreshCw, Send, ShieldCheck } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 type Service = {
   id?: string;
@@ -13,6 +14,8 @@ type Service = {
   qc_status?: string;
   qc_comment?: string | null;
   can_edit?: boolean;
+  submitted_at?: string;
+  qc_at?: string | null;
 };
 
 const empty = (): Service[] => [1, 2, 3].map((slot) => ({ slot, url: "", can_edit: true }));
@@ -24,13 +27,16 @@ function statusTone(status?: string) {
 }
 
 export default function StudentServicesPage() {
-  const [student, setStudent] = useState<{ name: string; email?: string } | null>(null);
+  const [student, setStudent] = useState<{ id: string; name: string; email?: string } | null>(null);
   const [services, setServices] = useState<Service[]>(empty());
   const [submission, setSubmission] = useState<any>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [reviews, setReviews] = useState<any[]>([]);
+  const [lastReviewedAt, setLastReviewedAt] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   async function refresh() {
     setLoading(true);
@@ -40,8 +46,16 @@ export default function StudentServicesPage() {
       const value = await response.json();
       if (!response.ok || value.error) throw new Error(value.error || "Unable to load your services.");
       setStudent(value.student);
-      setServices(value.services || empty());
+      const serverServices = value.services || empty();
+      const draftKey = `depi-service-draft:${value.student.id}`;
+      let draft: Record<string, string> = {};
+      try { draft = JSON.parse(localStorage.getItem(draftKey) || "{}"); } catch {}
+      setServices(serverServices.map((service: Service) =>
+        service.can_edit !== false && draft[service.slot] ? { ...service, url: draft[service.slot] } : service,
+      ));
       setSubmission(value.submission);
+      setReviews(value.reviews || []);
+      setLastReviewedAt(value.last_reviewed_at || null);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -65,8 +79,21 @@ export default function StudentServicesPage() {
     setServices((current) => current.map((service) => (service.slot === slot ? { ...service, url } : service)));
   }
 
-  async function submit(e: React.FormEvent) {
+  useEffect(() => {
+    if (!student || loading) return;
+    const editableDraft = Object.fromEntries(
+      services.filter((service) => service.can_edit !== false).map((service) => [service.slot, service.url]),
+    );
+    localStorage.setItem(`depi-service-draft:${student.id}`, JSON.stringify(editableDraft));
+  }, [services, student, loading]);
+
+  function requestSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setConfirmOpen(true);
+  }
+
+  async function submit() {
+    setConfirmOpen(false);
     setBusy(true);
     setSaved(false);
     setError("");
@@ -80,6 +107,9 @@ export default function StudentServicesPage() {
       if (!response.ok || value.error) throw new Error(value.error || "Unable to submit your links.");
       setServices(value.services || empty());
       setSubmission(value.submission);
+      setReviews(value.reviews || []);
+      setLastReviewedAt(value.last_reviewed_at || null);
+      if (student) localStorage.removeItem(`depi-service-draft:${student.id}`);
       setSaved(true);
     } catch (e: any) {
       setError(e.message);
@@ -125,7 +155,13 @@ export default function StudentServicesPage() {
               <div><h2>Your three service links</h2><p>Locked links cannot be changed. Links needing correction stay editable with the QC comment.</p></div>
               {submission && <span className={statusTone(submission.status)}>{submission.status}</span>}
             </div>
-            <form onSubmit={submit}>
+            {submission && (
+              <div className="student-meta student-submission-meta">
+                <span>Submitted {new Date(submission.submitted_at).toLocaleString()}</span>
+                <span>Last reviewed {lastReviewedAt ? new Date(lastReviewedAt).toLocaleString() : "Not reviewed yet"}</span>
+              </div>
+            )}
+            <form onSubmit={requestSubmit}>
               <div className="student-service-list">
                 {services.map((service) => {
                   const locked = service.qc_status === "Locked";
@@ -144,6 +180,11 @@ export default function StudentServicesPage() {
                           {service.auto_status && <span className={statusTone(service.auto_status)}>{service.auto_status === "Needs Review" ? "Automatic check passed" : service.auto_status}</span>}
                         </div>
                         {service.auto_result?.message && <p className="student-check-note">{service.auto_result.message}</p>}
+                        {service.auto_result?.checks?.length ? (
+                          <ul className="student-check-list">
+                            {service.auto_result.checks.map((check) => <li key={check}>{check}</li>)}
+                          </ul>
+                        ) : null}
                         {correction && <div className="student-qc-note"><strong>QC correction:</strong> {service.qc_comment}</div>}
                         {locked && <div className="student-locked-note"><LockKeyhole size={15} /> Locked by QC{service.qc_comment ? ` · ${service.qc_comment}` : ""}</div>}
                       </div>
@@ -159,9 +200,37 @@ export default function StudentServicesPage() {
               </div>
             </form>
           </section>
+          {reviews.length > 0 && (
+            <section className="student-card" aria-labelledby="review-history-title">
+              <div className="student-card-heading"><div><h2 id="review-history-title">QC updates</h2><p>Your approval and correction history.</p></div></div>
+              <div className="student-service-list">
+                {reviews.map((review) => (
+                  <article className="student-service-row" key={review.id}>
+                    <div className="student-slot"><span>0{review.slot}</span><strong>Service {review.slot}</strong></div>
+                    <div><span className={statusTone(review.decision)}>{review.decision}</span><p>{review.comment}</p><small>{new Date(review.reviewed_at).toLocaleString()} · revision {review.revision}</small></div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
           <p className="student-footnote"><ShieldCheck size={15} /> Your links are visible to the DEPI QC team only for verification.</p>
         </>
       )}
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Submit these three service links?</DialogTitle>
+            <DialogDescription>Pending links become read-only until QC reviews them. You can edit only links returned for correction.</DialogDescription>
+          </DialogHeader>
+          <ol className="student-confirm-list">
+            {services.map((service) => <li key={service.slot}><strong>Service {service.slot}</strong><span>{service.url}</span></li>)}
+          </ol>
+          <div className="student-actions">
+            <button type="button" className="student-secondary" onClick={() => setConfirmOpen(false)}>Review links</button>
+            <button type="button" className="student-primary" disabled={busy} onClick={submit}>Confirm submission</button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }

@@ -63,7 +63,12 @@ export const students = sqliteTable(
     lastContact: text("last_contact"),
     createdAt: text("created_at").notNull(),
   },
-  (t) => [index("idx_students_group").on(t.groupId)],
+  (t) => [
+    index("idx_students_group").on(t.groupId),
+    uniqueIndex("student_email_identity")
+      .on(sql`lower(${t.email})`)
+      .where(sql`${t.email} IS NOT NULL AND trim(${t.email}) <> ''`),
+  ],
 );
 export const tasks = sqliteTable(
   "tasks",
@@ -953,6 +958,7 @@ export const serviceLinkReviews = sqliteTable(
     reviewedAt: text("reviewed_at").notNull(),
   },
   (t) => [
+    uniqueIndex("service_link_review_revision").on(t.serviceLinkId, t.revision),
     index("idx_service_link_reviews_link_date").on(
       t.serviceLinkId,
       t.reviewedAt,

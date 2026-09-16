@@ -1,93 +1,95 @@
-export type ServiceLinkAutoStatus = "Verified" | "Needs Review" | "Failed";
+export type ServiceLinkAutoStatus = "Needs Review" | "Failed";
 
 export type ServiceLinkVerification = {
   status: ServiceLinkAutoStatus;
   normalizedUrl: string;
   platform: string;
+  serviceId: string | null;
   checks: string[];
   message: string;
+  verificationVersion: string;
 };
 
+export const serviceLinkVerificationVersion = "2026-09-16.1";
+export const acceptedServicePlatforms = ["Kafiil", "Khamsat"] as const;
 const platformHosts: Record<string, string> = {
   "kafiil.com": "Kafiil",
   "khamsat.com": "Khamsat",
-  "upwork.com": "Upwork",
-  "freelancer.com": "Freelancer",
-  "fiverr.com": "Fiverr",
-  "mostaql.com": "Mostaql",
-  "linkedin.com": "LinkedIn",
-  "behance.net": "Behance",
-  "dribbble.com": "Dribbble",
-  "github.com": "GitHub",
 };
+const slug = "[\\p{L}\\p{N}]+(?:-[\\p{L}\\p{N}]+)*";
+const kafiilPath = new RegExp(`^/service/(\\d+)-(${slug})/?$`, "iu");
+const khamsatPath = new RegExp(`^/(${slug})/(${slug})/(\\d+)-(${slug})/?$`, "iu");
 
 function hostPlatform(hostname: string) {
   const host = hostname.toLowerCase().replace(/^www\./, "");
-  const entry = Object.entries(platformHosts).find(
-    ([domain]) => host === domain || host.endsWith(`.${domain}`),
-  );
-  return entry?.[1] || "External service";
+  return platformHosts[host] || "External service";
 }
 
-function marketplacePathCheck(platform: string, parsed: URL) {
-  if (platform === "Kafiil") return /^\/service\/\d+(?:-|\/|$)/i.test(parsed.pathname);
-  if (platform === "Khamsat") return /^\/[^/]+\/[^/]+\/\d+(?:-|\/|$)/i.test(parsed.pathname);
-  return true;
+function marketplacePath(platform: string, pathname: string) {
+  let decodedPath = pathname;
+  try { decodedPath = decodeURIComponent(pathname); } catch {}
+  const match = platform === "Kafiil"
+    ? decodedPath.match(kafiilPath)
+    : platform === "Khamsat"
+      ? decodedPath.match(khamsatPath)
+      : null;
+  return { valid: Boolean(match), serviceId: match?.[platform === "Kafiil" ? 1 : 3] || null };
+}
+
+function failed(message: string, checks: string[] = [message]): ServiceLinkVerification {
+  return {
+    status: "Failed",
+    normalizedUrl: "",
+    platform: "Unknown",
+    serviceId: null,
+    checks,
+    message,
+    verificationVersion: serviceLinkVerificationVersion,
+  };
 }
 
 /**
- * Automatic verification intentionally stays deterministic and network-free for now.
- * The later link rules can be plugged into this function without changing the API or UI.
+ * The automatic gate is deterministic and network-free. It accepts only direct,
+ * secure Kafiil and Khamsat service-page URLs. QC remains responsible for page
+ * availability, ownership, category and track fit.
  */
 export function verifyServiceLink(raw: unknown): ServiceLinkVerification {
   const value = typeof raw === "string" ? raw.trim() : "";
-  if (!value) {
-    return {
-      status: "Failed",
-      normalizedUrl: "",
-      platform: "Unknown",
-      checks: ["A link is required"],
-      message: "Add a public service link.",
-    };
-  }
+  if (!value) return failed("Add a public service link.");
+  if (value.length > 2048)
+    return failed("Use a direct service URL shorter than 2,048 characters.");
   try {
     const parsed = new URL(value);
-    const protocolOk = parsed.protocol === "https:" || parsed.protocol === "http:";
-    const hostOk = Boolean(parsed.hostname) && !parsed.hostname.includes(" ");
+    const protocolOk = parsed.protocol === "https:";
+    const directOk = !parsed.username && !parsed.password && !parsed.port;
     const platform = hostPlatform(parsed.hostname);
-    const pathOk = parsed.pathname.length > 1 || parsed.search.length > 1;
-    const marketplacePathOk = marketplacePathCheck(platform, parsed);
-    const normalizedUrl = parsed.toString();
+    const platformOk = acceptedServicePlatforms.includes(platform as any);
+    const path = marketplacePath(platform, parsed.pathname);
+    parsed.hostname = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    parsed.hash = "";
+    parsed.search = "";
     const checks = [
-      protocolOk ? "HTTP/HTTPS link" : "Only HTTP or HTTPS links are supported",
-      hostOk ? "Public hostname" : "A valid hostname is required",
-      marketplacePathOk
-        ? "Service page pattern detected"
-        : "Marketplace service URL pattern is invalid",
+      protocolOk ? "Secure HTTPS link" : "The service link must use HTTPS",
+      directOk ? "Direct public URL" : "Ports and embedded credentials are not allowed",
+      platformOk ? `${platform} is accepted` : "Only Kafiil and Khamsat service links are accepted",
+      path.valid
+        ? `Numeric service ID ${path.serviceId} and slug detected`
+        : "Use the complete service URL with its numeric ID and Arabic or English slug",
     ];
-    const failed =
-      !protocolOk ||
-      !hostOk ||
-      !pathOk ||
-      !marketplacePathOk ||
-      Boolean(parsed.username || parsed.password);
+    const isFailed = !protocolOk || !directOk || !platformOk || !path.valid;
     return {
-      status: failed ? "Failed" : "Needs Review",
-      normalizedUrl,
+      status: isFailed ? "Failed" : "Needs Review",
+      normalizedUrl: parsed.toString(),
       platform,
+      serviceId: path.serviceId,
       checks,
-      message: failed
-        ? "Fix the link format before QC review."
-        : "Link format passed; QC still needs to confirm the service.",
+      message: isFailed
+        ? checks.find((check) => /must|not allowed|Only|complete/.test(check)) || "Fix the link before QC review."
+        : "Format verified. QC still confirms availability, ownership, category and track fit.",
+      verificationVersion: serviceLinkVerificationVersion,
     };
   } catch {
-    return {
-      status: "Failed",
-      normalizedUrl: "",
-      platform: "Unknown",
-      checks: ["Valid URL format required"],
-      message: "Enter a complete link beginning with https:// or http://.",
-    };
+    return failed("Enter a complete HTTPS service URL.", ["Valid URL format required"]);
   }
 }
 
@@ -99,7 +101,9 @@ export function normalizeServiceSlots(input: unknown) {
   );
   if (values.some((value) => !value))
     throw new Error("All 3 service links are required.");
-  const normalized = values.map((value) => verifyServiceLink(value).normalizedUrl || value.toLowerCase());
+  const normalized = values.map((value) =>
+    verifyServiceLink(value).normalizedUrl || value.toLowerCase(),
+  );
   if (new Set(normalized).size !== 3)
     throw new Error("Each service link must be different.");
   return values;

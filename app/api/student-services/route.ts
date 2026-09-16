@@ -46,6 +46,14 @@ async function studentView(studentId: string) {
     studentId,
   );
   const bySlot = new Map(rows.map((row) => [row.slot, parseLink(row)]));
+  const reviews = await all(
+    `SELECT r.id,r.service_link_id,l.slot,r.revision,r.decision,r.comment,r.reviewed_at,u.name reviewer_name
+     FROM service_link_reviews r
+     JOIN service_links l ON l.id=r.service_link_id
+     JOIN users u ON u.id=r.reviewed_by
+     WHERE l.student_id=? ORDER BY r.reviewed_at DESC LIMIT 50`,
+    studentId,
+  );
   return {
     submitted: Boolean(submission),
     submission: submission
@@ -58,6 +66,8 @@ async function studentView(studentId: string) {
         }
       : null,
     services: [1, 2, 3].map((slot) => bySlot.get(slot) || { slot, url: "", can_edit: true }),
+    reviews,
+    last_reviewed_at: reviews[0]?.reviewed_at || null,
   };
 }
 
@@ -72,6 +82,8 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
+    const contentLength = Number(req.headers.get("content-length") || 0);
+    if (contentLength > 20_000) throw new Error("The request is too large.");
     const origin = req.headers.get("origin");
     if (origin) {
       if (origin !== new URL(req.url).origin)
@@ -166,6 +178,17 @@ export async function POST(req: Request) {
            THEN (SELECT max(qc_at) FROM service_links WHERE student_id=?) ELSE NULL END
        WHERE student_id=?`, s.id, s.id, s.id, s.id, s.id,
     ));
+    const notificationSeed = uid("NTF");
+    jobs.push(stmt(
+      `INSERT OR IGNORE INTO notifications(id,recipient,title,entity_type,entity_id,severity,source,created_at,read_at)
+       SELECT ?||'-'||id,id,?,'student',?,'Action Required',?||':'||id,?,NULL
+       FROM users WHERE active=1 AND (roles LIKE '%Quality Member%' OR roles LIKE '%Quality Lead%')`,
+      notificationSeed,
+      priorSubmissionTitle(Boolean(existing.length)),
+      s.id,
+      `service-links:${s.id}:${t}`,
+      t,
+    ));
     jobs.push(auditStmt(s, "Student service links submitted", s.id, { slots: 3 }, null, uid("REQ")));
     await db().batch(jobs);
     return Response.json({ ok: true, ...(await studentView(s.id)) });
@@ -180,11 +203,20 @@ async function qcReview(x: any) {
   if (!["Lock", "Needs Correction"].includes(x.decision))
     throw new Error("Choose Lock or Needs Correction.");
   const comment = String(x.comment || "").trim();
+  if (comment.length > 1000) throw new Error("QC comments must be 1,000 characters or fewer.");
   if (x.decision === "Needs Correction" && !comment)
     throw new Error("Add a correction comment for the student.");
   const link: any = await stmt("SELECT * FROM service_links WHERE id=?", x.service_id).first();
   if (!link) throw new Error("Service link not found.");
   if (link.qc_status === "Locked") throw new Error("This service link is already locked.");
+  if (link.qc_actor && link.qc_actor !== u.id && !u.roles.includes("Quality Lead"))
+    throw new Error("This link is assigned to another reviewer.");
+  const overrideReason = String(x.override_reason || "").trim();
+  if (overrideReason.length > 1000) throw new Error("Override reasons must be 1,000 characters or fewer.");
+  if (x.decision === "Lock" && link.auto_status === "Failed") {
+    permit(u, ["Quality Lead"]);
+    if (!overrideReason) throw new Error("Quality Lead override reason is required for an automatic failure.");
+  }
   const t = now();
   const next = x.decision === "Lock" ? "Locked" : "Needs Correction";
   const jobs: any[] = [
@@ -221,8 +253,12 @@ async function qcReview(x: any) {
       t,
       link.student_id,
     ),
-    auditStmt(u, "QC service link review", link.id, { decision: next, student_id: link.student_id, comment }),
+    auditStmt(u, "QC service link review", link.id, { decision: next, student_id: link.student_id, comment, override_reason: overrideReason || null }),
   ];
   await db().batch(jobs);
   return Response.json({ ok: true });
+}
+
+function priorSubmissionTitle(resubmission: boolean) {
+  return resubmission ? "Student resubmitted service links" : "New student service links";
 }

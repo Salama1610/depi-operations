@@ -438,14 +438,29 @@ export async function POST(req: Request) {
             "Group is outside your scope.",
           );
         }
+        const email = String(x.email || "").trim().toLowerCase();
+        ensure(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email), "A valid student email is required for ChatGPT sign-in.");
+        ensure(
+          !(await stmt("SELECT id FROM students WHERE email IS NOT NULL AND trim(email)<>'' AND lower(email)=?", email).first()),
+          "This student email is already linked to another record.",
+        );
+        const lifecycle = x.lifecycle || "Active";
+        const engagement = x.engagement || "Active";
+        const coaching = x.coaching || "In Progress";
+        ensure(["Active", "Paused", "Transferred", "Withdrawn", "Removed", "Graduate Closed", "Non-Graduate Closed"].includes(lifecycle), "Invalid lifecycle status.");
+        ensure(["Active", "At Risk", "Critical", "Unresponsive"].includes(engagement), "Invalid engagement status.");
+        ensure(String(coaching).length <= 80, "Coaching status is too long.");
         jobs.push(
           stmt(
-            "INSERT INTO students(id,name,group_id,email,phone,created_at) VALUES(?,?,?,?,?,?)",
+            "INSERT INTO students(id,name,group_id,email,phone,lifecycle,engagement,coaching,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
             id,
             x.name,
             x.group_id,
-            x.email || "",
+            email,
             x.phone || "",
+            lifecycle,
+            engagement,
+            coaching,
             t,
           ),
         );
@@ -1836,17 +1851,29 @@ export async function POST(req: Request) {
           "Choose Lock or Needs Correction.",
         );
         const comment = String(x.comment || "").trim();
+        ensure(comment.length <= 1000, "QC comments must be 1,000 characters or fewer.");
         ensure(
           x.decision === "Lock" || comment,
           "Add a correction comment for the student.",
         );
         ensure(link.qc_status !== "Locked", "This service link is already locked.");
+        ensure(!link.qc_actor || link.qc_actor === u.id || can(u.roles, ["Quality Lead"]), "This link is assigned to another reviewer.");
+        const overrideReason = String(x.override_reason || "").trim();
+        ensure(overrideReason.length <= 1000, "Override reasons must be 1,000 characters or fewer.");
+        if (x.decision === "Lock" && link.auto_status === "Failed") {
+          permit(u, ["Quality Lead"]);
+          ensure(
+            overrideReason,
+            "Quality Lead override reason is required for an automatic failure.",
+          );
+        }
         const next = x.decision === "Lock" ? "Locked" : "Needs Correction";
         auditValue = {
           service_id: link.id,
           student_id: link.student_id,
           decision: next,
           comment,
+          override_reason: overrideReason || null,
         };
         sid = link.student_id;
         s = await student(u, sid);
@@ -1885,7 +1912,62 @@ export async function POST(req: Request) {
             t,
             link.student_id,
           ),
+          stmt(
+            `INSERT OR IGNORE INTO notifications(id,recipient,title,entity_type,entity_id,severity,source,created_at,read_at)
+             SELECT ?||'-'||id,id,?,'student',?,'Information',?||':'||id,?,NULL
+             FROM users WHERE active=1 AND id IN (
+               SELECT coordinator FROM groups WHERE id=(SELECT group_id FROM students WHERE id=?)
+               UNION SELECT supervisor FROM groups WHERE id=(SELECT group_id FROM students WHERE id=?)
+             )`,
+            uid("NTF"),
+            next === "Locked" ? "Student service link approved" : "Student service link needs correction",
+            link.student_id,
+            `service-review:${link.id}:${link.revision}:${next}`,
+            t,
+            link.student_id,
+            link.student_id,
+          ),
         );
+        break;
+      }
+      case "service_qc_claim": {
+        permit(u, ["Quality Member", "Quality Lead"]);
+        const link: any = await stmt("SELECT * FROM service_links WHERE id=?", x.service_id || id).first();
+        ensure(link && link.qc_status !== "Locked", "Open service link not found.");
+        ensure(!link.qc_actor || link.qc_actor === u.id, "This link is assigned to another reviewer.");
+        await student(u, link.student_id);
+        auditPrevious = link;
+        auditValue = { service_id: link.id, assigned_to: u.id };
+        jobs.push(stmt("UPDATE service_links SET qc_actor=?,updated_at=? WHERE id=? AND qc_status<>'Locked' AND (qc_actor IS NULL OR qc_actor=?)", u.id, t, link.id, u.id));
+        break;
+      }
+      case "service_qc_lock_student": {
+        permit(u, ["Quality Member", "Quality Lead"]);
+        ensure(sid, "Choose a student submission.");
+        const links = await (await stmt(
+          "SELECT * FROM service_links WHERE student_id=? AND qc_status='Pending' AND auto_status<>'Failed' ORDER BY slot",
+          sid,
+        ).all()).results as any[];
+        ensure(links.length, "No format-passing pending links are available to lock.");
+        ensure(
+          links.every((link) => !link.qc_actor || link.qc_actor === u.id || can(u.roles, ["Quality Lead"])),
+          "One or more links are assigned to another reviewer.",
+        );
+        for (const link of links) {
+          jobs.push(
+            stmt("UPDATE service_links SET qc_status='Locked',qc_comment=?,qc_actor=?,qc_at=?,updated_at=? WHERE id=? AND qc_status='Pending'", "Verified by QC.", u.id, t, t, link.id),
+            stmt("INSERT INTO service_link_reviews(id,service_link_id,revision,decision,comment,reviewed_by,reviewed_at) VALUES(?,?,?,?,?,?,?)", uid("SLR"), link.id, link.revision, "Locked", "Verified by QC.", u.id, t),
+          );
+        }
+        jobs.push(stmt(
+          `UPDATE service_submissions SET status=CASE
+             WHEN (SELECT count(*) FROM service_links WHERE student_id=? AND qc_status='Locked')=3 THEN 'Complete'
+             WHEN EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status='Needs Correction') THEN 'Needs Correction'
+             ELSE 'Pending QC' END,
+             qc_completed_at=CASE WHEN (SELECT count(*) FROM service_links WHERE student_id=? AND qc_status='Locked')=3 THEN ? ELSE NULL END,
+             updated_at=? WHERE student_id=?`, sid, sid, sid, t, t, sid,
+        ));
+        auditValue = { student_id: sid, locked_service_ids: links.map((link) => link.id) };
         break;
       }
       case "load_demo_data": {

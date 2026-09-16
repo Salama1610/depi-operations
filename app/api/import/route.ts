@@ -11,7 +11,7 @@ import { ensure } from "@/lib/domain/rules";
 import { POST as operate } from "@/app/api/operations/route";
 import { POST as program } from "@/app/api/program/route";
 const allowed: Record<string, string[]> = {
-  students: ["id", "name", "group_id", "email", "phone"],
+  students: ["id", "name", "group_id", "email", "phone", "lifecycle", "engagement", "coaching"],
   groups: [
     "id",
     "name",
@@ -138,7 +138,7 @@ const actions: Record<string, string> = {
   post_program_outcomes: "post_program_outcome",
 };
 const required: Record<string, string[]> = {
-  students: ["id", "name", "group_id"],
+  students: ["id", "name", "group_id", "email"],
   groups: [
     "id",
     "name",
@@ -257,6 +257,10 @@ export async function POST(req: Request) {
             expected: columns.join(", "),
           });
       if (x.module === "students") {
+        row.email = String(row.email || "").trim().toLowerCase();
+        row.lifecycle = String(row.lifecycle || "Active").trim();
+        row.engagement = String(row.engagement || "Active").trim();
+        row.coaching = String(row.coaching || "In Progress").trim();
         if (
           seen.has(row.id) ||
           (await stmt(
@@ -285,7 +289,32 @@ export async function POST(req: Request) {
             error: "Group does not exist",
             expected: "Existing group ID",
           });
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email))
+          errors.push({
+            row: i + 2,
+            field: "email",
+            value: row.email,
+            error: "A valid student email is required for ChatGPT sign-in",
+            expected: "Unique email address",
+          });
+        if (
+          row.email &&
+          (seen.has(`email:${row.email}`) ||
+            (await stmt("SELECT id FROM students WHERE email IS NOT NULL AND trim(email)<>'' AND lower(email)=?", row.email).first()))
+        )
+          errors.push({
+            row: i + 2,
+            field: "email",
+            value: row.email,
+            error: "Duplicate student email; one identity cannot access two records",
+            expected: "Unique email address",
+          });
+        if (!["Active", "Paused", "Transferred", "Withdrawn", "Removed", "Graduate Closed", "Non-Graduate Closed"].includes(row.lifecycle))
+          errors.push({ row: i + 2, field: "lifecycle", value: row.lifecycle, error: "Invalid lifecycle status", expected: "Active, Paused, Transferred, Withdrawn, Removed, Graduate Closed, or Non-Graduate Closed" });
+        if (!["Active", "At Risk", "Critical", "Unresponsive"].includes(row.engagement))
+          errors.push({ row: i + 2, field: "engagement", value: row.engagement, error: "Invalid engagement status", expected: "Active, At Risk, Critical, or Unresponsive" });
         seen.add(row.id);
+        if (row.email) seen.add(`email:${row.email}`);
       }
       for (const k of required[x.module])
         if (

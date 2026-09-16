@@ -617,6 +617,28 @@ test("session spreadsheet preview and commit retain the governed controls", asyn
   });
   assert.deepEqual(replay, committed);
 });
+test("student roster preview reports missing and duplicate emails and handles 1,000 rows", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  const invalid = await importPost({ module: "students", rows: [
+    { id: "S-ROSTER-MISSING", name: "Missing Email", group_id: "G101", email: "" },
+    { id: "S-ROSTER-DUP-1", name: "Duplicate One", group_id: "G101", email: "duplicate@example.com" },
+    { id: "S-ROSTER-DUP-2", name: "Duplicate Two", group_id: "G101", email: "DUPLICATE@example.com" },
+  ] });
+  assert.equal(invalid.rows[0].status, "Rejected");
+  assert.ok(invalid.rows[0].errors.some((error) => error.field === "email"));
+  assert.equal(invalid.rows[2].status, "Rejected");
+  assert.ok(invalid.rows[2].errors.some((error) => /Duplicate/.test(error.error)));
+  const rows = Array.from({ length: 1000 }, (_, index) => ({
+    id: `S-ROSTER-${String(index + 1).padStart(4, "0")}`,
+    name: `Roster Student ${index + 1}`,
+    group_id: "G101",
+    email: `roster-${index + 1}@example.com`,
+    lifecycle: "Active",
+  }));
+  const preview = await importPost({ module: "students", rows });
+  assert.equal(preview.rows.length, 1000);
+  assert.equal(preview.rows.filter((row) => row.status === "Ready").length, 1000);
+});
 test("complete program flow governs intake, assessment, withdrawal, certificate and reporting", async () => {
   current = { id: "owner", email: "owner@example.com" };
   await programCheck("application", {
@@ -1199,6 +1221,34 @@ test("student service resubmissions preserve completion and QC errors return JSO
   assert.match((await missing.json()).error, /not found/);
   current = { id: "owner", email: "owner@example.com" };
 });
+test("student service records are identity-isolated and QC review is single-decision per revision", async () => {
+  const servicesApi = await route("student-services");
+  const first = sqlite.prepare("SELECT id,email FROM students WHERE id='S10902'").get();
+  const second = sqlite.prepare("SELECT id,email FROM students WHERE id='S10903'").get();
+  current = { id: first.id, email: first.email };
+  const firstView = await (await servicesApi.GET()).json();
+  assert.equal(firstView.student.id, first.id);
+  assert.ok(firstView.services.every((link) => !link.id || sqlite.prepare("SELECT student_id FROM service_links WHERE id=?").get(link.id).student_id === first.id));
+  current = { id: second.id, email: second.email };
+  const secondView = await (await servicesApi.GET()).json();
+  assert.equal(secondView.student.id, second.id);
+  assert.notDeepEqual(firstView.services.map((link) => link.id), secondView.services.map((link) => link.id));
+  const pending = sqlite.prepare("SELECT * FROM service_links WHERE student_id='S10902' AND qc_status='Pending' LIMIT 1").get();
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  const request = () => servicesApi.POST(new Request("https://test.local/api/student-services", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "qc_review", service_id: pending.id, decision: "Needs Correction", comment: "Submit the direct active service page." }) }));
+  assert.equal((await request()).status, 200);
+  const duplicate = await request();
+  assert.equal(duplicate.status, 400);
+  assert.match((await duplicate.json()).error, /already|UNIQUE/i);
+  assert.equal(sqlite.prepare("SELECT count(*) n FROM service_link_reviews WHERE service_link_id=? AND revision=?").get(pending.id,pending.revision).n,1);
+  current = { id: "owner", email: "owner@example.com" };
+});
+test("service QC and student identity lookups use their production indexes", () => {
+  const queuePlan = sqlite.prepare("EXPLAIN QUERY PLAN SELECT id FROM service_links WHERE qc_status=? ORDER BY updated_at").all("Pending");
+  assert.match(queuePlan.map((row) => row.detail).join(" "), /idx_service_links_qc_status/);
+  const emailPlan = sqlite.prepare("EXPLAIN QUERY PLAN SELECT id FROM students WHERE email IS NOT NULL AND trim(email)<>'' AND lower(email)=?").all("student@example.com");
+  assert.match(emailPlan.map((row) => row.detail).join(" "), /student_email_identity/);
+});
 test("signed automation rejects tampering and replays without duplicate execution", async () => {
   const { createHash, createHmac } = await import("node:crypto");
   globalThis.__testEnv.AUTOMATION_HMAC_SECRET =
@@ -1410,6 +1460,14 @@ test("encrypted database and evidence backup restores to a fresh isolated direct
     1001,
   );
   assert.equal(restored.prepare("PRAGMA foreign_key_check").all().length, 0);
+  assert.equal(
+    restored.prepare("SELECT count(*) n FROM service_links").get().n,
+    sqlite.prepare("SELECT count(*) n FROM service_links").get().n,
+  );
+  assert.equal(
+    restored.prepare("SELECT count(*) n FROM service_link_reviews").get().n,
+    sqlite.prepare("SELECT count(*) n FROM service_link_reviews").get().n,
+  );
   assert.throws(
     () => restored.exec("UPDATE audit_events SET action='tamper'"),
     /immutable/,

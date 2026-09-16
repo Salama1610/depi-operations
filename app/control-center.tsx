@@ -71,6 +71,21 @@ export function ControlCenter() {
         Connections are configured through protected deployment settings. Secret
         values are never shown here.
       </p>
+      <h3>Student roster readiness</h3>
+      <div className="mini-stats">
+        <span><strong>{data?.roster?.total ?? "—"}</strong>Total students</span>
+        <span><strong>{data?.roster?.active ?? "—"}</strong>Active students</span>
+        <span><strong>{data?.roster?.missing_email ?? "—"}</strong>Missing sign-in email</span>
+        <span><strong>{data?.roster?.duplicate_emails?.length ?? "—"}</strong>Duplicate emails</span>
+      </div>
+      {(data?.roster?.missing_email_rows?.length > 0 || data?.roster?.duplicate_emails?.length > 0) && (
+        <div className="info-box">
+          <strong>Roster corrections required before student launch</strong>
+          {data.roster.missing_email_rows.slice(0, 20).map((student: any) => <span key={student.id}>{student.id} · {student.name} · {student.group_id} · missing email</span>)}
+          {data.roster.duplicate_emails.slice(0, 20).map((row: any) => <span key={row.email}>{row.email} · {row.student_ids}</span>)}
+          {(data.roster.missing_email_rows.length > 20 || data.roster.duplicate_emails.length > 20) && <small>Only the first 20 rows in each category are shown. Correct the source roster and rerun import preview.</small>}
+        </div>
+      )}
       <button
         className="primary"
         disabled={busy || !data?.connections.backup_encryption}
@@ -196,6 +211,8 @@ export function ReportsPanel() {
           >
             Export group report
           </a>
+          <a className="small-btn" href={"/api/reports?dataset=service_links&format=csv&from=" + from + "&to=" + to}>Export service links CSV</a>
+          <a className="small-btn" href={"/api/reports?dataset=service_links&format=xlsx&from=" + from + "&to=" + to}>Export service links XLSX</a>
         </div>
         {error && <p role="alert">{error}</p>}
         {data && (
@@ -224,6 +241,20 @@ export function ReportsPanel() {
               accepted.
             </p>
             <p>{data.graduation_scenarios.description}</p>
+            <h3>Student service-link QC</h3>
+            <div className="mini-stats">
+              <span><strong>{data.service_links.submitted_percent}%</strong>Submitted</span>
+              <span><strong>{data.service_links.fully_approved_percent}%</strong>Fully approved</span>
+              <span><strong>{data.service_links.needs_correction_percent}%</strong>Need correction</span>
+              <span><strong>{data.service_links.average_qc_turnaround_hours ?? "—"}</strong>Average QC hours</span>
+              <span><strong>{data.service_links.automatic_failure_rate}%</strong>Automatic failures</span>
+              <span><strong>{data.service_links.average_revisions}</strong>Average revisions</span>
+            </div>
+            <div className="report-grid">
+              <div className="info-box"><strong>Students by submitted links</strong>{data.service_links.students_by_link_count.map((row: any) => <span key={row.count}>{row.count} links · {row.students} students</span>)}</div>
+              <div className="info-box"><strong>Platform distribution</strong>{Object.entries(data.service_links.platform_distribution).map(([platform, count]: any) => <span key={platform}>{platform} · {count}</span>)}</div>
+              <div className="info-box"><strong>Reviewer activity</strong>{Object.entries(data.service_links.reviewer_workload).map(([reviewer, count]: any) => <span key={reviewer}>{reviewer} · {count}</span>)}</div>
+            </div>
             <h3>Account capacity by platform</h3>
             {Object.entries(data.capacity).map(([platform, r]: any) => (
               <div className="info-box" key={platform}>

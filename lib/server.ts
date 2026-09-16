@@ -87,9 +87,12 @@ export async function actor() {
   return { ...u, roles: JSON.parse(u.roles), scopes: JSON.parse(u.scopes) };
 }
 export async function studentByIdentity(i: { id: string; email: string }) {
+  const byId = i.id
+    ? await stmt("SELECT s.*,g.track,g.provider,g.pathway,g.status group_status FROM students s JOIN groups g ON g.id=s.group_id WHERE s.id=?", i.id).first()
+    : null;
+  if (byId || !i.email) return byId as any;
   return (await stmt(
-    "SELECT s.*,g.track,g.provider,g.pathway,g.status group_status FROM students s JOIN groups g ON g.id=s.group_id WHERE (s.id=? OR lower(coalesce(s.email,''))=?)",
-    i.id,
+    "SELECT s.*,g.track,g.provider,g.pathway,g.status group_status FROM students s JOIN groups g ON g.id=s.group_id WHERE s.email IS NOT NULL AND trim(s.email)<>'' AND lower(s.email)=?",
     i.email,
   ).first()) as any;
 }
@@ -258,12 +261,31 @@ export async function loadData(u: any) {
     "Project Operations",
   ])
     ? await all(
-        `SELECT l.*,s.name student_name,s.email student_email,ss.status submission_status
+        `SELECT l.*,s.name student_name,s.email student_email,s.group_id,g.track,g.coordinator,
+                ss.status submission_status,ss.submitted_at submission_submitted_at,
+                ss.qc_completed_at,u.name reviewer_name,
+                (SELECT count(*) FROM service_link_reviews r WHERE r.service_link_id=l.id) correction_count
          FROM service_links l
          JOIN students s ON s.id=l.student_id
+         JOIN groups g ON g.id=s.group_id
          LEFT JOIN service_submissions ss ON ss.student_id=l.student_id
-         WHERE l.qc_status<>'Locked'
-         ORDER BY CASE WHEN l.qc_status='Needs Correction' THEN 0 ELSE 1 END,l.updated_at ASC`,
+         LEFT JOIN users u ON u.id=l.qc_actor
+         WHERE ${q.sql}
+         ORDER BY CASE WHEN l.qc_status='Needs Correction' THEN 0 WHEN l.qc_status='Pending' THEN 1 ELSE 2 END,l.updated_at ASC`,
+        ...q.args,
+      )
+    : [];
+  const serviceLinkReviews = serviceLinks.length
+    ? await all(
+        `SELECT r.*,l.student_id,l.slot,u.name reviewer_name
+         FROM service_link_reviews r
+         JOIN service_links l ON l.id=r.service_link_id
+         JOIN students s ON s.id=l.student_id
+         JOIN groups g ON g.id=s.group_id
+         JOIN users u ON u.id=r.reviewed_by
+         WHERE ${q.sql}
+         ORDER BY r.reviewed_at DESC LIMIT 2000`,
+        ...q.args,
       )
     : [];
   const policyMap = Object.fromEntries(
@@ -499,6 +521,7 @@ export async function loadData(u: any) {
     evidencePackages,
     evidencePackageItems,
     serviceLinks,
+    serviceLinkReviews,
     accounts: can(u.roles, [
       "Higher Board",
       "Project Operations",

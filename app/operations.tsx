@@ -292,6 +292,7 @@ export default function Operations({ module }: { module: string }) {
     [importRows, setImportRows] = useState<Row[]>([]),
     [preview, setPreview] = useState<Row | null>(null),
     [importId, setImportId] = useState(""),
+    [serviceFilters, setServiceFilters] = useState<Row>({ platform: "All", track: "All", group: "All", coordinator: "All", age: "All", automatic: "All", corrections: "All" }),
     [saved, setSaved] = useState<string[]>([]);
   async function refresh() {
     try {
@@ -323,6 +324,7 @@ export default function Operations({ module }: { module: string }) {
   const attendance: Row[] = d.attendance || [];
   const groupCoaches: Row[] = d.groupCoaches || [];
   const serviceLinks: Row[] = d.serviceLinks || [];
+  const serviceLinkReviews: Row[] = d.serviceLinkReviews || [];
   const openTasks = tasks.filter((t) => t.status === "Open");
   const overdue = openTasks.filter((t) => t.due < new Date().toISOString());
   const dueToday = openTasks.filter((t) => t.due.slice(0, 10) === today());
@@ -1515,6 +1517,21 @@ export default function Operations({ module }: { module: string }) {
       .filter(qMatch)
       .filter((e) => filter === "All" || e.status === filter)
       .sort((a, b) => a.stage_at.localeCompare(b.stage_at));
+    const serviceQueue = serviceLinks
+      .filter((r) => r.qc_status !== "Locked")
+      .filter(qMatch)
+      .filter((r) => serviceFilters.platform === "All" || r.platform === serviceFilters.platform)
+      .filter((r) => serviceFilters.track === "All" || r.track === serviceFilters.track)
+      .filter((r) => serviceFilters.group === "All" || r.group_id === serviceFilters.group)
+      .filter((r) => serviceFilters.coordinator === "All" || r.coordinator === serviceFilters.coordinator)
+      .filter((r) => serviceFilters.automatic === "All" || r.auto_status === serviceFilters.automatic)
+      .filter((r) => serviceFilters.corrections === "All" || (serviceFilters.corrections === "Repeated" ? Number(r.correction_count) > 1 : Number(r.correction_count) === Number(serviceFilters.corrections)))
+      .filter((r) => serviceFilters.age === "All" || Date.now() - Date.parse(r.updated_at) >= Number(serviceFilters.age) * 3600000);
+    const reviewerWorkload = Object.entries(serviceLinkReviews.reduce((out: Row, review: Row) => {
+      const key = review.reviewer_name || owner(review.reviewed_by);
+      out[key] = (out[key] || 0) + 1;
+      return out;
+    }, {})).sort((a: any, b: any) => b[1] - a[1]);
     content = (
       <>
         {module === "quality" && (
@@ -1523,21 +1540,33 @@ export default function Operations({ module }: { module: string }) {
               <span><strong>{serviceLinks.filter((r) => r.qc_status === "Pending").length}</strong>Awaiting QC</span>
               <span><strong>{serviceLinks.filter((r) => r.qc_status === "Needs Correction").length}</strong>Need student correction</span>
               <span><strong>{serviceLinks.filter((r) => r.auto_status === "Failed").length}</strong>Automatic check failed</span>
+              <span><strong>{serviceLinks.filter((r) => r.qc_status === "Pending" && Date.now() - Date.parse(r.updated_at) > 48 * 3600000).length}</strong>Past 48-hour SLA</span>
+            </div>
+            <div className="filter-row service-qc-filters">
+              <Pick label="Platform" value={serviceFilters.platform} onChange={(platform) => setServiceFilters({ ...serviceFilters, platform })} options={["All", "Kafiil", "Khamsat"]} />
+              <Pick label="Track" value={serviceFilters.track} onChange={(track) => setServiceFilters({ ...serviceFilters, track })} options={["All", ...Array.from(new Set(serviceLinks.map((r) => r.track).filter(Boolean)))]} />
+              <Pick label="Group" value={serviceFilters.group} onChange={(group) => setServiceFilters({ ...serviceFilters, group })} options={["All", ...Array.from(new Set(serviceLinks.map((r) => r.group_id).filter(Boolean)))]} />
+              <Pick label="Coordinator" value={serviceFilters.coordinator} onChange={(coordinator) => setServiceFilters({ ...serviceFilters, coordinator })} options={[{ value: "All", label: "All coordinators" }, ...Array.from(new Set(serviceLinks.map((r) => r.coordinator).filter(Boolean))).map((id) => ({ value: id, label: owner(id) }))]} />
+              <Pick label="Submission age" value={serviceFilters.age} onChange={(age) => setServiceFilters({ ...serviceFilters, age })} options={[{ value: "All", label: "Any age" }, { value: "24", label: "24+ hours" }, { value: "48", label: "48+ hours" }, { value: "168", label: "7+ days" }]} />
+              <Pick label="Automatic check" value={serviceFilters.automatic} onChange={(automatic) => setServiceFilters({ ...serviceFilters, automatic })} options={["All", "Needs Review", "Failed"]} />
+              <Pick label="Corrections" value={serviceFilters.corrections} onChange={(corrections) => setServiceFilters({ ...serviceFilters, corrections })} options={[{ value: "All", label: "Any revision" }, { value: "0", label: "No prior review" }, { value: "1", label: "One review" }, { value: "Repeated", label: "Repeated corrections" }]} />
             </div>
             {panel(
-              "Student service-link verification",
-              generic(
-                serviceLinks.filter(qMatch),
+              `Student service-link verification · ${serviceQueue.length} matching`,
+              paginate(serviceQueue, (pageRows) => generic(
+                pageRows,
                 [
                   { key: "student_name", label: "Student", render: (r) => <span><strong>{r.student_name}</strong><small className="table-subline">{r.student_id}</small></span> },
                   { key: "slot", label: "Slot", render: (r) => `Service ${r.slot}` },
                   { key: "url", label: "Link", render: (r) => <a className="text-link" href={r.url} target="_blank" rel="noreferrer">{r.platform} <ExternalLink size={14} /></a> },
                   { key: "auto_status", label: "Automatic check", render: (r) => <Badge value={r.auto_status} /> },
-                  { key: "qc_status", label: "QC state", render: (r) => <Badge value={r.qc_status} /> },
+                  { key: "reviewer_name", label: "Assigned", render: (r) => r.reviewer_name || "Unassigned" },
+                  { key: "qc_status", label: "QC state", render: (r) => <span><Badge value={r.qc_status} /><small className="table-subline">{Math.round((Date.now() - Date.parse(r.updated_at)) / 3600000)}h · revision {r.revision}</small></span> },
                 ],
-                (r) => <button className="small-btn" onClick={() => open("service_qc_review", { ...r, service_id: r.id, student_id: r.student_id, decision: r.qc_status === "Needs Correction" ? "Lock" : "" })}>Review</button>,
-              ),
+                (r) => <div className="detail-actions">{!r.qc_actor && can(user.roles, ["Quality Member", "Quality Lead"]) && <button className="small-btn" onClick={() => quick("service_qc_claim", { service_id: r.id })}>Claim</button>}<button className="small-btn" onClick={() => open("service_qc_review", { ...r, service_id: r.id, student_id: r.student_id, decision: r.qc_status === "Needs Correction" ? "Lock" : "" })}>Review</button>{r.qc_status === "Pending" && r.auto_status !== "Failed" && <button className="small-btn" onClick={() => window.confirm("Lock every format-passing pending link for this student after you have checked each page?") && quick("service_qc_lock_student", { student_id: r.student_id })}>Lock passing links</button>}</div>,
+              )),
             )}
+            {panel("QC reviewer activity", reviewerWorkload.length ? <div className="mini-stats">{reviewerWorkload.map(([reviewer, count]: any) => <span key={reviewer}><strong>{count}</strong>{reviewer}</span>)}</div> : <Empty title="No service-link reviews yet" />)}
           </>
         )}
         <div className="mini-stats">
@@ -2368,6 +2397,7 @@ export default function Operations({ module }: { module: string }) {
                     "tasks",
                     "sessions",
                     "gigs",
+                    "services",
                     "evidence",
                     "accounts",
                     "cases",
@@ -2468,6 +2498,7 @@ export default function Operations({ module }: { module: string }) {
                   "tasks",
                   "sessions",
                   "gigs",
+                  "services",
                   "evidence",
                   "accounts",
                   "cases",
@@ -2513,6 +2544,22 @@ export default function Operations({ module }: { module: string }) {
                               </article>
                             ))
                         )}
+                      </div>
+                    ) : tab === "services" ? (
+                      <div className="history">
+                        {serviceLinks.filter((link) => link.student_id === selectedStudent.id).length === 0 ? (
+                          <Empty title="No service links submitted" text="The student has not submitted service links yet." />
+                        ) : serviceLinks.filter((link) => link.student_id === selectedStudent.id).map((link) => (
+                          <article key={link.id}>
+                            <div className="detail-actions"><Badge value={`Service ${link.slot}`} /><Badge value={link.qc_status} /><Badge value={link.auto_status} /></div>
+                            <h3><a className="text-link" href={link.url} target="_blank" rel="noreferrer">{link.platform} <ExternalLink size={14} /></a></h3>
+                            <p>{(() => { try { return JSON.parse(link.auto_result || "{}").message; } catch { return "Automatic details unavailable."; } })()}</p>
+                            <small>Revision {link.revision} · submitted {new Date(link.submitted_at).toLocaleString()}{link.qc_at ? ` · reviewed ${new Date(link.qc_at).toLocaleString()} by ${link.reviewer_name || owner(link.qc_actor)}` : ""}</small>
+                            {serviceLinkReviews.filter((review) => review.service_link_id === link.id).map((review) => (
+                              <div className="info-box" key={review.id}><Badge value={review.decision} /><span>{review.comment}</span><small>{new Date(review.reviewed_at).toLocaleString()} · {review.reviewer_name}</small></div>
+                            ))}
+                          </article>
+                        ))}
                       </div>
                     ) : tab === "evidence" ? (
                       generic(
@@ -2672,8 +2719,11 @@ export default function Operations({ module }: { module: string }) {
                         label: g.id + " · " + g.name,
                       })),
                     )}
-                    {field("email", "Email", "email", false)}
+                    {field("email", "ChatGPT sign-in email", "email")}
                     {field("phone", "Phone", "tel", false)}
+                    {choice("lifecycle", "Lifecycle", ["Active", "Paused", "Transferred", "Withdrawn", "Removed", "Graduate Closed", "Non-Graduate Closed"], false)}
+                    {choice("engagement", "Engagement", ["Active", "At Risk", "Critical", "Unresponsive"], false)}
+                    {field("coaching", "Coaching status", "text", false)}
                   </>
                 );
               if (a === "group")
@@ -3178,10 +3228,30 @@ export default function Operations({ module }: { module: string }) {
                       <span>Automatic check: <Badge value={modal!.auto_status} /></span>
                       <small>{modal!.platform} · revision {modal!.revision}</small>
                     </div>
+                    {(() => {
+                      try {
+                        const automatic = JSON.parse(modal!.auto_result || "{}");
+                        return <div className="info-box"><strong>{automatic.message}</strong>{(automatic.checks || []).map((check: string) => <small key={check}>{check}</small>)}</div>;
+                      } catch { return null; }
+                    })()}
                     {choice("decision", "QC decision", ["Lock", "Needs Correction"])}
+                    {form.decision === "Needs Correction" && (
+                      <Pick
+                        label="Correction template"
+                        value=""
+                        onChange={(comment) => setForm({ ...form, comment })}
+                        options={[
+                          { value: "The link does not open the submitted service page. Send the direct public service URL.", label: "Direct link required" },
+                          { value: "The service owner could not be matched to your student record. Confirm the seller profile and resubmit.", label: "Owner mismatch" },
+                          { value: "The service is unavailable, paused or deleted. Submit an active public service.", label: "Service unavailable" },
+                          { value: "The service category or title does not match your assigned track. Submit a track-relevant service.", label: "Track mismatch" },
+                        ]}
+                      />
+                    )}
                     {field("comment", "QC comment / correction guidance", "text", form.decision === "Needs Correction")}
+                    {form.decision === "Lock" && modal!.auto_status === "Failed" && field("override_reason", "Quality Lead override reason")}
                     <p className="footnote">
-                      Lock only when the service page is correct and belongs to the student. A correction comment is required when the link is rejected.
+                      Lock only when the service page is active, correct, track-relevant and belongs to the student. Automatic failures require a Quality Lead override with a recorded reason.
                     </p>
                   </>
                 );

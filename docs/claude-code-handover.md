@@ -40,7 +40,8 @@ The active workspace is intentionally populated with synthetic pilot data. Never
 15. Private byte-validated screenshots, authenticated no-store reads, encrypted database/evidence backup and offline restore verification.
 16. Retention-policy recording without automatic deletion, connection status and recovery controls.
 17. Admin-only synthetic pilot loader that works only on an empty operational workspace, preserves the existing owner/effective policy, is retry-safe and refuses mixed live/synthetic data.
-18. Student service portal with exactly three service-link slots, automatic URL/marketplace checks, per-link QC locking, correction comments, editable rejected links only, and immutable QC review history.
+18. Student service portal with exactly three service-link slots, strict Kafiil/Khamsat URL checks, confirmation and recoverable drafts, per-link QC locking, correction comments, editable rejected links only, timestamps, immutable review history and identity isolation.
+19. Service-link QC assignment, filters, pagination, SLA reminders, correction templates, Quality Lead overrides, Student 360 visibility, reporting/export, roster health, and backup/restore coverage.
 
 ## Core workflows
 
@@ -89,7 +90,7 @@ node --experimental-strip-types --test tests/*.test.mjs
 node /root/.codex/plugins/cache/openai-curated-remote/sites/0.1.62/scripts/build-site.mjs
 ```
 
-All 33 tests, lint, TypeScript and the bounded production Worker build must pass before publishing. The portable commands are `npm run lint`, `npm run typecheck`, `npm run build`, and then `npm run test:all`. Do not modify already-applied migration files; generate an additive migration for schema changes.
+All 38 tests, lint, TypeScript and the bounded production Worker build must pass before publishing. The portable commands are `npm run lint`, `npm run typecheck`, `npm run build`, and then `npm run test:all`. Do not modify already-applied migration files; generate an additive migration for schema changes.
 
 ## Deployment notes
 

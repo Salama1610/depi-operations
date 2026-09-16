@@ -23,6 +23,8 @@ The initializing owner receives Project Operations and Operations Systems / Admi
 ## Working features
 
 - Responsive operations overview, complete program flow, work queues, student directory/360, groups, sessions, accounts, gigs, evidence, Quality, cases, reports and administration.
+- Student service-link portal with identity-linked ChatGPT sign-in, confirmed three-link submission, recoverable device drafts, strict Kafiil/Khamsat URL rules, per-link correction/locking, review history and timestamps.
+- Service-link QC filters, assignment, pagination, SLA reminders, Quality Lead overrides, Student 360 history, operational metrics, exports, roster-health reporting and backup/restore coverage.
 - Coach Operations session control with Regular (8) and Industry (5) delivery plans, policy-locked 180-minute duration, onboarded coach assignment, Cairo-day conflict prevention, coach confirmation, reasoned reschedule/cancellation, attendance completion, delivery notes and SLA/coverage dashboards.
 - Identity from trusted hosting dispatch; backend staff role and assigned-group checks; students access `/student` through their registered email without self-registration.
 - Screenshot-backed contact logging, next actions, valid-contact compliance and risk recommendations.
@@ -48,6 +50,8 @@ The initializing owner receives Project Operations and Operations Systems / Admi
 - AES-GCM encrypted database/evidence export and an offline recovery verifier; local restore drill passed.
 
 These features need protected connection settings to run against real services. They have not been activated or published.
+
+The service-link operating rules, student/QC procedures, roster import process, role matrix, incident response, launch checklist and UAT template are in `docs/service-link-launch-pack.md`.
 
 ## Organization-owned activation inputs
 

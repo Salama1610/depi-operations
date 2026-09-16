@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `service_link_review_revision` ON `service_link_reviews` (`service_link_id`,`revision`);

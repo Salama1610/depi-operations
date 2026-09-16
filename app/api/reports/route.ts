@@ -18,17 +18,19 @@ export async function GET(req: Request) {
         to: q.get("to"),
         format,
       }).run();
+      const rows = q.get("dataset") === "service_links" ? data.service_links.groups : data.groups;
+      const filename = q.get("dataset") === "service_links" ? "depi-service-link-report" : "depi-group-report";
       return new Response(
         format === "xlsx"
-          ? (toXLSX(data.groups).buffer as ArrayBuffer)
-          : toCSV(data.groups),
+          ? (toXLSX(rows).buffer as ArrayBuffer)
+          : toCSV(rows),
         {
           headers: {
             "Content-Type":
               format === "xlsx"
                 ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 : "text/csv",
-            "Content-Disposition": `attachment; filename="depi-group-report.${format === "xlsx" ? "xlsx" : "csv"}"`,
+            "Content-Disposition": `attachment; filename="${filename}.${format === "xlsx" ? "xlsx" : "csv"}"`,
             "Cache-Control": "private,no-store",
           },
         },
