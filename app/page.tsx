@@ -1,6 +1,7 @@
 import Operations from './operations';
 import StudentServicesPage from './student/page';
-import { getChatGPTUser } from './chatgpt-auth';
+import { redirect } from 'next/navigation';
+import { getSupabaseUser } from '@/lib/supabase/server';
 import { actor, identity, stmt, studentByIdentity } from '@/lib/server';
 export const dynamic = "force-dynamic";
 
@@ -21,14 +22,14 @@ function AccessGate({ email }: { email?: string }) {
           <p>
             {signedIn
               ? `${email} is signed in, but it is not linked to an active student or staff record. Ask the program administrator to add this exact email.`
-              : "Use the ChatGPT account whose email is registered in the DEPI student or staff roster."}
+              : "Use the Supabase account whose email is registered in the DEPI student or staff roster."}
           </p>
         </div>
         <div className="student-actions">
           {signedIn ? (
-            <a className="student-secondary" href="/signout-with-chatgpt?return_to=/" target="_top">Use another account</a>
+            <a className="student-secondary" href="/api/auth/logout">Use another account</a>
           ) : (
-            <a className="student-primary" href="/signin-with-chatgpt?return_to=/" target="_top">Sign in with ChatGPT</a>
+            <a className="student-primary" href="/login">Sign in</a>
           )}
         </div>
       </section>
@@ -37,8 +38,8 @@ function AccessGate({ email }: { email?: string }) {
 }
 
 export default async function Page(){
-  const chatGPTUser = await getChatGPTUser();
-  if (!chatGPTUser) return <AccessGate />;
+  const authUser = await getSupabaseUser();
+  if (!authUser) redirect("/login");
 
   let destination: "student" | "staff" | "denied" = "denied";
   try {
@@ -53,5 +54,5 @@ export default async function Page(){
 
   if (destination === "student") return <StudentServicesPage />;
   if (destination === "staff") return <Operations module="home"/>;
-  return <AccessGate email={chatGPTUser.email} />;
+  return <AccessGate email={authUser.email} />;
 }

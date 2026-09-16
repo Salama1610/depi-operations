@@ -12,7 +12,7 @@ The active workspace is intentionally populated with synthetic pilot data. Never
 
 - Next/Vinext application compiled to a Cloudflare Worker.
 - Managed D1 relational database plus private R2 evidence storage.
-- Trusted ChatGPT hosting identity; students are linked server-side by their registered email (no application passwords).
+- Supabase Auth with server-validated cookie sessions; students are linked server-side by their registered email.
 - Main UI: `app/operations.tsx` and `app/program-flow.tsx`.
 - Operations API: `app/api/operations/route.ts`.
 - Program lifecycle API: `app/api/program/route.ts`.

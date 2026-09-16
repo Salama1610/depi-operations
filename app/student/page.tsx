@@ -125,7 +125,7 @@ export default function StudentServicesPage() {
           <span className="brand-mark">D↗</span>
           <span><strong>DEPI</strong><small>Student services</small></span>
         </a>
-        <a className="student-signout" href="/signout-with-chatgpt?return_to=/student" target="_top">Sign out</a>
+        <a className="student-signout" href="/api/auth/logout">Sign out</a>
       </header>
 
       {loading ? (
@@ -135,7 +135,7 @@ export default function StudentServicesPage() {
           <ShieldCheck size={24} />
           <div><h1>Student sign-in required</h1><p>{error}</p></div>
           <div className="student-actions">
-            <a className="student-primary" href="/signin-with-chatgpt?return_to=/student" target="_top">Continue with ChatGPT</a>
+            <a className="student-primary" href="/login">Sign in</a>
             <button className="student-secondary" onClick={refresh}>Try again</button>
           </div>
         </section>

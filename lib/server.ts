@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { headers } from "next/headers";
+import { getSupabaseUser } from "./supabase/server";
 import {
   ensure,
   can,
@@ -54,24 +54,14 @@ export async function rateLimit(
     await stmt("DELETE FROM rate_limits WHERE expires_at<?", now()).run();
 }
 export async function identity() {
-  const h = await headers();
-  const email = (h.get("oai-authenticated-user-email") || "")
-      .trim()
-      .toLowerCase(),
-    forwardedId = (h.get("oai-authenticated-user-id") || "").trim();
-  ensure(forwardedId || email, "Sign in with your staff account to continue.");
-  const encodedName = h.get("oai-authenticated-user-full-name");
-  let name = email || "Workspace owner";
-  if (
-    encodedName &&
-    h.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-  ) {
-    try {
-      name = decodeURIComponent(encodedName);
-    } catch {}
-  }
-  return { id: forwardedId || "email:" + email, email, name };
+  const user = await getSupabaseUser();
+  ensure(user?.id && user.email, "Sign in with your DEPI account to continue.");
+  const email = user.email.trim().toLowerCase();
+  const name =
+    (typeof user.user_metadata?.full_name === "string" && user.user_metadata.full_name.trim()) ||
+    (typeof user.user_metadata?.name === "string" && user.user_metadata.name.trim()) ||
+    email;
+  return { id: user.id, email, name };
 }
 export async function actor() {
   const i = await identity();

@@ -16,17 +16,21 @@ The hosted application uses managed D1 relational storage and a private R2 bucke
 
 ## Initial use
 
-Open the private Site while signed in and choose a blank production workspace or the synthetic pilot. An administrator can also append the pilot later from Administration, but only while the production workspace still has no operational footprint. The guarded, retry-safe pilot keeps the existing owner and effective policy, then creates 1,000 synthetic students, 40 groups, 1,000 tasks, role-specific staff profiles, 40 sessions and 20 controlled-account metadata records. Representative synthetic records cover intake, attendance, account reservation/allocation, gigs, review stages, rejection correction, graduation, certification, outcomes, withdrawals, cases, reporting, retention and notifications. Fifteen tiny private PNG fixtures make proof links testable. Everything remains visibly labelled synthetic.
+Open the Site, sign in with Supabase, and choose a blank production workspace or the synthetic pilot. An administrator can also append the pilot later from Administration, but only while the production workspace still has no operational footprint. The guarded, retry-safe pilot keeps the existing owner and effective policy, then creates 1,000 synthetic students, 40 groups, 1,000 tasks, role-specific staff profiles, 40 sessions and 20 controlled-account metadata records. Representative synthetic records cover intake, attendance, account reservation/allocation, gigs, review stages, rejection correction, graduation, certification, outcomes, withdrawals, cases, reporting, retention and notifications. Fifteen tiny private PNG fixtures make proof links testable. Everything remains visibly labelled synthetic.
 
-The initializing owner receives Project Operations and Operations Systems / Admin roles. Quality and Higher Board powers are not silently granted. Add or explicitly modify staff access in Administration, with a reason. Example staff addresses end in `example.invalid` and cannot be used as real accounts. Access remains owner-private at the hosting layer until explicitly shared. App staff membership does not itself broaden the Site audience.
+The initializing owner receives Project Operations and Operations Systems / Admin roles. Quality and Higher Board powers are not silently granted. Add or explicitly modify staff access in Administration, with a reason. Example staff addresses end in `example.invalid` and cannot be used as real accounts. App staff membership is checked separately from Supabase authentication.
+
+## Supabase authentication setup
+
+Create the authorized staff and student users in Supabase Auth, then configure `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` in the hosted Site environment. Add `https://depi-coaching-operations.abdelrhman-shoman62.chatgpt.site/auth/callback` to the Supabase redirect allowlist for password recovery. Each Supabase user email must exactly match one active staff or student record; self-registration is intentionally disabled.
 
 ## Working features
 
 - Responsive operations overview, complete program flow, work queues, student directory/360, groups, sessions, accounts, gigs, evidence, Quality, cases, reports and administration.
-- Student service-link portal with identity-linked ChatGPT sign-in, confirmed three-link submission, recoverable device drafts, strict Kafiil/Khamsat URL rules, per-link correction/locking, review history and timestamps.
+- Student service-link portal with Supabase email/password sign-in, server-validated cookie sessions, password reset, confirmed three-link submission, recoverable device drafts, strict Kafiil/Khamsat URL rules, per-link correction/locking, review history and timestamps.
 - Service-link QC filters, assignment, pagination, SLA reminders, Quality Lead overrides, Student 360 history, operational metrics, exports, roster-health reporting and backup/restore coverage.
 - Coach Operations session control with Regular (8) and Industry (5) delivery plans, policy-locked 180-minute duration, onboarded coach assignment, Cairo-day conflict prevention, coach confirmation, reasoned reschedule/cancellation, attendance completion, delivery notes and SLA/coverage dashboards.
-- Identity from trusted hosting dispatch; backend staff role and assigned-group checks; students access `/student` through their registered email without self-registration.
+- Identity from Supabase Auth; backend staff role and assigned-group checks; students access `/student` through their registered email without self-registration.
 - Screenshot-backed contact logging, next actions, valid-contact compliance and risk recommendations.
 - Private image storage, byte-signature checks, 8 MB upload limit, hashes, authorized file delivery and upload audit.
 - Account request/allocation with database-enforced duplicate student/group use and concurrent eligibility protection.

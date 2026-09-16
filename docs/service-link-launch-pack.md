@@ -2,7 +2,7 @@
 
 ## Approved operating baseline
 
-- Authentication: ChatGPT sign-in only. A student is authorized when the verified sign-in email matches exactly one active student record. Shared usernames and passwords, including `student1 / 123456`, are prohibited.
+- Authentication: Supabase email/password sign-in. A student is authorized when the verified Supabase email matches exactly one active student record. Shared usernames and passwords, including `student1 / 123456`, are prohibited.
 - Accepted platforms: Kafiil and Khamsat only.
 - Links: direct public HTTPS service-page URLs only. Shorteners, embedded credentials, custom ports, fragments, and non-marketplace hosts fail automatically. Query strings are removed before duplicate comparison.
 - Kafiil format: `/service/<numeric-id>-<Arabic-or-English-slug>`.
@@ -14,7 +14,7 @@
 
 ## Student SOP
 
-1. Sign in with the ChatGPT account whose email was registered by the program team.
+1. Sign in with the Supabase account whose email was registered by the program team.
 2. Open the Student services page and add exactly three direct Kafiil or Khamsat service URLs.
 3. Review the normalized links in the confirmation dialog and submit them. Pending links are read-only.
 4. Check the QC updates section. Approved links remain locked. A returned link shows the correction reason and becomes editable.

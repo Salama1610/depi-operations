@@ -294,7 +294,7 @@ export async function POST(req: Request) {
             row: i + 2,
             field: "email",
             value: row.email,
-            error: "A valid student email is required for ChatGPT sign-in",
+            error: "A valid student email is required for Supabase sign-in",
             expected: "Unique email address",
           });
         if (

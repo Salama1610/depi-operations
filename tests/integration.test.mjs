@@ -16,6 +16,24 @@ for (const file of fs
   .sort())
   sqlite.exec(fs.readFileSync("drizzle/" + file, "utf8"));
 let current = { id: "owner", email: "owner@example.com" };
+globalThis.__testSupabaseUser = () => ({
+  id: current.id,
+  email: current.email,
+  user_metadata: { full_name: current.email },
+});
+const supabaseAuthMock = {
+  name: "test-supabase-auth",
+  setup(build) {
+    build.onResolve({ filter: /supabase\/server$/ }, () => ({
+      path: "supabase-server",
+      namespace: "auth-mock",
+    }));
+    build.onLoad({ filter: /.*/, namespace: "auth-mock" }, () => ({
+      contents: "export const getSupabaseUser=async()=>globalThis.__testSupabaseUser()",
+      loader: "js",
+    }));
+  },
+};
 const query = (sql, args = []) => ({
   sql,
   args,
@@ -64,6 +82,7 @@ await build({
   format: "esm",
   outfile: join(testDirectory, "operations.mjs"),
   plugins: [
+    supabaseAuthMock,
     {
       name: "test-bindings",
       setup(b) {
@@ -90,6 +109,7 @@ await build({
   format: "esm",
   outfile: join(testDirectory, "program.mjs"),
   plugins: [
+    supabaseAuthMock,
     {
       name: "test-bindings",
       setup(b) {
@@ -116,6 +136,7 @@ await build({
   format: "esm",
   outfile: join(testDirectory, "import.mjs"),
   plugins: [
+    supabaseAuthMock,
     {
       name: "test-bindings",
       setup(b) {
@@ -402,8 +423,8 @@ test("full seeded backend workflow and permission gates", async () => {
   );
   assert.throws(() => sqlite.exec("DELETE FROM evidence_reviews"), /immutable/);
 });
-test("verified hosted email recovers identity when the user-id header is absent", async () => {
-  current = { id: "", email: "owner@example.com" };
+test("verified Supabase email recovers staff identity when the auth id changes", async () => {
+  current = { id: "supabase-new-id", email: "owner@example.com" };
   const data = await (await api.GET()).json();
   assert.equal(data.user.email, "owner@example.com");
   assert.equal(data.error, undefined);
@@ -1179,6 +1200,7 @@ async function route(name) {
     format: "esm",
     outfile: output,
     plugins: [
+      supabaseAuthMock,
       {
         name: "test-bindings",
         setup(b) {

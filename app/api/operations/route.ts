@@ -439,7 +439,7 @@ export async function POST(req: Request) {
           );
         }
         const email = String(x.email || "").trim().toLowerCase();
-        ensure(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email), "A valid student email is required for ChatGPT sign-in.");
+        ensure(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email), "A valid student email is required for Supabase sign-in.");
         ensure(
           !(await stmt("SELECT id FROM students WHERE email IS NOT NULL AND trim(email)<>'' AND lower(email)=?", email).first()),
           "This student email is already linked to another record.",

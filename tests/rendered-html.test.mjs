@@ -35,7 +35,7 @@ test("renders development preview metadata", async () => {
   });
   const { default: worker } = await import(pathToFileURL(outfile).href);
 
-  const response = await worker.fetch(
+  const rootResponse = await worker.fetch(
     new Request("http://localhost/", {
       headers: { accept: "text/html" },
     }),
@@ -50,6 +50,22 @@ test("renders development preview metadata", async () => {
     },
   );
 
+  assert.equal(rootResponse.status, 307);
+  assert.equal(new URL(rootResponse.headers.get("location"), "http://localhost").pathname, "/login");
+  const response = await worker.fetch(
+    new Request("http://localhost/login", {
+      headers: { accept: "text/html" },
+    }),
+    {
+      ASSETS: {
+        fetch: async () => new Response("Not found", { status: 404 }),
+      },
+    },
+    {
+      waitUntil() {},
+      passThroughOnException() {},
+    },
+  );
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
   assert.match(await response.text(), developmentPreviewMeta);

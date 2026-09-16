@@ -2063,8 +2063,8 @@ export default function Operations({ module }: { module: string }) {
               <button className="primary" onClick={refresh}>
                 Try again
               </button>
-              <a href="/signin-with-chatgpt?return_to=/" target="_top">
-                Sign in with ChatGPT
+              <a href="/login">
+                Sign in
               </a>
             </div>
           ) : loading ? (
@@ -2719,7 +2719,7 @@ export default function Operations({ module }: { module: string }) {
                         label: g.id + " · " + g.name,
                       })),
                     )}
-                    {field("email", "ChatGPT sign-in email", "email")}
+                    {field("email", "Supabase sign-in email", "email")}
                     {field("phone", "Phone", "tel", false)}
                     {choice("lifecycle", "Lifecycle", ["Active", "Paused", "Transferred", "Withdrawn", "Removed", "Graduate Closed", "Non-Graduate Closed"], false)}
                     {choice("engagement", "Engagement", ["Active", "At Risk", "Critical", "Unresponsive"], false)}
