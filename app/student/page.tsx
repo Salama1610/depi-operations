@@ -26,6 +26,16 @@ function statusTone(status?: string) {
   return "student-status pending";
 }
 
+/**
+ * The service endpoint reports identity problems and unexpected failures
+ * through the same channel, so the error screen decides its heading from the
+ * message. Showing "sign in" for a database fault sends the student to a page
+ * that cannot help them.
+ */
+function needsSignIn(message: string) {
+  return /sign in|not been linked|no longer be updated|staff workspace/i.test(message);
+}
+
 export default function StudentServicesPage() {
   const [student, setStudent] = useState<{ id: string; name: string; email?: string } | null>(null);
   const [services, setServices] = useState<Service[]>(empty());
@@ -133,10 +143,13 @@ export default function StudentServicesPage() {
       ) : error ? (
         <section className="student-card student-error" role="alert">
           <ShieldCheck size={24} />
-          <div><h1>Student sign-in required</h1><p>{error}</p></div>
+          <div>
+            <h1>{needsSignIn(error) ? "Student sign-in required" : "We could not load your service links"}</h1>
+            <p>{error}</p>
+          </div>
           <div className="student-actions">
-            <a className="student-primary" href="/login">Sign in</a>
-            <button className="student-secondary" onClick={refresh}>Try again</button>
+            {needsSignIn(error) ? <a className="student-primary" href="/login">Sign in</a> : null}
+            <button className={needsSignIn(error) ? "student-secondary" : "student-primary"} onClick={refresh}>Try again</button>
           </div>
         </section>
       ) : (
