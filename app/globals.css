@@ -444,3 +444,48 @@ input:focus-visible {
   min-height: 30px;
   max-width: 180px;
 }
+
+/* Secondary text under a table cell's main value stacks instead of running on. */
+.table-subline {
+  display: block;
+  font-size: 10px;
+  color: #94a2b7;
+  font-weight: 400;
+  margin-top: 3px;
+  white-space: nowrap;
+}
+/* Row actions inside a table must not inherit the page-level 22px margins. */
+.panel td .detail-actions {
+  margin: 0;
+  flex-wrap: nowrap;
+}
+/* Thirteen navigation entries fit without a hidden scroll on a 900px screen. */
+.app-sidebar [data-slot="sidebar-header"] {
+  padding: 22px 20px 6px;
+  gap: 16px;
+}
+.app-sidebar [data-slot="sidebar-menu-button"] {
+  height: 36px;
+  padding: 8px 12px;
+}
+.app-sidebar [data-slot="sidebar-menu"] {
+  gap: 2px;
+}
+.app-sidebar [data-slot="sidebar-group"] {
+  padding: 8px 12px;
+}
+.app-sidebar [data-slot="sidebar-footer"] {
+  padding: 10px 18px 16px;
+}
+.staff-only {
+  margin-bottom: 10px;
+}
+.student-submission-meta > span {
+  font-size: 12px;
+  color: #8c9bb1;
+}
+.badge.muted {
+  color: #8a94a5;
+  background: #eef1f5;
+  border: 1px dashed #d5dbe5;
+}

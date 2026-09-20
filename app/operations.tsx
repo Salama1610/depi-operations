@@ -1615,8 +1615,7 @@ export default function Operations({ module }: { module: string }) {
               { key: "group_id", label: "Group", render: (r) => <span>{r.group_id}<small className="table-subline">{r.track}</small></span> },
               { key: "coordinator", label: "Coordinator", render: (r) => owner(r.coordinator) },
               { key: "follow_up", label: "Follow-up", render: (r) => <Badge value={r.follow_up} /> },
-              { key: "links_submitted", label: "Links", render: (r) => `${r.links_locked}/3 locked · ${r.links_submitted} submitted` },
-              { key: "submitted_at", label: "Submitted", render: (r) => (r.submitted_at ? new Date(r.submitted_at).toLocaleDateString() : "Never") },
+              { key: "links_submitted", label: "Locked", render: (r) => <span>{r.links_locked}/3<small className="table-subline">{r.submitted_at ? `${r.links_submitted} submitted ${new Date(r.submitted_at).toLocaleDateString()}` : "never submitted"}</small></span> },
             ],
             (r) => <div className="detail-actions"><button className="small-btn" onClick={() => setSelected(students.find((x) => x.id === r.student_id) || null)}>Open student</button></div>,
           )),
@@ -1627,7 +1626,6 @@ export default function Operations({ module }: { module: string }) {
       <>
         {module === "quality" && (
           <>
-            {submissionPanel}
             {canReviewServiceLinks && (
             <>
             <div className="mini-stats service-qc-stats">
@@ -1681,6 +1679,7 @@ export default function Operations({ module }: { module: string }) {
             {panel("QC reviewer activity", reviewerWorkload.length ? <div className="mini-stats">{reviewerWorkload.map(([reviewer, count]: any) => <span key={reviewer}><strong>{count}</strong>{reviewer}</span>)}</div> : <Empty title="No service-link reviews yet" />)}
             </>
             )}
+            {submissionPanel}
           </>
         )}
         <div className="mini-stats">
@@ -1891,7 +1890,7 @@ export default function Operations({ module }: { module: string }) {
             generic(
               staff,
               [
-                { key: "name", label: "Staff member" },
+                { key: "name", label: "Staff member", render: (r) => <span>{r.name}{(r.active === 0 || r.active === false) && <small className="table-subline"><span className="badge muted">{String(r.id).startsWith("system-unassigned") ? "Placeholder · cannot sign in" : "Inactive"}</span></small>}</span> },
                 { key: "email", label: "Email" },
                 {
                   key: "roles",

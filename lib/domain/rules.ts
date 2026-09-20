@@ -130,18 +130,24 @@ export function risk(
   const reasons: string[] = [];
   let status = "Active";
   const lag = expectedMilestone(week, p) - s.milestone;
+  // A student nobody has contacted yet is overdue only once the contact window
+  // has passed since they joined; before that there is nothing to be late on.
+  // A record with no join date keeps the strict reading.
+  const window = p.contactDays * 86400000;
+  const joined = s.created_at ? Date.parse(s.created_at) : NaN;
+  const contactOverdue = s.last_contact
+    ? Date.now() - Date.parse(s.last_contact) > window
+    : !(Number.isFinite(joined) && Date.now() - joined <= window);
   if (
     (attendance !== null && attendance < p.riskAttendance) ||
-    !s.last_contact ||
-    Date.now() - Date.parse(s.last_contact) > p.contactDays * 86400000 ||
+    contactOverdue ||
     lag >= p.journeyDelayedLag
   ) {
     status = "At Risk";
     if (attendance !== null && attendance < p.riskAttendance)
       reasons.push(`Attendance ${attendance}%`);
     if (
-      !s.last_contact ||
-      Date.now() - Date.parse(s.last_contact) > p.contactDays * 86400000
+      contactOverdue
     )
       reasons.push(`No valid contact in ${p.contactDays} days`);
     if (lag >= p.journeyDelayedLag)

@@ -209,8 +209,16 @@ export default function StudentServicesPage() {
               {error && <p className="student-form-error" role="alert">{error}</p>}
               {saved && <p className="student-saved"><Check size={17} /> Saved. The QC team can now review your links.</p>}
               <div className="student-form-footer">
-                <span>{editable.length === 0 ? "All links are locked." : `${editable.length} link${editable.length === 1 ? "" : "s"} can be updated.`}</span>
-                <button className="student-primary" disabled={!ready || busy} type="submit"><Send size={16} />{busy ? "Submitting…" : submission ? "Resubmit editable links" : "Submit 3 links"}</button>
+                <span>
+                  {!submission
+                    ? "Add all three links, then submit them together."
+                    : editable.length > 0
+                      ? `${editable.length} link${editable.length === 1 ? "" : "s"} can be updated.`
+                      : lockedCount === 3
+                        ? "All three links are locked. Nothing more is needed."
+                        : "Your links are with the QC team. Nothing can be changed until they respond."}
+                </span>
+                <button className="student-primary" disabled={!ready || busy || (Boolean(submission) && editable.length === 0)} type="submit"><Send size={16} />{busy ? "Submitting…" : submission ? "Resubmit editable links" : "Submit 3 links"}</button>
               </div>
             </form>
           </section>
