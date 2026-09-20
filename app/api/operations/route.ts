@@ -125,7 +125,13 @@ export async function GET() {
       ).first();
       return Response.json({ setup: true, importedRoster: Boolean(roster?.n) });
     }
-    return Response.json(await loadData(await actor()));
+    const data: any = await loadData(await actor());
+    // Server-side callers (reports, policy checks) use the per-student policy
+    // copy; the browser never does. 2,887 copies of it were 1.6 MB of the
+    // response, so it is stripped at the boundary along with the evidence copy.
+    for (const s of data.students) delete s.policy;
+    for (const e of data.evidence) delete e.applied_policy;
+    return Response.json(data);
   } catch (e: any) {
     return Response.json({ error: e.message }, { status: 403 });
   }

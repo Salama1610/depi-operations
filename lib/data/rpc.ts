@@ -211,10 +211,39 @@ export function createRpcDatabase(caller: StatementCaller, options: { columnType
 
   const skipped = (): D1Result => ({ results: [], success: true, meta: { changes: 0 } });
 
+  // Reads issued in the same tick, as `Promise.all` does, travel in one call.
+  // Every HTTPS round trip to the database costs the same few hundred
+  // milliseconds whatever it carries, so twelve concurrent SELECTs become one
+  // request instead of twelve. Only row-producing statements are pooled: a
+  // write keeps its own call so its failure cannot be blamed on a neighbour.
+  let pooled: { statement: RpcStatement; resolve: (r: RpcStatementResult) => void; reject: (e: unknown) => void }[] = [];
+  let flushScheduled = false;
+  const flushPool = async () => {
+    const batch = pooled;
+    pooled = [];
+    flushScheduled = false;
+    try {
+      const results = await caller(batch.map((entry) => entry.statement));
+      batch.forEach((entry, index) => entry.resolve(results[index]));
+    } catch (error) {
+      for (const entry of batch) entry.reject(error);
+    }
+  };
+  const pool = (statement: RpcStatement) =>
+    new Promise<RpcStatementResult>((resolve, reject) => {
+      pooled.push({ statement, resolve, reject });
+      if (!flushScheduled) {
+        flushScheduled = true;
+        setTimeout(flushPool, 0);
+      }
+    });
+
   const executeMany = async (items: BoundStatement[]): Promise<D1Result[]> => {
     const prepared = items.map((item) => prepareStatement(item.text, item.params));
     const active = prepared.filter((statement): statement is RpcStatement => statement !== null);
-    const executed = active.length ? await caller(active) : [];
+    let executed: RpcStatementResult[] = [];
+    if (active.length === 1 && items.length === 1 && active[0].mode === "rows") executed = [await pool(active[0])];
+    else if (active.length) executed = await caller(active);
     let cursor = 0;
     return prepared.map((statement) => (statement === null ? skipped() : toResult(executed[cursor++])));
   };

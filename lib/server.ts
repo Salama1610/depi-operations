@@ -193,20 +193,28 @@ export async function recalc(sid: string) {
 }
 export async function loadData(u: any) {
   const q = scopeSql(u);
-  const groups = await all(
-    `SELECT g.*,c.name coordinator_name,s.name supervisor_name,h.name coach_name,m.name account_manager_name FROM groups g JOIN users c ON c.id=g.coordinator JOIN users s ON s.id=g.supervisor JOIN users h ON h.id=g.coach LEFT JOIN users m ON m.id=g.account_manager WHERE ${q.sql}`,
-    ...q.args,
-  );
-  const students = await all(
-    `SELECT s.*,g.track,g.provider,g.pathway,g.start_date,g.policy_id,g.coordinator,g.supervisor,g.coach,c.name coordinator_name FROM students s JOIN groups g ON g.id=s.group_id JOIN users c ON c.id=g.coordinator WHERE ${q.sql}`,
-    ...q.args,
-  );
+  // Every independent read is issued at once. Over the HTTPS transport the
+  // adapter coalesces concurrent reads into a single round trip, so this block
+  // costs one request instead of the dozen sequential stages it replaced.
   const scoped = (table: string) =>
     all(
       `SELECT t.* FROM ${table} t JOIN students s ON s.id=t.student_id JOIN groups g ON g.id=s.group_id WHERE ${q.sql}`,
       ...q.args,
     );
+  const none = Promise.resolve([] as any[]);
+  const qualityScope = can(u.roles, ["Quality Member", "Quality Lead", "Project Operations"]);
+  const coverageScope = can(u.roles, [
+    "Quality Member",
+    "Quality Lead",
+    "Project Operations",
+    "Operations Coordinator",
+    "Team Supervisor",
+    "Higher Board",
+  ]);
+  const broad = can(u.roles, ["Project Operations", "Operations Systems / Admin"]);
   const [
+    groups,
+    students,
     tasks,
     contacts,
     gigs,
@@ -215,25 +223,50 @@ export async function loadData(u: any) {
     requests,
     attendance,
     cases,
-  ] = await Promise.all(
-    [
-      "tasks",
-      "contacts",
-      "gigs",
-      "evidence",
-      "attachments",
-      "account_requests",
-      "attendance",
-    ]
-      .map(scoped)
-      .concat([
-        all(
-          `SELECT t.* FROM cases t LEFT JOIN students s ON s.id=t.student_id LEFT JOIN groups g ON g.id=s.group_id WHERE t.student_id IS NULL OR ${q.sql}`,
-          ...q.args,
-        ),
-      ]),
-  );
-  const [reviews, sessions, groupCoaches, p, fxApplications] = await Promise.all([
+    reviews,
+    sessions,
+    groupCoaches,
+    p,
+    fxApplications,
+    serviceLinks,
+    serviceSubmissionStatus,
+    serviceLinkReviews,
+    logs,
+    initializedRows,
+    tracks,
+    taskBank,
+    savedViews,
+    gates,
+    statusEvents,
+    caseEvents,
+    attachmentContexts,
+    fxRates,
+    reservations,
+    creditLedger,
+    evidencePackages,
+    evidencePackageItems,
+    accounts,
+    staff,
+  ] = await Promise.all([
+    all(
+      `SELECT g.*,c.name coordinator_name,s.name supervisor_name,h.name coach_name,m.name account_manager_name FROM groups g JOIN users c ON c.id=g.coordinator JOIN users s ON s.id=g.supervisor JOIN users h ON h.id=g.coach LEFT JOIN users m ON m.id=g.account_manager WHERE ${q.sql}`,
+      ...q.args,
+    ),
+    all(
+      `SELECT s.*,g.track,g.provider,g.pathway,g.start_date,g.policy_id,g.coordinator,g.supervisor,g.coach,c.name coordinator_name FROM students s JOIN groups g ON g.id=s.group_id JOIN users c ON c.id=g.coordinator WHERE ${q.sql}`,
+      ...q.args,
+    ),
+    scoped("tasks"),
+    scoped("contacts"),
+    scoped("gigs"),
+    scoped("evidence"),
+    scoped("attachments"),
+    scoped("account_requests"),
+    scoped("attendance"),
+    all(
+      `SELECT t.* FROM cases t LEFT JOIN students s ON s.id=t.student_id LEFT JOIN groups g ON g.id=s.group_id WHERE t.student_id IS NULL OR ${q.sql}`,
+      ...q.args,
+    ),
     all(
       `SELECT r.* FROM evidence_reviews r JOIN evidence e ON e.id=r.evidence_id JOIN students s ON s.id=e.student_id JOIN groups g ON g.id=s.group_id WHERE ${q.sql}`,
       ...q.args,
@@ -251,75 +284,116 @@ export async function loadData(u: any) {
       `SELECT x.* FROM gig_fx_applications x JOIN gigs z ON z.id=x.gig_id JOIN students s ON s.id=z.student_id JOIN groups g ON g.id=s.group_id WHERE ${q.sql}`,
       ...q.args,
     ),
+    qualityScope
+      ? all(
+          `SELECT l.*,s.name student_name,s.email student_email,s.group_id,g.track,g.coordinator,
+                  ss.status submission_status,ss.submitted_at submission_submitted_at,
+                  ss.qc_completed_at,u.name reviewer_name,
+                  (SELECT count(*) FROM service_link_reviews r WHERE r.service_link_id=l.id) correction_count
+           FROM service_links l
+           JOIN students s ON s.id=l.student_id
+           JOIN groups g ON g.id=s.group_id
+           LEFT JOIN service_submissions ss ON ss.student_id=l.student_id
+           LEFT JOIN users u ON u.id=l.qc_actor
+           WHERE ${q.sql}
+           ORDER BY CASE WHEN l.qc_status='Needs Correction' THEN 0 WHEN l.qc_status='Pending' THEN 1 ELSE 2 END,l.updated_at ASC`,
+          ...q.args,
+        )
+      : none,
+    // Every scoped student with their service-link position, including those
+    // who have submitted nothing, so coordinators can chase non-submitters.
+    coverageScope
+      ? all(
+          `SELECT s.id student_id,s.name student_name,s.group_id,s.lifecycle,
+                  g.track,g.coordinator,c.name coordinator_name,
+                  ifnull(ss.status,'Not submitted') submission_status,
+                  ss.submitted_at,ss.updated_at submission_updated_at,ss.qc_completed_at,
+                  ifnull(agg.total,0) links_submitted,
+                  ifnull(agg.locked,0) links_locked,
+                  ifnull(agg.needs_correction,0) links_need_correction,
+                  ifnull(agg.pending,0) links_pending,
+                  ifnull(agg.failed,0) links_failed
+           FROM students s
+           JOIN groups g ON g.id=s.group_id
+           JOIN users c ON c.id=g.coordinator
+           LEFT JOIN service_submissions ss ON ss.student_id=s.id
+           LEFT JOIN (SELECT student_id,count(*) total,
+                             sum(CASE WHEN qc_status='Locked' THEN 1 ELSE 0 END) locked,
+                             sum(CASE WHEN qc_status='Needs Correction' THEN 1 ELSE 0 END) needs_correction,
+                             sum(CASE WHEN qc_status='Pending' THEN 1 ELSE 0 END) pending,
+                             sum(CASE WHEN auto_status='Failed' THEN 1 ELSE 0 END) failed
+                      FROM service_links GROUP BY student_id) agg ON agg.student_id=s.id
+           WHERE ${q.sql}`,
+          ...q.args,
+        )
+      : none,
+    qualityScope
+      ? all(
+          `SELECT r.*,l.student_id,l.slot,u.name reviewer_name
+           FROM service_link_reviews r
+           JOIN service_links l ON l.id=r.service_link_id
+           JOIN students s ON s.id=l.student_id
+           JOIN groups g ON g.id=s.group_id
+           JOIN users u ON u.id=r.reviewed_by
+           WHERE ${q.sql}
+           ORDER BY r.reviewed_at DESC LIMIT 2000`,
+          ...q.args,
+        )
+      : none,
+    broad
+      ? all("SELECT * FROM audit_events ORDER BY created_at DESC LIMIT 200")
+      : all("SELECT * FROM audit_events WHERE actor=? ORDER BY created_at DESC LIMIT 100", u.id),
+    all(
+      "SELECT value FROM audit_events WHERE action IN ('Workspace initialized with 1,000 synthetic students','Blank production workspace initialized') ORDER BY CASE WHEN action='Workspace initialized with 1,000 synthetic students' THEN 0 ELSE 1 END,created_at DESC LIMIT 1",
+    ),
+    all("SELECT * FROM tracks WHERE active=1 ORDER BY name"),
+    all("SELECT * FROM task_bank WHERE active=1 ORDER BY track,title"),
+    all("SELECT * FROM saved_views WHERE user_id=? ORDER BY created_at DESC", u.id),
+    all(
+      `SELECT x.* FROM group_gate_checks x JOIN groups g ON g.id=x.group_id WHERE ${q.sql}`,
+      ...q.args,
+    ),
+    all(
+      `SELECT x.* FROM student_status_events x JOIN students s ON s.id=x.student_id JOIN groups g ON g.id=s.group_id WHERE ${q.sql} ORDER BY x.created_at DESC LIMIT 500`,
+      ...q.args,
+    ),
+    all(
+      `SELECT x.* FROM case_events x JOIN cases c ON c.id=x.case_id LEFT JOIN students s ON s.id=c.student_id LEFT JOIN groups g ON g.id=s.group_id WHERE c.student_id IS NULL OR ${q.sql} ORDER BY x.created_at DESC LIMIT 500`,
+      ...q.args,
+    ),
+    all(
+      `SELECT x.* FROM attachment_context x JOIN groups g ON g.id=x.group_id WHERE ${q.sql}`,
+      ...q.args,
+    ),
+    can(u.roles, ["Project Operations", "Operations Systems / Admin", "Quality Lead"])
+      ? all("SELECT * FROM fx_rates ORDER BY effective_date DESC")
+      : none,
+    can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin"])
+      ? all("SELECT * FROM account_reservations ORDER BY created_at DESC")
+      : none,
+    can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin"])
+      ? all("SELECT * FROM account_credit_ledger ORDER BY created_at DESC LIMIT 1000")
+      : none,
+    all(
+      `SELECT x.* FROM evidence_packages x JOIN evidence e ON e.id=x.evidence_id JOIN students s ON s.id=e.student_id JOIN groups g ON g.id=s.group_id WHERE ${q.sql} ORDER BY x.created_at DESC`,
+      ...q.args,
+    ),
+    all(
+      `SELECT x.* FROM evidence_package_items x JOIN evidence_packages p ON p.id=x.package_id JOIN evidence e ON e.id=p.evidence_id JOIN students s ON s.id=e.student_id JOIN groups g ON g.id=s.group_id WHERE ${q.sql} ORDER BY x.created_at`,
+      ...q.args,
+    ),
+    can(u.roles, [
+      "Higher Board",
+      "Project Operations",
+      "Operations Systems / Admin",
+    ]) ? all("SELECT id,label,platform,status,credits FROM accounts") : none,
+    all("SELECT id,name,email,roles,scopes,active FROM users"),
   ]);
-  const serviceLinks = can(u.roles, [
-    "Quality Member",
-    "Quality Lead",
-    "Project Operations",
-  ])
-    ? await all(
-        `SELECT l.*,s.name student_name,s.email student_email,s.group_id,g.track,g.coordinator,
-                ss.status submission_status,ss.submitted_at submission_submitted_at,
-                ss.qc_completed_at,u.name reviewer_name,
-                (SELECT count(*) FROM service_link_reviews r WHERE r.service_link_id=l.id) correction_count
-         FROM service_links l
-         JOIN students s ON s.id=l.student_id
-         JOIN groups g ON g.id=s.group_id
-         LEFT JOIN service_submissions ss ON ss.student_id=l.student_id
-         LEFT JOIN users u ON u.id=l.qc_actor
-         WHERE ${q.sql}
-         ORDER BY CASE WHEN l.qc_status='Needs Correction' THEN 0 WHEN l.qc_status='Pending' THEN 1 ELSE 2 END,l.updated_at ASC`,
-        ...q.args,
-      )
-    : [];
-  // Every scoped student with their service-link position, including the ones
-  // who have submitted nothing. Coordinators and supervisors see this to chase
-  // non-submitters; QC sees it to know how much work is still coming.
-  const serviceSubmissionStatus = can(u.roles, [
-    "Quality Member",
-    "Quality Lead",
-    "Project Operations",
-    "Operations Coordinator",
-    "Team Supervisor",
-    "Higher Board",
-  ])
-    ? await all(
-        `SELECT s.id student_id,s.name student_name,s.email student_email,s.group_id,s.lifecycle,
-                g.track,g.provider,g.coordinator,c.name coordinator_name,
-                ifnull(ss.status,'Not submitted') submission_status,
-                ss.submitted_at,ss.updated_at submission_updated_at,ss.qc_completed_at,
-                ifnull(agg.total,0) links_submitted,
-                ifnull(agg.locked,0) links_locked,
-                ifnull(agg.needs_correction,0) links_need_correction,
-                ifnull(agg.pending,0) links_pending,
-                ifnull(agg.failed,0) links_failed
-         FROM students s
-         JOIN groups g ON g.id=s.group_id
-         JOIN users c ON c.id=g.coordinator
-         LEFT JOIN service_submissions ss ON ss.student_id=s.id
-         LEFT JOIN (SELECT student_id,count(*) total,
-                           sum(CASE WHEN qc_status='Locked' THEN 1 ELSE 0 END) locked,
-                           sum(CASE WHEN qc_status='Needs Correction' THEN 1 ELSE 0 END) needs_correction,
-                           sum(CASE WHEN qc_status='Pending' THEN 1 ELSE 0 END) pending,
-                           sum(CASE WHEN auto_status='Failed' THEN 1 ELSE 0 END) failed
-                    FROM service_links GROUP BY student_id) agg ON agg.student_id=s.id
-         WHERE ${q.sql}`,
-        ...q.args,
-      )
-    : [];
-  const serviceLinkReviews = serviceLinks.length
-    ? await all(
-        `SELECT r.*,l.student_id,l.slot,u.name reviewer_name
-         FROM service_link_reviews r
-         JOIN service_links l ON l.id=r.service_link_id
-         JOIN students s ON s.id=l.student_id
-         JOIN groups g ON g.id=s.group_id
-         JOIN users u ON u.id=r.reviewed_by
-         WHERE ${q.sql}
-         ORDER BY r.reviewed_at DESC LIMIT 2000`,
-        ...q.args,
-      )
-    : [];
+  const initialized: any = initializedRows[0];
+  let workspaceMode = "production";
+  try {
+    workspaceMode = JSON.parse(initialized?.value || "{}").synthetic ? "demo" : "production";
+  } catch {}
   const policyMap = Object.fromEntries(
     p.map((p) => [p.id, JSON.parse(p.config)]),
   );
@@ -351,11 +425,16 @@ export async function loadData(u: any) {
   for (const s of students) {
     const group = groupMap.get(s.group_id);
     s.policy = policyMap[group.policy_id];
-    s.contact_due =
-      s.lifecycle === "Active" &&
-      (!s.last_contact ||
-        Date.now() - Date.parse(s.last_contact) >
-          s.policy.contactDays * 86400000);
+    {
+      // Same first-contact window as risk(): nobody is late on a contact
+      // inside contactDays of joining.
+      const window = s.policy.contactDays * 86400000;
+      const joined = s.created_at ? Date.parse(s.created_at) : NaN;
+      const overdue = s.last_contact
+        ? Date.now() - Date.parse(s.last_contact) > window
+        : !(Number.isFinite(joined) && Date.now() - joined <= window);
+      s.contact_due = s.lifecycle === "Active" && overdue;
+    }
     s.week = Math.max(
       0,
       Math.min(
@@ -436,93 +515,6 @@ export async function loadData(u: any) {
           ? `${Math.abs(lag).toFixed(1)} milestones ahead of expectation`
           : `At the Week ${g.week} expected milestone`;
   }
-  const broad = can(u.roles, [
-    "Project Operations",
-    "Operations Systems / Admin",
-  ]);
-  const logs = broad
-    ? await all("SELECT * FROM audit_events ORDER BY created_at DESC LIMIT 200")
-    : await all(
-        "SELECT * FROM audit_events WHERE actor=? ORDER BY created_at DESC LIMIT 100",
-        u.id,
-      );
-  const initialized: any = await stmt(
-    "SELECT value FROM audit_events WHERE action IN ('Workspace initialized with 1,000 synthetic students','Blank production workspace initialized') ORDER BY CASE WHEN action='Workspace initialized with 1,000 synthetic students' THEN 0 ELSE 1 END,created_at DESC LIMIT 1",
-  ).first();
-  let workspaceMode = "production";
-  try {
-    workspaceMode = JSON.parse(initialized?.value || "{}").synthetic
-      ? "demo"
-      : "production";
-  } catch {}
-  const [
-    tracks,
-    taskBank,
-    savedViews,
-    gates,
-    statusEvents,
-    caseEvents,
-    attachmentContexts,
-    fxRates,
-    reservations,
-    creditLedger,
-    evidencePackages,
-    evidencePackageItems,
-  ] = await Promise.all([
-    all("SELECT * FROM tracks WHERE active=1 ORDER BY name"),
-    all("SELECT * FROM task_bank WHERE active=1 ORDER BY track,title"),
-    all(
-      "SELECT * FROM saved_views WHERE user_id=? ORDER BY created_at DESC",
-      u.id,
-    ),
-    all(
-      `SELECT x.* FROM group_gate_checks x JOIN groups g ON g.id=x.group_id WHERE ${q.sql}`,
-      ...q.args,
-    ),
-    all(
-      `SELECT x.* FROM student_status_events x JOIN students s ON s.id=x.student_id JOIN groups g ON g.id=s.group_id WHERE ${q.sql} ORDER BY x.created_at DESC LIMIT 500`,
-      ...q.args,
-    ),
-    all(
-      `SELECT x.* FROM case_events x JOIN cases c ON c.id=x.case_id LEFT JOIN students s ON s.id=c.student_id LEFT JOIN groups g ON g.id=s.group_id WHERE c.student_id IS NULL OR ${q.sql} ORDER BY x.created_at DESC LIMIT 500`,
-      ...q.args,
-    ),
-    all(
-      `SELECT x.* FROM attachment_context x JOIN groups g ON g.id=x.group_id WHERE ${q.sql}`,
-      ...q.args,
-    ),
-    can(u.roles, [
-      "Project Operations",
-      "Operations Systems / Admin",
-      "Quality Lead",
-    ])
-      ? all("SELECT * FROM fx_rates ORDER BY effective_date DESC")
-      : Promise.resolve([]),
-    can(u.roles, [
-      "Higher Board",
-      "Project Operations",
-      "Operations Systems / Admin",
-    ])
-      ? all("SELECT * FROM account_reservations ORDER BY created_at DESC")
-      : Promise.resolve([]),
-    can(u.roles, [
-      "Higher Board",
-      "Project Operations",
-      "Operations Systems / Admin",
-    ])
-      ? all(
-          "SELECT * FROM account_credit_ledger ORDER BY created_at DESC LIMIT 1000",
-        )
-      : Promise.resolve([]),
-    all(
-      `SELECT x.* FROM evidence_packages x JOIN evidence e ON e.id=x.evidence_id JOIN students s ON s.id=e.student_id JOIN groups g ON g.id=s.group_id WHERE ${q.sql} ORDER BY x.created_at DESC`,
-      ...q.args,
-    ),
-    all(
-      `SELECT x.* FROM evidence_package_items x JOIN evidence_packages p ON p.id=x.package_id JOIN evidence e ON e.id=p.evidence_id JOIN students s ON s.id=e.student_id JOIN groups g ON g.id=s.group_id WHERE ${q.sql} ORDER BY x.created_at`,
-      ...q.args,
-    ),
-  ]);
   return {
     user: u,
     workspaceMode,
@@ -555,14 +547,8 @@ export async function loadData(u: any) {
     serviceLinks,
     serviceLinkReviews,
     serviceSubmissionStatus,
-    accounts: can(u.roles, [
-      "Higher Board",
-      "Project Operations",
-      "Operations Systems / Admin",
-    ])
-      ? await all("SELECT id,label,platform,status,credits FROM accounts")
-      : [],
-    staff: await all("SELECT id,name,email,roles,scopes,active FROM users"),
+    accounts,
+    staff,
     policies: p,
     audit: logs,
     roles,
