@@ -151,6 +151,10 @@ export function createRpcCaller(supabaseUrl: string, serviceRoleKey: string, opt
           Authorization: "Bearer " + serviceRoleKey,
           "Content-Type": "application/json",
           Accept: "application/json",
+          // A full workspace load is several megabytes of JSON that gzips
+          // about eight to one, and the transfer was most of the wait. Both
+          // runtimes decode the body transparently.
+          "Accept-Encoding": "gzip",
           Prefer: "params=single-object",
         },
         body: JSON.stringify({ statements }),

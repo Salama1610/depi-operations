@@ -191,8 +191,12 @@ export async function recalc(sid: string) {
   ).run();
   return result;
 }
+/** Where the last workspace load spent its time, for the Server-Timing header. */
+export const loadTimings: Record<string, number> = {};
+
 export async function loadData(u: any) {
   const q = scopeSql(u);
+  const loadStarted = Date.now();
   // Every independent read is issued at once. Over the HTTPS transport the
   // adapter coalesces concurrent reads into a single round trip, so this block
   // costs one request instead of the dozen sequential stages it replaced.
@@ -300,12 +304,13 @@ export async function loadData(u: any) {
           ...q.args,
         )
       : none,
-    // Every scoped student with their service-link position, including those
-    // who have submitted nothing, so coordinators can chase non-submitters.
+    // Every scoped student's service-link position, including those who have
+    // submitted nothing, so coordinators can chase non-submitters. Only the
+    // counts travel: name, group and coordinator are joined in the browser
+    // from the student list it already holds.
     coverageScope
       ? all(
-          `SELECT s.id student_id,s.name student_name,s.group_id,s.lifecycle,
-                  g.track,g.coordinator,c.name coordinator_name,
+          `SELECT s.id student_id,
                   ifnull(ss.status,'Not submitted') submission_status,
                   ss.submitted_at,ss.updated_at submission_updated_at,ss.qc_completed_at,
                   ifnull(agg.total,0) links_submitted,
@@ -315,7 +320,6 @@ export async function loadData(u: any) {
                   ifnull(agg.failed,0) links_failed
            FROM students s
            JOIN groups g ON g.id=s.group_id
-           JOIN users c ON c.id=g.coordinator
            LEFT JOIN service_submissions ss ON ss.student_id=s.id
            LEFT JOIN (SELECT student_id,count(*) total,
                              sum(CASE WHEN qc_status='Locked' THEN 1 ELSE 0 END) locked,
@@ -389,6 +393,7 @@ export async function loadData(u: any) {
     ]) ? all("SELECT id,label,platform,status,credits FROM accounts") : none,
     all("SELECT id,name,email,roles,scopes,active FROM users"),
   ]);
+  loadTimings.db = Date.now() - loadStarted;
   const initialized: any = initializedRows[0];
   let workspaceMode = "production";
   try {
@@ -515,6 +520,7 @@ export async function loadData(u: any) {
           ? `${Math.abs(lag).toFixed(1)} milestones ahead of expectation`
           : `At the Week ${g.week} expected milestone`;
   }
+  loadTimings.enrich = Date.now() - loadStarted - loadTimings.db;
   return {
     user: u,
     workspaceMode,

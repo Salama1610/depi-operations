@@ -1,6 +1,7 @@
 import { policyChecks } from "@/lib/automation";
 import { distributeEvenly, spread } from "@/lib/domain/qc-assignment";
 import {
+  loadTimings,
   actor,
   identity,
   stmt,
@@ -112,26 +113,74 @@ async function validateSessionSlot(x: any, excludeId?: string) {
   );
   return { startsAt, day, week, duration };
 }
-export async function GET() {
+/**
+ * The workspace payload is a few megabytes of JSON that shrinks more than ten
+ * times under gzip. Cloudflare compresses at the edge in production, but the
+ * development server does not, and the difference between 4 MB and 0.3 MB on
+ * the wire is the difference between a page that feels broken and one that
+ * feels quick. Server-Timing reports where the time went so the next slowness
+ * can be measured rather than guessed.
+ */
+async function jsonResponse(data: unknown, req: Request | undefined, timings: Record<string, number>) {
+  const started = Date.now();
+  const text = JSON.stringify(data);
+  timings.serialize = Date.now() - started;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Cache-Control": "private, no-store",
+    "Server-Timing": Object.entries(timings)
+      .map(([name, ms]) => `${name};dur=${ms}`)
+      .join(", "),
+  };
+  const accepts = req?.headers.get("accept-encoding") ?? "";
+  if (/gzip/.test(accepts) && typeof CompressionStream === "function") {
+    const stream = new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"));
+    headers["Content-Encoding"] = "gzip";
+    headers["Vary"] = "Accept-Encoding";
+    return new Response(stream, { headers });
+  }
+  return new Response(text, { headers });
+}
+
+export async function GET(req?: Request) {
   try {
-    await identity();
-    if (
-      !(await stmt(
-        "SELECT count(*) n FROM users WHERE id NOT LIKE 'system-unassigned-%'",
-      ).first<any>())?.n
-    ) {
-      const roster: any = await stmt(
-        "SELECT count(*) n FROM roster_imports",
-      ).first();
-      return Response.json({ setup: true, importedRoster: Boolean(roster?.n) });
+    const timings: Record<string, number> = {};
+    let mark = Date.now();
+    const lap = (name: string) => {
+      timings[name] = Date.now() - mark;
+      mark = Date.now();
+    };
+    const i = await identity();
+    lap("identity");
+    // A signed-in staff record proves the workspace is initialized, so the
+    // setup check only runs when no such record exists. That removes one
+    // database round trip from every ordinary request.
+    let u: any;
+    try {
+      u = await actor();
+    } catch (error) {
+      if (
+        !(await stmt(
+          "SELECT count(*) n FROM users WHERE id NOT LIKE 'system-unassigned-%'",
+        ).first<any>())?.n
+      ) {
+        const roster: any = await stmt("SELECT count(*) n FROM roster_imports").first();
+        return Response.json({ setup: true, importedRoster: Boolean(roster?.n) });
+      }
+      throw error;
     }
-    const data: any = await loadData(await actor());
+    void i;
+    lap("actor");
+    const data: any = await loadData(u);
+    lap("load");
+    timings.db = loadTimings.db;
+    timings.enrich = loadTimings.enrich;
     // Server-side callers (reports, policy checks) use the per-student policy
     // copy; the browser never does. 2,887 copies of it were 1.6 MB of the
     // response, so it is stripped at the boundary along with the evidence copy.
     for (const s of data.students) delete s.policy;
     for (const e of data.evidence) delete e.applied_policy;
-    return Response.json(data);
+    return jsonResponse(data, req, timings);
   } catch (e: any) {
     return Response.json({ error: e.message }, { status: 403 });
   }

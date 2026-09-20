@@ -282,7 +282,32 @@ function saveBlob(bytes: any, name: string, type: string) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
-export default function Operations({ module }: { module: string }) {
+/** The module a path points at: "/" is the overview, "/students" is students. */
+function moduleFromPath(pathname: string) {
+  const segment = pathname.replace(/^\/+|\/+$/g, "").split("/")[0];
+  return segment && nav.some(([id]) => id === segment) ? segment : "home";
+}
+
+export default function Operations({ module: initialModule }: { module: string }) {
+  // Which module is showing is client state, not a route. The sidebar used to
+  // be plain links, so every click reloaded the page and re-fetched the whole
+  // workspace. Now a click changes the address bar and this state; the data
+  // already in memory is reused, and a fresh load happens only on a real
+  // reload. Back and forward still work through popstate.
+  const [module, setModule] = useState(initialModule);
+  useEffect(() => {
+    const onPop = () => setModule(moduleFromPath(window.location.pathname));
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  function goTo(id: string, event?: React.MouseEvent) {
+    if (event && (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0)) return;
+    event?.preventDefault();
+    const href = id === "home" ? "/" : "/" + id;
+    if (window.location.pathname !== href) window.history.pushState(null, "", href);
+    setModule(id);
+    window.scrollTo({ top: 0 });
+  }
   const [data, setData] = useState<Row | null>(null),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true),
@@ -334,7 +359,13 @@ export default function Operations({ module }: { module: string }) {
   const groupCoaches: Row[] = d.groupCoaches || [];
   const serviceLinks: Row[] = d.serviceLinks || [];
   const serviceLinkReviews: Row[] = d.serviceLinkReviews || [];
-  const serviceSubmissionStatus: Row[] = d.serviceSubmissionStatus || [];
+  // The server sends only per-student counts; identity fields come from the
+  // student list already in memory, so the same facts are not shipped twice.
+  const studentsById = new Map<string, Row>((d.students || []).map((s: Row) => [s.id, s]));
+  const serviceSubmissionStatus: Row[] = (d.serviceSubmissionStatus || []).map((r: Row) => {
+    const s = studentsById.get(r.student_id) || {};
+    return { ...r, student_name: s.name, group_id: s.group_id, lifecycle: s.lifecycle, track: s.track, coordinator: s.coordinator, coordinator_name: s.coordinator_name };
+  });
   const openTasks = tasks.filter((t) => t.status === "Open");
   const overdue = openTasks.filter((t) => t.due < new Date().toISOString());
   const dueToday = openTasks.filter((t) => t.due.slice(0, 10) === today());
@@ -586,7 +617,12 @@ export default function Operations({ module }: { module: string }) {
     </div>
   );
   function routeQueue(q: string) {
-    window.location.assign("/work?queue=" + encodeURIComponent(q));
+    // Same in-page switch as the sidebar, carrying the queue as state.
+    window.history.pushState(null, "", "/work?queue=" + encodeURIComponent(q));
+    setFilter(q);
+    setSearch("");
+    setModule("work");
+    window.scrollTo({ top: 0 });
   }
   useEffect(() => {
     const p = new URLSearchParams(window.location.search),
@@ -1160,8 +1196,11 @@ export default function Operations({ module }: { module: string }) {
                 <button
                   className="group-link"
                   onClick={() => {
-                    window.location.href = "/students?queue=All";
-                    sessionStorage.setItem("depi-group-search", g.id);
+                    window.history.pushState(null, "", "/students?queue=All");
+                    setFilter("All");
+                    setSearch(g.id);
+                    setModule("students");
+                    window.scrollTo({ top: 0 });
                   }}
                 >
                   Open student group <ArrowRight size={16} />
@@ -2083,7 +2122,7 @@ export default function Operations({ module }: { module: string }) {
               {shownNav.map(([id, label, Icon]) => (
                 <SidebarMenuItem key={id}>
                   <SidebarMenuButton asChild isActive={module === id}>
-                    <a href={id === "home" ? "/" : "/" + id}>
+                    <a href={id === "home" ? "/" : "/" + id} onClick={(event) => goTo(id, event)}>
                       <Icon />
                       <span>{label}</span>
                       {id === "work" && overdue.length > 0 && (
