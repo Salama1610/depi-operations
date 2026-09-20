@@ -38,11 +38,12 @@ export default function LoginForm({ configured }: { configured: boolean }) {
     <main className="auth-shell">
       <section className="auth-story" aria-label="DEPI Round 5">
         <a className="auth-brand" href="/login" aria-label="DEPI sign in">
-          <span className="brand-mark">D↗</span>
+          {/* eslint-disable-next-line @next/next/no-img-element -- a static local logo; the Worker build does not run the image optimizer */}
+          <img className="auth-logo" src="/brand/logo-white.png" alt="Freelance Yard" width={176} height={80} />
           <span><strong>DEPI</strong><small>Round 5 operations</small></span>
         </a>
         <div className="auth-story-copy">
-          <span className="auth-kicker">COACHING & FREELANCING OPERATIONS</span>
+          <span className="auth-kicker">COACHING &amp; FREELANCING OPERATIONS</span>
           <h1>One secure workspace for every student outcome.</h1>
           <p>Students submit service links. Quality teams review them. Operations staff keep the full journey accountable.</p>
         </div>
@@ -52,7 +53,8 @@ export default function LoginForm({ configured }: { configured: boolean }) {
       <section className="auth-form-panel">
         <div className="auth-form-wrap">
           <div className="auth-form-heading">
-            <span className="auth-icon"><LockKeyhole size={22} /></span>
+{/* eslint-disable-next-line @next/next/no-img-element -- a static local logo; the Worker build does not run the image optimizer */}
+            <img className="auth-cobrand" src="/brand/cobrand.png" alt="Digital Egypt Pioneers Initiative and Freelance Yard" width={216} height={120} />
             <h2>{mode === "login" ? "Welcome back" : "Reset your password"}</h2>
             <p>{mode === "login" ? "Sign in with the email registered in your DEPI roster." : "We’ll send a secure reset link to your registered email."}</p>
           </div>

@@ -2096,7 +2096,7 @@ export default function Operations({ module: initialModule }: { module: string }
         <SidebarHeader>
           <a className="brand" href="/">
             {/* eslint-disable-next-line @next/next/no-img-element -- a static local logo; the Worker build does not run the image optimizer */}
-            <img className="brand-logo" src="/brand/logo.png" alt="Freelance Yard" width={160} height={34} />
+            <img className="brand-mark-img" src="/brand/mark.png" alt="" width={38} height={38} />
             <div>
               <strong>
                 DEPI<span>operations</span>
@@ -2234,7 +2234,7 @@ export default function Operations({ module: initialModule }: { module: string }
           ) : d.setup ? (
             <div className="setup panel">
               {/* eslint-disable-next-line @next/next/no-img-element -- a static local logo; the Worker build does not run the image optimizer */}
-              <img className="brand-logo" src="/brand/logo.png" alt="Freelance Yard" width={160} height={34} />
+              <img className="brand-logo brand-logo-large" src="/brand/logo.png" alt="Freelance Yard" width={232} height={80} />
               <h1>Set up your operations workspace</h1>
               <p>
                 {d.importedRoster

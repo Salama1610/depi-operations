@@ -28,7 +28,10 @@ export default function PasswordForm() {
     <main className="auth-shell auth-single">
       <section className="auth-form-panel">
         <div className="auth-form-wrap">
-          <a className="auth-brand auth-brand-dark" href="/login"><span className="brand-mark">D↗</span><span><strong>DEPI</strong><small>Round 5 operations</small></span></a>
+          <a className="auth-brand auth-brand-dark" href="/login">
+          {/* eslint-disable-next-line @next/next/no-img-element -- a static local logo; the Worker build does not run the image optimizer */}
+          <img className="brand-mark-img" src="/brand/mark.png" alt="" width={38} height={38} />
+          <span><strong>DEPI</strong><small>Round 5 operations</small></span></a>
           <div className="auth-form-heading"><span className="auth-icon"><LockKeyhole size={22} /></span><h2>Choose a new password</h2><p>Use at least eight characters. A longer, unique password is safer.</p></div>
           <form className="auth-form" onSubmit={submit}>
             <label><span>New password</span><div className="auth-input"><LockKeyhole size={18} /><input type="password" autoComplete="new-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} /></div></label>

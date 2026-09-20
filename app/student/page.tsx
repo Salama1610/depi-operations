@@ -133,7 +133,7 @@ export default function StudentServicesPage() {
       <header className="student-header">
         <a className="student-brand" href="/student" aria-label="DEPI student services">
           {/* eslint-disable-next-line @next/next/no-img-element -- a static local logo; the Worker build does not run the image optimizer */}
-          <img className="brand-logo" src="/brand/logo.png" alt="Freelance Yard" width={150} height={30} />
+          <img className="brand-mark-img" src="/brand/mark.png" alt="" width={34} height={34} />
           <span><strong>DEPI</strong><small>Student services</small></span>
         </a>
         <a className="student-signout" href="/api/auth/logout">Sign out</a>

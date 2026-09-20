@@ -5,9 +5,9 @@ export const metadata: Metadata = {
   title: "Freelance Yard Operations · DEPI Round 5",
   description: "DEPI Round 5 operations and student service-link verification.",
   icons: {
-    icon: "/brand/logo.png",
-    shortcut: "/brand/logo.png",
-    apple: "/brand/logo-stacked.png",
+    icon: "/brand/favicon.png",
+    shortcut: "/brand/favicon.png",
+    apple: "/brand/apple-touch-icon.png",
   },
   other: {
     "codex-preview": "development",
