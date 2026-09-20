@@ -19,7 +19,7 @@ import { createRpcCaller, createRpcDatabase } from "./rpc";
 
 export const COLUMN_TYPES: ColumnTypeMap = columnTypes as ColumnTypeMap;
 
-let client: D1Database | undefined;
+let rpcClient: D1Database | undefined;
 
 /** Whether the injected D1/R2 bindings may be used instead of Supabase. */
 export function localFallbackAllowed() {
@@ -49,16 +49,21 @@ export function isSupabaseDatabaseConfigured() {
 }
 
 export function database(): D1Database | undefined {
-  if (client) return client;
   switch (databaseBackend()) {
     case "supabase-rpc": {
+      // Safe to cache: this client owns no socket, only a fetch closure.
       const { url, serviceRoleKey } = rpcSettings()!;
-      client = createRpcDatabase(createRpcCaller(url, serviceRoleKey), { columnTypes: COLUMN_TYPES });
-      return client;
+      rpcClient ??= createRpcDatabase(createRpcCaller(url, serviceRoleKey), { columnTypes: COLUMN_TYPES });
+      return rpcClient;
     }
     case "supabase-postgres":
-      client = createPostgresDatabase(wireUrl()!, { columnTypes: COLUMN_TYPES });
-      return client;
+      // Never cached. The wire client owns a connection, and the Cloudflare
+      // runtime refuses to let one request touch I/O created in another
+      // request's context ("Cannot perform I/O on behalf of a different
+      // request"). A fresh client per call costs one connection and only
+      // applies to this local development path; production uses the HTTPS
+      // transport above, and Node scripts build their own clients.
+      return createPostgresDatabase(wireUrl()!, { columnTypes: COLUMN_TYPES, max: 1 });
     case "d1":
       return env.DB;
     default:
