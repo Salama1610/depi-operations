@@ -14,6 +14,9 @@
 //
 //   --tabs students,groups,service_links   which datasets to publish
 //   --dry-run                              show row counts and write nothing
+//   --out <file.xlsx>                      write a local workbook instead, one tab
+//                                          per dataset, for when the Google service
+//                                          account is not set up yet
 //
 // Setup, once, in the Google account that owns the sheet:
 //   1. Create a project at console.cloud.google.com and enable the Sheets API.
@@ -25,6 +28,7 @@
 // access to the sheet can read it. Publish the narrow views, not the roster,
 // unless you intend exactly that.
 import fs from "node:fs";
+import { zipSync, strToU8 } from "fflate";
 import { adminConnection, parseArgs, resolveDatabaseUrl } from "./supabase-env.mjs";
 
 /** Each tab is one query. Add a row here to publish another view. */
@@ -166,6 +170,82 @@ function cell(value) {
   return String(value);
 }
 
+const COLUMN = (index) => {
+  let name = "";
+  for (let n = index; n >= 0; n = Math.floor(n / 26) - 1) name = String.fromCharCode(65 + (n % 26)) + name;
+  return name;
+};
+const escapeXml = (value) =>
+  String(value).replace(/[<>&"']/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&apos;" })[c]);
+
+/**
+ * A workbook with one worksheet per dataset, written with inline strings so no
+ * shared-string table is needed. Used by --out, for when the Google service
+ * account is not set up yet: the file imports into the same sheet by hand.
+ */
+function workbook(sheetsByTitle) {
+  const titles = Object.keys(sheetsByTitle);
+  const overrides = titles
+    .map(
+      (_, i) =>
+        `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`,
+    )
+    .join("");
+  const files = {
+    "_rels/.rels": strToU8(
+      '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
+    ),
+    "[Content_Types].xml": strToU8(
+      '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+        '<Default Extension="xml" ContentType="application/xml"/>' +
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+        overrides +
+        "</Types>",
+    ),
+    "xl/workbook.xml": strToU8(
+      '<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>' +
+        titles.map((t, i) => `<sheet name="${escapeXml(t)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("") +
+        "</sheets></workbook>",
+    ),
+    "xl/_rels/workbook.xml.rels": strToU8(
+      '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+        titles
+          .map(
+            (_, i) =>
+              `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`,
+          )
+          .join("") +
+        "</Relationships>",
+    ),
+  };
+  titles.forEach((title, index) => {
+    const rows = sheetsByTitle[title];
+    const headers = rows.length ? Object.keys(rows[0]) : [];
+    const grid = [headers, ...rows.map((row) => headers.map((h) => cell(row[h])))];
+    const body = grid
+      .map(
+        (row, r) =>
+          `<row r="${r + 1}">` +
+          row
+            .map((value, c) =>
+              typeof value === "number" && Number.isFinite(value)
+                ? `<c r="${COLUMN(c)}${r + 1}"><v>${value}</v></c>`
+                : `<c r="${COLUMN(c)}${r + 1}" t="inlineStr"><is><t xml:space="preserve">${escapeXml(value)}</t></is></c>`,
+            )
+            .join("") +
+          "</row>",
+      )
+      .join("");
+    files[`xl/worksheets/sheet${index + 1}.xml`] = strToU8(
+      '<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' +
+        body +
+        "</sheetData></worksheet>",
+    );
+  });
+  return zipSync(files);
+}
+
 const sql = adminConnection(resolveDatabaseUrl(args, "session"));
 try {
   const tables = {};
@@ -174,7 +254,12 @@ try {
     tables[name] = rows;
     console.log(`${DATASETS[name].title.padEnd(22)} ${rows.length} rows`);
   }
-  if (dryRun) {
+  if (args.out) {
+    const byTitle = Object.fromEntries(requested.map((name) => [DATASETS[name].title, tables[name]]));
+    fs.writeFileSync(String(args.out), Buffer.from(workbook(byTitle)));
+    console.log(`\nworkbook written to ${args.out}`);
+    console.log("In the sheet: File, then Import, then Upload, and replace the spreadsheet.");
+  } else if (dryRun) {
     console.log("\nDry run. Nothing was written to the sheet.");
   } else {
     const token = await accessToken(serviceAccount());
