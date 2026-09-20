@@ -8,6 +8,7 @@ import {
   RetentionPanel,
 } from "./control-center";
 import { ProgramFlow } from "./program-flow";
+import { acceptedServicePlatforms } from "@/lib/domain/service-links";
 import { useState, useEffect } from "react";
 import {
   Home,
@@ -1527,6 +1528,20 @@ export default function Operations({ module }: { module: string }) {
       .filter((r) => serviceFilters.automatic === "All" || r.auto_status === serviceFilters.automatic)
       .filter((r) => serviceFilters.corrections === "All" || (serviceFilters.corrections === "Repeated" ? Number(r.correction_count) > 1 : Number(r.correction_count) === Number(serviceFilters.corrections)))
       .filter((r) => serviceFilters.age === "All" || Date.now() - Date.parse(r.updated_at) >= Number(serviceFilters.age) * 3600000);
+    // One student at a time: a student's links stay together and in slot order,
+    // and the student waiting longest comes first so the SLA still drives the
+    // queue. Each link keeps its own decision.
+    const waitingSince = serviceQueue.reduce((out: Row, r: Row) => {
+      const current = out[r.student_id];
+      out[r.student_id] = !current || r.updated_at < current ? r.updated_at : current;
+      return out;
+    }, {} as Row);
+    serviceQueue.sort(
+      (a, b) =>
+        String(waitingSince[a.student_id]).localeCompare(String(waitingSince[b.student_id])) ||
+        String(a.student_id).localeCompare(String(b.student_id)) ||
+        Number(a.slot) - Number(b.slot),
+    );
     const reviewerWorkload = Object.entries(serviceLinkReviews.reduce((out: Row, review: Row) => {
       const key = review.reviewer_name || owner(review.reviewed_by);
       out[key] = (out[key] || 0) + 1;
@@ -1543,7 +1558,7 @@ export default function Operations({ module }: { module: string }) {
               <span><strong>{serviceLinks.filter((r) => r.qc_status === "Pending" && Date.now() - Date.parse(r.updated_at) > 48 * 3600000).length}</strong>Past 48-hour SLA</span>
             </div>
             <div className="filter-row service-qc-filters">
-              <Pick label="Platform" value={serviceFilters.platform} onChange={(platform) => setServiceFilters({ ...serviceFilters, platform })} options={["All", "Kafiil", "Khamsat"]} />
+              <Pick label="Platform" value={serviceFilters.platform} onChange={(platform) => setServiceFilters({ ...serviceFilters, platform })} options={["All", ...acceptedServicePlatforms]} />
               <Pick label="Track" value={serviceFilters.track} onChange={(track) => setServiceFilters({ ...serviceFilters, track })} options={["All", ...Array.from(new Set(serviceLinks.map((r) => r.track).filter(Boolean)))]} />
               <Pick label="Group" value={serviceFilters.group} onChange={(group) => setServiceFilters({ ...serviceFilters, group })} options={["All", ...Array.from(new Set(serviceLinks.map((r) => r.group_id).filter(Boolean)))]} />
               <Pick label="Coordinator" value={serviceFilters.coordinator} onChange={(coordinator) => setServiceFilters({ ...serviceFilters, coordinator })} options={[{ value: "All", label: "All coordinators" }, ...Array.from(new Set(serviceLinks.map((r) => r.coordinator).filter(Boolean))).map((id) => ({ value: id, label: owner(id) }))]} />
@@ -1556,14 +1571,14 @@ export default function Operations({ module }: { module: string }) {
               paginate(serviceQueue, (pageRows) => generic(
                 pageRows,
                 [
-                  { key: "student_name", label: "Student", render: (r) => <span><strong>{r.student_name}</strong><small className="table-subline">{r.student_id}</small></span> },
+                  { key: "student_name", label: "Student", render: (r) => { const own = serviceLinks.filter((l) => l.student_id === r.student_id); const decided = own.filter((l) => l.qc_status !== "Pending").length; return <span><strong>{r.student_name}</strong><small className="table-subline">{r.student_id} · {decided}/{own.length} reviewed</small></span>; } },
                   { key: "slot", label: "Slot", render: (r) => `Service ${r.slot}` },
                   { key: "url", label: "Link", render: (r) => <a className="text-link" href={r.url} target="_blank" rel="noreferrer">{r.platform} <ExternalLink size={14} /></a> },
                   { key: "auto_status", label: "Automatic check", render: (r) => <Badge value={r.auto_status} /> },
                   { key: "reviewer_name", label: "Assigned", render: (r) => r.reviewer_name || "Unassigned" },
                   { key: "qc_status", label: "QC state", render: (r) => <span><Badge value={r.qc_status} /><small className="table-subline">{Math.round((Date.now() - Date.parse(r.updated_at)) / 3600000)}h · revision {r.revision}</small></span> },
                 ],
-                (r) => <div className="detail-actions">{!r.qc_actor && can(user.roles, ["Quality Member", "Quality Lead"]) && <button className="small-btn" onClick={() => quick("service_qc_claim", { service_id: r.id })}>Claim</button>}<button className="small-btn" onClick={() => open("service_qc_review", { ...r, service_id: r.id, student_id: r.student_id, decision: r.qc_status === "Needs Correction" ? "Lock" : "" })}>Review</button>{r.qc_status === "Pending" && r.auto_status !== "Failed" && <button className="small-btn" onClick={() => window.confirm("Lock every format-passing pending link for this student after you have checked each page?") && quick("service_qc_lock_student", { student_id: r.student_id })}>Lock passing links</button>}</div>,
+                (r) => <div className="detail-actions">{!r.qc_actor && can(user.roles, ["Quality Member", "Quality Lead"]) && <button className="small-btn" onClick={() => quick("service_qc_claim", { service_id: r.id })}>Claim</button>}<button className="small-btn" onClick={() => open("service_qc_review", { ...r, service_id: r.id, student_id: r.student_id, decision: r.qc_status === "Needs Correction" ? "Lock" : "" })}>Review</button></div>,
               )),
             )}
             {panel("QC reviewer activity", reviewerWorkload.length ? <div className="mini-stats">{reviewerWorkload.map(([reviewer, count]: any) => <span key={reviewer}><strong>{count}</strong>{reviewer}</span>)}</div> : <Empty title="No service-link reviews yet" />)}

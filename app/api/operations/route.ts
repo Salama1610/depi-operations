@@ -1962,35 +1962,6 @@ export async function POST(req: Request) {
         jobs.push(stmt("UPDATE service_links SET qc_actor=?,updated_at=? WHERE id=? AND qc_status<>'Locked' AND (qc_actor IS NULL OR qc_actor=?)", u.id, t, link.id, u.id));
         break;
       }
-      case "service_qc_lock_student": {
-        permit(u, ["Quality Member", "Quality Lead"]);
-        ensure(sid, "Choose a student submission.");
-        const links = await (await stmt(
-          "SELECT * FROM service_links WHERE student_id=? AND qc_status='Pending' AND auto_status<>'Failed' ORDER BY slot",
-          sid,
-        ).all()).results as any[];
-        ensure(links.length, "No format-passing pending links are available to lock.");
-        ensure(
-          links.every((link) => !link.qc_actor || link.qc_actor === u.id || can(u.roles, ["Quality Lead"])),
-          "One or more links are assigned to another reviewer.",
-        );
-        for (const link of links) {
-          jobs.push(
-            stmt("UPDATE service_links SET qc_status='Locked',qc_comment=?,qc_actor=?,qc_at=?,updated_at=? WHERE id=? AND qc_status='Pending'", "Verified by QC.", u.id, t, t, link.id),
-            stmt("INSERT INTO service_link_reviews(id,service_link_id,revision,decision,comment,reviewed_by,reviewed_at) VALUES(?,?,?,?,?,?,?)", uid("SLR"), link.id, link.revision, "Locked", "Verified by QC.", u.id, t),
-          );
-        }
-        jobs.push(stmt(
-          `UPDATE service_submissions SET status=CASE
-             WHEN (SELECT count(*) FROM service_links WHERE student_id=? AND qc_status='Locked')=3 THEN 'Complete'
-             WHEN EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status='Needs Correction') THEN 'Needs Correction'
-             ELSE 'Pending QC' END,
-             qc_completed_at=CASE WHEN (SELECT count(*) FROM service_links WHERE student_id=? AND qc_status='Locked')=3 THEN ? ELSE NULL END,
-             updated_at=? WHERE student_id=?`, sid, sid, sid, t, t, sid,
-        ));
-        auditValue = { student_id: sid, locked_service_ids: links.map((link) => link.id) };
-        break;
-      }
       case "load_demo_data": {
         permit(u, admin);
         const initialized = await stmt(
