@@ -1,5 +1,6 @@
-import { env } from "cloudflare:workers";
 import { getSupabaseUser } from "./supabase/server";
+import { database } from "./data/database";
+import { objectStore } from "./data/storage";
 import {
   ensure,
   can,
@@ -9,16 +10,18 @@ import {
   risk,
   expectedMilestone,
 } from "./domain/rules";
-export function db() {
-  ensure(env.DB, "The database is unavailable. Please try again shortly.");
-  return env.DB;
+export function db(): D1Database {
+  const client = database();
+  ensure(client, "The database is unavailable. Please try again shortly.");
+  return client as D1Database;
 }
 export function bucket() {
+  const store = objectStore();
   ensure(
-    env.BUCKET,
+    store,
     "File storage is unavailable. Your changes have not been saved.",
   );
-  return env.BUCKET;
+  return store as NonNullable<typeof store>;
 }
 export const now = () => new Date().toISOString();
 export const uid = (p = "EV") => p + "-" + crypto.randomUUID();

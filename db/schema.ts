@@ -14,6 +14,9 @@ export const users = sqliteTable("users", {
   roles: text("roles").notNull(),
   scopes: text("scopes").notNull().default("[]"),
   active: integer("active").notNull().default(1),
+  // Supabase Auth identity binding. Kept last so positional inserts written
+  // against the original column order remain valid on both engines.
+  auth_user_id: text("auth_user_id").unique(),
 });
 export const policies = sqliteTable("policies", {
   id: text("id").primaryKey(),

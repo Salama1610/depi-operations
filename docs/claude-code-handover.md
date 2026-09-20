@@ -13,6 +13,7 @@ The active workspace is intentionally populated with synthetic pilot data. Never
 - Next/Vinext application compiled to a Cloudflare Worker.
 - Managed D1 relational database plus private R2 evidence storage.
 - Supabase Auth with server-validated cookie sessions; students are linked server-side by their registered email.
+- Supabase/PostgreSQL operational target in `supabase/migrations/`, reached through the `lib/data/` adapters when `SUPABASE_DB_URL` is set (production fails closed without it; `LOCAL_DATA_FALLBACK=1` re-enables the D1/R2 bindings for previews and tests). Cut-over and rollback: `docs/data-path-migration.md`.
 - Main UI: `app/operations.tsx` and `app/program-flow.tsx`.
 - Operations API: `app/api/operations/route.ts`.
 - Program lifecycle API: `app/api/program/route.ts`.
@@ -20,6 +21,7 @@ The active workspace is intentionally populated with synthetic pilot data. Never
 - Business rules: `lib/domain/rules.ts`.
 - Synthetic fixtures and blank-workspace upgrade: `lib/seed.ts`.
 - Schema/migrations: `db/schema.ts`, `drizzle/` and `db/runtime-triggers.mjs`.
+- Supabase target and security model: `supabase/migrations/`, `lib/supabase/admin.ts` and `docs/supabase-backend.md`.
 
 ## Implemented feature inventory
 

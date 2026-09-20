@@ -38,7 +38,7 @@ These are deployment decisions or credentials, not unfinished application featur
 - Configure the approved vault, automation signer/HMAC secret and independent backup encryption key/destination.
 - Enter approved retention periods and authorities; the product intentionally ships with none.
 - Create the Ministry-supplied report mapping as a draft and have a different authorized staff member approve it.
-- Import the approved 3,000-student roster as three reconciled batches and obtain program-owner approval for marketplace ownership/track-fit decision standards.
+- Import the approved Round 5 roster (2,948 workbook rows reconciling to 2,887 canonical students after 61 duplicate merges, 131 groups, five tracks) in reconciled batches of at most 1,000 rows, and obtain program-owner approval for marketplace ownership/track-fit decision standards.
 - Activate the supplied scheduler workflows if scheduled notifications are required.
 - Complete organizational security, accessibility/mobile, staff UAT and recovery-objective sign-off before loading real personal data.
 

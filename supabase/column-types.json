@@ -1,0 +1,612 @@
+{
+  "users": {
+    "id": "text",
+    "email": "text",
+    "name": "text",
+    "roles": "jsonb",
+    "scopes": "jsonb",
+    "active": "boolean",
+    "auth_user_id": "uuid"
+  },
+  "policies": {
+    "id": "text",
+    "name": "text",
+    "status": "text",
+    "config": "jsonb",
+    "created_by": "text",
+    "approved_by": "text",
+    "created_at": "timestamptz"
+  },
+  "groups": {
+    "id": "text",
+    "name": "text",
+    "track": "text",
+    "provider": "text",
+    "coordinator": "text",
+    "supervisor": "text",
+    "coach": "text",
+    "pathway": "text",
+    "delivery_model": "text",
+    "start_date": "date",
+    "status": "text",
+    "policy_id": "text"
+  },
+  "students": {
+    "id": "text",
+    "tp_id": "text",
+    "national_id": "text",
+    "name": "text",
+    "name_ar": "text",
+    "group_id": "text",
+    "email": "text",
+    "phone": "text",
+    "job_profile": "text",
+    "student_type": "text",
+    "source_status": "text",
+    "serial": "text",
+    "round_1": "text",
+    "source_row": "integer",
+    "lifecycle": "text",
+    "engagement": "text",
+    "coaching": "text",
+    "milestone": "integer",
+    "last_contact": "timestamptz",
+    "created_at": "timestamptz"
+  },
+  "tasks": {
+    "id": "text",
+    "student_id": "text",
+    "title": "text",
+    "owner": "text",
+    "due": "timestamptz",
+    "category": "text",
+    "priority": "text",
+    "status": "text",
+    "source": "text",
+    "created_at": "timestamptz"
+  },
+  "attachments": {
+    "id": "text",
+    "student_id": "text",
+    "key": "text",
+    "name": "text",
+    "mime": "text",
+    "size": "bigint",
+    "hash": "text",
+    "recorder": "text",
+    "created_at": "timestamptz"
+  },
+  "contacts": {
+    "id": "text",
+    "student_id": "text",
+    "channel": "text",
+    "outcome": "text",
+    "occurred_at": "timestamptz",
+    "proof_id": "text",
+    "next_action": "text",
+    "owner": "text",
+    "due": "timestamptz",
+    "notes": "text",
+    "recorder": "text",
+    "created_at": "timestamptz"
+  },
+  "accounts": {
+    "id": "text",
+    "platform": "text",
+    "label": "text",
+    "status": "text",
+    "credits": "numeric(14,2)",
+    "secret_ref": "text",
+    "active_assignment": "text"
+  },
+  "account_requests": {
+    "id": "text",
+    "student_id": "text",
+    "task": "text",
+    "platform": "text",
+    "value": "numeric(14,2)",
+    "status": "text",
+    "task_fit": "boolean",
+    "recorder": "text",
+    "created_at": "timestamptz"
+  },
+  "account_assignments": {
+    "id": "text",
+    "account_id": "text",
+    "student_id": "text",
+    "group_id": "text",
+    "request_id": "text",
+    "created_at": "timestamptz"
+  },
+  "gigs": {
+    "id": "text",
+    "student_id": "text",
+    "account_id": "text",
+    "platform": "text",
+    "title": "text",
+    "value": "numeric(14,2)",
+    "currency": "text",
+    "order_ref": "text",
+    "status": "text",
+    "due": "timestamptz",
+    "created_at": "timestamptz"
+  },
+  "gig_events": {
+    "id": "text",
+    "gig_id": "text",
+    "status": "text",
+    "proof_id": "text",
+    "performed_by": "text",
+    "recorder": "text",
+    "occurred_at": "timestamptz",
+    "created_at": "timestamptz"
+  },
+  "evidence": {
+    "id": "text",
+    "student_id": "text",
+    "gig_id": "text",
+    "proof_id": "text",
+    "source": "text",
+    "status": "text",
+    "rejections": "integer",
+    "code": "text",
+    "requirements": "text",
+    "recorder": "text",
+    "stage_at": "timestamptz",
+    "created_at": "timestamptz",
+    "policy_id": "text"
+  },
+  "evidence_reviews": {
+    "id": "text",
+    "evidence_id": "text",
+    "actor": "text",
+    "decision": "text",
+    "code": "text",
+    "notes": "text",
+    "created_at": "timestamptz"
+  },
+  "cases": {
+    "id": "text",
+    "student_id": "text",
+    "title": "text",
+    "type": "text",
+    "severity": "text",
+    "status": "text",
+    "owner": "text",
+    "due": "timestamptz",
+    "resolution": "text",
+    "root_cause": "text",
+    "prevention": "text",
+    "verifier": "text",
+    "source": "text",
+    "created_at": "timestamptz"
+  },
+  "sessions": {
+    "id": "text",
+    "group_id": "text",
+    "coach_id": "text",
+    "title": "text",
+    "starts_at": "timestamptz",
+    "session_day": "date",
+    "duration_minutes": "integer",
+    "status": "text",
+    "week": "integer",
+    "confirmed_at": "timestamptz",
+    "cancel_reason": "text",
+    "updated_at": "timestamptz"
+  },
+  "attendance": {
+    "id": "text",
+    "session_id": "text",
+    "student_id": "text",
+    "status": "text",
+    "recorder": "text",
+    "source": "text",
+    "updated_at": "timestamptz"
+  },
+  "graduation_ledger": {
+    "id": "text",
+    "student_id": "text",
+    "policy_id": "text",
+    "result": "text",
+    "evidence_ids": "jsonb",
+    "calculated_at": "timestamptz"
+  },
+  "audit_events": {
+    "id": "text",
+    "actor": "text",
+    "action": "text",
+    "entity_id": "text",
+    "previous": "jsonb",
+    "value": "jsonb",
+    "reason": "text",
+    "request_id": "text",
+    "created_at": "timestamptz"
+  },
+  "imports": {
+    "id": "text",
+    "actor": "text",
+    "module": "text",
+    "summary": "jsonb",
+    "created_at": "timestamptz"
+  },
+  "notifications": {
+    "id": "text",
+    "recipient": "text",
+    "title": "text",
+    "entity_type": "text",
+    "entity_id": "text",
+    "severity": "text",
+    "source": "text",
+    "created_at": "timestamptz",
+    "read_at": "timestamptz"
+  },
+  "automation_runs": {
+    "id": "text",
+    "actor": "text",
+    "kind": "text",
+    "payload_hash": "text",
+    "status": "text",
+    "result": "jsonb",
+    "created_at": "timestamptz",
+    "updated_at": "timestamptz"
+  },
+  "task_bank": {
+    "id": "text",
+    "track": "text",
+    "title": "text",
+    "platform": "text",
+    "value": "numeric(14,2)",
+    "active": "boolean",
+    "created_by": "text",
+    "created_at": "timestamptz"
+  },
+  "account_request_details": {
+    "request_id": "text",
+    "task_bank_id": "text",
+    "job_profile": "text",
+    "gig_number": "integer",
+    "notes": "text"
+  },
+  "attachment_context": {
+    "attachment_id": "text",
+    "group_id": "text",
+    "gig_id": "text",
+    "account_id": "text",
+    "activity_type": "text",
+    "platform": "text",
+    "occurred_at": "timestamptz",
+    "source": "text",
+    "performed_by_type": "text",
+    "performed_by_student_id": "text"
+  },
+  "saved_views": {
+    "id": "text",
+    "user_id": "text",
+    "module": "text",
+    "name": "text",
+    "filters": "jsonb",
+    "created_at": "timestamptz"
+  },
+  "system_configuration": {
+    "key": "text",
+    "value": "jsonb",
+    "classification": "text",
+    "updated_by": "text",
+    "updated_at": "timestamptz"
+  },
+  "retention_actions": {
+    "id": "text",
+    "scope": "text",
+    "cutoff": "timestamptz",
+    "action": "text",
+    "status": "text",
+    "reason": "text",
+    "approved_by": "text",
+    "created_at": "timestamptz",
+    "completed_at": "timestamptz"
+  },
+  "export_jobs": {
+    "id": "text",
+    "actor": "text",
+    "module": "text",
+    "format": "text",
+    "filters": "jsonb",
+    "count": "integer",
+    "created_at": "timestamptz"
+  },
+  "import_rows": {
+    "id": "text",
+    "import_id": "text",
+    "row_number": "integer",
+    "status": "text",
+    "errors": "jsonb",
+    "record_id": "text"
+  },
+  "roster_imports": {
+    "id": "text",
+    "source_name": "text",
+    "source_sheet": "text",
+    "source_sha256": "text",
+    "total_rows": "integer",
+    "canonical_students": "integer",
+    "duplicate_rows": "integer",
+    "status": "text",
+    "summary": "jsonb",
+    "created_at": "timestamptz"
+  },
+  "roster_source_rows": {
+    "id": "text",
+    "import_id": "text",
+    "row_number": "integer",
+    "student_id": "text",
+    "disposition": "text",
+    "reason": "text",
+    "payload": "jsonb"
+  },
+  "case_events": {
+    "id": "text",
+    "case_id": "text",
+    "status": "text",
+    "actor": "text",
+    "notes": "text",
+    "created_at": "timestamptz"
+  },
+  "student_status_events": {
+    "id": "text",
+    "student_id": "text",
+    "dimension": "text",
+    "previous": "text",
+    "value": "text",
+    "actor": "text",
+    "reason": "text",
+    "created_at": "timestamptz"
+  },
+  "group_gate_checks": {
+    "id": "text",
+    "group_id": "text",
+    "week": "integer",
+    "check_key": "text",
+    "status": "text",
+    "evidence_id": "text",
+    "owner": "text",
+    "due": "timestamptz",
+    "updated_at": "timestamptz"
+  },
+  "rate_limits": {
+    "id": "text",
+    "count": "integer",
+    "expires_at": "timestamptz"
+  },
+  "fx_rates": {
+    "id": "text",
+    "currency": "text",
+    "usd_rate": "numeric(20,8)",
+    "effective_date": "date",
+    "source": "text",
+    "status": "text",
+    "created_by": "text",
+    "approved_by": "text",
+    "created_at": "timestamptz"
+  },
+  "gig_fx_applications": {
+    "gig_id": "text",
+    "fx_rate_id": "text",
+    "usd_value": "numeric(14,2)",
+    "applied_by": "text",
+    "applied_at": "timestamptz"
+  },
+  "tracks": {
+    "id": "text",
+    "name": "text",
+    "provider": "text",
+    "capacity": "integer",
+    "active": "boolean",
+    "created_at": "timestamptz"
+  },
+  "applications": {
+    "id": "text",
+    "external_ref": "text",
+    "name": "text",
+    "email": "text",
+    "phone": "text",
+    "preferred_track": "text",
+    "status": "text",
+    "source": "text",
+    "consent_ref": "text",
+    "owner": "text",
+    "submitted_at": "timestamptz",
+    "updated_at": "timestamptz"
+  },
+  "screenings": {
+    "id": "text",
+    "application_id": "text",
+    "decision": "text",
+    "criteria": "jsonb",
+    "reason": "text",
+    "reviewer": "text",
+    "reviewed_at": "timestamptz"
+  },
+  "admissions": {
+    "id": "text",
+    "application_id": "text",
+    "student_id": "text",
+    "group_id": "text",
+    "assigned_by": "text",
+    "admitted_at": "timestamptz"
+  },
+  "group_coaches": {
+    "id": "text",
+    "group_id": "text",
+    "user_id": "text",
+    "coach_type": "text",
+    "status": "text",
+    "onboarding_status": "text",
+    "checklist": "jsonb",
+    "assigned_by": "text",
+    "assigned_at": "timestamptz",
+    "onboarded_at": "timestamptz"
+  },
+  "session_reports": {
+    "session_id": "text",
+    "facilitator": "text",
+    "notes": "text",
+    "attendance_reconciled": "boolean",
+    "submitted_at": "timestamptz"
+  },
+  "assessments": {
+    "id": "text",
+    "group_id": "text",
+    "title": "text",
+    "type": "text",
+    "max_score": "numeric(10,2)",
+    "pass_score": "numeric(10,2)",
+    "due_at": "timestamptz",
+    "status": "text",
+    "created_by": "text",
+    "created_at": "timestamptz"
+  },
+  "assessment_results": {
+    "id": "text",
+    "assessment_id": "text",
+    "student_id": "text",
+    "score": "numeric(10,2)",
+    "outcome": "text",
+    "evidence_id": "text",
+    "notes": "text",
+    "assessed_by": "text",
+    "assessed_at": "timestamptz"
+  },
+  "certificates": {
+    "id": "text",
+    "student_id": "text",
+    "type": "text",
+    "status": "text",
+    "external_ref": "text",
+    "issued_by": "text",
+    "issued_at": "timestamptz",
+    "created_at": "timestamptz"
+  },
+  "post_program_outcomes": {
+    "id": "text",
+    "student_id": "text",
+    "type": "text",
+    "organization": "text",
+    "title": "text",
+    "value": "numeric(14,2)",
+    "currency": "text",
+    "status": "text",
+    "proof_id": "text",
+    "follow_up_at": "timestamptz",
+    "owner": "text",
+    "created_at": "timestamptz"
+  },
+  "withdrawal_decisions": {
+    "id": "text",
+    "student_id": "text",
+    "ministry_reference": "text",
+    "decision": "text",
+    "reason": "text",
+    "decided_at": "timestamptz",
+    "recorded_by": "text",
+    "created_at": "timestamptz"
+  },
+  "group_closures": {
+    "id": "text",
+    "group_id": "text",
+    "action": "text",
+    "snapshot": "jsonb",
+    "reason": "text",
+    "actor": "text",
+    "created_at": "timestamptz"
+  },
+  "account_reservations": {
+    "account_id": "text",
+    "id": "text",
+    "request_id": "text",
+    "reserved_by": "text",
+    "expires_at": "timestamptz",
+    "status": "text",
+    "created_at": "timestamptz"
+  },
+  "account_credit_ledger": {
+    "id": "text",
+    "account_id": "text",
+    "assignment_id": "text",
+    "gig_id": "text",
+    "delta": "numeric(14,2)",
+    "balance_after": "numeric(14,2)",
+    "reason": "text",
+    "actor": "text",
+    "created_at": "timestamptz"
+  },
+  "evidence_packages": {
+    "id": "text",
+    "evidence_id": "text",
+    "revision": "integer",
+    "status": "text",
+    "created_by": "text",
+    "created_at": "timestamptz"
+  },
+  "evidence_package_items": {
+    "id": "text",
+    "package_id": "text",
+    "item_type": "text",
+    "attachment_id": "text",
+    "created_at": "timestamptz"
+  },
+  "report_definitions": {
+    "id": "text",
+    "name": "text",
+    "status": "text",
+    "columns": "jsonb",
+    "created_by": "text",
+    "created_at": "timestamptz",
+    "approved_by": "text",
+    "approved_at": "timestamptz",
+    "updated_at": "timestamptz"
+  },
+  "report_runs": {
+    "id": "text",
+    "definition_id": "text",
+    "actor": "text",
+    "filters": "jsonb",
+    "count": "integer",
+    "created_at": "timestamptz"
+  },
+  "service_submissions": {
+    "id": "text",
+    "student_id": "text",
+    "status": "text",
+    "submitted_at": "timestamptz",
+    "updated_at": "timestamptz",
+    "qc_completed_at": "timestamptz"
+  },
+  "service_links": {
+    "id": "text",
+    "student_id": "text",
+    "slot": "smallint",
+    "url": "text",
+    "normalized_url": "text",
+    "platform": "text",
+    "auto_status": "text",
+    "auto_result": "jsonb",
+    "auto_checked_at": "timestamptz",
+    "qc_status": "text",
+    "qc_comment": "text",
+    "qc_actor": "text",
+    "qc_at": "timestamptz",
+    "revision": "integer",
+    "submitted_at": "timestamptz",
+    "updated_at": "timestamptz"
+  },
+  "service_link_reviews": {
+    "id": "text",
+    "service_link_id": "text",
+    "revision": "integer",
+    "decision": "text",
+    "comment": "text",
+    "reviewed_by": "text",
+    "reviewed_at": "timestamptz"
+  }
+}

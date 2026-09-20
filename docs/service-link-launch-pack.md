@@ -36,7 +36,7 @@ Required student columns are `id`, `name`, `group_id`, and `email`. Optional con
 
 Normalize the source email column before import. The preview rejects missing or malformed emails, duplicate IDs, duplicate emails, unknown groups, invalid lifecycle values and protected columns. Correct rejected rows in the source file and upload a new batch; imports never overwrite an existing student.
 
-Import a 3,000-student roster as three independently reconciled batches of no more than 1,000 rows. Validate 10 rows, then 100, then one 1,000-row batch before the full three-batch run. Each commit records created, skipped and rejected totals plus row-level failures. Administration shows missing and duplicate-email reports after import.
+Import the Round 5 roster (2,948 workbook rows, 2,887 canonical students after 61 duplicate merges) as independently reconciled batches of no more than 1,000 rows. Validate 10 rows, then 100, then one 1,000-row batch before the full three-batch run. Each commit records created, skipped and rejected totals plus row-level failures. Administration shows missing and duplicate-email reports after import.
 
 ## Role and data ownership matrix
 

@@ -6,15 +6,30 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import { build } from "esbuild";
+import { startPostgresTestDatabase } from "./helpers/postgres-test-db.mjs";
 const testDirectory = fs.mkdtempSync(join(tmpdir(), "depi-test-"));
 after(() => fs.rmSync(testDirectory, { recursive: true, force: true }));
-const sqlite = new DatabaseSync(":memory:");
-sqlite.exec("PRAGMA foreign_keys=ON");
-for (const file of fs
-  .readdirSync("drizzle")
-  .filter((f) => f.endsWith(".sql"))
-  .sort())
-  sqlite.exec(fs.readFileSync("drizzle/" + file, "utf8"));
+// DEPI_TEST_BACKEND=postgres runs the same service tests against a disposable
+// PostgreSQL server with the Supabase migrations applied; the default keeps the
+// fast in-memory SQLite mirror of the D1 schema.
+const backend = ["postgres", "postgres-rpc"].includes(process.env.DEPI_TEST_BACKEND)
+  ? process.env.DEPI_TEST_BACKEND
+  : "sqlite";
+const onPostgres = backend !== "sqlite";
+let sqlite = null;
+let postgresHandle = null;
+if (backend === "sqlite") {
+  sqlite = new DatabaseSync(":memory:");
+  sqlite.exec("PRAGMA foreign_keys=ON");
+  for (const file of fs
+    .readdirSync("drizzle")
+    .filter((f) => f.endsWith(".sql"))
+    .sort())
+    sqlite.exec(fs.readFileSync("drizzle/" + file, "utf8"));
+} else {
+  postgresHandle = await startPostgresTestDatabase({ transport: backend === "postgres-rpc" ? "rpc" : "postgres" });
+  after(() => postgresHandle.stop());
+}
 let current = { id: "owner", email: "owner@example.com" };
 globalThis.__testSupabaseUser = () => ({
   id: current.id,
@@ -51,8 +66,7 @@ const query = (sql, args = []) => ({
     return { success: true, meta: { changes: r.changes } };
   },
 });
-globalThis.__testEnv = {
-  DB: {
+const sqliteDatabase = {
     prepare: query,
     async batch(jobs) {
       sqlite.exec("BEGIN");
@@ -67,9 +81,13 @@ globalThis.__testEnv = {
         throw e;
       }
     },
-  },
-  BUCKET: {},
 };
+const DB = backend === "sqlite" ? sqliteDatabase : postgresHandle.db;
+globalThis.__testEnv = { DB, BUCKET: {}, LOCAL_DATA_FALLBACK: "1" };
+const dbRow = async (sql, ...args) => DB.prepare(sql).bind(...args).first();
+const dbRows = async (sql, ...args) => (await DB.prepare(sql).bind(...args).all()).results;
+const dbExec = async (sql, ...args) => DB.prepare(sql).bind(...args).run();
+const ROWID = onPostgres ? "ctid" : "rowid";
 globalThis.__testHeaders = () =>
   new Headers({
     "oai-authenticated-user-id": current.id,
@@ -198,11 +216,11 @@ const importPost = async (payload) => {
 };
 test("full seeded backend workflow and permission gates", async () => {
   await check("setup", { mode: "production" });
-  assert.equal(sqlite.prepare("SELECT count(*) n FROM students").get().n, 0);
+  assert.equal((await dbRow("SELECT count(*) n FROM students")).n, 0);
   await check("load_demo_data", { request_id: "load-synthetic-pilot-once" });
   await check("load_demo_data", { request_id: "load-synthetic-pilot-once" });
-  assert.equal(sqlite.prepare("SELECT count(*) n FROM students").get().n, 1000);
-  assert.equal(sqlite.prepare("SELECT count(*) n FROM tasks").get().n, 1000);
+  assert.equal((await dbRow("SELECT count(*) n FROM students")).n, 1000);
+  assert.equal((await dbRow("SELECT count(*) n FROM tasks")).n, 1000);
   const data = await (await api.GET()).json();
   assert.equal(data.students.length, 1000);
   assert.equal(data.workspaceMode, "demo");
@@ -210,9 +228,7 @@ test("full seeded backend workflow and permission gates", async () => {
   assert.ok(data.students[0].next_task);
   let r = await post("contact", { student_id: "S10001" });
   assert.match(r.error, /incomplete/);
-  sqlite
-    .prepare("INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)")
-    .run(
+  await dbExec("INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)", 
       "PROOF-1",
       "S10001",
       "key1",
@@ -223,9 +239,7 @@ test("full seeded backend workflow and permission gates", async () => {
       "owner",
       new Date().toISOString(),
     );
-  sqlite
-    .prepare("INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)")
-    .run(
+  await dbExec("INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)", 
       "PROOF-2",
       "S10001",
       "key2",
@@ -236,9 +250,7 @@ test("full seeded backend workflow and permission gates", async () => {
       "owner",
       new Date().toISOString(),
     );
-  sqlite
-    .prepare("INSERT INTO attachment_context VALUES(?,?,?,?,?,?,?,?,?,?)")
-    .run(
+  await dbExec("INSERT INTO attachment_context VALUES(?,?,?,?,?,?,?,?,?,?)", 
       "PROOF-1",
       "G101",
       null,
@@ -264,17 +276,11 @@ test("full seeded backend workflow and permission gates", async () => {
   await check("contact", c);
   await check("contact", c);
   assert.equal(
-    sqlite
-      .prepare("SELECT count(*) n FROM contacts WHERE student_id='S10001'")
-      .get().n,
+    (await dbRow("SELECT count(*) n FROM contacts WHERE student_id='S10001'")).n,
     1,
   );
   assert.equal(
-    sqlite
-      .prepare(
-        "SELECT activity_type FROM attachment_context WHERE attachment_id='PROOF-1'",
-      )
-      .get().activity_type,
+    (await dbRow("SELECT activity_type FROM attachment_context WHERE attachment_id='PROOF-1'")).activity_type,
     "Student contact",
   );
   await check("account_request", {
@@ -305,7 +311,7 @@ test("full seeded backend workflow and permission gates", async () => {
     task_fit: true,
   });
   assert.equal(
-    sqlite.prepare("SELECT status FROM accounts WHERE id='ACC-102'").get()
+    (await dbRow("SELECT status FROM accounts WHERE id='ACC-102'"))
       .status,
     "Assigned",
   );
@@ -321,9 +327,7 @@ test("full seeded backend workflow and permission gates", async () => {
     account: "ACC-102",
   });
   assert.match(r.error, /unavailable|assigned/);
-  const gig = sqlite
-    .prepare("SELECT * FROM gigs WHERE student_id='S10001'")
-    .get();
+  const gig = (await dbRow("SELECT * FROM gigs WHERE student_id='S10001'"));
   r = await post("gig_transition", {
     id: gig.id,
     status: "Paid",
@@ -369,9 +373,7 @@ test("full seeded backend workflow and permission gates", async () => {
     request_id: "reject-once",
   });
   assert.equal(
-    sqlite
-      .prepare("SELECT count(*) n FROM tasks WHERE category='Correction'")
-      .get().n,
+    (await dbRow("SELECT count(*) n FROM tasks WHERE category='Correction'")).n,
     1,
   );
   current = { id: "owner", email: "owner@example.com" };
@@ -397,15 +399,11 @@ test("full seeded backend workflow and permission gates", async () => {
     ],
   });
   assert.equal(
-    sqlite.prepare("SELECT status FROM evidence WHERE id='EV1'").get().status,
+    (await dbRow("SELECT status FROM evidence WHERE id='EV1'")).status,
     "Accepted",
   );
   assert.equal(
-    sqlite
-      .prepare(
-        "SELECT result FROM graduation_ledger WHERE student_id='S10001' ORDER BY rowid DESC LIMIT 1",
-      )
-      .get().result,
+    (await dbRow(`SELECT result FROM graduation_ledger WHERE student_id='S10001' ORDER BY ${ROWID} DESC LIMIT 1`)).result,
     "1/3",
   );
   current = { id: "coordinator-login", email: "staff-omar@example.invalid" };
@@ -417,11 +415,8 @@ test("full seeded backend workflow and permission gates", async () => {
     notes: "Unauthorized",
   });
   assert.ok(r.error);
-  assert.throws(
-    () => sqlite.exec("UPDATE audit_events SET action='tampered'"),
-    /immutable/,
-  );
-  assert.throws(() => sqlite.exec("DELETE FROM evidence_reviews"), /immutable/);
+  await assert.rejects(dbExec("UPDATE audit_events SET action='tampered'"), /immutable/);
+  await assert.rejects(dbExec("DELETE FROM evidence_reviews"), /immutable/);
 });
 test("verified Supabase email recovers staff identity when the auth id changes", async () => {
   current = { id: "supabase-new-id", email: "owner@example.com" };
@@ -443,9 +438,7 @@ test("session delivery enforces model limits, coach coverage and lifecycle contr
     week: 1,
     duration_minutes: 180,
   });
-  const created = sqlite
-    .prepare("SELECT * FROM sessions WHERE id='SES-RULE-1'")
-    .get();
+  const created = (await dbRow("SELECT * FROM sessions WHERE id='SES-RULE-1'"));
   assert.equal(created.status, "Scheduled");
   assert.equal(created.coach_id, "staff-coach");
   assert.equal(created.duration_minutes, 180);
@@ -501,9 +494,7 @@ test("session delivery enforces model limits, coach coverage and lifecycle contr
   current = { id: "coach-login", email: "staff-coach@example.invalid" };
   await check("session_confirm", { id: "SES-RULE-1" });
   assert.ok(
-    sqlite
-      .prepare("SELECT confirmed_at FROM sessions WHERE id='SES-RULE-1'")
-      .get().confirmed_at,
+    (await dbRow("SELECT confirmed_at FROM sessions WHERE id='SES-RULE-1'")).confirmed_at,
   );
   r = await post("session_reschedule", {
     id: "SES-RULE-1",
@@ -518,9 +509,7 @@ test("session delivery enforces model limits, coach coverage and lifecycle contr
     starts_at: rescheduledAt,
     reason: "Coach availability changed",
   });
-  const moved = sqlite
-    .prepare("SELECT status,confirmed_at,starts_at FROM sessions WHERE id='SES-RULE-1'")
-    .get();
+  const moved = (await dbRow("SELECT status,confirmed_at,starts_at FROM sessions WHERE id='SES-RULE-1'"));
   assert.equal(moved.status, "Scheduled");
   assert.equal(moved.confirmed_at, null);
   assert.equal(moved.starts_at, rescheduledAt);
@@ -529,7 +518,7 @@ test("session delivery enforces model limits, coach coverage and lifecycle contr
     reason: "Group requested a replacement date",
   });
   assert.equal(
-    sqlite.prepare("SELECT status FROM sessions WHERE id='SES-RULE-1'").get()
+    (await dbRow("SELECT status FROM sessions WHERE id='SES-RULE-1'"))
       .status,
     "Cancelled",
   );
@@ -561,11 +550,7 @@ test("session delivery enforces model limits, coach coverage and lifecycle contr
   });
   assert.match(r.error, /attendance/i);
   current = { id: "owner", email: "owner@example.com" };
-  const activeStudents = sqlite
-    .prepare(
-      "SELECT id FROM students WHERE group_id='G103' AND lifecycle='Active'",
-    )
-    .all();
+  const activeStudents = (await dbRows("SELECT id FROM students WHERE group_id='G103' AND lifecycle='Active'"));
   for (const student of activeStudents)
     await check("attendance", {
       session_id: "SES-RULE-COMPLETE",
@@ -582,17 +567,11 @@ test("session delivery enforces model limits, coach coverage and lifecycle contr
     notes: "Delivery completed with documented follow-up actions.",
   });
   assert.equal(
-    sqlite
-      .prepare("SELECT status FROM sessions WHERE id='SES-RULE-COMPLETE'")
-      .get().status,
+    (await dbRow("SELECT status FROM sessions WHERE id='SES-RULE-COMPLETE'")).status,
     "Completed",
   );
   assert.equal(
-    sqlite
-      .prepare(
-        "SELECT attendance_reconciled FROM session_reports WHERE session_id='SES-RULE-COMPLETE'",
-      )
-      .get().attendance_reconciled,
+    (await dbRow("SELECT attendance_reconciled FROM session_reports WHERE session_id='SES-RULE-COMPLETE'")).attendance_reconciled,
     1,
   );
   current = { id: "owner", email: "owner@example.com" };
@@ -626,7 +605,7 @@ test("session spreadsheet preview and commit retain the governed controls", asyn
   });
   assert.equal(committed.created, 1);
   assert.equal(
-    sqlite.prepare("SELECT coach_id FROM sessions WHERE id='SES-IMPORT-1'").get()
+    (await dbRow("SELECT coach_id FROM sessions WHERE id='SES-IMPORT-1'"))
       .coach_id,
     "staff-support-coach",
   );
@@ -688,7 +667,7 @@ test("complete program flow governs intake, assessment, withdrawal, certificate 
     group_id: "G101",
   });
   assert.equal(
-    sqlite.prepare("SELECT status FROM applications WHERE id='APP-FLOW'").get()
+    (await dbRow("SELECT status FROM applications WHERE id='APP-FLOW'"))
       .status,
     "Admitted",
   );
@@ -709,9 +688,7 @@ test("complete program flow governs intake, assessment, withdrawal, certificate 
     notes: "Final assessment completed",
   });
   assert.equal(
-    sqlite
-      .prepare("SELECT outcome FROM assessment_results WHERE id='ASR-FLOW'")
-      .get().outcome,
+    (await dbRow("SELECT outcome FROM assessment_results WHERE id='ASR-FLOW'")).outcome,
     "Passed",
   );
   await programCheck("assessment_result", {
@@ -735,18 +712,12 @@ test("complete program flow governs intake, assessment, withdrawal, certificate 
     reason: "Approved withdrawal test",
   });
   assert.equal(
-    sqlite.prepare("SELECT lifecycle FROM students WHERE id='S-FLOW'").get()
+    (await dbRow("SELECT lifecycle FROM students WHERE id='S-FLOW'"))
       .lifecycle,
     "Withdrawn",
   );
-  sqlite
-    .prepare(
-      "UPDATE students SET lifecycle='Graduate Closed' WHERE id='S10001'",
-    )
-    .run();
-  sqlite
-    .prepare("INSERT INTO graduation_ledger VALUES(?,?,?,?,?,?)")
-    .run(
+  await dbExec("UPDATE students SET lifecycle='Graduate Closed' WHERE id='S10001'");
+  await dbExec("INSERT INTO graduation_ledger VALUES(?,?,?,?,?,?)", 
       "GR-CERT",
       "S10001",
       "R5-v1",
@@ -796,7 +767,7 @@ test("complete program flow governs intake, assessment, withdrawal, certificate 
     roles: ["Project Operations"],
     reason: "Independent Ministry reporting approval",
   });
-  const reportApprover = sqlite.prepare("SELECT id FROM users WHERE email='report-approver@example.com'").get().id;
+  const reportApprover = (await dbRow("SELECT id FROM users WHERE email='report-approver@example.com'")).id;
   current = { id: reportApprover, email: "report-approver@example.com" };
   await programCheck("approve_report_definition", {
     id: "RDEF-FLOW",
@@ -822,7 +793,7 @@ test("complete program flow governs intake, assessment, withdrawal, certificate 
   );
   assert.equal(xlsxResponse.status, 200);
   assert.match(xlsxResponse.headers.get("content-type"), /spreadsheetml/);
-  assert.equal(sqlite.prepare("SELECT count(*) n FROM report_runs WHERE definition_id='RDEF-FLOW'").get().n, 2);
+  assert.equal((await dbRow("SELECT count(*) n FROM report_runs WHERE definition_id='RDEF-FLOW'")).n, 2);
   const lifecycleExport = await programApi.GET(
     new Request("https://test.local/api/program?format=xlsx&dataset=lifecycle"),
   );
@@ -840,7 +811,7 @@ test("safe bulk controls are atomic and dangerous approvals stay individual", as
     reason: "Weekly readiness batch",
   });
   assert.equal(
-    sqlite.prepare("SELECT count(*) n FROM tasks WHERE title='Prepare weekly evidence package'").get().n,
+    (await dbRow("SELECT count(*) n FROM tasks WHERE title='Prepare weekly evidence package'")).n,
     2,
   );
   await programCheck("bulk_classification", {
@@ -849,7 +820,7 @@ test("safe bulk controls are atomic and dangerous approvals stay individual", as
     reason: "Shared progress threshold reached",
   });
   assert.equal(
-    sqlite.prepare("SELECT count(*) n FROM students WHERE id IN ('S10002','S10003') AND engagement='At Risk'").get().n,
+    (await dbRow("SELECT count(*) n FROM students WHERE id IN ('S10002','S10003') AND engagement='At Risk'")).n,
     2,
   );
   await programCheck("bulk_group_owner", {
@@ -859,7 +830,7 @@ test("safe bulk controls are atomic and dangerous approvals stay individual", as
     reason: "Approved workload rebalance",
   });
   assert.equal(
-    sqlite.prepare("SELECT count(*) n FROM groups WHERE id IN ('G101','G102') AND coordinator='staff-sara'").get().n,
+    (await dbRow("SELECT count(*) n FROM groups WHERE id IN ('G101','G102') AND coordinator='staff-sara'")).n,
     2,
   );
   const rejected = await programPost("bulk_classification", {
@@ -868,18 +839,18 @@ test("safe bulk controls are atomic and dangerous approvals stay individual", as
     reason: "Atomic validation test",
   });
   assert.match(rejected.error, /not found|scope/i);
-  assert.equal(sqlite.prepare("SELECT engagement FROM students WHERE id='S10002'").get().engagement, "At Risk");
+  assert.equal((await dbRow("SELECT engagement FROM students WHERE id='S10002'")).engagement, "At Risk");
 });
 test("track capacity blocks direct and admitted roster growth", async () => {
   current = { id: "owner", email: "owner@example.com" };
-  const enrolled = sqlite.prepare("SELECT count(*) n FROM students s JOIN groups g ON g.id=s.group_id WHERE g.track='Digital Marketing' AND s.lifecycle NOT IN ('Transferred','Withdrawn','Removed')").get().n;
-  sqlite.prepare("UPDATE tracks SET capacity=? WHERE name='Digital Marketing'").run(enrolled);
+  const enrolled = (await dbRow("SELECT count(*) n FROM students s JOIN groups g ON g.id=s.group_id WHERE g.track='Digital Marketing' AND s.lifecycle NOT IN ('Transferred','Withdrawn','Removed')")).n;
+  await dbExec("UPDATE tracks SET capacity=? WHERE name='Digital Marketing'", enrolled);
   assert.match(
     (await post("student", { id: "S-CAPACITY", name: "Capacity Test", group_id: "G101" })).error,
     /capacity/,
   );
-  assert.equal(sqlite.prepare("SELECT count(*) n FROM students WHERE id='S-CAPACITY'").get().n, 0);
-  sqlite.prepare("UPDATE tracks SET capacity=300 WHERE name='Digital Marketing'").run();
+  assert.equal((await dbRow("SELECT count(*) n FROM students WHERE id='S-CAPACITY'")).n, 0);
+  await dbExec("UPDATE tracks SET capacity=300 WHERE name='Digital Marketing'");
 });
 test("program roles enforce functional coach and approval boundaries", async () => {
   current = { id: "staff-support-coach", email: "staff-support-coach@example.invalid" };
@@ -931,19 +902,19 @@ test("second evidence rejection routes through L3 and closes correction work", a
     ["L3-DELIVERY-2", "l3-delivery-2", "l3hash3"],
     ["L3-PAYMENT-2", "l3-payment-2", "l3hash4"],
   ]) {
-    sqlite.prepare("INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)").run(
+    await dbExec("INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)", 
       id, "S10002", key, `${id}.png`, "image/png", 120, hash, "owner", created,
     );
   }
-  sqlite.prepare("INSERT INTO gigs(id,student_id,platform,title,value,currency,status,due,created_at) VALUES(?,?,?,?,?,?,?,?,?)").run(
+  await dbExec("INSERT INTO gigs(id,student_id,platform,title,value,currency,status,due,created_at) VALUES(?,?,?,?,?,?,?,?,?)", 
     "GIG-L3", "S10002", "Upwork", "L3 recovery test", 15, "USD", "Paid", "2027-01-01T00:00:00Z", created,
   );
-  sqlite.prepare("INSERT INTO evidence(id,student_id,gig_id,proof_id,source,status,rejections,code,requirements,recorder,stage_at,created_at,policy_id) VALUES(?,?,?,?,?, 'Quality Review',1,'EV01','First correction','owner',?,?,?)").run(
+  await dbExec("INSERT INTO evidence(id,student_id,gig_id,proof_id,source,status,rejections,code,requirements,recorder,stage_at,created_at,policy_id) VALUES(?,?,?,?,?, 'Quality Review',1,'EV01','First correction','owner',?,?,?)", 
     "EV-L3", "S10002", "GIG-L3", "L3-DELIVERY-1", "Platform", created, created, "R5-v1",
   );
-  sqlite.prepare("INSERT INTO evidence_packages VALUES(?,?,?,?,?,?)").run("EPK-L3-1", "EV-L3", 1, "Submitted", "owner", created);
-  sqlite.prepare("INSERT INTO evidence_package_items VALUES(?,?,?,?,?)").run("EPI-L3-1", "EPK-L3-1", "Delivery", "L3-DELIVERY-1", created);
-  sqlite.prepare("INSERT INTO evidence_package_items VALUES(?,?,?,?,?)").run("EPI-L3-2", "EPK-L3-1", "Payment", "L3-PAYMENT-1", created);
+  await dbExec("INSERT INTO evidence_packages VALUES(?,?,?,?,?,?)", "EPK-L3-1", "EV-L3", 1, "Submitted", "owner", created);
+  await dbExec("INSERT INTO evidence_package_items VALUES(?,?,?,?,?)", "EPI-L3-1", "EPK-L3-1", "Delivery", "L3-DELIVERY-1", created);
+  await dbExec("INSERT INTO evidence_package_items VALUES(?,?,?,?,?)", "EPI-L3-2", "EPK-L3-1", "Payment", "L3-PAYMENT-1", created);
   current = { id: "quality-login", email: "staff-quality@example.invalid" };
   await check("review", { id: "EV-L3", decision: "Reject", code: "EV07", notes: "Second rejection requires L3 review" });
   current = { id: "owner", email: "owner@example.com" };
@@ -953,20 +924,16 @@ test("second evidence rejection routes through L3 and closes correction work", a
     payment_proof_id: "L3-PAYMENT-2",
     notes: "Corrected evidence package resubmitted",
   });
-  assert.equal(sqlite.prepare("SELECT status FROM evidence WHERE id='EV-L3'").get().status, "L3 Review");
+  assert.equal((await dbRow("SELECT status FROM evidence WHERE id='EV-L3'")).status, "L3 Review");
   current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
   await check("review", { id: "EV-L3", decision: "Final resolution", notes: "Final non-qualifying resolution recorded" });
-  assert.equal(sqlite.prepare("SELECT status FROM evidence WHERE id='EV-L3'").get().status, "Closed L3");
-  assert.ok(sqlite.prepare("SELECT id FROM cases WHERE source='L3-EV-L3'").get());
+  assert.equal((await dbRow("SELECT status FROM evidence WHERE id='EV-L3'")).status, "Closed L3");
+  assert.ok((await dbRow("SELECT id FROM cases WHERE source='L3-EV-L3'")));
   current = { id: "owner", email: "owner@example.com" };
 });
-test("database allocation guard protects stale concurrent eligibility", () => {
+test("database allocation guard protects stale concurrent eligibility", async () => {
   const now = new Date().toISOString();
-  assert.throws(
-    () =>
-      sqlite
-        .prepare("INSERT INTO account_assignments VALUES(?,?,?,?,?,?)")
-        .run("ASN-late", "ACC-102", "S10002", "G101", "REQ2", now),
+  await assert.rejects(dbExec("INSERT INTO account_assignments VALUES(?,?,?,?,?,?)", "ASN-late", "ACC-102", "S10002", "G101", "REQ2", now),
     /eligibility/,
   );
 });
@@ -1046,12 +1013,12 @@ test("policy versions require separate approval and apply to new groups", async 
     policy_id: "P2",
   });
   assert.equal(
-    sqlite.prepare("SELECT policy_id FROM groups WHERE id='GNEW'").get()
+    (await dbRow("SELECT policy_id FROM groups WHERE id='GNEW'"))
       .policy_id,
     "P2",
   );
   assert.equal(
-    sqlite.prepare("SELECT policy_id FROM groups WHERE id='G101'").get()
+    (await dbRow("SELECT policy_id FROM groups WHERE id='G101'"))
       .policy_id,
     "R5-v1",
   );
@@ -1065,29 +1032,17 @@ test("policy checks create recovery and supervisor actions without duplicates", 
     assert.ok(runs++ < 30, "Policy batches must converge");
     first = await check("policy_check");
   }
-  const n = sqlite
-    .prepare("SELECT count(*) n FROM tasks WHERE source LIKE 'policy-%'")
-    .get().n;
-  const c = sqlite
-    .prepare(
-      "SELECT count(*) n FROM cases WHERE source LIKE 'policy-critical:%'",
-    )
-    .get().n;
+  const n = (await dbRow("SELECT count(*) n FROM tasks WHERE source LIKE 'policy-%'")).n;
+  const c = (await dbRow("SELECT count(*) n FROM cases WHERE source LIKE 'policy-critical:%'")).n;
   assert.ok(c > 0);
   const second = await check("policy_check");
   assert.equal(second.summary.processed, 0);
   assert.equal(
-    sqlite
-      .prepare("SELECT count(*) n FROM tasks WHERE source LIKE 'policy-%'")
-      .get().n,
+    (await dbRow("SELECT count(*) n FROM tasks WHERE source LIKE 'policy-%'")).n,
     n,
   );
   assert.equal(
-    sqlite
-      .prepare(
-        "SELECT count(*) n FROM cases WHERE source LIKE 'policy-critical:%'",
-      )
-      .get().n,
+    (await dbRow("SELECT count(*) n FROM cases WHERE source LIKE 'policy-critical:%'")).n,
     c,
   );
   current = { id: "coordinator", email: "staff-sara@example.invalid" };
@@ -1095,18 +1050,10 @@ test("policy checks create recovery and supervisor actions without duplicates", 
 });
 test("controlled platforms and separately approved FX applications are enforced", async () => {
   current = { id: "owner", email: "owner@example.com" };
-  assert.throws(
-    () =>
-      sqlite
-        .prepare(
-          "INSERT INTO accounts(id,platform,label,status,credits) VALUES('BAD-PLATFORM','Fiverr','Invalid','Available',10)",
-        )
-        .run(),
+  await assert.rejects(dbExec("INSERT INTO accounts(id,platform,label,status,credits) VALUES('BAD-PLATFORM','Fiverr','Invalid','Available',10)"),
     /platform/,
   );
-  sqlite
-    .prepare("INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)")
-    .run(
+  await dbExec("INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)", 
       "PROOF-FX",
       "S10003",
       "key-fx",
@@ -1134,11 +1081,7 @@ test("controlled platforms and separately approved FX applications are enforced"
       proof_id: "PROOF-FX",
       occurred_at: new Date().toISOString(),
     });
-  sqlite
-    .prepare(
-      "INSERT INTO evidence(id,student_id,gig_id,proof_id,source,status,rejections,recorder,stage_at,created_at,policy_id) VALUES(?,?,?,?,?,'Accepted',0,?,?,?,?)",
-    )
-    .run(
+  await dbExec("INSERT INTO evidence(id,student_id,gig_id,proof_id,source,status,rejections,recorder,stage_at,created_at,policy_id) VALUES(?,?,?,?,?,'Accepted',0,?,?,?,?)", 
       "EV-FX",
       "S10003",
       "GIG-FX",
@@ -1168,26 +1111,14 @@ test("controlled platforms and separately approved FX applications are enforced"
   });
   await check("fx_apply", { gig_id: "GIG-FX", fx_rate_id: "FX-EGP-1" });
   assert.equal(
-    sqlite
-      .prepare(
-        "SELECT usd_value FROM gig_fx_applications WHERE gig_id='GIG-FX'",
-      )
-      .get().usd_value,
+    (await dbRow("SELECT usd_value FROM gig_fx_applications WHERE gig_id='GIG-FX'")).usd_value,
     6,
   );
   assert.equal(
-    sqlite
-      .prepare(
-        "SELECT result FROM graduation_ledger WHERE student_id='S10003' ORDER BY rowid DESC LIMIT 1",
-      )
-      .get().result,
+    (await dbRow(`SELECT result FROM graduation_ledger WHERE student_id='S10003' ORDER BY ${ROWID} DESC LIMIT 1`)).result,
     "1/3",
   );
-  assert.throws(
-    () =>
-      sqlite
-        .prepare("UPDATE fx_rates SET usd_rate=1 WHERE id='FX-EGP-1'")
-        .run(),
+  await assert.rejects(dbExec("UPDATE fx_rates SET usd_rate=1 WHERE id='FX-EGP-1'"),
     /immutable/,
   );
 });
@@ -1223,12 +1154,12 @@ async function route(name) {
 }
 test("student service resubmissions preserve completion and QC errors return JSON", async () => {
   const servicesApi = await route("student-services");
-  const student = sqlite.prepare("SELECT id,email FROM students WHERE id='S10903'").get();
+  const student = (await dbRow("SELECT id,email FROM students WHERE id='S10903'"));
   current = { id: student.id, email: student.email };
   const call = (body) => servicesApi.POST(new Request("https://test.local/api/student-services", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   }));
-  const links = sqlite.prepare("SELECT url FROM service_links WHERE student_id=? ORDER BY slot").all(student.id);
+  const links = (await dbRows("SELECT url FROM service_links WHERE student_id=? ORDER BY slot", student.id));
   const response = await call({ action: "submit_services", services: links.map((link) => link.url) });
   assert.equal(response.status, 200);
   const result = await response.json();
@@ -1245,30 +1176,41 @@ test("student service resubmissions preserve completion and QC errors return JSO
 });
 test("student service records are identity-isolated and QC review is single-decision per revision", async () => {
   const servicesApi = await route("student-services");
-  const first = sqlite.prepare("SELECT id,email FROM students WHERE id='S10902'").get();
-  const second = sqlite.prepare("SELECT id,email FROM students WHERE id='S10903'").get();
+  const first = (await dbRow("SELECT id,email FROM students WHERE id='S10902'"));
+  const second = (await dbRow("SELECT id,email FROM students WHERE id='S10903'"));
   current = { id: first.id, email: first.email };
   const firstView = await (await servicesApi.GET()).json();
   assert.equal(firstView.student.id, first.id);
-  assert.ok(firstView.services.every((link) => !link.id || sqlite.prepare("SELECT student_id FROM service_links WHERE id=?").get(link.id).student_id === first.id));
+  for (const link of firstView.services) {
+    if (!link.id) continue;
+    assert.equal((await dbRow("SELECT student_id FROM service_links WHERE id=?", link.id)).student_id, first.id);
+  }
   current = { id: second.id, email: second.email };
   const secondView = await (await servicesApi.GET()).json();
   assert.equal(secondView.student.id, second.id);
   assert.notDeepEqual(firstView.services.map((link) => link.id), secondView.services.map((link) => link.id));
-  const pending = sqlite.prepare("SELECT * FROM service_links WHERE student_id='S10902' AND qc_status='Pending' LIMIT 1").get();
+  const pending = (await dbRow("SELECT * FROM service_links WHERE student_id='S10902' AND qc_status='Pending' LIMIT 1"));
   current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
   const request = () => servicesApi.POST(new Request("https://test.local/api/student-services", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "qc_review", service_id: pending.id, decision: "Needs Correction", comment: "Submit the direct active service page." }) }));
-  assert.equal((await request()).status, 200);
+  const reviewed = await request();
+  assert.equal(reviewed.status, 200, await reviewed.clone().text());
   const duplicate = await request();
   assert.equal(duplicate.status, 400);
   assert.match((await duplicate.json()).error, /already|UNIQUE/i);
-  assert.equal(sqlite.prepare("SELECT count(*) n FROM service_link_reviews WHERE service_link_id=? AND revision=?").get(pending.id,pending.revision).n,1);
+  assert.equal((await dbRow("SELECT count(*) n FROM service_link_reviews WHERE service_link_id=? AND revision=?", pending.id,pending.revision)).n,1);
   current = { id: "owner", email: "owner@example.com" };
 });
-test("service QC and student identity lookups use their production indexes", () => {
-  const queuePlan = sqlite.prepare("EXPLAIN QUERY PLAN SELECT id FROM service_links WHERE qc_status=? ORDER BY updated_at").all("Pending");
+test("service QC and student identity lookups use their production indexes", async () => {
+  if (onPostgres) {
+    const queueIndexes = await dbRows("SELECT indexname FROM pg_indexes WHERE schemaname='public' AND tablename='service_links'");
+    assert.match(queueIndexes.map((r) => r.indexname).join(" "), /idx_service_links_qc_status/);
+    const emailIndexes = await dbRows("SELECT indexname FROM pg_indexes WHERE schemaname='public' AND tablename='students'");
+    assert.match(emailIndexes.map((r) => r.indexname).join(" "), /student_email_identity/);
+    return;
+  }
+  const queuePlan = (await dbRows("EXPLAIN QUERY PLAN SELECT id FROM service_links WHERE qc_status=? ORDER BY updated_at", "Pending"));
   assert.match(queuePlan.map((row) => row.detail).join(" "), /idx_service_links_qc_status/);
-  const emailPlan = sqlite.prepare("EXPLAIN QUERY PLAN SELECT id FROM students WHERE email IS NOT NULL AND trim(email)<>'' AND lower(email)=?").all("student@example.com");
+  const emailPlan = (await dbRows("EXPLAIN QUERY PLAN SELECT id FROM students WHERE email IS NOT NULL AND trim(email)<>'' AND lower(email)=?", "student@example.com"));
   assert.match(emailPlan.map((row) => row.detail).join(" "), /student_email_identity/);
 });
 test("signed automation rejects tampering and replays without duplicate execution", async () => {
@@ -1360,7 +1302,7 @@ test("global search is bounded to the signed-in staff scope", async () => {
 test("retention policy records approved periods without deleting data", async () => {
   const api = await route("retention");
   current = { id: "owner", email: "owner@example.com" };
-  const before = sqlite.prepare("SELECT count(*) n FROM attachments").get().n;
+  const before = (await dbRow("SELECT count(*) n FROM attachments")).n;
   let result = await (
     await api.POST(
       new Request("https://test.local/api/retention", {
@@ -1382,7 +1324,7 @@ test("retention policy records approved periods without deleting data", async ()
     result.configurations.some((x) => x.key === "retention:attachments"),
   );
   assert.equal(
-    sqlite.prepare("SELECT count(*) n FROM attachments").get().n,
+    (await dbRow("SELECT count(*) n FROM attachments")).n,
     before,
   );
 });
@@ -1426,11 +1368,7 @@ test("vault access is role restricted and never logs returned credentials", asyn
     ).json();
     assert.equal(result.password, "test-secret-never-log");
     assert.equal(
-      sqlite
-        .prepare(
-          "SELECT count(*) n FROM audit_events WHERE value LIKE '%test-secret-never-log%'",
-        )
-        .get().n,
+      (await dbRow("SELECT count(*) n FROM audit_events WHERE value LIKE '%test-secret-never-log%'")).n,
       0,
     );
   } finally {
@@ -1445,9 +1383,7 @@ test("encrypted database and evidence backup restores to a fresh isolated direct
   const bytes = new TextEncoder().encode(
     "synthetic evidence bytes for restore test",
   );
-  sqlite
-    .prepare("UPDATE attachments SET size=?,hash=?")
-    .run(bytes.length, createHash("sha256").update(bytes).digest("hex"));
+  await dbExec("UPDATE attachments SET size=?,hash=?", bytes.length, createHash("sha256").update(bytes).digest("hex"));
   globalThis.__testEnv.BUCKET.get = async () => ({
     body: new Response(bytes).body,
   });
@@ -1484,11 +1420,11 @@ test("encrypted database and evidence backup restores to a fresh isolated direct
   assert.equal(restored.prepare("PRAGMA foreign_key_check").all().length, 0);
   assert.equal(
     restored.prepare("SELECT count(*) n FROM service_links").get().n,
-    sqlite.prepare("SELECT count(*) n FROM service_links").get().n,
+    (await dbRow("SELECT count(*) n FROM service_links")).n,
   );
   assert.equal(
     restored.prepare("SELECT count(*) n FROM service_link_reviews").get().n,
-    sqlite.prepare("SELECT count(*) n FROM service_link_reviews").get().n,
+    (await dbRow("SELECT count(*) n FROM service_link_reviews")).n,
   );
   assert.throws(
     () => restored.exec("UPDATE audit_events SET action='tamper'"),
@@ -1499,4 +1435,36 @@ test("encrypted database and evidence backup restores to a fresh isolated direct
     fs.readFileSync(path.join(out, "evidence", "PROOF-1")),
     Buffer.from(bytes),
   );
+});
+test("migration script loads a full export into Supabase PostgreSQL and reconciles", async () => {
+  const { backupTables } = await import("../lib/domain/backup.ts");
+  const tables = {};
+  for (const table of backupTables) tables[table] = await dbRows(`SELECT * FROM ${table}`);
+  const exportPath = join(testDirectory, "export.json");
+  fs.writeFileSync(exportPath, JSON.stringify({ format: "depi-backup-v1", created_at: new Date().toISOString(), tables }));
+  const reportPath = join(testDirectory, "migration-report.json");
+  const target = await startPostgresTestDatabase();
+  try {
+    const { spawnSync } = await import("node:child_process");
+    const run = (extra) =>
+      spawnSync(
+        process.execPath,
+        ["--experimental-strip-types", "scripts/migrate-d1-to-supabase.mjs", "--json", exportPath, "--database", target.url, "--skip-evidence", "--report", reportPath, ...extra],
+        { encoding: "utf8" },
+      );
+    const dry = run(["--dry-run"]);
+    assert.equal(dry.status, 0, dry.stdout + dry.stderr);
+    assert.equal((await target.db.prepare("SELECT count(*) n FROM students").first()).n, 0, "dry run must not commit");
+    const real = run([]);
+    assert.equal(real.status, 0, real.stdout + real.stderr);
+    const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+    assert.ok(report.ok);
+    assert.ok(Object.values(report.tables).every((entry) => entry.match));
+    assert.equal((await target.db.prepare("SELECT count(*) n FROM students").first()).n, tables.students.length);
+    assert.equal((await target.db.prepare("SELECT count(*) n FROM audit_events").first()).n, tables.audit_events.length);
+    const again = run([]);
+    assert.notEqual(again.status, 0, "a second run against a populated project must refuse");
+  } finally {
+    await target.stop();
+  }
 });
