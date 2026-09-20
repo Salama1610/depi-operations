@@ -9,6 +9,8 @@
 //
 // Password modes:
 //   --password student-id   the student's business ID, as printed on the roster
+//   --group <id>            limit the run to one group, for a supervised pilot
+//
 //   --password random       a long random secret nobody is told (default); each
 //                           student then activates through password recovery
 //
@@ -79,12 +81,18 @@ async function existingIdentities() {
 const sql = adminConnection(resolveDatabaseUrl(args, "session"));
 let report;
 try {
+  // --group limits the run to one group, for a supervised pilot before the
+  // whole roster is provisioned.
+  const group = args.group ? String(args.group) : null;
   const students = await sql.unsafe(
     `select id, lower(btrim(email)) as email, name, lifecycle
        from students
       where email is not null and btrim(email) <> ''
+        and ($1::text is null or group_id = $1::text)
       order by id`,
+    [group],
   );
+  if (group) console.log(`limited to group            ${group}`);
   const active = students.filter(
     (s) => !["Removed", "Withdrawn", "Graduate Closed", "Non-Graduate Closed"].includes(s.lifecycle),
   );
@@ -97,6 +105,7 @@ try {
   report = {
     generated_at: new Date().toISOString(),
     password_mode: mode,
+    group: group,
     students_with_email: students.length,
     skipped_closed_lifecycle: skippedClosed,
     eligible: active.length,
