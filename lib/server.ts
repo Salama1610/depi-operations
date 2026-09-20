@@ -120,8 +120,8 @@ export function scopeSql(u: any, alias = "g") {
   )
     return { sql: "1=1", args: [] };
   return {
-    sql: `(${alias}.coordinator=? OR ${alias}.supervisor=? OR ${alias}.coach=? OR EXISTS (SELECT 1 FROM group_coaches gc WHERE gc.group_id=${alias}.id AND gc.user_id=? AND gc.status='Active'))`,
-    args: [u.id, u.id, u.id, u.id],
+    sql: `(${alias}.coordinator=? OR ${alias}.supervisor=? OR ${alias}.coach=? OR ${alias}.account_manager=? OR EXISTS (SELECT 1 FROM group_coaches gc WHERE gc.group_id=${alias}.id AND gc.user_id=? AND gc.status='Active'))`,
+    args: [u.id, u.id, u.id, u.id, u.id],
   };
 }
 export async function student(u: any, id: string) {
@@ -190,7 +190,7 @@ export async function recalc(sid: string) {
 export async function loadData(u: any) {
   const q = scopeSql(u);
   const groups = await all(
-    `SELECT g.*,c.name coordinator_name,s.name supervisor_name,h.name coach_name FROM groups g JOIN users c ON c.id=g.coordinator JOIN users s ON s.id=g.supervisor JOIN users h ON h.id=g.coach WHERE ${q.sql}`,
+    `SELECT g.*,c.name coordinator_name,s.name supervisor_name,h.name coach_name,m.name account_manager_name FROM groups g JOIN users c ON c.id=g.coordinator JOIN users s ON s.id=g.supervisor JOIN users h ON h.id=g.coach LEFT JOIN users m ON m.id=g.account_manager WHERE ${q.sql}`,
     ...q.args,
   );
   const students = await all(

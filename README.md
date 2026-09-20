@@ -61,6 +61,12 @@ The service-link operating rules, student/QC procedures, roster import process, 
 
 See `docs/production-readiness.md`. Before loading real student data, the organization must add the real role-separated staff roster, approve the Ministry report mapping and retention periods, connect the selected credential vault and backup destination, activate the scheduler if required, and complete staff UAT/security/recovery sign-off. These are environment and policy decisions; the product flow is implemented.
 
+## Publishing to a Google Sheet
+
+`scripts/publish-to-google-sheet.mjs` writes operational views into a Google Sheet, one tab per dataset: groups, service-link status, controlled accounts and roster health. It is deliberately one way. The workspace holds the rules, the constraints and the audit trail, so a two-way sync would let a pasted cell bypass all of them. Marketplace credentials are never published.
+
+It needs a Google service account: create a project, enable the Sheets API, download the service-account key, and share the sheet with that account's address as an Editor. Nothing is billed at this volume. Run with `--dry-run` first to see the row counts.
+
 ## Source layout
 
 - `app/operations.tsx`: role-aware working surface and workflows.

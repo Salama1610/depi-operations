@@ -20,6 +20,7 @@ const allowed: Record<string, string[]> = {
     "coordinator",
     "supervisor",
     "coach",
+    "account_manager",
     "pathway",
     "delivery_model",
     "start_date",
