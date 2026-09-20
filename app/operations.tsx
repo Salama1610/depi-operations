@@ -294,6 +294,7 @@ export default function Operations({ module }: { module: string }) {
     [preview, setPreview] = useState<Row | null>(null),
     [importId, setImportId] = useState(""),
     [serviceFilters, setServiceFilters] = useState<Row>({ platform: "All", track: "All", group: "All", coordinator: "All", age: "All", automatic: "All", corrections: "All" }),
+    [submissionFilters, setSubmissionFilters] = useState<Row>({ state: "All", track: "All", group: "All", coordinator: "All" }),
     [saved, setSaved] = useState<string[]>([]);
   async function refresh() {
     try {
@@ -326,6 +327,7 @@ export default function Operations({ module }: { module: string }) {
   const groupCoaches: Row[] = d.groupCoaches || [];
   const serviceLinks: Row[] = d.serviceLinks || [];
   const serviceLinkReviews: Row[] = d.serviceLinkReviews || [];
+  const serviceSubmissionStatus: Row[] = d.serviceSubmissionStatus || [];
   const openTasks = tasks.filter((t) => t.status === "Open");
   const overdue = openTasks.filter((t) => t.due < new Date().toISOString());
   const dueToday = openTasks.filter((t) => t.due.slice(0, 10) === today());
@@ -348,6 +350,7 @@ export default function Operations({ module }: { module: string }) {
     students.find((s) => s.id === id)?.name || id || "—";
   const owner = (id: string) =>
     staff.find((s: Row) => s.id === id)?.name || "Unassigned";
+  const canReviewServiceLinks = can(user.roles, ["Quality Member", "Quality Lead", "Project Operations"]);
   const shownNav = nav.filter(([m]) =>
     m === "administration"
       ? can(user.roles, ["Operations Systems / Admin"])
@@ -356,6 +359,9 @@ export default function Operations({ module }: { module: string }) {
             "Quality Member",
             "Quality Lead",
             "Project Operations",
+            "Operations Coordinator",
+            "Team Supervisor",
+            "Higher Board",
           ])
         : m === "accounts"
           ? can(user.roles, [
@@ -1547,10 +1553,69 @@ export default function Operations({ module }: { module: string }) {
       out[key] = (out[key] || 0) + 1;
       return out;
     }, {})).sort((a: any, b: any) => b[1] - a[1]);
+    // One plain follow-up state per student, so a coordinator can see who has
+    // not submitted at all and who is waiting on the student rather than on QC.
+    const submissionState = (r: Row) =>
+      Number(r.links_submitted) === 0
+        ? "Not submitted"
+        : Number(r.links_need_correction) > 0
+          ? "Needs student correction"
+          : Number(r.links_locked) === 3
+            ? "Complete"
+            : "Awaiting QC";
+    const submissionRows = serviceSubmissionStatus
+      .map((r): Row => ({ ...r, follow_up: submissionState(r) }))
+      .filter(qMatch)
+      .filter((r) => submissionFilters.state === "All" || r.follow_up === submissionFilters.state)
+      .filter((r) => submissionFilters.track === "All" || r.track === submissionFilters.track)
+      .filter((r) => submissionFilters.group === "All" || r.group_id === submissionFilters.group)
+      .filter((r) => submissionFilters.coordinator === "All" || r.coordinator === submissionFilters.coordinator)
+      .sort(
+        (a, b) =>
+          ["Not submitted", "Needs student correction", "Awaiting QC", "Complete"].indexOf(a.follow_up) -
+            ["Not submitted", "Needs student correction", "Awaiting QC", "Complete"].indexOf(b.follow_up) ||
+          String(a.student_name).localeCompare(String(b.student_name)),
+      );
+    const submissionCount = (state: string) =>
+      serviceSubmissionStatus.filter((r) => submissionState(r) === state).length;
+    const submissionPanel = serviceSubmissionStatus.length > 0 && (
+      <>
+        <div className="mini-stats service-qc-stats">
+          <span><strong>{submissionCount("Not submitted")}</strong>Not submitted</span>
+          <span><strong>{submissionCount("Awaiting QC")}</strong>Awaiting QC</span>
+          <span><strong>{submissionCount("Needs student correction")}</strong>Needs student correction</span>
+          <span><strong>{submissionCount("Complete")}</strong>Complete</span>
+        </div>
+        <div className="filter-row service-qc-filters">
+          <Pick label="Follow-up" value={submissionFilters.state} onChange={(state) => setSubmissionFilters({ ...submissionFilters, state })} options={["All", "Not submitted", "Needs student correction", "Awaiting QC", "Complete"]} />
+          <Pick label="Track" value={submissionFilters.track} onChange={(track) => setSubmissionFilters({ ...submissionFilters, track })} options={["All", ...Array.from(new Set(serviceSubmissionStatus.map((r) => r.track).filter(Boolean)))]} />
+          <Pick label="Group" value={submissionFilters.group} onChange={(group) => setSubmissionFilters({ ...submissionFilters, group })} options={["All", ...Array.from(new Set(serviceSubmissionStatus.map((r) => r.group_id).filter(Boolean)))]} />
+          <Pick label="Coordinator" value={submissionFilters.coordinator} onChange={(coordinator) => setSubmissionFilters({ ...submissionFilters, coordinator })} options={[{ value: "All", label: "All coordinators" }, ...Array.from(new Set(serviceSubmissionStatus.map((r) => r.coordinator).filter(Boolean))).map((id) => ({ value: id, label: owner(id) }))]} />
+        </div>
+        {panel(
+          `Service-link submission status · ${submissionRows.length} matching`,
+          paginate(submissionRows, (pageRows) => generic(
+            pageRows,
+            [
+              { key: "student_name", label: "Student", render: (r) => <span><strong>{r.student_name}</strong><small className="table-subline">{r.student_id}</small></span> },
+              { key: "group_id", label: "Group", render: (r) => <span>{r.group_id}<small className="table-subline">{r.track}</small></span> },
+              { key: "coordinator", label: "Coordinator", render: (r) => owner(r.coordinator) },
+              { key: "follow_up", label: "Follow-up", render: (r) => <Badge value={r.follow_up} /> },
+              { key: "links_submitted", label: "Links", render: (r) => `${r.links_locked}/3 locked · ${r.links_submitted} submitted` },
+              { key: "submitted_at", label: "Submitted", render: (r) => (r.submitted_at ? new Date(r.submitted_at).toLocaleDateString() : "Never") },
+            ],
+            (r) => <div className="detail-actions"><button className="small-btn" onClick={() => setSelected(students.find((x) => x.id === r.student_id) || null)}>Open student</button></div>,
+          )),
+        )}
+      </>
+    );
     content = (
       <>
         {module === "quality" && (
           <>
+            {submissionPanel}
+            {canReviewServiceLinks && (
+            <>
             <div className="mini-stats service-qc-stats">
               <span><strong>{serviceLinks.filter((r) => r.qc_status === "Pending").length}</strong>Awaiting QC</span>
               <span><strong>{serviceLinks.filter((r) => r.qc_status === "Needs Correction").length}</strong>Need student correction</span>
@@ -1582,6 +1647,8 @@ export default function Operations({ module }: { module: string }) {
               )),
             )}
             {panel("QC reviewer activity", reviewerWorkload.length ? <div className="mini-stats">{reviewerWorkload.map(([reviewer, count]: any) => <span key={reviewer}><strong>{count}</strong>{reviewer}</span>)}</div> : <Empty title="No service-link reviews yet" />)}
+            </>
+            )}
           </>
         )}
         <div className="mini-stats">

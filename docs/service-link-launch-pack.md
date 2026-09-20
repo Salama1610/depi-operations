@@ -9,6 +9,7 @@
 - Khamsat format: `/<category>/<subcategory>/<numeric-id>-<Arabic-or-English-slug>`.
 - Nafezly format: `/service/<numeric-id>-<Arabic-or-English-slug>`, the same shape as Kafiil.
 - The three normalized URLs must be distinct. The same approved platform and category may be used more than once.
+- Coverage: the Quality review module lists every student in the reviewer's or coordinator's scope with one follow-up state, so a student who has submitted nothing is visible alongside those under review. The states are Not submitted, Awaiting QC, Needs student correction and Complete, filterable by track, group and coordinator. Coordinators and supervisors see this list; only Quality roles see the review queue and can decide a link.
 - QC must open the page and confirm it is public, active, owned by the student, and relevant to the assigned track. Login-only, deleted, paused, rejected, unavailable, owner-mismatched, or track-mismatched services require correction.
 - Automatic failure cannot be approved by a Quality Member. A Quality Lead may override it only with a recorded reason; the audit record remains immutable.
 - Marketplace content is not fetched automatically in this release. Availability, owner, title and category are human QC decisions because marketplace contracts, stable page fields, and an approved identity-matching rule have not been supplied.

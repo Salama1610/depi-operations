@@ -268,6 +268,41 @@ export async function loadData(u: any) {
         ...q.args,
       )
     : [];
+  // Every scoped student with their service-link position, including the ones
+  // who have submitted nothing. Coordinators and supervisors see this to chase
+  // non-submitters; QC sees it to know how much work is still coming.
+  const serviceSubmissionStatus = can(u.roles, [
+    "Quality Member",
+    "Quality Lead",
+    "Project Operations",
+    "Operations Coordinator",
+    "Team Supervisor",
+    "Higher Board",
+  ])
+    ? await all(
+        `SELECT s.id student_id,s.name student_name,s.email student_email,s.group_id,s.lifecycle,
+                g.track,g.provider,g.coordinator,c.name coordinator_name,
+                ifnull(ss.status,'Not submitted') submission_status,
+                ss.submitted_at,ss.updated_at submission_updated_at,ss.qc_completed_at,
+                ifnull(agg.total,0) links_submitted,
+                ifnull(agg.locked,0) links_locked,
+                ifnull(agg.needs_correction,0) links_need_correction,
+                ifnull(agg.pending,0) links_pending,
+                ifnull(agg.failed,0) links_failed
+         FROM students s
+         JOIN groups g ON g.id=s.group_id
+         JOIN users c ON c.id=g.coordinator
+         LEFT JOIN service_submissions ss ON ss.student_id=s.id
+         LEFT JOIN (SELECT student_id,count(*) total,
+                           sum(CASE WHEN qc_status='Locked' THEN 1 ELSE 0 END) locked,
+                           sum(CASE WHEN qc_status='Needs Correction' THEN 1 ELSE 0 END) needs_correction,
+                           sum(CASE WHEN qc_status='Pending' THEN 1 ELSE 0 END) pending,
+                           sum(CASE WHEN auto_status='Failed' THEN 1 ELSE 0 END) failed
+                    FROM service_links GROUP BY student_id) agg ON agg.student_id=s.id
+         WHERE ${q.sql}`,
+        ...q.args,
+      )
+    : [];
   const serviceLinkReviews = serviceLinks.length
     ? await all(
         `SELECT r.*,l.student_id,l.slot,u.name reviewer_name
@@ -515,6 +550,7 @@ export async function loadData(u: any) {
     evidencePackageItems,
     serviceLinks,
     serviceLinkReviews,
+    serviceSubmissionStatus,
     accounts: can(u.roles, [
       "Higher Board",
       "Project Operations",
