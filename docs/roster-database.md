@@ -3,7 +3,7 @@
 The roster database is generated from the first worksheet of the source XLSX. The generator uses the workbook as an immutable source, normalizes identity fields, and writes three private artifacts beside the workbook:
 
 - `depi-r5-database.sqlite`: a complete SQLite copy with all application migrations and roster data.
-- `depi-r5-roster-data.sql`: data-only SQL for a migrated, empty D1 database.
+- `depi-r5-roster-data.sql`: data-only SQL for a migrated, empty relational database. It is an offline artifact; the supported path is the authenticated import in step 4 below.
 - `depi-r5-reconciliation.json`: counts, validation results, conflict resolutions, and launch follow-up without student PII.
 
 The SQL and SQLite files contain personal data. Keep them out of source control and transfer them only through an approved private channel.
@@ -39,13 +39,15 @@ The workbook has no coordinator, supervisor, or coach columns. The generator the
 
 The first authenticated administrator initializes the imported production workspace through the existing setup screen. The application then records that Supabase user as Project Operations and Operations Systems / Admin. Student Supabase accounts remain separate: their authenticated email is matched to the normalized roster email.
 
-## D1 import order
+## Import order
 
-1. Apply every file in `drizzle/` through migration `0012`.
-2. Deploy the application and configure the Supabase runtime variables.
+1. Apply `supabase/migrations/*.sql` to the Supabase project with `node scripts/apply-supabase-migrations.mjs`.
+2. Configure the Supabase runtime variables and deploy the application.
 3. Sign in with the intended first administrator and choose production setup.
-4. Run `scripts/import-roster-api.py` with the private SQLite database and bootstrap credentials. This sends the roster directly to the authenticated Site API without placing PII in Git history.
+4. Run `scripts/import-roster-api.py` with the private SQLite database and bootstrap credentials. This sends the roster to the authenticated application API, which revalidates every row, so no personal data enters Git history.
 5. Add real staff users, replace all unassigned group ownership, and confirm group start dates.
-6. Compare D1 totals with `depi-r5-reconciliation.json`.
+6. Compare the Supabase totals with `depi-r5-reconciliation.json`.
+
+Completed for Round 5 on 20 September 2026: 5 tracks, 131 groups, 2,887 students, 2,948 source rows, status Reconciled. Steps 5 and 6 of the follow-up remain: every group still references the three disabled `system-unassigned-*` records and the placeholder start date.
 
 Never run the data SQL twice. The batch, student, and source-file identities are unique and the second import is expected to fail rather than duplicate records.

@@ -42,4 +42,4 @@ These are deployment decisions or credentials, not unfinished application featur
 - Activate the supplied scheduler workflows if scheduled notifications are required.
 - Complete organizational security, accessibility/mobile, staff UAT and recovery-objective sign-off before loading real personal data.
 
-No real student data has been loaded or contacted by this project.
+The approved Round 5 roster was loaded into the Supabase project on 20 September 2026 through the application's authenticated roster-import flow: 5 tracks, 131 groups, 2,887 canonical students and 2,948 source rows, reconciled against `depi-r5-reconciliation.json`. No student has been contacted, and no Supabase Auth identity has been created for a student yet. Until the organization-owned inputs above are complete, treat the workspace as loaded but not launched.
