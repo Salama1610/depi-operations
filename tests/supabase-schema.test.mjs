@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { effectiveColumnTypes, effectiveTables } from "./helpers/schema-contract.mjs";
 
 const schemaSource = await readFile(new URL("../db/schema.ts", import.meta.url), "utf8");
 const drizzleSnapshot = JSON.parse(
@@ -25,15 +26,14 @@ const rosterSourceContract = JSON.parse(
   await readFile(new URL("../supabase/roster-source-contract.json", import.meta.url), "utf8"),
 );
 
-test("Supabase core migration covers every D1 schema table", () => {
+test("the Supabase migrations cover every D1 schema table", () => {
   const sqliteTables = new Set(
     [...schemaSource.matchAll(/sqliteTable\(\s*["']([^"']+)/g)].map((match) => match[1]),
   );
-  const postgresTables = new Set(
-    [...coreMigration.matchAll(/create table public\.([a-z_]+)/gi)].map((match) => match[1]),
-  );
+  // Every migration, not only the core file: later ones add tables too.
+  const postgresTables = effectiveTables();
 
-  assert.equal(sqliteTables.size, 59);
+  assert.equal(sqliteTables.size, 60);
   assert.deepEqual([...postgresTables].sort(), [...sqliteTables].sort());
 });
 
@@ -59,19 +59,11 @@ test("Supabase core migration preserves every latest D1 column", () => {
   assert.ok(postgresColumns.get("users").has("auth_user_id"));
 });
 
-test("Supabase column type contract exactly matches the core migration", () => {
-  const extracted = {};
-  for (const tableMatch of coreMigration.matchAll(/create table public\.([a-z_]+) \(([\s\S]*?)\n\);/gi)) {
-    const columns = {};
-    for (const line of tableMatch[2].split("\n")) {
-      const match = line.match(
-        /^\s{2}([a-z_][a-z0-9_]*)\s+(text|uuid|jsonb|boolean|date|timestamptz|bigint|integer|smallint|numeric\(\d+,\d+\))/i,
-      );
-      if (match) columns[match[1]] = match[2].toLowerCase();
-    }
-    extracted[tableMatch[1]] = columns;
-  }
-  assert.deepEqual(columnTypes, extracted);
+test("Supabase column type contract exactly matches the migrations", () => {
+  // Derived from every migration, so a column added by a later one has to be
+  // in the contract too. The adapter binds and converts values from this file,
+  // so a column missing here is a runtime bug, not a documentation gap.
+  assert.deepEqual(columnTypes, effectiveColumnTypes());
 });
 
 test("roster source contract preserves the reconciled workbook shape", () => {

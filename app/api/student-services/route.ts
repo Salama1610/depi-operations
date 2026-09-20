@@ -100,6 +100,23 @@ export async function POST(req: Request) {
       s.id,
     );
     const bySlot = new Map(existing.map((row) => [Number(row.slot), row]));
+    // The controlled account a service was published from. The student never
+    // types it: the programme assigned them an account per marketplace, so it
+    // is resolved from that assignment. The gate's platform names differ from
+    // the account platform names (Kafiil is the Kafeel marketplace), so the
+    // mapping is explicit. Left null when the student holds no assignment, or
+    // more than one, on that marketplace.
+    const accountPlatform: Record<string, string> = { Kafiil: "Kafeel", Khamsat: "Khamsat", Nafezly: "Nafezly" };
+    const assignments = await all(
+      `SELECT a.platform,a.id FROM account_assignments n JOIN accounts a ON a.id=n.account_id WHERE n.student_id=?`,
+      s.id,
+    );
+    const accountFor = (platform: string) => {
+      const wanted = accountPlatform[platform];
+      if (!wanted) return null;
+      const matches = assignments.filter((row: any) => row.platform === wanted);
+      return matches.length === 1 ? String(matches[0].id) : null;
+    };
     const t = now();
     const jobs: any[] = [
       stmt(
@@ -136,7 +153,7 @@ export async function POST(req: Request) {
       if (prior) {
         jobs.push(
           stmt(
-            `UPDATE service_links SET url=?,normalized_url=?,platform=?,auto_status=?,auto_result=?,auto_checked_at=?,qc_status=?,qc_comment=NULL,qc_actor=NULL,qc_at=NULL,revision=?,submitted_at=?,updated_at=? WHERE id=? AND qc_status<>'Locked'`,
+            `UPDATE service_links SET url=?,normalized_url=?,platform=?,auto_status=?,auto_result=?,auto_checked_at=?,qc_status=?,qc_comment=NULL,qc_actor=NULL,qc_at=NULL,revision=?,account_id=?,submitted_at=?,updated_at=? WHERE id=? AND qc_status<>'Locked'`,
             stored,
             check.normalizedUrl,
             check.platform,
@@ -145,6 +162,7 @@ export async function POST(req: Request) {
             t,
             qcStatus,
             revision,
+            accountFor(check.platform),
             t,
             t,
             prior.id,
@@ -153,8 +171,8 @@ export async function POST(req: Request) {
       } else {
         jobs.push(
           stmt(
-            `INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,submitted_at,updated_at)
-             VALUES(?,?,?,?,?,?,?,?,?,?,NULL,NULL,NULL,?,?,?)`,
+            `INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,account_id,submitted_at,updated_at)
+             VALUES(?,?,?,?,?,?,?,?,?,?,NULL,NULL,NULL,?,?,?,?)`,
             uid("SLK"),
             s.id,
             slot,
@@ -166,6 +184,7 @@ export async function POST(req: Request) {
             t,
             qcStatus,
             revision,
+            accountFor(check.platform),
             t,
             t,
           ),

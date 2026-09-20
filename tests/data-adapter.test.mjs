@@ -2,26 +2,18 @@ import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createPostgresDatabase, isoTimestamp, normalizeDatabaseError, translateSql } from "../lib/data/postgres.ts";
-import { columnTypes, dialectOptions, migrationFiles, startPostgresTestDatabase } from "./helpers/postgres-test-db.mjs";
+import { columnTypes, dialectOptions, startPostgresTestDatabase } from "./helpers/postgres-test-db.mjs";
+import { effectiveColumns, latestSnapshot } from "./helpers/schema-contract.mjs";
 
 const options = dialectOptions();
 const t = (sql) => translateSql(sql, options);
 
 test("PostgreSQL column order matches the deployed D1 schema for positional inserts", () => {
-  const snapshot = JSON.parse(fs.readFileSync(new URL("../drizzle/meta/0012_snapshot.json", import.meta.url), "utf8"));
-  const migration = fs.readFileSync(new URL("../supabase/migrations/" + migrationFiles()[0], import.meta.url), "utf8");
-  const postgresColumns = new Map();
-  for (const match of migration.matchAll(/create table public\.([a-z_]+) \(([\s\S]*?)\n\);/gi)) {
-    postgresColumns.set(
-      match[1],
-      match[2]
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => /^[a-z_][a-z0-9_]*\s/i.test(line))
-        .filter((line) => !/^(?:check|constraint|foreign|primary|unique)\b/i.test(line))
-        .map((line) => line.match(/^([a-z_][a-z0-9_]*)/i)[1]),
-    );
-  }
+  // Compared after every migration, not just the first: a column added by a
+  // later migration lands at the end of the PostgreSQL table, which is exactly
+  // what a positional INSERT depends on.
+  const snapshot = latestSnapshot();
+  const postgresColumns = effectiveColumns();
   for (const [table, definition] of Object.entries(snapshot.tables)) {
     const d1 = Object.keys(definition.columns);
     const pg = (postgresColumns.get(table) || []).slice(0, d1.length);
@@ -137,13 +129,13 @@ test("Supabase migrations apply to a real PostgreSQL server", async () => {
   const { results } = await pg.db
     .prepare("SELECT count(*) n FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'")
     .all();
-  assert.equal(results[0].n, 59);
+  assert.equal(results[0].n, 60);
   const triggers = await pg.db.prepare("SELECT count(*) n FROM information_schema.triggers WHERE trigger_schema='public'").first();
   assert.ok(triggers.n >= 20, `expected the integrity triggers to be installed, found ${triggers.n}`);
   const rls = await pg.db
     .prepare("SELECT count(*) n FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND c.relrowsecurity")
     .first();
-  assert.equal(rls.n, 59, "row level security must be enabled on every application table");
+  assert.equal(rls.n, 60, "row level security must be enabled on every application table");
 });
 
 test("adapter preserves D1 value semantics through the PostgreSQL types", async () => {

@@ -48,6 +48,10 @@ export const groups = sqliteTable("groups", {
   policyId: text("policy_id")
     .notNull()
     .references(() => policies.id),
+  // The tier above the supervisor in service operations. Added later, so it
+  // sits last: both engines append a new column, and positional inserts
+  // written against the original order must keep working.
+  accountManager: text("account_manager").references(() => users.id),
 });
 export const students = sqliteTable(
   "students",
@@ -151,6 +155,22 @@ export const accounts = sqliteTable("accounts", {
   credits: real("credits").notNull(),
   secretRef: text("secret_ref"),
   activeAssignment: text("active_assignment"),
+});
+
+// Marketplace credentials held by the programme, encrypted at rest with a
+// server-only key. Never selected by a client: the API decrypts and shows the
+// value for a few seconds to an authorised person, and records who and why.
+export const accountSecrets = sqliteTable("account_secrets", {
+  accountId: text("account_id")
+    .primaryKey()
+    .references(() => accounts.id),
+  username: text("username").notNull(),
+  secret: text("secret").notNull(),
+  iv: text("iv").notNull(),
+  updatedBy: text("updated_by")
+    .notNull()
+    .references(() => users.id),
+  updatedAt: text("updated_at").notNull(),
 });
 export const requests = sqliteTable("account_requests", {
   id: text("id").primaryKey(),
@@ -984,6 +1004,9 @@ export const serviceLinks = sqliteTable(
     revision: integer("revision").notNull().default(1),
     submittedAt: text("submitted_at").notNull(),
     updatedAt: text("updated_at").notNull(),
+    // The controlled account this service was published from. Added later, so
+    // it sits last for the same positional-insert reason as above.
+    accountId: text("account_id").references(() => accounts.id),
   },
   (t) => [
     uniqueIndex("service_link_student_slot").on(t.studentId, t.slot),

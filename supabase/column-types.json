@@ -29,7 +29,8 @@
     "delivery_model": "text",
     "start_date": "date",
     "status": "text",
-    "policy_id": "text"
+    "policy_id": "text",
+    "account_manager": "text"
   },
   "students": {
     "id": "text",
@@ -598,7 +599,8 @@
     "qc_at": "timestamptz",
     "revision": "integer",
     "submitted_at": "timestamptz",
-    "updated_at": "timestamptz"
+    "updated_at": "timestamptz",
+    "account_id": "text"
   },
   "service_link_reviews": {
     "id": "text",
@@ -608,5 +610,13 @@
     "comment": "text",
     "reviewed_by": "text",
     "reviewed_at": "timestamptz"
+  },
+  "account_secrets": {
+    "account_id": "text",
+    "username": "text",
+    "secret": "text",
+    "iv": "text",
+    "updated_by": "text",
+    "updated_at": "timestamptz"
   }
 }
