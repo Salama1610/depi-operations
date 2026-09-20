@@ -50,6 +50,7 @@ Import the Round 5 roster (2,948 workbook rows, 2,887 canonical students after 6
 | Override automatic failure | No | No | No | Yes, with reason | No unless separately assigned Quality Lead |
 | Import roster | No | Authorized operations roles | No | No | Yes |
 | View roster health and connections | No | No | No | No | Admin |
+| Reveal a marketplace account credential | No | Yes, for accounts their groups use | No | No | Higher Board and Admin always; Project Operations within scope |
 
 Each student record owns one submission, three numbered service-link rows, and immutable review rows keyed by link revision. Staff notifications are recipient-scoped. Student review history is loaded only through the authenticated student's own record.
 

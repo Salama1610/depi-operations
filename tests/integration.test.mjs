@@ -1337,12 +1337,25 @@ test("vault access is role restricted and never logs returned credentials", asyn
         body: JSON.stringify(x),
       }),
     );
-  current = { id: "coordinator", email: "staff-sara@example.invalid" };
+  // A coach has no business with marketplace logins, whatever group they are on.
+  current = { id: "staff-coach", email: "staff-coach@example.invalid" };
   let result = await (
     await call({
       action: "reveal",
       account_id: "ACC-102",
       purpose: "Resolve the assigned client task",
+    })
+  ).json();
+  assert.match(result.error, /not used by a group you are responsible for|role/);
+  // Storing a credential is a custodian act, not a coordinator one.
+  current = { id: "coordinator", email: "staff-sara@example.invalid" };
+  result = await (
+    await call({
+      action: "set_credential",
+      account_id: "ACC-102",
+      purpose: "Record the marketplace login",
+      username: "depi.kafeel@example.invalid",
+      password: "stored-secret-never-log",
     })
   ).json();
   assert.match(result.error, /role/);
@@ -1374,6 +1387,44 @@ test("vault access is role restricted and never logs returned credentials", asyn
   } finally {
     globalThis.fetch = realFetch;
   }
+
+  // The workspace can also hold the credential itself, encrypted. That path
+  // takes precedence over the vault and is what a coordinator uses day to day.
+  globalThis.__testEnv.CREDENTIAL_ENCRYPTION_KEY = "a".repeat(64);
+  result = await (
+    await call({
+      action: "set_credential",
+      account_id: "ACC-102",
+      purpose: "Record the marketplace login",
+      username: "depi.kafeel@example.invalid",
+      password: "stored-secret-never-log",
+    })
+  ).json();
+  assert.equal(result.ok, true);
+  const rawRow = await dbRow("SELECT username,secret FROM account_secrets WHERE account_id='ACC-102'");
+  assert.ok(!JSON.stringify(rawRow).includes("stored-secret-never-log"), "the stored row must be encrypted");
+  assert.ok(!JSON.stringify(rawRow).includes("depi.kafeel@example.invalid"));
+
+  current = { id: "coordinator", email: "staff-sara@example.invalid" };
+  result = await (
+    await call({
+      action: "reveal",
+      account_id: "ACC-102",
+      purpose: "Hand the login to the assigned student",
+    })
+  ).json();
+  assert.equal(result.password, "stored-secret-never-log", "a coordinator responsible for the group may reveal it");
+  assert.equal(result.username, "depi.kafeel@example.invalid");
+  assert.equal(
+    (await dbRow("SELECT count(*) n FROM audit_events WHERE value LIKE '%stored-secret-never-log%'")).n,
+    0,
+    "the credential must never reach the audit log",
+  );
+  assert.ok(
+    Number((await dbRow("SELECT count(*) n FROM audit_events WHERE action='Credential access granted'")).n) >= 1,
+    "every reveal is recorded",
+  );
+  current = { id: "owner", email: "owner@example.com" };
 });
 test("encrypted database and evidence backup restores to a fresh isolated directory", async () => {
   const { createHash } = await import("node:crypto");

@@ -10,7 +10,7 @@
     "dev": "vite",
     "build": "node scripts/build-verified.mjs",
     "start": "vinext start",
-    "test": "node --experimental-strip-types --test tests/domain.test.mjs tests/integration.test.mjs tests/supabase-schema.test.mjs tests/data-adapter.test.mjs",
+    "test": "node --experimental-strip-types --test tests/domain.test.mjs tests/integration.test.mjs tests/supabase-schema.test.mjs tests/data-adapter.test.mjs tests/account-secrets.test.mjs tests/rpc-transport.test.mjs tests/service-link-platform.test.mjs",
     "test:postgres": "node --experimental-strip-types --test tests/integration-postgres.test.mjs",
     "test:postgres-rpc": "node --experimental-strip-types --test tests/integration-postgres-rpc.test.mjs",
     "migrate:supabase": "node --experimental-strip-types scripts/migrate-d1-to-supabase.mjs",
