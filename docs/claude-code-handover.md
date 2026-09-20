@@ -42,7 +42,7 @@ The active workspace is intentionally populated with synthetic pilot data. Never
 15. Private byte-validated screenshots, authenticated no-store reads, encrypted database/evidence backup and offline restore verification.
 16. Retention-policy recording without automatic deletion, connection status and recovery controls.
 17. Admin-only synthetic pilot loader that works only on an empty operational workspace, preserves the existing owner/effective policy, is retry-safe and refuses mixed live/synthetic data.
-18. Student service portal with exactly three service-link slots, strict Kafiil/Khamsat URL checks, confirmation and recoverable drafts, per-link QC locking, correction comments, editable rejected links only, timestamps, immutable review history and identity isolation.
+18. Student service portal with exactly three service-link slots, strict Kafiil, Khamsat and Nafezly URL checks, confirmation and recoverable drafts, per-link QC locking, correction comments, editable rejected links only, timestamps, immutable review history and identity isolation.
 19. Service-link QC assignment, filters, pagination, SLA reminders, correction templates, Quality Lead overrides, Student 360 visibility, reporting/export, roster health, and backup/restore coverage.
 
 ## Core workflows

@@ -2,7 +2,7 @@
 
 Students use the `/student` route (and are routed there automatically from `/` when their signed-in email matches a student record). The page always presents three service slots. A first submission must contain three distinct HTTP/HTTPS URLs.
 
-Each URL receives a deterministic automatic check before it enters the QC queue. The check accepts only direct HTTPS Kafiil (`/service/<numeric-id>-<slug>`) and Khamsat (`/<category>/<subcategory>/<numeric-id>-<slug>`) pages, supports Arabic and English slugs, removes tracking parameters and fragments, limits input length, rejects custom ports and embedded credentials, and prevents normalized duplicates. Network availability, ownership and track fit remain explicit human QC checks. The approved rules and SOPs are in `docs/service-link-launch-pack.md`.
+Each URL receives a deterministic automatic check before it enters the QC queue. The check accepts only direct service pages on Kafiil (`/service/<numeric-id>-<slug>`), Nafezly (the same shape) and Khamsat (`/<category>/<subcategory>/<numeric-id>-<slug>`). It supports Arabic and English slugs, stores every link over HTTPS and upgrades an `http` address on those marketplaces rather than rejecting it, removes tracking parameters and fragments, limits input length, rejects custom ports and embedded credentials, and prevents normalized duplicates. Network availability, ownership and track fit remain explicit human QC checks. The approved rules and SOPs are in `docs/service-link-launch-pack.md`.
 
 QC reviews each slot independently:
 

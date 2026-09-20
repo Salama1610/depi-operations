@@ -36,6 +36,8 @@ const SAMPLES = [
   "https://kafiil.com/service/12345-a-service",
   "https://www.khamsat.com/programming/web-development/135790-a-service",
   "https://upwork.com/services/product/12345",
+  "https://nafezly.com/service/56713-a-service",
+  "https://nafezly.com/about",
   "http://kafiil.com/service/12345-a-service",
   "https://kafiil.com/service/not-numeric",
   "https://user:pass@kafiil.com/service/12345-a-service",
@@ -64,14 +66,15 @@ test("every platform the gate can record is allowed by the PostgreSQL constraint
   // would pass while proving nothing.
   assert.ok(seen.has("External service"), "samples must include a non-marketplace host");
   assert.ok(seen.has("Unknown"), "samples must include an unparsable value");
-  assert.ok(seen.has("Kafiil") && seen.has("Khamsat"), "samples must include both accepted marketplaces");
+  for (const platform of ["Kafiil", "Khamsat", "Nafezly"])
+    assert.ok(seen.has(platform), `samples must include ${platform}`);
 });
 
 test("a rejected link is still recorded, with a reason the student can act on", () => {
   const external = verifyServiceLink("https://upwork.com/services/product/12345");
   assert.equal(external.status, "Failed");
   assert.equal(external.platform, "External service");
-  assert.match(external.message, /Only Kafiil and Khamsat/);
+  assert.match(external.message, /Only Kafiil, Khamsat and Nafezly/);
 
   const unparsable = verifyServiceLink("not a url at all");
   assert.equal(unparsable.status, "Failed");
@@ -81,4 +84,11 @@ test("a rejected link is still recorded, with a reason the student can act on", 
   const accepted = verifyServiceLink("https://kafiil.com/service/12345-a-service");
   assert.equal(accepted.status, "Needs Review");
   assert.equal(accepted.platform, "Kafiil");
+
+  // An http address on an approved marketplace is accepted and stored securely.
+  const upgraded = verifyServiceLink("http://kafiil.com/service/12345-a-service");
+  assert.equal(upgraded.status, "Needs Review");
+  assert.equal(upgraded.normalizedUrl, "https://kafiil.com/service/12345-a-service");
+  // An http address anywhere else is still refused.
+  assert.equal(verifyServiceLink("http://example.com/service/12345-a-service").status, "Failed");
 });

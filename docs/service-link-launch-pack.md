@@ -3,10 +3,11 @@
 ## Approved operating baseline
 
 - Authentication: Supabase email/password sign-in. A student is authorized when the verified Supabase email matches exactly one active student record. Shared usernames and passwords, including `student1 / 123456`, are prohibited.
-- Accepted platforms: Kafiil and Khamsat only.
-- Links: direct public HTTPS service-page URLs only. Shorteners, embedded credentials, custom ports, fragments, and non-marketplace hosts fail automatically. Query strings are removed before duplicate comparison.
+- Accepted platforms: Kafiil, Khamsat and Nafezly only. Approved on 20 September 2026; Nafezly was already an approved controlled-account platform.
+- Links: direct public service-page URLs, stored over HTTPS. An `http` address on an approved marketplace whose service ID and slug are valid is upgraded to `https` and accepted, so no insecure link is ever recorded; `http` anywhere else fails. Shorteners, embedded credentials, custom ports, fragments and non-marketplace hosts fail automatically. Query strings are removed before duplicate comparison.
 - Kafiil format: `/service/<numeric-id>-<Arabic-or-English-slug>`.
 - Khamsat format: `/<category>/<subcategory>/<numeric-id>-<Arabic-or-English-slug>`.
+- Nafezly format: `/service/<numeric-id>-<Arabic-or-English-slug>`, the same shape as Kafiil.
 - The three normalized URLs must be distinct. The same approved platform and category may be used more than once.
 - QC must open the page and confirm it is public, active, owned by the student, and relevant to the assigned track. Login-only, deleted, paused, rejected, unavailable, owner-mismatched, or track-mismatched services require correction.
 - Automatic failure cannot be approved by a Quality Member. A Quality Lead may override it only with a recorded reason; the audit record remains immutable.
@@ -15,7 +16,7 @@
 ## Student SOP
 
 1. Sign in with the Supabase account whose email was registered by the program team.
-2. Open the Student services page and add exactly three direct Kafiil or Khamsat service URLs.
+2. Open the Student services page and add exactly three direct Kafiil, Khamsat or Nafezly service URLs.
 3. Review the normalized links in the confirmation dialog and submit them. Pending links are read-only.
 4. Check the QC updates section. Approved links remain locked. A returned link shows the correction reason and becomes editable.
 5. Correct only returned links, confirm the resubmission, and wait until all three links are approved.

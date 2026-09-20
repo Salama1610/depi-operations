@@ -27,7 +27,7 @@ Pre-provision the authorized staff and student users in Supabase Auth, then conf
 ## Working features
 
 - Responsive operations overview, complete program flow, work queues, student directory/360, groups, sessions, accounts, gigs, evidence, Quality, cases, reports and administration.
-- Student service-link portal with Supabase email/password sign-in, server-validated cookie sessions, password reset, confirmed three-link submission, recoverable device drafts, strict Kafiil/Khamsat URL rules, per-link correction/locking, review history and timestamps.
+- Student service-link portal with Supabase email/password sign-in, server-validated cookie sessions, password reset, confirmed three-link submission, recoverable device drafts, strict Kafiil, Khamsat and Nafezly URL rules, per-link correction/locking, review history and timestamps.
 - Service-link QC filters, assignment, pagination, SLA reminders, Quality Lead overrides, Student 360 history, operational metrics, exports, roster-health reporting and backup/restore coverage.
 - Coach Operations session control with Regular (8) and Industry (5) delivery plans, policy-locked 180-minute duration, onboarded coach assignment, Cairo-day conflict prevention, coach confirmation, reasoned reschedule/cancellation, attendance completion, delivery notes and SLA/coverage dashboards.
 - Identity from Supabase Auth; backend staff role and assigned-group checks; students access `/student` through their registered email without self-registration.

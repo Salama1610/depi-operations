@@ -3,6 +3,8 @@ export type ServiceLinkAutoStatus = "Needs Review" | "Failed";
 export type ServiceLinkVerification = {
   status: ServiceLinkAutoStatus;
   normalizedUrl: string;
+  /** True when an http address on an approved marketplace was raised to https. */
+  upgraded: boolean;
   platform: string;
   serviceId: string | null;
   checks: string[];
@@ -10,15 +12,32 @@ export type ServiceLinkVerification = {
   verificationVersion: string;
 };
 
-export const serviceLinkVerificationVersion = "2026-09-16.1";
-export const acceptedServicePlatforms = ["Kafiil", "Khamsat"] as const;
+export const serviceLinkVerificationVersion = "2026-09-20.1";
+export const acceptedServicePlatforms = ["Kafiil", "Khamsat", "Nafezly"] as const;
 const platformHosts: Record<string, string> = {
   "kafiil.com": "Kafiil",
   "khamsat.com": "Khamsat",
+  "nafezly.com": "Nafezly",
 };
 const slug = "[\\p{L}\\p{N}]+(?:-[\\p{L}\\p{N}]+)*";
-const kafiilPath = new RegExp(`^/service/(\\d+)-(${slug})/?$`, "iu");
-const khamsatPath = new RegExp(`^/(${slug})/(${slug})/(\\d+)-(${slug})/?$`, "iu");
+const servicePath = new RegExp(`^/service/(\\d+)-(${slug})/?$`, "iu");
+const categoryPath = new RegExp(`^/(${slug})/(${slug})/(\\d+)-(${slug})/?$`, "iu");
+
+/**
+ * Each accepted marketplace publishes its services under one address shape.
+ * `idGroup` is the capture holding the numeric service ID.
+ */
+const platformPaths: Record<string, { pattern: RegExp; idGroup: number }> = {
+  Kafiil: { pattern: servicePath, idGroup: 1 },
+  Nafezly: { pattern: servicePath, idGroup: 1 },
+  Khamsat: { pattern: categoryPath, idGroup: 3 },
+};
+
+/** "Kafiil, Khamsat and Nafezly" — used in the student-facing messages. */
+function acceptedPlatformList() {
+  const names = [...acceptedServicePlatforms];
+  return names.length < 2 ? names.join("") : names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
+}
 
 function hostPlatform(hostname: string) {
   const host = hostname.toLowerCase().replace(/^www\./, "");
@@ -28,18 +47,16 @@ function hostPlatform(hostname: string) {
 function marketplacePath(platform: string, pathname: string) {
   let decodedPath = pathname;
   try { decodedPath = decodeURIComponent(pathname); } catch {}
-  const match = platform === "Kafiil"
-    ? decodedPath.match(kafiilPath)
-    : platform === "Khamsat"
-      ? decodedPath.match(khamsatPath)
-      : null;
-  return { valid: Boolean(match), serviceId: match?.[platform === "Kafiil" ? 1 : 3] || null };
+  const shape = platformPaths[platform];
+  const match = shape ? decodedPath.match(shape.pattern) : null;
+  return { valid: Boolean(match), serviceId: (shape && match?.[shape.idGroup]) || null };
 }
 
 function failed(message: string, checks: string[] = [message]): ServiceLinkVerification {
   return {
     status: "Failed",
     normalizedUrl: "",
+    upgraded: false,
     platform: "Unknown",
     serviceId: null,
     checks,
@@ -49,9 +66,10 @@ function failed(message: string, checks: string[] = [message]): ServiceLinkVerif
 }
 
 /**
- * The automatic gate is deterministic and network-free. It accepts only direct,
- * secure Kafiil and Khamsat service-page URLs. QC remains responsible for page
- * availability, ownership, category and track fit.
+ * The automatic gate is deterministic and network-free. It accepts only direct
+ * service pages on the approved marketplaces (see acceptedServicePlatforms) and
+ * stores them over https. QC remains responsible for page availability,
+ * ownership, category and track fit.
  */
 export function verifyServiceLink(raw: unknown): ServiceLinkVerification {
   const value = typeof raw === "string" ? raw.trim() : "";
@@ -60,18 +78,28 @@ export function verifyServiceLink(raw: unknown): ServiceLinkVerification {
     return failed("Use a direct service URL shorter than 2,048 characters.");
   try {
     const parsed = new URL(value);
-    const protocolOk = parsed.protocol === "https:";
     const directOk = !parsed.username && !parsed.password && !parsed.port;
     const platform = hostPlatform(parsed.hostname);
     const platformOk = acceptedServicePlatforms.includes(platform as any);
     const path = marketplacePath(platform, parsed.pathname);
+    // Students commonly copy an http address for a marketplace that serves the
+    // same page over https. For an accepted marketplace the scheme is upgraded
+    // and the secure address is what gets stored; anything else must already be
+    // https, so no insecure link is ever recorded.
+    const upgraded = parsed.protocol === "http:" && platformOk && path.valid;
+    const protocolOk = parsed.protocol === "https:" || upgraded;
+    if (upgraded) parsed.protocol = "https:";
     parsed.hostname = parsed.hostname.toLowerCase().replace(/^www\./, "");
     parsed.hash = "";
     parsed.search = "";
     const checks = [
-      protocolOk ? "Secure HTTPS link" : "The service link must use HTTPS",
+      upgraded
+        ? "Secure HTTPS link (the address was upgraded from http)"
+        : protocolOk
+          ? "Secure HTTPS link"
+          : "The service link must use HTTPS",
       directOk ? "Direct public URL" : "Ports and embedded credentials are not allowed",
-      platformOk ? `${platform} is accepted` : "Only Kafiil and Khamsat service links are accepted",
+      platformOk ? `${platform} is accepted` : `Only ${acceptedPlatformList()} service links are accepted`,
       path.valid
         ? `Numeric service ID ${path.serviceId} and slug detected`
         : "Use the complete service URL with its numeric ID and Arabic or English slug",
@@ -80,6 +108,7 @@ export function verifyServiceLink(raw: unknown): ServiceLinkVerification {
     return {
       status: isFailed ? "Failed" : "Needs Review",
       normalizedUrl: parsed.toString(),
+      upgraded,
       platform,
       serviceId: path.serviceId,
       checks,

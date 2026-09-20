@@ -118,6 +118,9 @@ export async function POST(req: Request) {
       const slot = index + 1;
       const value = values[index];
       const check = verifyServiceLink(value);
+      // When the gate raised an http marketplace address to https, the secure
+      // form is what gets stored and opened; both screens link to this column.
+      const stored = check.upgraded ? check.normalizedUrl : value;
       const prior: any = bySlot.get(slot);
       if (prior && prior.qc_status !== "Needs Correction") {
         if (prior.normalized_url !== check.normalizedUrl)
@@ -134,7 +137,7 @@ export async function POST(req: Request) {
         jobs.push(
           stmt(
             `UPDATE service_links SET url=?,normalized_url=?,platform=?,auto_status=?,auto_result=?,auto_checked_at=?,qc_status=?,qc_comment=NULL,qc_actor=NULL,qc_at=NULL,revision=?,submitted_at=?,updated_at=? WHERE id=? AND qc_status<>'Locked'`,
-            value,
+            stored,
             check.normalizedUrl,
             check.platform,
             check.status,
@@ -155,7 +158,7 @@ export async function POST(req: Request) {
             uid("SLK"),
             s.id,
             slot,
-            value,
+            stored,
             check.normalizedUrl,
             check.platform,
             check.status,
