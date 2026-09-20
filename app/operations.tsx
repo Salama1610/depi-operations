@@ -25,6 +25,7 @@ import {
   Settings2,
   Search,
   Bell,
+  LogOut,
   Plus,
   ArrowUpRight,
   ArrowRight,
@@ -2077,6 +2078,9 @@ export default function Operations({ module }: { module: string }) {
               <strong>{user.name}</strong>
               <small>{user.roles?.[0] || "Workspace setup"}</small>
             </div>
+            <a className="profile-signout" href="/api/auth/logout" title="Sign out" aria-label="Sign out">
+              <LogOut size={17} />
+            </a>
           </div>
         </SidebarFooter>
       </Sidebar>
