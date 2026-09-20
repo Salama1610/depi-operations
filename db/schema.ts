@@ -265,6 +265,9 @@ export const evidence = sqliteTable("evidence", {
   policyId: text("policy_id")
     .notNull()
     .references(() => policies.id),
+  // The Quality reviewer this package is assigned to. Added later, so it sits
+  // last for the same positional-insert reason as the other late columns.
+  qcActor: text("qc_actor").references(() => users.id),
 });
 export const reviews = sqliteTable("evidence_reviews", {
   id: text("id").primaryKey(),

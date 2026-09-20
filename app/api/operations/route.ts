@@ -1,4 +1,5 @@
 import { policyChecks } from "@/lib/automation";
+import { distributeEvenly, spread } from "@/lib/domain/qc-assignment";
 import {
   actor,
   identity,
@@ -1949,6 +1950,53 @@ export async function POST(req: Request) {
             link.student_id,
           ),
         );
+        break;
+      }
+      // A lead hands out the open quality work, evenly. Passing a reviewer
+      // assigns just that item; passing none distributes the whole queue.
+      case "service_qc_assign":
+      case "evidence_qc_assign": {
+        permit(u, ["Quality Lead"]);
+        const services = x.action === "service_qc_assign";
+        const table = services ? "service_links" : "evidence";
+        const openFilter = services ? "qc_status<>'Locked'" : "status IN ('Quality','Coach','L1')";
+        const reviewers = (await (await stmt(
+          "SELECT id FROM users WHERE active=1 AND (roles LIKE '%Quality Member%' OR roles LIKE '%Quality Lead%') ORDER BY id",
+        ).all()).results) as any[];
+        ensure(reviewers.length, "Add an active Quality Member before assigning reviews.");
+        if (x.reviewer_id) {
+          ensure(reviewers.some((r) => r.id === x.reviewer_id), "Choose an active Quality reviewer.");
+          const item: any = await stmt(`SELECT * FROM ${table} WHERE id=?`, x.item_id || id).first();
+          ensure(item, "That review item was not found.");
+          auditPrevious = item;
+          auditValue = { item_id: item.id, assigned_to: x.reviewer_id, mode: "manual" };
+          jobs.push(stmt(`UPDATE ${table} SET qc_actor=? WHERE id=?`, x.reviewer_id, item.id));
+          break;
+        }
+        const load = await Promise.all(
+          reviewers.map(async (r) => ({
+            id: r.id,
+            open: Number(
+              ((await stmt(`SELECT count(*) n FROM ${table} WHERE qc_actor=? AND ${openFilter}`, r.id).first()) as any)?.n || 0,
+            ),
+          })),
+        );
+        const pending = (await (await stmt(
+          `SELECT id FROM ${table} WHERE qc_actor IS NULL AND ${openFilter} ORDER BY id`,
+        ).all()).results) as any[];
+        ensure(pending.length, "Every open review already has a reviewer.");
+        const allocations = distributeEvenly(pending.map((r) => String(r.id)), load);
+        for (const allocation of allocations) {
+          jobs.push(
+            stmt(`UPDATE ${table} SET qc_actor=? WHERE id=? AND qc_actor IS NULL`, allocation.reviewerId, allocation.itemId),
+          );
+        }
+        auditValue = {
+          assigned: allocations.length,
+          reviewers: load.length,
+          spread: spread(load, allocations),
+          mode: "even",
+        };
         break;
       }
       case "service_qc_claim": {

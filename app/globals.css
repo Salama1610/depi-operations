@@ -130,3 +130,317 @@ body{font-size:16px}.task-main>strong,.student-identity strong,.student-next>spa
 }
 .profile-signout:hover { opacity: 1; background: rgba(148, 163, 184, 0.18); }
 .profile-signout:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+
+/* ---------------------------------------------------------------------------
+   Freelance Yard brand.
+   Colours taken from the supplied identity: three oranges, three blues and the
+   near-black used for body text. Appended rather than edited into the rules
+   above so the override points stay in one readable place.
+   --------------------------------------------------------------------------- */
+:root {
+  --fy-orange-deep: #e44701;
+  --fy-orange: #ff4e10;
+  --fy-orange-warm: #f15e15;
+  --fy-navy-deep: #094268;
+  --fy-navy: #1b4e79;
+  --fy-sky: #4ab7dd;
+  --fy-ink: #151b1e;
+  --fy-navy-tint: #e8eef4;
+  --fy-navy-line: #cfdce7;
+  --fy-orange-tint: #fdeee7;
+  --font-display: "Bebas Neue", "Montserrat", Impact, sans-serif;
+  --font-body: "Montserrat", "GE SS Two", "Segoe UI", Tahoma, Arial, sans-serif;
+  --primary: var(--fy-navy);
+  --accent: var(--fy-navy-tint);
+}
+
+body,
+.student-shell {
+  font-family: var(--font-body);
+  color: var(--fy-ink);
+}
+h1,
+.stat strong,
+.student-intro h1,
+.journey-total strong {
+  font-family: var(--font-display);
+  letter-spacing: 0.5px;
+}
+h1 {
+  font-weight: 400;
+}
+h2,
+h3,
+.brand strong {
+  font-family: var(--font-body);
+  font-weight: 600;
+}
+
+/* Interactive colour. Navy carries the interface; orange is kept for the
+   primary action and for genuine attention, so it never competes with itself. */
+.primary,
+.student-primary {
+  background: var(--fy-orange-deep);
+  border-color: var(--fy-orange-deep);
+  box-shadow: 0 3px 8px rgba(228, 71, 1, 0.22);
+}
+.primary:hover,
+.student-primary:hover {
+  background: var(--fy-orange);
+  border-color: var(--fy-orange);
+}
+.app-sidebar [data-active="true"] {
+  background: var(--fy-navy-tint);
+  color: var(--fy-navy-deep);
+}
+.nav-count {
+  background: var(--fy-navy-line);
+  color: var(--fy-navy-deep);
+}
+.text-link,
+.queue-tabs button.active,
+.student-signout:hover,
+.icon-btn:hover {
+  color: var(--fy-navy);
+}
+.queue-tabs button.active {
+  border-bottom-color: var(--fy-orange-deep);
+}
+.icon-btn:hover {
+  background: var(--fy-navy-tint);
+}
+.small-btn:hover {
+  border-color: var(--fy-navy);
+  background: var(--fy-navy-tint);
+  color: var(--fy-navy-deep);
+}
+.avatar,
+.avatar.navy {
+  background: var(--fy-navy-tint);
+  color: var(--fy-navy-deep);
+}
+.cohort-icon,
+.group-icon {
+  background: var(--fy-navy-tint);
+  color: var(--fy-navy);
+}
+.journey-card {
+  background: var(--fy-navy-deep);
+}
+.journey-card [data-slot="progress-indicator"] {
+  background: var(--fy-sky);
+}
+.student-progress {
+  background: var(--fy-orange-tint);
+  border-color: #f6d9cc;
+}
+.student-progress strong {
+  color: var(--fy-orange-deep);
+}
+.student-kicker {
+  color: var(--fy-navy);
+}
+.field input:focus,
+.student-url-wrap input:focus {
+  border-color: var(--fy-navy);
+  outline-color: var(--fy-navy-tint);
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible {
+  outline-color: var(--fy-navy);
+}
+.stat strong,
+.mini-stats strong {
+  color: var(--fy-navy-deep);
+}
+
+/* The logo replaces the old lettermark in both shells. */
+.brand-logo {
+  height: 34px;
+  width: auto;
+  display: block;
+}
+.student-brand .brand-logo {
+  height: 30px;
+}
+.app-footer .brand-logo {
+  height: 20px;
+  opacity: 0.8;
+}
+
+/* ---------------------------------------------------------------------------
+   Flexible layout.
+   The workspace was built for a wide desktop: fixed four-column statistics, a
+   three-column group grid, a 307px side column and 34px gutters. Below those
+   widths the content used to overflow rather than reflow.
+   --------------------------------------------------------------------------- */
+.workspace {
+  max-width: 1760px;
+}
+@media (max-width: 1400px) {
+  .home-grid {
+    grid-template-columns: minmax(0, 1fr) 270px;
+  }
+  .group-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 1150px) {
+  .stats,
+  .mini-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .home-grid,
+  .report-grid,
+  .detail-grid,
+  .form-grid,
+  .review-checks {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .priority-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .policy-values {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 900px) {
+  .topbar {
+    height: auto;
+    padding: 12px 18px;
+    flex-wrap: wrap;
+  }
+  .breadcrumb [data-slot="sidebar-trigger"] {
+    display: inline-flex;
+  }
+  .workspace {
+    padding: 18px 18px 32px;
+  }
+  .app-footer {
+    padding: 16px 18px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .group-grid,
+  .priority-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .greeting,
+  .page-heading {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .student-intro {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 30px 0 20px;
+  }
+  .student-service-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+  /* Wide tables scroll inside their panel instead of stretching the page. */
+  .panel table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .status-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 620px) {
+  .stats,
+  .mini-stats,
+  .status-strip,
+  .policy-values {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .workspace {
+    padding: 14px 14px 28px;
+  }
+  .student-shell {
+    padding: 0 14px 34px;
+  }
+  .toolbar > .pick,
+  .search-box {
+    width: 100%;
+  }
+  .toolbar-right {
+    margin-left: 0;
+    width: 100%;
+  }
+  .toolbar-right > .pick {
+    width: 100%;
+    min-width: 0;
+  }
+  .action-dialog {
+    padding: 18px !important;
+  }
+  h1 {
+    font-size: 26px;
+  }
+  .student-intro h1 {
+    font-size: 28px;
+  }
+}
+
+/* Filters carry their name above the control, so a row of them reads. */
+.pick-field {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 140px;
+}
+.toolbar > .pick-field {
+  width: 160px;
+}
+.toolbar-right > .pick-field {
+  min-width: 90px;
+  width: 110px;
+}
+.pick-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: #6f7e98;
+  padding-left: 2px;
+}
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  margin-bottom: 16px;
+  align-items: flex-end;
+}
+@media (max-width: 620px) {
+  .toolbar > .pick-field,
+  .toolbar-right > .pick-field,
+  .filter-row > .pick-field {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+.qc-lead-actions {
+  align-items: center;
+  margin: 0 0 14px;
+}
+.qc-lead-note {
+  font-size: 11px;
+  color: #6f7e98;
+  flex-basis: 100%;
+}
+.pick-inline {
+  border: 1px solid #dfe5ef;
+  border-radius: 6px;
+  background: #fff;
+  padding: 5px 8px;
+  font-size: 12px;
+  color: #53627d;
+  min-height: 30px;
+  max-width: 180px;
+}

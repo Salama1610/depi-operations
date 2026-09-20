@@ -155,7 +155,8 @@
     "recorder": "text",
     "stage_at": "timestamptz",
     "created_at": "timestamptz",
-    "policy_id": "text"
+    "policy_id": "text",
+    "qc_actor": "text"
   },
   "evidence_reviews": {
     "id": "text",

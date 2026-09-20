@@ -42,6 +42,8 @@ Import the Round 5 roster (2,948 workbook rows, 2,887 canonical students after 6
 
 ## Role and data ownership matrix
 
+Operations Systems / Admin may perform every action in the workspace; it is the owner role and passes every role gate. The separation-of-duties rules still apply to it because they compare identities rather than roles: an administrator cannot approve a policy, exchange rate or report mapping they created. A Quality Lead assigns reviewers to service links and to gig evidence, either one item at a time or by distributing every unassigned open item evenly: each goes to whoever currently holds the least, with ties broken by reviewer id so the result is repeatable.
+
 | Activity | Student | Coordinator/Supervisor | Quality Member | Quality Lead | Admin/Project Operations |
 |---|---:|---:|---:|---:|---:|
 | Submit or correct own links | Yes | No | No | No | No |

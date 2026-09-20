@@ -1,0 +1,1 @@
+ALTER TABLE `evidence` ADD `qc_actor` text REFERENCES users(id);

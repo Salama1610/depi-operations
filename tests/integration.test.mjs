@@ -290,12 +290,23 @@ test("full seeded backend workflow and permission gates", async () => {
     job_profile: "Digital marketing specialist",
     gig_number: 1,
   });
+  // Role gates are probed with a Project Operations member who does not hold
+  // the admin role, because Operations Systems / Admin may perform any action.
+  await check("staff", {
+    name: "Ops Only",
+    email: "ops-only@example.com",
+    roles: ["Project Operations"],
+    reason: "Probe role gates without the admin role",
+  });
+  const opsOnly = { id: "ops-only-login", email: "ops-only@example.com" };
+  current = opsOnly;
   r = await post("allocate", {
     request: "REQ1",
     account: "ACC-102",
     task_fit: true,
   });
   assert.match(r.error, /role/);
+  current = { id: "owner", email: "owner@example.com" };
   await check("staff", {
     name: "Owner",
     email: "owner@example.com",
@@ -349,12 +360,14 @@ test("full seeded backend workflow and permission gates", async () => {
     payment_proof_id: "PROOF-2",
     source: "WhatsApp",
   });
+  current = opsOnly;
   r = await post("review", { id: "EV1", notes: "Looks complete" });
   assert.match(r.error, /role/);
   current = { id: "coach-login", email: "staff-coach@example.invalid" };
   await check("review", { id: "EV1", notes: "Coach confirms delivery" });
   current = { id: "owner", email: "owner@example.com" };
   await check("review", { id: "EV1", notes: "Completeness checked" });
+  current = opsOnly;
   r = await post("review", { id: "EV1", decision: "Accept", notes: "Approve" });
   assert.match(r.error, /role/);
   current = { id: "quality-login", email: "staff-quality@example.invalid" };
@@ -1413,7 +1426,7 @@ test("vault access is role restricted and never logs returned credentials", asyn
       purpose: "Hand the login to the assigned student",
     })
   ).json();
-  assert.equal(result.password, "stored-secret-never-log", "a coordinator responsible for the group may reveal it");
+  assert.equal(result.password, "stored-secret-never-log", "a coordinator responsible for the group may reveal it: " + JSON.stringify(result));
   assert.equal(result.username, "depi.kafeel@example.invalid");
   assert.equal(
     (await dbRow("SELECT count(*) n FROM audit_events WHERE value LIKE '%stored-secret-never-log%'")).n,

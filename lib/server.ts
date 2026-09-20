@@ -105,6 +105,10 @@ export async function currentStudent() {
   return { ...s, identity: i };
 }
 export function permit(u: any, allowed: string[]) {
+  // Operations Systems / Admin owns the workspace and may perform any action.
+  // The separation-of-duties rules are unaffected: they compare identities, not
+  // roles, so an administrator still cannot approve something they created.
+  if (can(u.roles, ["Operations Systems / Admin"])) return;
   ensure(can(u.roles, allowed), "Your staff role does not permit this action.");
 }
 export function scopeSql(u: any, alias = "g") {

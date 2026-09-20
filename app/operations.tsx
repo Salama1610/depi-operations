@@ -239,22 +239,28 @@ function Pick({
   options: (string | { value: string; label: string })[];
   label: string;
 }) {
+  // The name of the filter is always visible. With only the chosen value
+  // shown, a row of filters all read "All" and nobody could tell which was
+  // which.
   return (
-    <Select value={value || undefined} onValueChange={onChange}>
-      <SelectTrigger className="pick" aria-label={label}>
-        <SelectValue placeholder={label} />
-      </SelectTrigger>
-      <SelectContent>
-        {options.map((o) => {
-          const a = typeof o === "string" ? { value: o, label: o } : o;
-          return (
-            <SelectItem key={a.value} value={a.value}>
-              {a.label}
-            </SelectItem>
-          );
-        })}
-      </SelectContent>
-    </Select>
+    <span className="pick-field">
+      <span className="pick-label">{label}</span>
+      <Select value={value || undefined} onValueChange={onChange}>
+        <SelectTrigger className="pick" aria-label={label}>
+          <SelectValue placeholder={label} />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((o) => {
+            const a = typeof o === "string" ? { value: o, label: o } : o;
+            return (
+              <SelectItem key={a.value} value={a.value}>
+                {a.label}
+              </SelectItem>
+            );
+          })}
+        </SelectContent>
+      </Select>
+    </span>
   );
 }
 function Empty({
@@ -352,6 +358,13 @@ export default function Operations({ module }: { module: string }) {
   const owner = (id: string) =>
     staff.find((s: Row) => s.id === id)?.name || "Unassigned";
   const canReviewServiceLinks = can(user.roles, ["Quality Member", "Quality Lead", "Project Operations"]);
+  const isQualityLead = can(user.roles, ["Quality Lead", "Operations Systems / Admin"]);
+  const qualityReviewers: Row[] = staff.filter((s: Row) => {
+    if (s.active === 0 || s.active === false) return false;
+    let roles: string[] = [];
+    try { roles = Array.isArray(s.roles) ? s.roles : JSON.parse(s.roles || "[]"); } catch { roles = []; }
+    return roles.includes("Quality Member") || roles.includes("Quality Lead");
+  });
   const shownNav = nav.filter(([m]) =>
     m === "administration"
       ? can(user.roles, ["Operations Systems / Admin"])
@@ -1632,6 +1645,19 @@ export default function Operations({ module }: { module: string }) {
               <Pick label="Automatic check" value={serviceFilters.automatic} onChange={(automatic) => setServiceFilters({ ...serviceFilters, automatic })} options={["All", "Needs Review", "Failed"]} />
               <Pick label="Corrections" value={serviceFilters.corrections} onChange={(corrections) => setServiceFilters({ ...serviceFilters, corrections })} options={[{ value: "All", label: "Any revision" }, { value: "0", label: "No prior review" }, { value: "1", label: "One review" }, { value: "Repeated", label: "Repeated corrections" }]} />
             </div>
+            {isQualityLead && (
+              <div className="detail-actions qc-lead-actions">
+                <button className="small-btn" disabled={busy} onClick={() => quick("service_qc_assign", {})}>
+                  <Users size={15} /> Distribute service links evenly
+                </button>
+                <button className="small-btn" disabled={busy} onClick={() => quick("evidence_qc_assign", {})}>
+                  <Files size={15} /> Distribute gig evidence evenly
+                </button>
+                <small className="qc-lead-note">
+                  Unassigned open items go to whoever currently holds the least. Reviewers: {qualityReviewers.map((r) => r.name).join(", ") || "none active"}.
+                </small>
+              </div>
+            )}
             {panel(
               `Student service-link verification · ${serviceQueue.length} matching`,
               paginate(serviceQueue, (pageRows) => generic(
@@ -1641,7 +1667,12 @@ export default function Operations({ module }: { module: string }) {
                   { key: "slot", label: "Slot", render: (r) => `Service ${r.slot}` },
                   { key: "url", label: "Link", render: (r) => <a className="text-link" href={r.url} target="_blank" rel="noreferrer">{r.platform} <ExternalLink size={14} /></a> },
                   { key: "auto_status", label: "Automatic check", render: (r) => <Badge value={r.auto_status} /> },
-                  { key: "reviewer_name", label: "Assigned", render: (r) => r.reviewer_name || "Unassigned" },
+                  { key: "reviewer_name", label: "Assigned", render: (r) => isQualityLead && r.qc_status !== "Locked"
+                      ? <select className="pick-inline" aria-label="Assign reviewer" value={r.qc_actor || ""} disabled={busy} onChange={(e) => e.target.value && quick("service_qc_assign", { item_id: r.id, reviewer_id: e.target.value })}>
+                          <option value="">Unassigned</option>
+                          {qualityReviewers.map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
+                        </select>
+                      : (r.reviewer_name || "Unassigned") },
                   { key: "qc_status", label: "QC state", render: (r) => <span><Badge value={r.qc_status} /><small className="table-subline">{Math.round((Date.now() - Date.parse(r.updated_at)) / 3600000)}h · revision {r.revision}</small></span> },
                 ],
                 (r) => <div className="detail-actions">{!r.qc_actor && can(user.roles, ["Quality Member", "Quality Lead"]) && <button className="small-btn" onClick={() => quick("service_qc_claim", { service_id: r.id })}>Claim</button>}<button className="small-btn" onClick={() => open("service_qc_review", { ...r, service_id: r.id, student_id: r.student_id, decision: r.qc_status === "Needs Correction" ? "Lock" : "" })}>Review</button></div>,
@@ -2026,9 +2057,8 @@ export default function Operations({ module }: { module: string }) {
       <Sidebar className="app-sidebar">
         <SidebarHeader>
           <a className="brand" href="/">
-            <span className="brand-mark">
-              D<span>↗</span>
-            </span>
+            {/* eslint-disable-next-line @next/next/no-img-element -- a static local logo; the Worker build does not run the image optimizer */}
+            <img className="brand-logo" src="/brand/logo.png" alt="Freelance Yard" width={160} height={34} />
             <div>
               <strong>
                 DEPI<span>operations</span>
@@ -2165,7 +2195,8 @@ export default function Operations({ module }: { module: string }) {
             </div>
           ) : d.setup ? (
             <div className="setup panel">
-              <span className="brand-mark">D↗</span>
+              {/* eslint-disable-next-line @next/next/no-img-element -- a static local logo; the Worker build does not run the image optimizer */}
+              <img className="brand-logo" src="/brand/logo.png" alt="Freelance Yard" width={160} height={34} />
               <h1>Set up your operations workspace</h1>
               <p>
                 {d.importedRoster

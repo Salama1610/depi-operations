@@ -67,6 +67,10 @@ See `docs/production-readiness.md`. Before loading real student data, the organi
 
 It needs a Google service account: create a project, enable the Sheets API, download the service-account key, and share the sheet with that account's address as an Editor. Nothing is billed at this volume. Run with `--dry-run` first to see the row counts.
 
+## Brand
+
+The interface uses the Freelance Yard identity: the orange and navy palette from the supplied colour sheet, Bebas Neue for display text and Montserrat for everything else, with GE SS Two as the Arabic face where installed. The logo files live in `public/brand/`. The layout reflows from wide desktop down to phone width.
+
 ## Source layout
 
 - `app/operations.tsx`: role-aware working surface and workflows.

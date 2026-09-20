@@ -11,7 +11,8 @@ function AccessGate({ email }: { email?: string }) {
     <main className="student-shell">
       <header className="student-header">
         <span className="student-brand">
-          <span className="brand-mark">D↗</span>
+          {/* eslint-disable-next-line @next/next/no-img-element -- a static local logo; the Worker build does not run the image optimizer */}
+          <img className="brand-logo" src="/brand/logo.png" alt="Freelance Yard" width={150} height={30} />
           <span><strong>DEPI</strong><small>Round 5 operations</small></span>
         </span>
       </header>
