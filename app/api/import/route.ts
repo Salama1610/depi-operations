@@ -6,8 +6,9 @@ import {
   uid,
   now,
   rateLimit,
+  scopeSql,
 } from "@/lib/server";
-import { ensure } from "@/lib/domain/rules";
+import { can, ensure } from "@/lib/domain/rules";
 import { POST as operate } from "@/app/api/operations/route";
 import { POST as program } from "@/app/api/program/route";
 const allowed: Record<string, string[]> = {
@@ -222,6 +223,221 @@ const required: Record<string, string[]> = {
     "owner",
   ],
 };
+/**
+ * Update mode: a spreadsheet that modifies records that already exist.
+ *
+ * Operations data arrives from several sources (ministry lists, provider
+ * sheets, the previous cohort's workbook), each holding a few columns for
+ * the same people. A sheet in update mode is matched to existing records
+ * and only the columns it carries are changed; an empty cell leaves the
+ * stored value alone, so partial sheets merge instead of blanking data.
+ *
+ * Fields that the workflow governs with their own rules (moving a student,
+ * lifecycle and engagement states, account status) are refused here with a
+ * pointer to the action that owns them, so a spreadsheet can never bypass
+ * the evidence and approvals those actions require.
+ */
+type UpdateSpec = {
+  table: string;
+  /** Columns that identify the record; the first present one is used. */
+  keys: string[];
+  editable: string[];
+  /** Governed columns: accepted only when the value already matches. */
+  protectedHints: Record<string, string>;
+  /** Columns that must stay unique across the table. */
+  unique: string[];
+  roles: string[];
+};
+const updatable: Record<string, UpdateSpec> = {
+  students: {
+    table: "students",
+    keys: ["id", "email", "national_id", "tp_id"],
+    editable: ["name", "name_ar", "email", "phone", "national_id", "tp_id", "job_profile", "student_type", "coaching"],
+    protectedHints: {
+      group_id: "Use the Transfer action to move a student between groups",
+      lifecycle: "Use the Lifecycle action; it records the reason and evidence",
+      engagement: "Use the Engagement action; it records the reason and evidence",
+    },
+    unique: ["email", "national_id", "tp_id"],
+    roles: ["Project Operations", "Operations Coordinator", "Operations Systems / Admin"],
+  },
+  groups: {
+    table: "groups",
+    keys: ["id"],
+    editable: ["name", "track", "provider", "coordinator", "supervisor", "coach", "account_manager", "pathway", "delivery_model", "start_date"],
+    protectedHints: {
+      status: "Use the group close, gate and archive actions to change a group's status",
+      policy_id: "Policies are applied through the policy approval workflow",
+    },
+    unique: [],
+    roles: ["Project Operations", "Operations Systems / Admin"],
+  },
+  accounts: {
+    table: "accounts",
+    keys: ["id"],
+    editable: ["label", "platform", "credits"],
+    protectedHints: {
+      status: "Use the account status action; blocking and retiring are audited decisions",
+      secret_ref: "Credentials are managed from the credential panel",
+    },
+    unique: [],
+    roles: ["Project Operations", "Operations Systems / Admin"],
+  },
+};
+const platforms = ["Kafeel", "Nafezly", "Khamsat"];
+
+/** Reference data an update review needs, fetched once per batch. */
+type Lookups = { users: Set<string>; tracks: Set<string> };
+
+/** Field-level validation of a new value for an update; returns an error or null. */
+function validateUpdate(module: string, field: string, value: string, lookups: Lookups) {
+  if (module === "students") {
+    if (field === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return "A valid student email is required for Supabase sign-in";
+    if (field === "national_id" && !/^\d{14}$/.test(value)) return "The national ID is the 14-digit number on the roster";
+    if (field === "name" && value.length < 2) return "Name is too short";
+    if (field === "coaching" && value.length > 80) return "Coaching status is too long";
+  }
+  if (module === "groups") {
+    if (["coordinator", "supervisor", "coach", "account_manager"].includes(field) && !lookups.users.has(value))
+      return "Not an active staff member (use the staff ID, not the name)";
+    if (field === "track" && !lookups.tracks.has(value)) return "Not an active approved track";
+    if (field === "pathway" && !["Outcome", "Support"].includes(value)) return "Pathway must be Outcome or Support";
+    if (field === "delivery_model" && !["Regular", "Industry"].includes(value)) return "Delivery model must be Regular or Industry";
+    if (field === "start_date" && (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(value)))) return "Start date must be YYYY-MM-DD";
+  }
+  if (module === "accounts") {
+    if (field === "platform" && !platforms.includes(value)) return "Platform must be " + platforms.join(", ");
+    if (field === "credits" && !(Number.isFinite(Number(value)) && Number(value) >= 0)) return "Credits must be a number of at least 0";
+  }
+  return null;
+}
+
+const same = (a: any, b: any) => String(a ?? "").trim() === String(b ?? "").trim();
+const keyExpr = (field: string) => (field === "email" ? "lower(email)" : field === "id" ? "id" : `trim(${field})`);
+
+/** `SELECT ... WHERE expr IN (...)` in slices, so a large sheet costs a few round trips instead of one per row. */
+async function fetchIn(table: string, columns: string, field: string, values: string[]) {
+  const rows: any[] = [];
+  const distinct = [...new Set(values)];
+  for (let i = 0; i < distinct.length; i += 400) {
+    const slice = distinct.slice(i, i + 400);
+    const result = await stmt(
+      `SELECT ${columns} FROM ${table} WHERE ${keyExpr(field)} IN (${slice.map(() => "?").join(",")})`,
+      ...slice,
+    ).all();
+    rows.push(...(result.results || []));
+  }
+  return rows;
+}
+
+async function reviewUpdates(u: any, module: string, rows: any[]) {
+  const spec = updatable[module];
+  ensure(spec, "Update mode is available for students, groups and accounts.");
+  ensure(can(u.roles, spec.roles), "You are not permitted to update this module.");
+  const known = new Set([...spec.keys, ...spec.editable, ...Object.keys(spec.protectedHints)]);
+
+  // Pass 1: normalize every row and note which identifiers it carries.
+  // Exported sheets carry derived columns (track, risk, next task) and sheets
+  // from other sources carry their own; both are ignored rather than rejected,
+  // and reported so a misspelt column name does not pass unnoticed.
+  const ignored = new Set<string>();
+  const prepared = rows.map((row) => {
+    const clean: Record<string, string> = {};
+    for (const [k, v] of Object.entries(row)) {
+      const value = String(v ?? "").trim();
+      if (!known.has(k)) {
+        if (value) ignored.add(k);
+        continue;
+      }
+      clean[k] = k === "email" ? value.toLowerCase() : value;
+    }
+    return { row, clean, keyField: spec.keys.find((k) => clean[k]) };
+  });
+
+  // Pass 2: everything the review needs, in a handful of queries.
+  const current = new Map<string, any>(); // "field:value" -> record
+  for (const field of spec.keys) {
+    const values = prepared.filter((p) => p.keyField === field).map((p) => p.clean[field]);
+    if (!values.length) continue;
+    for (const record of await fetchIn(spec.table, "*", field, values))
+      current.set(`${field}:${String(record[field] ?? "").trim().toLowerCase()}`, record);
+  }
+  const taken = new Map<string, string>(); // "field:value" -> id of the record already holding it
+  for (const field of spec.unique) {
+    const values = prepared.map((p) => p.clean[field]).filter(Boolean);
+    if (!values.length) continue;
+    for (const record of await fetchIn(spec.table, `id, ${field}`, field, values))
+      taken.set(`${field}:${String(record[field] ?? "").trim().toLowerCase()}`, record.id);
+  }
+  const scope = scopeSql(u);
+  const groupsInScope =
+    module === "students" && scope.sql !== "1=1"
+      ? new Set(((await stmt(`SELECT g.id FROM groups g WHERE ${scope.sql}`, ...scope.args).all()).results || []).map((g: any) => g.id))
+      : null;
+  const lookups: Lookups = {
+    users: new Set(((await stmt("SELECT id FROM users WHERE active=1").all()).results || []).map((r: any) => r.id)),
+    tracks: new Set(((await stmt("SELECT name FROM tracks WHERE active=1").all()).results || []).map((r: any) => r.name)),
+  };
+
+  // Pass 3: the review itself, entirely in memory.
+  const claimed = new Map<string, string>(); // "field:value" -> record, for uniqueness inside the batch
+  const touched = new Set<string>();
+  const checked: any[] = [];
+  prepared.forEach(({ row, clean, keyField }, i) => {
+    const line = i + 2;
+    const errors: any[] = [];
+    if (!keyField) {
+      errors.push({ row: line, field: spec.keys[0], error: "No identifier", expected: spec.keys.join(" or ") });
+      checked.push({ row: line, data: row, errors, changes: [], status: "Rejected" });
+      return;
+    }
+    const record = current.get(`${keyField}:${clean[keyField].toLowerCase()}`);
+    if (!record) {
+      errors.push({ row: line, field: keyField, value: clean[keyField], error: "No existing record matches", expected: "An existing " + module.replace(/s$/, "") });
+      checked.push({ row: line, data: row, errors, changes: [], status: "Rejected" });
+      return;
+    }
+    if (touched.has(record.id)) errors.push({ row: line, field: keyField, value: clean[keyField], error: "The same record appears twice in this sheet", expected: "One row per record" });
+    touched.add(record.id);
+    if (groupsInScope && !groupsInScope.has(record.group_id))
+      errors.push({ row: line, field: keyField, value: clean[keyField], error: "Student is outside your scope", expected: "A student in one of your groups" });
+    const changes: any[] = [];
+    for (const [field, hint] of Object.entries(spec.protectedHints))
+      if (clean[field] && !same(clean[field], record[field]))
+        errors.push({ row: line, field, value: clean[field], error: hint, expected: String(record[field] ?? "") });
+    for (const field of spec.editable) {
+      const value = clean[field];
+      if (value === undefined || value === "" || field === keyField) continue;
+      const normalized = field === "credits" && Number.isFinite(Number(value)) ? String(Number(value)) : value;
+      if (same(normalized, record[field])) continue;
+      const problem = validateUpdate(module, field, normalized, lookups);
+      if (problem) {
+        errors.push({ row: line, field, value, error: problem, expected: "A valid " + field.replace(/_/g, " ") });
+        continue;
+      }
+      if (spec.unique.includes(field)) {
+        const tag = `${field}:${normalized.toLowerCase()}`;
+        const holder = taken.get(tag);
+        if (claimed.has(tag) || (holder && holder !== record.id)) {
+          errors.push({ row: line, field, value, error: "Already used by another record", expected: "A unique " + field.replace(/_/g, " ") });
+          continue;
+        }
+        claimed.set(tag, record.id);
+      }
+      changes.push({ field, from: record[field] ?? "", to: normalized });
+    }
+    checked.push({
+      row: line,
+      id: record.id,
+      data: row,
+      errors,
+      changes,
+      status: errors.length ? "Rejected" : changes.length ? "Ready" : "Unchanged",
+    });
+  });
+  return { spec, checked, ignored: [...ignored] };
+}
+
 const programModules = new Set([
   "applications",
   "assessments",
@@ -234,13 +450,17 @@ export async function POST(req: Request) {
     const u = await actor();
     await rateLimit("import:" + u.id, 20, 60);
     const x = await req.json();
+    // Creating runs every row through its workflow action; updating is checked
+    // in bulk, so a whole roster's worth of corrections fits in one upload.
+    const limit = x.mode === "update" ? 5000 : 1000;
+    ensure(
+      Array.isArray(x.rows) && x.rows.length <= limit && x.rows.length > 0,
+      `Import between 1 and ${limit.toLocaleString("en-US")} rows at a time.`,
+    );
+    if (x.mode === "update") return await updateRecords(u, x);
     ensure(
       allowed[x.module],
       "Import is not enabled for this module. Calculated and protected records are export-only.",
-    );
-    ensure(
-      Array.isArray(x.rows) && x.rows.length <= 1000 && x.rows.length > 0,
-      "Import between 1 and 1,000 rows at a time.",
     );
     const columns = allowed[x.module];
     const seen = new Set();
@@ -436,4 +656,68 @@ export async function POST(req: Request) {
   } catch (e: any) {
     return Response.json({ error: e.message }, { status: 400 });
   }
+}
+
+async function updateRecords(u: any, x: any) {
+  const { spec, checked, ignored } = await reviewUpdates(u, x.module, x.rows);
+  if (!x.confirm)
+    return Response.json({
+      rows: checked,
+      columns: [...spec.keys, ...spec.editable],
+      ignored,
+      mode: "update",
+      notice:
+        "Only the columns in the sheet change; empty cells keep the stored value. Governed fields (group, lifecycle, engagement, status) are rejected here and changed through their own actions.",
+    });
+  ensure(x.batch_id, "Import batch identifier is required.");
+  const existing: any = await stmt("SELECT summary FROM imports WHERE id=? AND actor=?", x.batch_id, u.id).first();
+  if (existing) return Response.json(JSON.parse(existing.summary));
+  const result: any = { mode: "update", created: 0, updated: 0, skipped: 0, conflicted: 0, rejected: 0, errors: [] };
+  const jobs: any[] = [];
+  for (const c of checked) {
+    let status = "Updated";
+    if (c.status === "Rejected") {
+      result.rejected++;
+      result.errors.push(...c.errors);
+      status = "Rejected";
+    } else if (c.status === "Unchanged") {
+      result.skipped++;
+      status = "Skipped";
+    } else {
+      result.updated++;
+      const sets = c.changes.map((ch: any) => `${ch.field}=?`).join(",");
+      jobs.push(
+        stmt(
+          `UPDATE ${spec.table} SET ${sets} WHERE id=?`,
+          ...c.changes.map((ch: any) => (ch.field === "credits" ? Number(ch.to) : ch.to)),
+          c.id,
+        ),
+        auditStmt(
+          u,
+          "Spreadsheet update",
+          c.id,
+          Object.fromEntries(c.changes.map((ch: any) => [ch.field, ch.to])),
+          Object.fromEntries(c.changes.map((ch: any) => [ch.field, ch.from])),
+          x.batch_id + "-" + c.row,
+        ),
+      );
+    }
+    jobs.push(
+      stmt(
+        "INSERT INTO import_rows VALUES(?,?,?,?,?,?)",
+        uid("IMROW"),
+        x.batch_id,
+        c.row,
+        status,
+        status === "Rejected" ? JSON.stringify(c.errors) : null,
+        c.id || null,
+      ),
+    );
+  }
+  await db().batch([
+    stmt("INSERT INTO imports VALUES(?,?,?,?,?)", x.batch_id, u.id, x.module, JSON.stringify(result), now()),
+    ...jobs,
+    auditStmt(u, "Spreadsheet import", x.module, result),
+  ]);
+  return Response.json(result);
 }

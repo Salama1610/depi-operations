@@ -652,6 +652,151 @@ test("student roster preview reports missing and duplicate emails and handles 1,
   assert.equal(preview.rows.length, 1000);
   assert.equal(preview.rows.filter((row) => row.status === "Ready").length, 1000);
 });
+test("update-mode spreadsheets merge partial columns into existing records under the workflow rules", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  const inG101 = await dbRow("SELECT id, email FROM students WHERE group_id='G101' ORDER BY id LIMIT 1");
+  const inG102 = await dbRow("SELECT id, email FROM students WHERE group_id='G102' ORDER BY id LIMIT 1");
+  const other = await dbRow("SELECT id FROM students WHERE group_id='G103' ORDER BY id LIMIT 1");
+  const untouched = await dbRow("SELECT id, name FROM students WHERE group_id='G104' ORDER BY id LIMIT 1");
+  const fifth = await dbRow("SELECT id FROM students WHERE group_id='G105' ORDER BY id LIMIT 1");
+
+  // Preview: matched by id and by email, governed fields refused, duplicates caught.
+  const preview = await importPost({
+    module: "students",
+    mode: "update",
+    rows: [
+      { id: inG101.id, phone: "01000000001", national_id: "29901011234567", name_ar: "طالب", lifecycle: "", risk: "High" },
+      { email: inG102.email.toUpperCase(), job_profile: "Frontend developer", group_id: "G101" },
+      { id: other.id, national_id: "29901011234567" },
+      { id: inG101.id, phone: "01000000001" },
+      { id: "S-NOBODY", phone: "0100" },
+      { id: untouched.id, name: untouched.name, phone: "" },
+      { id: fifth.id, national_id: "1234" },
+    ],
+  });
+  assert.equal(preview.mode, "update");
+  assert.deepEqual(preview.ignored, ["risk"], "derived and foreign columns are ignored and reported");
+  assert.equal(preview.rows[0].status, "Ready");
+  assert.deepEqual(
+    preview.rows[0].changes.map((c) => c.field).sort(),
+    ["name_ar", "national_id", "phone"],
+    "empty cells are not changes",
+  );
+  assert.equal(preview.rows[1].status, "Rejected");
+  assert.match(preview.rows[1].errors[0].error, /Transfer action/, "group moves stay with the transfer workflow");
+  assert.equal(preview.rows[2].status, "Rejected");
+  assert.match(preview.rows[2].errors[0].error, /Already used/, "uniqueness is checked inside the batch");
+  assert.equal(preview.rows[3].status, "Rejected");
+  assert.match(preview.rows[3].errors[0].error, /appears twice/);
+  assert.equal(preview.rows[4].status, "Rejected");
+  assert.match(preview.rows[4].errors[0].error, /No existing record/);
+  assert.equal(preview.rows[5].status, "Unchanged");
+  assert.equal(preview.rows[6].status, "Rejected");
+  assert.match(preview.rows[6].errors[0].error, /14-digit/);
+
+  // Commit applies only the ready rows, audits each change and replays safely.
+  const batch = "update-batch-" + Date.now();
+  const rows = [
+    { id: inG101.id, phone: "01000000001", national_id: "29901011234567", name_ar: "طالب" },
+    { email: inG102.email, job_profile: "Frontend developer" },
+    { id: untouched.id, name: untouched.name, phone: "" },
+    { id: "S-NOBODY", phone: "0100" },
+  ];
+  const committed = await importPost({ module: "students", mode: "update", rows, confirm: true, batch_id: batch });
+  assert.equal(committed.updated, 2);
+  assert.equal(committed.skipped, 1);
+  assert.equal(committed.rejected, 1);
+  const after = await dbRow("SELECT phone, national_id, name_ar, lifecycle FROM students WHERE id=?", inG101.id);
+  assert.equal(after.phone, "01000000001");
+  assert.equal(after.national_id, "29901011234567");
+  assert.equal(after.name_ar, "طالب");
+  assert.equal(after.lifecycle, "Active");
+  assert.equal((await dbRow("SELECT job_profile FROM students WHERE id=?", inG102.id)).job_profile, "Frontend developer");
+  const audit = await dbRow(
+    "SELECT value, previous FROM audit_events WHERE action='Spreadsheet update' AND entity_id=? ORDER BY created_at DESC LIMIT 1",
+    inG101.id,
+  );
+  assert.equal(JSON.parse(audit.value).phone, "01000000001");
+  assert.ok("phone" in JSON.parse(audit.previous));
+  const replay = await importPost({ module: "students", mode: "update", rows, confirm: true, batch_id: batch });
+  assert.equal(replay.updated, 2, "a replayed batch returns the recorded summary without applying again");
+  assert.equal((await dbRow("SELECT count(*) n FROM import_rows WHERE import_id=?", batch)).n, 4);
+
+  // A coordinator may only touch students in groups they are responsible for.
+  current = { id: "coordinator-login", email: "staff-sara@example.invalid" };
+  const scoped = await importPost({
+    module: "students",
+    mode: "update",
+    rows: [
+      { id: inG101.id, phone: "01000000002" },
+      { id: inG102.id, phone: "01000000003" },
+    ],
+  });
+  assert.equal(scoped.rows[0].status, "Ready");
+  assert.equal(scoped.rows[1].status, "Rejected");
+  assert.match(scoped.rows[1].errors[0].error, /outside your scope/);
+  const groupsByCoordinator = await importPost({ module: "groups", mode: "update", rows: [{ id: "G101", name: "Renamed" }] });
+  assert.match(groupsByCoordinator.error, /not permitted/, "group data is Project Operations work");
+
+  // Groups: staff references must be active staff IDs; status stays with its actions.
+  current = { id: "ops-only-login", email: "ops-only@example.com" };
+  const groups = await importPost({
+    module: "groups",
+    mode: "update",
+    rows: [
+      { id: "G101", coordinator: "staff-omar", account_manager: "staff-nour", start_date: "2026-10-01" },
+      { id: "G102", coordinator: "Nobody Known" },
+      { id: "G103", status: "Closed" },
+      { id: "G104", pathway: "Elsewhere" },
+    ],
+  });
+  assert.equal(groups.rows[0].status, "Ready");
+  assert.equal(groups.rows[0].changes.length, 3);
+  assert.equal(groups.rows[1].status, "Rejected");
+  assert.match(groups.rows[1].errors[0].error, /active staff/);
+  assert.equal(groups.rows[2].status, "Rejected");
+  assert.match(groups.rows[2].errors[0].error, /close, gate and archive/);
+  assert.equal(groups.rows[3].status, "Rejected");
+  assert.match(groups.rows[3].errors[0].error, /Outcome or Support/);
+  const groupBatch = "update-groups-" + Date.now();
+  const groupCommit = await importPost({
+    module: "groups",
+    mode: "update",
+    rows: [{ id: "G101", coordinator: "staff-omar", account_manager: "staff-nour", start_date: "2026-10-01" }],
+    confirm: true,
+    batch_id: groupBatch,
+  });
+  assert.equal(groupCommit.updated, 1);
+  const g = await dbRow("SELECT coordinator, account_manager, start_date FROM groups WHERE id='G101'");
+  assert.equal(g.coordinator, "staff-omar");
+  assert.equal(g.account_manager, "staff-nour");
+  assert.equal(String(g.start_date).slice(0, 10), "2026-10-01");
+
+  // Accounts: credits become numbers; status is an audited decision elsewhere.
+  const accounts = await importPost({
+    module: "accounts",
+    mode: "update",
+    rows: [
+      { id: "ACC-101", credits: "75", label: "Renamed workspace" },
+      { id: "ACC-102", status: "Blocked" },
+      { id: "ACC-103", platform: "Fiverr" },
+    ],
+    confirm: true,
+    batch_id: "update-accounts-" + Date.now(),
+  });
+  assert.equal(accounts.updated, 1);
+  assert.equal(accounts.rejected, 2);
+  assert.equal(Number((await dbRow("SELECT credits FROM accounts WHERE id='ACC-101'")).credits), 75);
+  assert.equal((await dbRow("SELECT label FROM accounts WHERE id='ACC-101'")).label, "Renamed workspace");
+
+  // Modules without update support and roles without the right are refused.
+  const unsupported = await importPost({ module: "contacts", mode: "update", rows: [{ student_id: inG101.id }] });
+  assert.match(unsupported.error, /students, groups and accounts/);
+  current = { id: "coach-login", email: "staff-coach@example.invalid" };
+  const coach = await importPost({ module: "students", mode: "update", rows: [{ id: inG101.id, phone: "0" }] });
+  assert.match(coach.error, /not permitted/);
+  current = { id: "owner", email: "owner@example.com" };
+});
 test("complete program flow governs intake, assessment, withdrawal, certificate and reporting", async () => {
   current = { id: "owner", email: "owner@example.com" };
   await programCheck("application", {

@@ -83,3 +83,10 @@ The interface uses the Freelance Yard identity: the orange and navy palette from
 - `lib/data/`, `scripts/migrate-d1-to-supabase.mjs`, `docs/data-path-migration.md`: PostgreSQL/Storage adapters, the reconciled data migration and its runbook.
 - `tests/`: executable domain, service integration, rendering and UI component tests.
 - `docs/`: setup, deployment, metric definitions and remaining release gates.
+
+## Spreadsheets
+
+Every dataset exports as CSV, as an Excel sheet, or as one workbook with a tab per dataset (`/api/export?module=workbook`). Workbooks carry a bold frozen header, fitted columns and numeric cells, so they open cleanly in Excel and Google Sheets.
+
+Imports run in two modes from the import workspace. **Add new records** creates rows through the same workflow actions as the forms (1,000 rows per upload). **Update existing records** merges sheets from other sources into students, groups and accounts: rows are matched by ID (students also by email, national ID or TP ID), only the columns present change, empty cells keep the stored value, unknown columns are ignored and listed, and every row shows its field-by-field diff before anything is applied (5,000 rows per upload). Fields that the workflow governs (group moves, lifecycle, engagement, account status) are refused with a pointer to the action that owns them. Each applied change is audited with its previous value, and a batch replays safely.
+

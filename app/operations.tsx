@@ -288,6 +288,9 @@ function moduleFromPath(pathname: string) {
   return segment && nav.some(([id]) => id === segment) ? segment : "home";
 }
 
+/** Modules whose existing records a spreadsheet may modify (see /api/import). */
+const updatableModules = ["students", "groups", "accounts"];
+
 export default function Operations({ module: initialModule }: { module: string }) {
   // Which module is showing is client state, not a route. The sidebar used to
   // be plain links, so every click reloaded the page and re-fetched the whole
@@ -322,6 +325,7 @@ export default function Operations({ module: initialModule }: { module: string }
     [notifications, setNotifications] = useState(false),
     [importOpen, setImportOpen] = useState(false),
     [importModule, setImportModule] = useState("students"),
+    [importMode, setImportMode] = useState<"create" | "update">("create"),
     [importRows, setImportRows] = useState<Row[]>([]),
     [preview, setPreview] = useState<Row | null>(null),
     [importId, setImportId] = useState(""),
@@ -2067,9 +2071,19 @@ export default function Operations({ module: initialModule }: { module: string }
               Download a template, upload XLSX or CSV, review validation
               results, and confirm the import. Protected fields are rejected.
             </p>
-            <button className="primary" onClick={() => setImportOpen(true)}>
-              <Upload size={17} /> Open import workspace
-            </button>
+            <div className="detail-actions">
+              <button className="primary" onClick={() => setImportOpen(true)}>
+                <Upload size={17} /> Open import workspace
+              </button>
+              <a className="small-btn" href="/api/export?module=workbook">
+                <Download size={16} /> Download the whole workbook (Excel)
+              </a>
+            </div>
+            <p className="footnote">
+              The workbook holds one tab per dataset. Edit a tab, then upload
+              the file in update mode: the matching tab is read, only the
+              columns present change, and empty cells keep the stored value.
+            </p>
           </div>
         </TabsContent>
       </Tabs>
@@ -2442,7 +2456,7 @@ export default function Operations({ module: initialModule }: { module: string }
                         <Pick
                           label="Export"
                           value=""
-                          options={["CSV", "XLSX"]}
+                          options={["CSV", "XLSX", "Workbook (all)"]}
                           onChange={(v) => {
                             const m =
                               (
@@ -2452,13 +2466,14 @@ export default function Operations({ module: initialModule }: { module: string }
                                   reports: "students",
                                 } as Row
                               )[module] || module;
-                            window.location.href =
-                              "/api/export?module=" +
-                              m +
-                              "&format=" +
-                              v.toLowerCase() +
-                              "&search=" +
-                              encodeURIComponent(search);
+                            window.location.href = v.startsWith("Workbook")
+                              ? "/api/export?module=workbook"
+                              : "/api/export?module=" +
+                                m +
+                                "&format=" +
+                                v.toLowerCase() +
+                                "&search=" +
+                                encodeURIComponent(search);
                           }}
                         />
                       </div>
@@ -3749,6 +3764,26 @@ export default function Operations({ module: initialModule }: { module: string }
               Template → upload → validation → confirm → reconciliation
             </DialogDescription>
           </DialogHeader>
+          <div className="filter-row">
+            <Pick
+              label="What the sheet does"
+              value={importMode === "update" ? "Update existing records" : "Add new records"}
+              onChange={(v) => {
+                const mode = v.startsWith("Update") ? "update" : "create";
+                setImportMode(mode);
+                if (mode === "update" && !updatableModules.includes(importModule))
+                  setImportModule("students");
+                setPreview(null);
+                setImportRows([]);
+              }}
+              options={["Add new records", "Update existing records"]}
+            />
+          </div>
+          <p className="footnote">
+            {importMode === "update"
+              ? "Rows are matched to existing records by ID (students also by email, national ID or TP ID); up to 5,000 rows per upload. Only the columns in the sheet change; empty cells keep the stored value. Group moves, lifecycle, engagement and account status stay with their own actions."
+              : "Every row creates a record through the same workflow rules as the forms (up to 1,000 rows per upload). Rows whose ID already exists are rejected; use update mode to change them."}
+          </p>
           <Pick
             label="Import module"
             value={importModule}
@@ -3757,30 +3792,39 @@ export default function Operations({ module: initialModule }: { module: string }
               setPreview(null);
               setImportRows([]);
             }}
-            options={[
-              "students",
-              "groups",
-              "contacts",
-              "tasks",
-              "sessions",
-              "attendance",
-              "task_bank",
-              "accounts",
-              "requests",
-              "gigs",
-              "evidence",
-              "cases",
-              "applications",
-              "assessments",
-              "assessment_results",
-              "withdrawals",
-              "post_program_outcomes",
-            ]}
+            options={
+              importMode === "update"
+                ? updatableModules
+                : [
+                    "students",
+                    "groups",
+                    "contacts",
+                    "tasks",
+                    "sessions",
+                    "attendance",
+                    "task_bank",
+                    "accounts",
+                    "requests",
+                    "gigs",
+                    "evidence",
+                    "cases",
+                    "applications",
+                    "assessments",
+                    "assessment_results",
+                    "withdrawals",
+                    "post_program_outcomes",
+                  ]
+            }
           />
           <div className="import-tools">
             <button
               className="small-btn"
               onClick={() => {
+                if (importMode === "update") {
+                  // The current data is the template: edit it and upload it back.
+                  window.location.href = "/api/export?module=" + importModule + "&format=xlsx";
+                  return;
+                }
                 const templates: Row = {
                   students: {
                     id: "S20001",
@@ -3940,7 +3984,8 @@ export default function Operations({ module: initialModule }: { module: string }
                 );
               }}
             >
-              <Download size={16} /> Download XLSX template
+              <Download size={16} />{" "}
+              {importMode === "update" ? "Download current data (Excel)" : "Download XLSX template"}
             </button>
             <label className="small-btn">
               <Upload size={16} /> Upload XLSX / CSV
@@ -3952,13 +3997,13 @@ export default function Operations({ module: initialModule }: { module: string }
                   try {
                     if (!e.target.files?.[0]) return;
                     setBusy(true);
-                    const rows = await readSheet(e.target.files[0]);
+                    const rows = await readSheet(e.target.files[0], importModule);
                     setImportRows(rows);
                     setImportId(crypto.randomUUID());
                     const r = await fetch("/api/import", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ module: importModule, rows }),
+                      body: JSON.stringify({ module: importModule, rows, mode: importMode }),
                     });
                     const v = await r.json();
                     if (v.error) throw Error(v.error);
@@ -3979,6 +4024,9 @@ export default function Operations({ module: initialModule }: { module: string }
                 <span>
                   {preview.rows.filter((r: Row) => r.status === "Ready").length}{" "}
                   ready ·{" "}
+                  {preview.mode === "update"
+                    ? preview.rows.filter((r: Row) => r.status === "Unchanged").length + " unchanged · "
+                    : ""}
                   {
                     preview.rows.filter((r: Row) => r.status === "Rejected")
                       .length
@@ -3986,21 +4034,48 @@ export default function Operations({ module: initialModule }: { module: string }
                   rejected
                 </span>
               </div>
-              {generic(preview.rows.slice(0, 20), [
+              {generic(preview.rows.slice(0, 50), [
                 { key: "row", label: "Row" },
+                ...(preview.mode === "update" ? [{ key: "id", label: "Record" }] : []),
                 statusCol,
+                ...(preview.mode === "update"
+                  ? [
+                      {
+                        key: "changes",
+                        label: "Changes",
+                        render: (r: Row) =>
+                          r.changes?.length
+                            ? r.changes.map((c: Row) => (
+                                <span className="table-subline" key={c.field}>
+                                  <strong>{c.field}</strong>: {String(c.from || "—")} → {String(c.to)}
+                                </span>
+                              ))
+                            : r.status === "Unchanged"
+                              ? "Matches the stored record"
+                              : "",
+                      },
+                    ]
+                  : []),
                 {
                   key: "errors",
                   label: "Validation",
                   render: (r) =>
-                    r.errors.map((e: Row) => e.error).join("; ") ||
-                    "Ready for workflow validation",
+                    r.errors.map((e: Row) => (e.field ? e.field + ": " : "") + e.error).join("; ") ||
+                    (preview.mode === "update" ? "" : "Ready for workflow validation"),
                 },
               ])}
+              {preview.rows.length > 50 && (
+                <p className="footnote">Showing the first 50 of {preview.rows.length} rows; every row is validated.</p>
+              )}
+              {preview.ignored?.length > 0 && (
+                <p className="footnote">
+                  Columns ignored (not editable through this sheet): {preview.ignored.join(", ")}
+                </p>
+              )}
               <p className="footnote">{preview.notice}</p>
               <button
                 className="primary"
-                disabled={busy}
+                disabled={busy || !preview.rows.some((r: Row) => r.status === "Ready")}
                 onClick={async () => {
                   setBusy(true);
                   try {
@@ -4010,6 +4085,7 @@ export default function Operations({ module: initialModule }: { module: string }
                       body: JSON.stringify({
                         module: importModule,
                         rows: importRows,
+                        mode: importMode,
                         confirm: true,
                         batch_id: importId,
                       }),
@@ -4026,7 +4102,11 @@ export default function Operations({ module: initialModule }: { module: string }
                   }
                 }}
               >
-                {busy ? "Importing…" : "Confirm import"}
+                {busy
+                  ? "Importing…"
+                  : importMode === "update"
+                    ? `Apply ${preview.rows.filter((r: Row) => r.status === "Ready").length} changes`
+                    : "Confirm import"}
               </button>
             </>
           )}
