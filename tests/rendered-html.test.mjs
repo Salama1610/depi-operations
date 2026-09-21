@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { build } from "esbuild";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -8,11 +9,15 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const developmentPreviewMeta =
   /<meta(?=[^>]*\bname=["']codex-preview["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;
 
-test("renders development preview metadata", async () => {
+// This checks the Cloudflare Worker bundle, which only exists after
+// `npm run build:cloudflare`. The default build is now `next build` for Vercel,
+// so the check is skipped rather than failed when that bundle is absent.
+const workerBundle = fileURLToPath(new URL("../dist/server/index.js", import.meta.url));
+test("renders development preview metadata", { skip: !existsSync(workerBundle) && "no Cloudflare build output" }, async () => {
   const outfile = join(tmpdir(), `depi-render-worker-${process.pid}-${Date.now()}.mjs`);
   globalThis.__renderEnv = {};
   await build({
-    entryPoints: [fileURLToPath(new URL("../dist/server/index.js", import.meta.url))],
+    entryPoints: [workerBundle],
     bundle: true,
     platform: "node",
     format: "esm",

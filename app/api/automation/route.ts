@@ -1,4 +1,4 @@
-import { env } from 'cloudflare:workers';
+import { env } from '@/lib/env';
 import { stmt,now,permit } from '@/lib/server';
 import { verifyRequest,digest } from '@/lib/domain/signatures';
 import { ensure } from '@/lib/domain/rules';

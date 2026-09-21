@@ -1,4 +1,4 @@
-import { env } from "cloudflare:workers";
+import { env } from "@/lib/env";
 import columnTypes from "../../supabase/column-types.json";
 import { createPostgresDatabase, type ColumnTypeMap } from "./postgres";
 import { createRpcCaller, createRpcDatabase } from "./rpc";

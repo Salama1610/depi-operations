@@ -2,7 +2,7 @@ import "server-only";
 
 import { createServerClient } from "@supabase/ssr";
 import type { User } from "@supabase/supabase-js";
-import { env } from "cloudflare:workers";
+import { env } from "@/lib/env";
 import { cookies } from "next/headers";
 
 function config() {

@@ -1,4 +1,4 @@
-import { env } from "cloudflare:workers";
+import { env } from "@/lib/env";
 import { actor, permit, stmt, auditStmt, db, uid, now, rateLimit, scopeSql } from "@/lib/server";
 import { can, ensure } from "@/lib/domain/rules";
 import { credentialKey, credentialKeyConfigured, openCredential, sealCredential } from "@/lib/domain/account-secrets";

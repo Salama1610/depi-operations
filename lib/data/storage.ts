@@ -1,4 +1,4 @@
-import { env } from "cloudflare:workers";
+import { env } from "@/lib/env";
 import { getSupabaseAdminClient } from "../supabase/admin";
 import { localFallbackAllowed } from "./database";
 

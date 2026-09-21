@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import test, { after } from "node:test";
@@ -36,7 +37,11 @@ async function readCssTree(directory) {
 }
 
 test("emits the catalog's animation and scrolling utilities", async () => {
-  const css = await readCssTree(path.join(root, "dist"));
+  // Built CSS lives under dist/ for the Cloudflare build and .next/ for the
+  // default Next build; whichever exists is checked.
+  const built = ["dist", ".next"].map((d) => path.join(root, d)).find((d) => existsSync(d));
+  assert.ok(built, "run a production build first (npm run build or build:cloudflare)");
+  const css = await readCssTree(built);
 
   assert.match(css, /--tw-enter-opacity/);
   assert.match(css, /scrollbar-width:\s*thin/);

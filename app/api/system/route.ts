@@ -1,4 +1,4 @@
-import { env } from "cloudflare:workers";
+import { env } from "@/lib/env";
 import { actor, permit, all, stmt, auditStmt, db, uid, now, rateLimit } from "@/lib/server";
 import { ensure } from "@/lib/domain/rules";
 

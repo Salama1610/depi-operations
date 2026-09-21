@@ -1,5 +1,14 @@
 # Deployment and recovery
 
+## Vercel (current target)
+
+The application builds with plain Next.js (`npm run build` runs `next build`) and runs on Vercel's Node runtime. Connect the GitHub repository to a Vercel project, keep the default framework detection (Next.js), and set these environment variables for Production: `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_EVIDENCE_BUCKET`, `CREDENTIAL_ENCRYPTION_KEY`, and optionally `BACKUP_ENCRYPTION_KEY`, `AUTOMATION_HMAC_SECRET`, `AUTOMATION_ACTOR_EMAIL`. Every push to `main` deploys. Add the deployment's `/auth/callback` URL to the Supabase Auth redirect allowlist.
+
+Runtime settings are read through `lib/env.ts`, which uses the process environment everywhere and lets the test harness inject values, so the same code runs on Vercel, on Node, and on the Cloudflare Worker build (`npm run build:cloudflare`), which remains available.
+
+## Cloudflare Sites (previous target)
+
+
 The Sites manifest declares `DB` and `BUCKET` and the persistent Site identity. Keep credentials out of the repository. Hosting owns concrete resource bindings and trusted identity headers.
 
 1. Install the locked dependencies.
