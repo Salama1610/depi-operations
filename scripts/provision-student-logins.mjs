@@ -26,7 +26,7 @@
 // The script never prints an email address or a password. It reports counts and
 // writes a PII-free summary with --report.
 import fs from "node:fs";
-import { adminConnection, parseArgs, resolveDatabaseUrl, resolveSupabaseApi } from "./supabase-env.mjs";
+import { parseArgs, resolveConnection, resolveSupabaseApi } from "./supabase-env.mjs";
 
 const args = parseArgs(process.argv.slice(2));
 const apply = Boolean(args.apply);
@@ -87,7 +87,7 @@ async function existingIdentities() {
   return found;
 }
 
-const sql = adminConnection(resolveDatabaseUrl(args, "session"));
+const sql = resolveConnection(args, "session");
 let report;
 try {
   // --group limits the run to one group, for a supervised pilot before the

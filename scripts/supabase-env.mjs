@@ -83,3 +83,48 @@ export function adminConnection(url, options = {}) {
 export function redact(url) {
   return String(url).replace(/:\/\/([^:]+):[^@]+@/, "://$1:***@");
 }
+
+/**
+ * A minimal stand-in for the postgres.js client over the Management API:
+ * `unsafe(query)` for reads, `begin(fn)` collecting the statements of one
+ * migration into a single request. Parameters are inlined as literals because
+ * the endpoint takes plain SQL text.
+ */
+export function managementApiConnection(a) {
+  const credentials = readCredentials(a.credentials);
+  const ref = a["project-ref"] || credentials.project_ref;
+  const token = a["access-token"] || credentials.access_token || process.env.SUPABASE_ACCESS_TOKEN;
+  if (!ref || !token) throw new Error("--management-api needs a project ref and an access token (--credentials, flags or SUPABASE_ACCESS_TOKEN).");
+  const endpoint = `https://api.supabase.com/v1/projects/${ref}/database/query`;
+  const quote = (v) => (Array.isArray(v) ? "array[" + v.map(quote).join(",") + "]::text[]" : "'" + String(v).replace(/'/g, "''") + "'");
+  async function run(query) {
+    const r = await fetch(endpoint, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ query }),
+    });
+    const text = await r.text();
+    if (!r.ok) throw new Error(`management api ${r.status}: ${text.slice(0, 600)}`);
+    return text ? JSON.parse(text) : [];
+  }
+  return {
+    label: `management api project ${ref}`,
+    unsafe: (query, params = []) => run(params.length ? query.replace(/\$(\d+)/g, (_, i) => quote(params[i - 1])) : query),
+    begin: async (fn) => {
+      const parts = [];
+      await fn({ unsafe: async (query, params = []) => { parts.push(params.length ? query.replace(/\$(\d+)/g, (_, i) => quote(params[i - 1])) : query); } });
+      return run(parts.join(";\n"));
+    },
+    end: async () => {},
+  };
+}
+
+/**
+ * The connection a script should use: the Management API when `--management-api`
+ * is set (no database password needed, only a personal access token), else the
+ * wire-protocol client. Both expose `unsafe`, `begin` and `end`.
+ */
+export function resolveConnection(args, mode = "session") {
+  if (args["management-api"]) return managementApiConnection(args);
+  return adminConnection(resolveDatabaseUrl(args, mode));
+}

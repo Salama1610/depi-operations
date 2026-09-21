@@ -6,6 +6,10 @@ The application builds with plain Next.js (`npm run build` runs `next build`) an
 
 Runtime settings are read through `lib/env.ts`, which uses the process environment everywhere and lets the test harness inject values, so the same code runs on Vercel, on Node, and on the Cloudflare Worker build (`npm run build:cloudflare`), which remains available.
 
+### Applying migrations without the database password
+
+`node scripts/apply-supabase-migrations.mjs --credentials <private json> --management-api` runs the migration files through the Supabase Management API using a personal access token (`access_token` in the credentials file, or `SUPABASE_ACCESS_TOKEN`). `scripts/provision-student-logins.mjs` accepts the same flag. This is the path used when the project is created through the Vercel integration, which keeps the database password to itself.
+
 ## Cloudflare Sites (previous target)
 
 

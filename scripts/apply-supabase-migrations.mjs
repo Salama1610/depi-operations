@@ -6,21 +6,28 @@
 //
 //   node scripts/apply-supabase-migrations.mjs --credentials ../.secrets/supabase-depi.json
 //   node scripts/apply-supabase-migrations.mjs --db-url postgresql://... [--dry-run]
+//   node scripts/apply-supabase-migrations.mjs --credentials ... --management-api
+//
+// `--management-api` runs the same files through the Supabase Management API
+// (`/v1/projects/<ref>/database/query`) with a personal access token, for the
+// case where no database password is at hand. Each file and its bookkeeping
+// row travel as one multi-statement query, which PostgreSQL runs as a single
+// implicit transaction, so a failed file leaves nothing behind.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { adminConnection, parseArgs, redact, resolveDatabaseUrl } from "./supabase-env.mjs";
+import { parseArgs, redact, resolveConnection, resolveDatabaseUrl } from "./supabase-env.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MIGRATIONS = path.join(ROOT, "supabase", "migrations");
 
 const args = parseArgs(process.argv.slice(2));
-const url = resolveDatabaseUrl(args, "session");
 const files = fs
   .readdirSync(MIGRATIONS)
   .filter((f) => f.endsWith(".sql"))
   .sort();
-const sql = adminConnection(url);
+const sql = resolveConnection(args, "session");
+const url = sql.label || resolveDatabaseUrl(args, "session");
 
 try {
   const [{ version }] = await sql.unsafe("select current_setting('server_version') as version");

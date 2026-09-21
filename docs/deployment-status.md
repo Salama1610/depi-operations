@@ -1,5 +1,15 @@
 # Private deployment status
 
+## Current deployment (2026-09-21)
+
+- **Hosting**: Vercel, team Career-180-TMS, project `depi-operations`, production URL `https://depi-operations-career-180-tms.vercel.app`, Node runtime, `next build`. Linked to GitHub `Salama1610/depi-operations` (branch `main` deploys automatically).
+- **Database**: Supabase project `gmpvyuoepbvmsmlyhjdq` ("Depi R5", West EU Ireland, PostgreSQL 17), reached over the HTTPS transport (`depi_execute`). All 8 migrations recorded; 60 tables, RLS on all; private bucket `depi-evidence`.
+- **Data**: roster import `ROSTER-65847283428B8258` — 5 tracks, 131 groups, 2,887 students (2,887 unique emails), 2,948 source rows, 61 duplicates linked, status Reconciled. Bootstrap admin provisioned; 12 pilot student logins in `CAI5_SWD5_G1` (national-ID first password).
+- **Auth**: site URL and redirect allowlist point at the Vercel URL (plus preview hosts and localhost); public sign-up disabled — accounts are provisioned only.
+- **Vercel environment** (Production and Preview): `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_EVIDENCE_BUCKET`, `CREDENTIAL_ENCRYPTION_KEY`, `BACKUP_ENCRYPTION_KEY`, `AUTOMATION_HMAC_SECRET`. The Supabase↔Vercel integration's own variables (`POSTGRES_*`, `NEXT_PUBLIC_SUPABASE_*`, `SUPABASE_SECRET_KEY`, …) are present but unused by the app.
+- **Open item**: Vercel "Deployment Protection" (Vercel Authentication) is enabled on the project, so every URL currently asks for a Vercel login. Switch it off under Project → Settings → Deployment Protection before students are told the link.
+- **Previous project** `wfqkcafsolcqkarvilvg` (old Supabase account) still holds a full copy of the roster and the same pilot accounts; retire it once the new deployment is confirmed.
+
 The DEPI Round 5 Operations workspace is privately published at:
 
 <https://depi-coaching-operations.abdelrhman-shoman62.chatgpt.site>
