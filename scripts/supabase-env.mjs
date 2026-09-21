@@ -96,7 +96,12 @@ export function managementApiConnection(a) {
   const token = a["access-token"] || credentials.access_token || process.env.SUPABASE_ACCESS_TOKEN;
   if (!ref || !token) throw new Error("--management-api needs a project ref and an access token (--credentials, flags or SUPABASE_ACCESS_TOKEN).");
   const endpoint = `https://api.supabase.com/v1/projects/${ref}/database/query`;
-  const quote = (v) => (Array.isArray(v) ? "array[" + v.map(quote).join(",") + "]::text[]" : "'" + String(v).replace(/'/g, "''") + "'");
+  const quote = (v) =>
+    v === null || v === undefined
+      ? "NULL"
+      : Array.isArray(v)
+        ? "array[" + v.map(quote).join(",") + "]::text[]"
+        : "'" + String(v).replace(/'/g, "''") + "'";
   async function run(query) {
     const r = await fetch(endpoint, {
       method: "POST",
