@@ -45,3 +45,9 @@ next-env.d.ts
 
 .vercel
 .env*
+
+# Tooling drops (Supabase CLI skills, temp state)
+.agents/
+.claude/skills/
+skills-lock.json
+supabase/.temp/
