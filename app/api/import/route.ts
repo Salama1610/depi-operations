@@ -8,11 +8,12 @@ import {
   rateLimit,
   scopeSql,
 } from "@/lib/server";
-import { can, ensure } from "@/lib/domain/rules";
+import { can, ensure, roles } from "@/lib/domain/rules";
 import { applyMapping, isNationalId, nationalIdProblem, normalizeNationalId } from "@/lib/domain/sheet-mapping";
 import { POST as operate } from "@/app/api/operations/route";
 import { POST as program } from "@/app/api/program/route";
 const allowed: Record<string, string[]> = {
+  staff: ["name", "email", "roles", "active", "reason"],
   students: ["id", "name", "group_id", "email", "phone", "lifecycle", "engagement", "coaching"],
   groups: [
     "id",
@@ -122,6 +123,7 @@ const allowed: Record<string, string[]> = {
   ],
 };
 const actions: Record<string, string> = {
+  staff: "staff",
   students: "student",
   groups: "group",
   contacts: "contact",
@@ -141,6 +143,7 @@ const actions: Record<string, string> = {
   post_program_outcomes: "post_program_outcome",
 };
 const required: Record<string, string[]> = {
+  staff: ["name", "email", "roles"],
   students: ["id", "name", "group_id", "email"],
   groups: [
     "id",
@@ -288,7 +291,12 @@ const updatable: Record<string, UpdateSpec> = {
 const platforms = ["Kafeel", "Nafezly", "Khamsat"];
 
 /** Reference data an update review needs, fetched once per batch. */
-type Lookups = { users: Set<string>; tracks: Set<string> };
+type Lookups = { users: Set<string>; tracks: Set<string>; staffByRef: Map<string, string | null> };
+
+// Columns that name a member of staff. A sheet written by a person carries an
+// email or a name, never this application's internal reference, so all three
+// are accepted and resolved to the reference before anything is written.
+const staffFields = ["coordinator", "supervisor", "coach", "account_manager"];
 
 /** Field-level validation of a new value for an update; returns an error or null. */
 function validateUpdate(module: string, field: string, value: string, lookups: Lookups) {
@@ -299,8 +307,11 @@ function validateUpdate(module: string, field: string, value: string, lookups: L
     if (field === "coaching" && value.length > 80) return "Coaching status is too long";
   }
   if (module === "groups") {
-    if (["coordinator", "supervisor", "coach", "account_manager"].includes(field) && !lookups.users.has(value))
-      return "Not an active staff member (use the staff ID, not the name)";
+    if (staffFields.includes(field)) {
+      const resolved = lookups.staffByRef.get(value.toLowerCase());
+      if (resolved === undefined) return "Not an active member of staff — add them first, or check the spelling";
+      if (resolved === null) return "Two active people share this name; use their email address instead";
+    }
     if (field === "track" && !lookups.tracks.has(value)) return "Not an active approved track";
     if (field === "pathway" && !["Outcome", "Support"].includes(value)) return "Pathway must be Outcome or Support";
     if (field === "delivery_model" && !["Regular", "Industry"].includes(value)) return "Delivery model must be Regular or Industry";
@@ -403,9 +414,23 @@ async function reviewUpdates(u: any, module: string, rawRows: any[], options: { 
     module === "students" && scope.sql !== "1=1"
       ? new Set(((await stmt(`SELECT g.id FROM groups g WHERE ${scope.sql}`, ...scope.args).all()).results || []).map((g: any) => g.id))
       : null;
+  const staff = ((await stmt("SELECT id, name, email FROM users WHERE active=1").all()).results || []) as any[];
+  // id, email and name all point at the same person; a name shared by two
+  // active people points at nobody, and says so rather than guessing.
+  const staffByRef = new Map<string, string | null>();
+  const claimName = (key: string, id: string) => {
+    if (!key) return;
+    staffByRef.set(key, staffByRef.has(key) && staffByRef.get(key) !== id ? null : id);
+  };
+  for (const person of staff) {
+    staffByRef.set(String(person.id).toLowerCase(), person.id);
+    if (person.email) staffByRef.set(String(person.email).trim().toLowerCase(), person.id);
+  }
+  for (const person of staff) claimName(String(person.name || "").trim().toLowerCase(), person.id);
   const lookups: Lookups = {
-    users: new Set(((await stmt("SELECT id FROM users WHERE active=1").all()).results || []).map((r: any) => r.id)),
+    users: new Set(staff.map((person) => person.id)),
     tracks: new Set(((await stmt("SELECT name FROM tracks WHERE active=1").all()).results || []).map((r: any) => r.name)),
+    staffByRef,
   };
 
   // Pass 3: the review itself, entirely in memory.
@@ -452,6 +477,7 @@ async function reviewUpdates(u: any, module: string, rawRows: any[], options: { 
       if (value === undefined || value === "" || field === keyField) continue;
       const normalized = field === "credits" && Number.isFinite(Number(value)) ? String(Number(value)) : value;
       if (same(normalized, record[field])) continue;
+      if (module === "groups" && staffFields.includes(field) && same(lookups.staffByRef.get(normalized.toLowerCase()), record[field])) continue;
       const problem = validateUpdate(module, field, normalized, lookups);
       if (problem) {
         errors.push({ row: line, field, value, error: problem, expected: "A valid " + field.replace(/_/g, " ") });
@@ -466,7 +492,13 @@ async function reviewUpdates(u: any, module: string, rawRows: any[], options: { 
         }
         claimed.set(tag, record.id);
       }
-      changes.push({ field, from: record[field] ?? "", to: normalized });
+      // What the sheet said is what the reviewer sees; what the database
+      // gets is the reference it points at.
+      const stored =
+        module === "groups" && staffFields.includes(field)
+          ? String(lookups.staffByRef.get(normalized.toLowerCase()))
+          : normalized;
+      changes.push({ field, from: record[field] ?? "", to: normalized, stored });
     }
     checked.push({
       row: line,
@@ -479,6 +511,24 @@ async function reviewUpdates(u: any, module: string, rawRows: any[], options: { 
   });
   return { spec, checked, ignored: [...ignored], keyField: forcedKey || null };
 }
+
+/**
+ * A sheet writes text; some actions expect something else. The roles column of
+ * a staff sheet is "Operations Coordinator, Team Supervisor" written by a
+ * person, and the action takes a list, so it is split here rather than making
+ * whoever fills the sheet write JSON.
+ */
+const shape: Record<string, (row: any) => any> = {
+  staff: (row) => ({
+    ...row,
+    roles: String(row.roles ?? "")
+      .split(/[,;|/]/)
+      .map((role: string) => role.trim())
+      .filter(Boolean),
+    active: String(row.active ?? "").trim() === "" ? undefined : row.active,
+    reason: String(row.reason ?? "").trim() || "Bulk staff import",
+  }),
+};
 
 const programModules = new Set([
   "applications",
@@ -552,6 +602,23 @@ export async function POST(req: Request) {
             error: "Unknown or protected column",
             expected: columns.join(", "),
           });
+      if (x.module === "staff") {
+        row.email = String(row.email || "").trim().toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email))
+          errors.push({ row: i + 2, field: "email", value: row.email, error: "A valid work email is required", expected: "name@example.com" });
+        if (seen.has(`email:${row.email}`))
+          errors.push({ row: i + 2, field: "email", value: row.email, error: "The same person appears twice in this sheet", expected: "One row per person" });
+        const listed = String(row.roles ?? "").split(/[,;|/]/).map((role: string) => role.trim()).filter(Boolean);
+        for (const role of listed)
+          if (!roles.includes(role))
+            errors.push({ row: i + 2, field: "roles", value: role, error: "Not a role this workspace has", expected: roles.join(", ") });
+        if (!listed.length)
+          errors.push({ row: i + 2, field: "roles", error: "Give the person at least one role", expected: roles.join(", ") });
+        const state = String(row.active ?? "").trim().toLowerCase();
+        if (state && !["1", "0", "true", "false", "active", "inactive", "withdrawn", "yes", "no"].includes(state))
+          errors.push({ row: i + 2, field: "active", value: row.active, error: "Write active or withdrawn", expected: "active, withdrawn (or leave it empty)" });
+        if (row.email) seen.add(`email:${row.email}`);
+      }
       if (x.module === "students") {
         row.email = String(row.email || "").trim().toLowerCase();
         row.lifecycle = String(row.lifecycle || "Active").trim();
@@ -676,7 +743,7 @@ export async function POST(req: Request) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              ...c.data,
+              ...(shape[x.module] ? shape[x.module](c.data) : c.data),
               action: actions[x.module],
               request_id: x.batch_id + "-" + c.row,
             }),
@@ -770,14 +837,14 @@ async function updateRecords(u: any, x: any) {
       jobs.push(
         stmt(
           `UPDATE ${spec.table} SET ${sets} WHERE id=?`,
-          ...c.changes.map((ch: any) => (ch.field === "credits" ? Number(ch.to) : ch.to)),
+          ...c.changes.map((ch: any) => (ch.field === "credits" ? Number(ch.to) : (ch.stored ?? ch.to))),
           c.id,
         ),
         auditStmt(
           u,
           "Spreadsheet update",
           c.id,
-          Object.fromEntries(c.changes.map((ch: any) => [ch.field, ch.to])),
+          Object.fromEntries(c.changes.map((ch: any) => [ch.field, ch.stored ?? ch.to])),
           Object.fromEntries(c.changes.map((ch: any) => [ch.field, ch.from])),
           x.batch_id + "-" + c.row,
         ),

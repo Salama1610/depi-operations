@@ -1959,7 +1959,11 @@ export default function Operations({ module: initialModule }: { module: string }
                 <button
                   className="small-btn"
                   onClick={() =>
-                    open("staff", { ...r, roles: JSON.parse(r.roles) })
+                    open("staff", {
+                      ...r,
+                      roles: JSON.parse(r.roles),
+                      active: r.active === 0 || r.active === false ? "Withdrawn" : "Active",
+                    })
                   }
                 >
                   Edit access
@@ -1968,8 +1972,11 @@ export default function Operations({ module: initialModule }: { module: string }
             ),
           )}
           <p className="footnote">
-            Synthetic staff use example.invalid addresses. Add a real staff
-            email to authorize access. No student accounts are supported.
+            A person signs in with the email listed here. Whole teams are added
+            from a sheet: the import workspace has a staff template with name,
+            email and roles. Groups are then handed over by naming the person —
+            their email or their name is enough, and the coordinator of a group
+            reviews that group&apos;s students.
           </p>
         </TabsContent>
         <TabsContent value="policy">
@@ -3541,7 +3548,12 @@ export default function Operations({ module: initialModule }: { module: string }
                         </label>
                       ))}
                     </div>
+                    {choice("active", "Access", ["Active", "Withdrawn"])}
                     {field("reason", "Access change reason")}
+                    <p className="footnote">
+                      Withdrawing access stops this person signing in and takes them out of
+                      the list of people a group can be handed to. Their history stays.
+                    </p>
                   </>
                 );
               if (a === "milestone")
@@ -3805,6 +3817,7 @@ export default function Operations({ module: initialModule }: { module: string }
               importMode === "update"
                 ? updatableModules
                 : [
+                    "staff",
                     "students",
                     "groups",
                     "contacts",
@@ -3835,6 +3848,13 @@ export default function Operations({ module: initialModule }: { module: string }
                   return;
                 }
                 const templates: Row = {
+                  staff: {
+                    name: "Example Coordinator",
+                    email: "name@example.com",
+                    roles: "Operations Coordinator",
+                    active: "active",
+                    reason: "Round 5 staffing",
+                  },
                   students: {
                     id: "S20001",
                     name: "Example student",

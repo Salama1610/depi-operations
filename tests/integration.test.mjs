@@ -659,6 +659,7 @@ test("student roster preview reports missing and duplicate emails and handles 1,
 });
 test("update-mode spreadsheets merge partial columns into existing records under the workflow rules", async () => {
   current = { id: "owner", email: "owner@example.com" };
+  await dbExec("DELETE FROM rate_limits");
   const inG101 = await dbRow("SELECT id, email FROM students WHERE group_id='G101' ORDER BY id LIMIT 1");
   const inG102 = await dbRow("SELECT id, email FROM students WHERE group_id='G102' ORDER BY id LIMIT 1");
   const other = await dbRow("SELECT id FROM students WHERE group_id='G103' ORDER BY id LIMIT 1");
@@ -749,16 +750,25 @@ test("update-mode spreadsheets merge partial columns into existing records under
     module: "groups",
     mode: "update",
     rows: [
-      { id: "G101", coordinator: "staff-omar", account_manager: "staff-nour", start_date: "2026-10-01" },
+      { id: "G101", coordinator: "staff-omar@example.invalid", account_manager: "Nour El Din", start_date: "2026-10-01" },
       { id: "G102", coordinator: "Nobody Known" },
       { id: "G103", status: "Closed" },
       { id: "G104", pathway: "Elsewhere" },
     ],
   });
+  assert.deepEqual(
+    groups.rows[0].changes.map((c) => [c.field, c.to, c.stored]).sort(),
+    [
+      ["account_manager", "Nour El Din", "staff-nour"],
+      ["coordinator", "staff-omar@example.invalid", "staff-omar"],
+      ["start_date", "2026-10-01", "2026-10-01"],
+    ],
+    "an email or a name is shown as written and stored as the reference",
+  );
   assert.equal(groups.rows[0].status, "Ready");
   assert.equal(groups.rows[0].changes.length, 3);
   assert.equal(groups.rows[1].status, "Rejected");
-  assert.match(groups.rows[1].errors[0].error, /active staff/);
+  assert.match(groups.rows[1].errors[0].error, /Not an active member of staff/);
   assert.equal(groups.rows[2].status, "Rejected");
   assert.match(groups.rows[2].errors[0].error, /close, gate and archive/);
   assert.equal(groups.rows[3].status, "Rejected");
@@ -767,7 +777,7 @@ test("update-mode spreadsheets merge partial columns into existing records under
   const groupCommit = await importPost({
     module: "groups",
     mode: "update",
-    rows: [{ id: "G101", coordinator: "staff-omar", account_manager: "staff-nour", start_date: "2026-10-01" }],
+    rows: [{ id: "G101", coordinator: "staff-omar@example.invalid", account_manager: "Nour El Din", start_date: "2026-10-01" }],
     confirm: true,
     batch_id: groupBatch,
   });
@@ -804,6 +814,7 @@ test("update-mode spreadsheets merge partial columns into existing records under
 });
 test("a sheet from another source links on the national ID through a saved mapping", async () => {
   current = { id: "owner", email: "owner@example.com" };
+  await dbExec("DELETE FROM rate_limits");
   const NID = "\u0627\u0644\u0631\u0642\u0645 \u0627\u0644\u0642\u0648\u0645\u064a";
   const [one, two, three] = await dbRows(
     "SELECT id, email FROM students WHERE group_id='G101' ORDER BY id LIMIT 3",
@@ -993,6 +1004,113 @@ test("the gig phase is reviewed by the student's own coordinator, not by quality
   current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
   assert.match((await post("service_qc_assign", {})).error, /operation|action/i);
   assert.match((await post("service_qc_claim", { service_id: link.id })).error, /operation|action/i);
+  current = { id: "owner", email: "owner@example.com" };
+});
+
+test("a staff sheet grants and withdraws access, and groups are handed over by email or name", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  await dbExec("DELETE FROM rate_limits");
+  const sheet = [
+    { name: "Mona Fathy", email: "Mona.Fathy@example.org", roles: "Operations Coordinator", reason: "Round 5 intake" },
+    { name: "Hany Adel", email: "hany.adel@example.org", roles: "Team Supervisor, Coach Operations" },
+    { name: "Broken Roles", email: "broken@example.org", roles: "Chief Wizard" },
+    { name: "No Email", email: "not-an-email", roles: "Coach" },
+    { name: "No Roles", email: "noroles@example.org", roles: "" },
+    { name: "Twice", email: "mona.fathy@example.org", roles: "Coach" },
+  ];
+  const preview = await importPost({ module: "staff", rows: sheet });
+  assert.equal(preview.rows[0].status, "Ready");
+  assert.equal(preview.rows[1].status, "Ready", "several roles in one cell");
+  assert.match(preview.rows[2].errors[0].error, /Not a role/);
+  assert.match(preview.rows[3].errors[0].error, /valid work email/);
+  assert.match(preview.rows[4].errors[0].error, /at least one role/);
+  assert.match(preview.rows[5].errors[0].error, /appears twice/);
+
+  const applied = await importPost({ module: "staff", rows: sheet, confirm: true, batch_id: "staff-sheet-1" });
+  assert.equal(applied.created, 2);
+  assert.equal(applied.rejected, 4);
+  const mona = await dbRow("SELECT id, name, email, roles, active FROM users WHERE email='mona.fathy@example.org'");
+  assert.ok(mona, "the email is stored in lower case, the way sign-in looks it up");
+  assert.equal(mona.active, 1);
+  assert.deepEqual(JSON.parse(mona.roles), ["Operations Coordinator"]);
+  assert.deepEqual(
+    JSON.parse((await dbRow("SELECT roles FROM users WHERE email='hany.adel@example.org'")).roles),
+    ["Team Supervisor", "Coach Operations"],
+  );
+
+  // The same sheet again changes the roles it carries instead of duplicating.
+  const second = await importPost({
+    module: "staff",
+    rows: [{ name: "Mona Fathy", email: "mona.fathy@example.org", roles: "Operations Coordinator, Team Supervisor", reason: "Took over a second team" }],
+    confirm: true,
+    batch_id: "staff-sheet-2",
+  });
+
+  assert.equal((await dbRow("SELECT count(*) n FROM users WHERE email='mona.fathy@example.org'")).n, 1);
+  assert.deepEqual(
+    JSON.parse((await dbRow("SELECT roles FROM users WHERE email='mona.fathy@example.org'")).roles),
+    ["Operations Coordinator", "Team Supervisor"],
+  );
+
+  // A group is handed over by naming the person, not their reference.
+  const handover = await importPost({
+    module: "groups",
+    mode: "update",
+    rows: [{ id: "G105", coordinator: "Mona.Fathy@example.org", supervisor: "Hany Adel" }],
+    confirm: true,
+    batch_id: "handover-1",
+  });
+  assert.equal(handover.updated, 1);
+  const g105 = await dbRow("SELECT coordinator, supervisor FROM groups WHERE id='G105'");
+  assert.equal(g105.coordinator, mona.id);
+  assert.equal(g105.supervisor, (await dbRow("SELECT id FROM users WHERE email='hany.adel@example.org'")).id);
+  // And she can now review her own students, which is the point of the handover.
+  const student = await dbRow("SELECT id FROM students WHERE group_id='G105' ORDER BY id LIMIT 1");
+  const at = new Date().toISOString();
+  await dbExec(
+    "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,submitted_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    "HANDOVER-LINK",
+    student.id,
+    3,
+    "https://khamsat.com/marketing/social-media/993-service",
+    "https://khamsat.com/marketing/social-media/993-service",
+    "Khamsat",
+    "Needs Review",
+    JSON.stringify({ message: "Synthetic link for the handover test." }),
+    at,
+    "Pending",
+    null,
+    null,
+    null,
+    1,
+    at,
+    at,
+  );
+  current = { id: mona.id, email: mona.email };
+  await check("service_qc_review", { service_id: "HANDOVER-LINK", decision: "Lock", request_id: "handover-review-1" });
+  assert.equal((await dbRow("SELECT qc_status FROM service_links WHERE id='HANDOVER-LINK'")).qc_status, "Locked");
+
+  // Access is withdrawn the same way it was granted, and the workspace keeps
+  // at least one administrator and never lets one lock themselves out.
+  current = { id: "owner", email: "owner@example.com" };
+  // "Withdrawn" is what the directory shows, so it is what the form sends.
+  await check("staff", { name: "Hany Adel", email: "hany.adel@example.org", roles: ["Team Supervisor"], active: "Withdrawn", reason: "Left the programme" });
+  assert.equal((await dbRow("SELECT active FROM users WHERE email='hany.adel@example.org'")).active, 0);
+  const locked = await post("staff", { name: "Owner", email: "owner@example.com", roles: ["Operations Systems / Admin"], active: "Withdrawn", reason: "Trying to remove myself" });
+  assert.match(locked.error, /your own access/);
+  // Someone else's access can be withdrawn, and the person doing it keeps theirs.
+  await check("staff", { name: "Second Admin", email: "second.admin@example.org", roles: ["Operations Systems / Admin"], reason: "Cover during leave" });
+  await check("staff", { name: "Second Admin", email: "second.admin@example.org", roles: ["Operations Systems / Admin"], active: "Withdrawn", reason: "Cover ended" });
+  assert.equal((await dbRow("SELECT active FROM users WHERE email='second.admin@example.org'")).active, 0);
+  assert.equal((await dbRow("SELECT active FROM users WHERE id='owner'")).active, 1);
+  // A withdrawn person can no longer be handed a group.
+  const refused = await importPost({
+    module: "groups",
+    mode: "update",
+    rows: [{ id: "G106", supervisor: "hany.adel@example.org" }],
+  });
+  assert.equal(refused.rows[0].status, "Rejected");
+  assert.match(refused.rows[0].errors[0].error, /Not an active member of staff/);
   current = { id: "owner", email: "owner@example.com" };
 });
 

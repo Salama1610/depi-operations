@@ -1847,29 +1847,41 @@ export async function POST(req: Request) {
           "Staff name, email and valid roles are required.",
         );
         ensure(x.reason?.trim(), "Document the access change reason.");
+        const email = String(x.email).trim().toLowerCase();
         const old: any = await stmt(
-          "SELECT * FROM users WHERE email=?",
-          x.email,
+          "SELECT * FROM users WHERE lower(email)=?",
+          email,
         ).first();
+        // Access can be withdrawn as well as granted, because a coordinator
+        // who leaves must stop being able to reach their students. Withdrawing
+        // your own is refused: only an administrator reaches this action, so a
+        // person removing themselves could be the last one holding it.
+        const withdrawn = new Set(["0", "false", "inactive", "withdrawn", "no"]);
+        const stated = x.active === undefined || String(x.active).trim() === "" ? null : String(x.active).trim().toLowerCase();
+        const active = stated === null ? (old ? Number(old.active) : 1) : withdrawn.has(stated) ? 0 : 1;
+        if (old && Number(old.active) === 1 && active === 0)
+          ensure(old.id !== u.id, "You cannot withdraw your own access.");
         if (old) {
           auditPrevious = old;
           jobs.push(
             stmt(
-              "UPDATE users SET name=?,roles=? WHERE id=?",
+              "UPDATE users SET name=?,roles=?,active=? WHERE id=?",
               x.name,
               JSON.stringify(x.roles),
+              active,
               old.id,
             ),
           );
         } else
           jobs.push(
             stmt(
-              "INSERT INTO users(id,email,name,roles,scopes) VALUES(?,?,?,?,?)",
+              "INSERT INTO users(id,email,name,roles,scopes,active) VALUES(?,?,?,?,?,?)",
               uid("USR"),
-              x.email,
+              email,
               x.name,
               JSON.stringify(x.roles),
               "[]",
+              active,
             ),
           );
         break;
