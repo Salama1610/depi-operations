@@ -129,13 +129,13 @@ test("Supabase migrations apply to a real PostgreSQL server", async () => {
   const { results } = await pg.db
     .prepare("SELECT count(*) n FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'")
     .all();
-  assert.equal(results[0].n, 60);
+  assert.equal(results[0].n, 61);
   const triggers = await pg.db.prepare("SELECT count(*) n FROM information_schema.triggers WHERE trigger_schema='public'").first();
   assert.ok(triggers.n >= 20, `expected the integrity triggers to be installed, found ${triggers.n}`);
   const rls = await pg.db
     .prepare("SELECT count(*) n FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND c.relrowsecurity")
     .first();
-  assert.equal(rls.n, 60, "row level security must be enabled on every application table");
+  assert.equal(rls.n, 61, "row level security must be enabled on every application table");
 });
 
 test("adapter preserves D1 value semantics through the PostgreSQL types", async () => {

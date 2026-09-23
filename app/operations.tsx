@@ -100,6 +100,7 @@ import {
   controlledPlatforms,
 } from "@/lib/domain/rules";
 import { readSheet, toCSV, toXLSX } from "@/lib/spreadsheet";
+import { guessKeyColumn, guessMapping } from "@/lib/domain/sheet-mapping";
 type Row = Record<string, any>;
 const nav = [
   ["home", "Overview", Home],
@@ -179,7 +180,7 @@ const actionCopy: Row = {
   session_cancel:
     "Cancelled sessions remain in the operational history and require a reason.",
   service_qc_review:
-    "Lock a correct link or leave a clear correction comment for the student.",
+    "One link at a time. Lock a correct link, or leave a clear correction comment for the student.",
 };
 const fmt = (v: string) =>
   v
@@ -326,6 +327,13 @@ export default function Operations({ module: initialModule }: { module: string }
     [importOpen, setImportOpen] = useState(false),
     [importModule, setImportModule] = useState("students"),
     [importMode, setImportMode] = useState<"create" | "update">("create"),
+    [sheetHeaders, setSheetHeaders] = useState<string[]>([]),
+    [importMapping, setImportMapping] = useState<Row>({}),
+    [importKey, setImportKey] = useState("national_id"),
+    [mappingFields, setMappingFields] = useState<string[]>([]),
+    [mappingKeys, setMappingKeys] = useState<string[]>([]),
+    [savedMappings, setSavedMappings] = useState<Row[]>([]),
+    [mappingName, setMappingName] = useState(""),
     [importRows, setImportRows] = useState<Row[]>([]),
     [preview, setPreview] = useState<Row | null>(null),
     [importId, setImportId] = useState(""),
@@ -392,7 +400,15 @@ export default function Operations({ module: initialModule }: { module: string }
     students.find((s) => s.id === id)?.name || id || "—";
   const owner = (id: string) =>
     staff.find((s: Row) => s.id === id)?.name || "Unassigned";
-  const canReviewServiceLinks = can(user.roles, ["Quality Member", "Quality Lead", "Project Operations"]);
+  // The gig phase belongs to the people who run the student's group. Quality
+  // tracks programme activities in their own system, so they are not reviewers
+  // here; the workspace scope already limits a coordinator to their students.
+  const canReviewServiceLinks = can(user.roles, [
+    "Operations Coordinator",
+    "Team Supervisor",
+    "Project Operations",
+    "Operations Systems / Admin",
+  ]);
   const isQualityLead = can(user.roles, ["Quality Lead", "Operations Systems / Admin"]);
   const qualityReviewers: Row[] = staff.filter((s: Row) => {
     if (s.active === 0 || s.active === false) return false;
@@ -1672,7 +1688,7 @@ export default function Operations({ module: initialModule }: { module: string }
             {canReviewServiceLinks && (
             <>
             <div className="mini-stats service-qc-stats">
-              <span><strong>{serviceLinks.filter((r) => r.qc_status === "Pending").length}</strong>Awaiting QC</span>
+              <span><strong>{serviceLinks.filter((r) => r.qc_status === "Pending").length}</strong>Awaiting review</span>
               <span><strong>{serviceLinks.filter((r) => r.qc_status === "Needs Correction").length}</strong>Need student correction</span>
               <span><strong>{serviceLinks.filter((r) => r.auto_status === "Failed").length}</strong>Automatic check failed</span>
               <span><strong>{serviceLinks.filter((r) => r.qc_status === "Pending" && Date.now() - Date.parse(r.updated_at) > 48 * 3600000).length}</strong>Past 48-hour SLA</span>
@@ -1688,14 +1704,11 @@ export default function Operations({ module: initialModule }: { module: string }
             </div>
             {isQualityLead && (
               <div className="detail-actions qc-lead-actions">
-                <button className="small-btn" disabled={busy} onClick={() => quick("service_qc_assign", {})}>
-                  <Users size={15} /> Distribute service links evenly
-                </button>
                 <button className="small-btn" disabled={busy} onClick={() => quick("evidence_qc_assign", {})}>
                   <Files size={15} /> Distribute gig evidence evenly
                 </button>
                 <small className="qc-lead-note">
-                  Unassigned open items go to whoever currently holds the least. Reviewers: {qualityReviewers.map((r) => r.name).join(", ") || "none active"}.
+                  Unassigned open gig evidence goes to whoever currently holds the least. Reviewers: {qualityReviewers.map((r) => r.name).join(", ") || "none active"}. Service links are not distributed: each one belongs to the coordinator of the student&apos;s group.
                 </small>
               </div>
             )}
@@ -1708,18 +1721,13 @@ export default function Operations({ module: initialModule }: { module: string }
                   { key: "slot", label: "Slot", render: (r) => `Service ${r.slot}` },
                   { key: "url", label: "Link", render: (r) => <a className="text-link" href={r.url} target="_blank" rel="noreferrer">{r.platform} <ExternalLink size={14} /></a> },
                   { key: "auto_status", label: "Automatic check", render: (r) => <Badge value={r.auto_status} /> },
-                  { key: "reviewer_name", label: "Assigned", render: (r) => isQualityLead && r.qc_status !== "Locked"
-                      ? <select className="pick-inline" aria-label="Assign reviewer" value={r.qc_actor || ""} disabled={busy} onChange={(e) => e.target.value && quick("service_qc_assign", { item_id: r.id, reviewer_id: e.target.value })}>
-                          <option value="">Unassigned</option>
-                          {qualityReviewers.map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
-                        </select>
-                      : (r.reviewer_name || "Unassigned") },
-                  { key: "qc_status", label: "QC state", render: (r) => <span><Badge value={r.qc_status} /><small className="table-subline">{Math.round((Date.now() - Date.parse(r.updated_at)) / 3600000)}h · revision {r.revision}</small></span> },
+                  { key: "coordinator", label: "Coordinator", render: (r) => <span>{owner(r.coordinator)}<small className="table-subline">{r.reviewer_name ? `reviewed by ${r.reviewer_name}` : "not reviewed yet"}</small></span> },
+                  { key: "qc_status", label: "Review state", render: (r) => <span><Badge value={r.qc_status} /><small className="table-subline">{Math.round((Date.now() - Date.parse(r.updated_at)) / 3600000)}h · revision {r.revision}</small></span> },
                 ],
-                (r) => <div className="detail-actions">{!r.qc_actor && can(user.roles, ["Quality Member", "Quality Lead"]) && <button className="small-btn" onClick={() => quick("service_qc_claim", { service_id: r.id })}>Claim</button>}<button className="small-btn" onClick={() => open("service_qc_review", { ...r, service_id: r.id, student_id: r.student_id, decision: r.qc_status === "Needs Correction" ? "Lock" : "" })}>Review</button></div>,
+                (r) => <div className="detail-actions"><button className="small-btn" onClick={() => open("service_qc_review", { ...r, service_id: r.id, student_id: r.student_id, decision: r.qc_status === "Needs Correction" ? "Lock" : "" })}>Review</button></div>,
               )),
             )}
-            {panel("QC reviewer activity", reviewerWorkload.length ? <div className="mini-stats">{reviewerWorkload.map(([reviewer, count]: any) => <span key={reviewer}><strong>{count}</strong>{reviewer}</span>)}</div> : <Empty title="No service-link reviews yet" />)}
+            {panel("Reviewer activity", reviewerWorkload.length ? <div className="mini-stats">{reviewerWorkload.map(([reviewer, count]: any) => <span key={reviewer}><strong>{count}</strong>{reviewer}</span>)}</div> : <Empty title="No service-link reviews yet" />)}
             </>
             )}
             {submissionPanel}
@@ -3408,7 +3416,7 @@ export default function Operations({ module: initialModule }: { module: string }
                         return <div className="info-box"><strong>{automatic.message}</strong>{(automatic.checks || []).map((check: string) => <small key={check}>{check}</small>)}</div>;
                       } catch { return null; }
                     })()}
-                    {choice("decision", "QC decision", ["Lock", "Needs Correction"])}
+                    {choice("decision", "Review decision", ["Lock", "Needs Correction"])}
                     {form.decision === "Needs Correction" && (
                       <Pick
                         label="Correction template"
@@ -3422,10 +3430,9 @@ export default function Operations({ module: initialModule }: { module: string }
                         ]}
                       />
                     )}
-                    {field("comment", "QC comment / correction guidance", "text", form.decision === "Needs Correction")}
-                    {form.decision === "Lock" && modal!.auto_status === "Failed" && field("override_reason", "Quality Lead override reason")}
+                    {field("comment", "Comment / correction guidance", "text", form.decision === "Needs Correction")}
                     <p className="footnote">
-                      Lock only when the service page is active, correct, track-relevant and belongs to the student. Automatic failures require a Quality Lead override with a recorded reason.
+                      Lock only when the service page is active, correct, track-relevant and belongs to the student. A locked link is final, and a link the automatic check failed can only be returned for correction.
                     </p>
                   </>
                 );
@@ -3775,13 +3782,14 @@ export default function Operations({ module: initialModule }: { module: string }
                   setImportModule("students");
                 setPreview(null);
                 setImportRows([]);
+                setSheetHeaders([]);
               }}
               options={["Add new records", "Update existing records"]}
             />
           </div>
           <p className="footnote">
             {importMode === "update"
-              ? "Rows are matched to existing records by ID (students also by email, national ID or TP ID); up to 5,000 rows per upload. Only the columns in the sheet change; empty cells keep the stored value. Group moves, lifecycle, engagement and account status stay with their own actions."
+              ? "Rows are matched on the national ID, or on another identifier you choose; up to 5,000 rows per upload. Only the columns you map change, empty cells keep the stored value, and the mapping can be remembered for the next time this sheet arrives. Group moves, lifecycle, engagement and account status stay with their own actions."
               : "Every row creates a record through the same workflow rules as the forms (up to 1,000 rows per upload). Rows whose ID already exists are rejected; use update mode to change them."}
           </p>
           <Pick
@@ -3791,6 +3799,7 @@ export default function Operations({ module: initialModule }: { module: string }
               setImportModule(v);
               setPreview(null);
               setImportRows([]);
+              setSheetHeaders([]);
             }}
             options={
               importMode === "update"
@@ -3997,17 +4006,46 @@ export default function Operations({ module: initialModule }: { module: string }
                   try {
                     if (!e.target.files?.[0]) return;
                     setBusy(true);
-                    const rows = await readSheet(e.target.files[0], importModule);
+                    const file = e.target.files[0];
+                    const rows = await readSheet(file, importModule);
                     setImportRows(rows);
                     setImportId(crypto.randomUUID());
-                    const r = await fetch("/api/import", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ module: importModule, rows, mode: importMode }),
-                    });
-                    const v = await r.json();
-                    if (v.error) throw Error(v.error);
-                    setPreview(v);
+                    setPreview(null);
+                    if (importMode !== "update") {
+                      setSheetHeaders([]);
+                      const r = await fetch("/api/import", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ module: importModule, rows, mode: importMode }),
+                      });
+                      const v = await r.json();
+                      if (v.error) throw Error(v.error);
+                      setPreview(v);
+                      return;
+                    }
+                    // A sheet from another source keeps its own headings. The
+                    // application proposes which heading fills which field and
+                    // which one identifies the student; nothing is checked
+                    // against the database until that is confirmed.
+                    const meta = await (await fetch("/api/import?module=" + importModule, { cache: "no-store" })).json();
+                    if (meta.error) throw Error(meta.error);
+                    const headers = Array.from(new Set(rows.flatMap((row: Row) => Object.keys(row))));
+                    const allowed = [...(meta.keys || []), ...(meta.fields || [])];
+                    const guessed = guessMapping(headers, allowed);
+                    const keyColumn = guessKeyColumn(headers, rows, guessed);
+                    if (keyColumn && !guessed[keyColumn]) guessed[keyColumn] = "national_id";
+                    setSheetHeaders(headers);
+                    setMappingFields(meta.fields || []);
+                    setMappingKeys(meta.keys || []);
+                    setSavedMappings(meta.mappings || []);
+                    setImportMapping(guessed);
+                    setMappingName(file.name.replace(/\.[^.]+$/, ""));
+                    const mappedFields = Object.values(guessed);
+                    setImportKey(
+                      (keyColumn && guessed[keyColumn]) ||
+                        (meta.keys || []).find((k: string) => mappedFields.includes(k)) ||
+                        "national_id",
+                    );
                   } catch (e: any) {
                     toast.error(e.message);
                   } finally {
@@ -4017,6 +4055,141 @@ export default function Operations({ module: initialModule }: { module: string }
               />
             </label>
           </div>
+          {importMode === "update" && sheetHeaders.length > 0 && (
+            <div className="mapping-step">
+              <div className="info-box">
+                <strong>{sheetHeaders.length} columns · {importRows.length} rows read</strong>
+                <span>Say which column fills which field. Unmapped columns are ignored.</span>
+              </div>
+              {savedMappings.length > 0 && (
+                <Pick
+                  label="Saved mapping"
+                  value=""
+                  onChange={(name) => {
+                    const saved = savedMappings.find((m: Row) => m.name === name);
+                    if (!saved) return;
+                    setImportMapping({ ...saved.mapping });
+                    setImportKey(saved.key_field);
+                    setMappingName(saved.name);
+                    toast.success("Loaded the mapping saved for " + saved.name);
+                  }}
+                  options={savedMappings.map((m: Row) => ({ value: m.name, label: m.name }))}
+                />
+              )}
+              <table className="mapping-table">
+                <thead>
+                  <tr><th>Column in your sheet</th><th>First value</th><th>Fills this field</th></tr>
+                </thead>
+                <tbody>
+                  {sheetHeaders.map((header) => (
+                    <tr key={header}>
+                      <th scope="row">{header}</th>
+                      <td><small>{String(importRows.find((row: Row) => String(row[header] ?? "").trim())?.[header] ?? "—")}</small></td>
+                      <td>
+                        <select
+                          className="pick-inline"
+                          aria-label={`Field filled by ${header}`}
+                          value={importMapping[header] || ""}
+                          onChange={(e) => {
+                            const field = e.target.value;
+                            const next: Row = { ...importMapping };
+                            // One field cannot be filled from two columns.
+                            for (const [other, value] of Object.entries(next))
+                              if (value === field && other !== header) delete next[other];
+                            if (field) next[header] = field;
+                            else delete next[header];
+                            setImportMapping(next);
+                          }}
+                        >
+                          <option value="">Ignore this column</option>
+                          {[...mappingKeys, ...mappingFields.filter((f) => !mappingKeys.includes(f))].map((field) => (
+                            <option key={field} value={field}>{field.replace(/_/g, " ")}</option>
+                          ))}
+                        </select>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="filter-row">
+                <Pick
+                  label="Match rows on"
+                  value={importKey}
+                  onChange={setImportKey}
+                  options={mappingKeys.map((k) => ({ value: k, label: k.replace(/_/g, " ") }))}
+                />
+                <label className="pick-field">
+                  <span className="pick-label">Remember this sheet as</span>
+                  <input value={mappingName} onChange={(e) => setMappingName(e.target.value)} placeholder="Ministry monthly list" />
+                </label>
+              </div>
+              <div className="detail-actions">
+                <button
+                  className="primary"
+                  disabled={busy || !Object.values(importMapping).includes(importKey)}
+                  onClick={async () => {
+                    setBusy(true);
+                    try {
+                      const r = await fetch("/api/import", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          module: importModule,
+                          rows: importRows,
+                          mode: "update",
+                          mapping: importMapping,
+                          key_field: importKey,
+                        }),
+                      });
+                      const v = await r.json();
+                      if (v.error) throw Error(v.error);
+                      setPreview(v);
+                    } catch (e: any) {
+                      toast.error(e.message);
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  Check these rows
+                </button>
+                <button
+                  className="small-btn"
+                  disabled={busy || mappingName.trim().length < 2}
+                  onClick={async () => {
+                    setBusy(true);
+                    try {
+                      const r = await fetch("/api/import", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          action: "save_mapping",
+                          module: importModule,
+                          name: mappingName.trim(),
+                          key_field: importKey,
+                          mapping: importMapping,
+                        }),
+                      });
+                      const v = await r.json();
+                      if (v.error) throw Error(v.error);
+                      const meta = await (await fetch("/api/import?module=" + importModule, { cache: "no-store" })).json();
+                      setSavedMappings(meta.mappings || []);
+                      toast.success("Saved. The next upload of this sheet is mapped already.");
+                    } catch (e: any) {
+                      toast.error(e.message);
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  Remember this mapping
+                </button>
+              </div>
+              {!Object.values(importMapping).includes(importKey) && (
+                <p className="footnote">Map one column to {importKey.replace(/_/g, " ")} before checking the rows.</p>
+              )}
+            </div>
+          )}
           {preview?.rows && (
             <>
               <div className="info-box">
@@ -4086,6 +4259,9 @@ export default function Operations({ module: initialModule }: { module: string }
                         module: importModule,
                         rows: importRows,
                         mode: importMode,
+                        ...(importMode === "update" && sheetHeaders.length
+                          ? { mapping: importMapping, key_field: importKey }
+                          : {}),
                         confirm: true,
                         batch_id: importId,
                       }),

@@ -20,6 +20,14 @@ type Service = {
 
 const empty = (): Service[] => [1, 2, 3].map((slot) => ({ slot, url: "", can_edit: true }));
 
+/** The stored review states, in the words the student understands. */
+const reviewLabel: Record<string, string> = {
+  Locked: "Approved",
+  "Pending QC": "With your coordinator",
+  Pending: "With your coordinator",
+};
+const label = (status?: string) => (status ? reviewLabel[status] || status : "");
+
 function statusTone(status?: string) {
   if (status === "Locked" || status === "Verified" || status === "Complete") return "student-status success";
   if (status === "Needs Correction" || status === "Failed") return "student-status danger";
@@ -159,15 +167,15 @@ export default function StudentServicesPage() {
             <div>
               <span className="student-kicker">SERVICE LINKS / ROUND 5</span>
               <h1>{student?.name ? `Hi ${student.name.split(" ")[0]}, submit your services.` : "Submit your services."}</h1>
-              <p>Add exactly three public links to services you provide. Each link is checked automatically, then reviewed by the QC team.</p>
+              <p>Add exactly three public links to services you provide. Each link is checked automatically, then reviewed by your coordinator.</p>
             </div>
-            <div className="student-progress"><strong>{lockedCount}/3</strong><span>locked by QC</span></div>
+            <div className="student-progress"><strong>{lockedCount}/3</strong><span>approved</span></div>
           </section>
 
           <section className="student-card">
             <div className="student-card-heading">
-              <div><h2>Your three service links</h2><p>Locked links cannot be changed. Links needing correction stay editable with the QC comment.</p></div>
-              {submission && <span className={statusTone(submission.status)}>{submission.status}</span>}
+              <div><h2>Your three service links</h2><p>Approved links cannot be changed. Links needing correction stay editable with your coordinator&apos;s comment.</p></div>
+              {submission && <span className={statusTone(submission.status)}>{label(submission.status)}</span>}
             </div>
             {submission && (
               <div className="student-meta student-submission-meta">
@@ -191,7 +199,7 @@ export default function StudentServicesPage() {
                         </div>
                         <div className="student-meta">
                           {service.platform && <span>{service.platform}</span>}
-                          {service.auto_status && <span className={statusTone(service.auto_status)}>{service.auto_status === "Needs Review" ? "Automatic check passed" : service.auto_status}</span>}
+                          {service.auto_status && <span className={statusTone(service.auto_status)}>{service.auto_status === "Needs Review" ? "Automatic check passed" : label(service.auto_status)}</span>}
                         </div>
                         {service.auto_result?.message && <p className="student-check-note">{service.auto_result.message}</p>}
                         {service.auto_result?.checks?.length ? (
@@ -199,15 +207,15 @@ export default function StudentServicesPage() {
                             {service.auto_result.checks.map((check) => <li key={check}>{check}</li>)}
                           </ul>
                         ) : null}
-                        {correction && <div className="student-qc-note"><strong>QC correction:</strong> {service.qc_comment}</div>}
-                        {locked && <div className="student-locked-note"><LockKeyhole size={15} /> Locked by QC{service.qc_comment ? ` · ${service.qc_comment}` : ""}</div>}
+                        {correction && <div className="student-qc-note"><strong>Correction needed:</strong> {service.qc_comment}</div>}
+                        {locked && <div className="student-locked-note"><LockKeyhole size={15} /> Approved by your coordinator{service.qc_comment ? ` · ${service.qc_comment}` : ""}</div>}
                       </div>
                     </article>
                   );
                 })}
               </div>
               {error && <p className="student-form-error" role="alert">{error}</p>}
-              {saved && <p className="student-saved"><Check size={17} /> Saved. The QC team can now review your links.</p>}
+              {saved && <p className="student-saved"><Check size={17} /> Saved. Your coordinator can now review your links.</p>}
               <div className="student-form-footer">
                 <span>
                   {!submission
@@ -215,8 +223,8 @@ export default function StudentServicesPage() {
                     : editable.length > 0
                       ? `${editable.length} link${editable.length === 1 ? "" : "s"} can be updated.`
                       : lockedCount === 3
-                        ? "All three links are locked. Nothing more is needed."
-                        : "Your links are with the QC team. Nothing can be changed until they respond."}
+                        ? "All three links are approved. Nothing more is needed."
+                        : "Your links are with your coordinator. Nothing can be changed until they respond."}
                 </span>
                 <button className="student-primary" disabled={!ready || busy || (Boolean(submission) && editable.length === 0)} type="submit"><Send size={16} />{busy ? "Submitting…" : submission ? "Resubmit editable links" : "Submit 3 links"}</button>
               </div>
@@ -224,25 +232,25 @@ export default function StudentServicesPage() {
           </section>
           {reviews.length > 0 && (
             <section className="student-card" aria-labelledby="review-history-title">
-              <div className="student-card-heading"><div><h2 id="review-history-title">QC updates</h2><p>Your approval and correction history.</p></div></div>
+              <div className="student-card-heading"><div><h2 id="review-history-title">Review updates</h2><p>Your approval and correction history.</p></div></div>
               <div className="student-service-list">
                 {reviews.map((review) => (
                   <article className="student-service-row" key={review.id}>
                     <div className="student-slot"><span>0{review.slot}</span><strong>Service {review.slot}</strong></div>
-                    <div><span className={statusTone(review.decision)}>{review.decision}</span><p>{review.comment}</p><small>{new Date(review.reviewed_at).toLocaleString()} · revision {review.revision}</small></div>
+                    <div><span className={statusTone(review.decision)}>{label(review.decision)}</span><p>{review.comment}</p><small>{new Date(review.reviewed_at).toLocaleString()} · revision {review.revision}</small></div>
                   </article>
                 ))}
               </div>
             </section>
           )}
-          <p className="student-footnote"><ShieldCheck size={15} /> Your links are visible to the DEPI QC team only for verification.</p>
+          <p className="student-footnote"><ShieldCheck size={15} /> Your links are visible to the DEPI operations team only for verification.</p>
         </>
       )}
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Submit these three service links?</DialogTitle>
-            <DialogDescription>Pending links become read-only until QC reviews them. You can edit only links returned for correction.</DialogDescription>
+            <DialogDescription>Pending links become read-only until your coordinator reviews them. You can edit only links returned for correction.</DialogDescription>
           </DialogHeader>
           <ol className="student-confirm-list">
             {services.map((service) => <li key={service.slot}><strong>Service {service.slot}</strong><span>{service.url}</span></li>)}

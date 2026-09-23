@@ -9,6 +9,7 @@ import {
   uid,
   actor,
   permit,
+  student,
 } from "@/lib/server";
 import { normalizeServiceSlots, verifyServiceLink } from "@/lib/domain/service-links";
 export const dynamic = "force-dynamic";
@@ -204,12 +205,17 @@ export async function POST(req: Request) {
     jobs.push(stmt(
       `INSERT OR IGNORE INTO notifications(id,recipient,title,entity_type,entity_id,severity,source,created_at,read_at)
        SELECT ?||'-'||id,id,?,'student',?,'Action Required',?||':'||id,?,NULL
-       FROM users WHERE active=1 AND (roles LIKE '%Quality Member%' OR roles LIKE '%Quality Lead%')`,
+       FROM users WHERE active=1 AND id IN (
+         SELECT coordinator FROM groups WHERE id=(SELECT group_id FROM students WHERE id=?)
+         UNION SELECT supervisor FROM groups WHERE id=(SELECT group_id FROM students WHERE id=?)
+       )`,
       notificationSeed,
       priorSubmissionTitle(Boolean(existing.length)),
       s.id,
       `service-links:${s.id}:${t}`,
       t,
+      s.id,
+      s.id,
     ));
     jobs.push(auditStmt(s, "Student service links submitted", s.id, { slots: 3 }, null, uid("REQ")));
     await db().batch(jobs);
@@ -219,26 +225,31 @@ export async function POST(req: Request) {
   }
 }
 
+/**
+ * A coordinator's decision on one published service link.
+ *
+ * One link at a time, by the people responsible for the student's group:
+ * `student()` applies the workspace scope rule, so a coordinator can only
+ * review their own students. A locked link is final and a link the automatic
+ * gate failed can only go back for correction, so there is no override to
+ * argue about.
+ */
 async function qcReview(x: any) {
   const u = await actor();
-  permit(u, ["Quality Member", "Quality Lead"]);
+  permit(u, ["Project Operations", "Operations Coordinator", "Team Supervisor"]);
   if (!["Lock", "Needs Correction"].includes(x.decision))
     throw new Error("Choose Lock or Needs Correction.");
   const comment = String(x.comment || "").trim();
-  if (comment.length > 1000) throw new Error("QC comments must be 1,000 characters or fewer.");
+  if (comment.length > 1000) throw new Error("Review comments must be 1,000 characters or fewer.");
   if (x.decision === "Needs Correction" && !comment)
     throw new Error("Add a correction comment for the student.");
   const link: any = await stmt("SELECT * FROM service_links WHERE id=?", x.service_id).first();
   if (!link) throw new Error("Service link not found.");
-  if (link.qc_status === "Locked") throw new Error("This service link is already locked.");
-  if (link.qc_actor && link.qc_actor !== u.id && !u.roles.includes("Quality Lead"))
-    throw new Error("This link is assigned to another reviewer.");
-  const overrideReason = String(x.override_reason || "").trim();
-  if (overrideReason.length > 1000) throw new Error("Override reasons must be 1,000 characters or fewer.");
-  if (x.decision === "Lock" && link.auto_status === "Failed") {
-    permit(u, ["Quality Lead"]);
-    if (!overrideReason) throw new Error("Quality Lead override reason is required for an automatic failure.");
-  }
+  if (link.qc_status === "Locked")
+    throw new Error("This service link is already locked. The student submits a new link instead.");
+  if (link.auto_status === "Failed" && x.decision === "Lock")
+    throw new Error("The automatic check failed for this link, so it can only be returned for correction.");
+  await student(u, link.student_id);
   const t = now();
   const next = x.decision === "Lock" ? "Locked" : "Needs Correction";
   const jobs: any[] = [
@@ -257,7 +268,7 @@ async function qcReview(x: any) {
       link.id,
       link.revision,
       next,
-      comment || "Verified by QC.",
+      comment || "Verified in coordinator review.",
       u.id,
       t,
     ),
@@ -275,7 +286,7 @@ async function qcReview(x: any) {
       t,
       link.student_id,
     ),
-    auditStmt(u, "QC service link review", link.id, { decision: next, student_id: link.student_id, comment, override_reason: overrideReason || null }),
+    auditStmt(u, "Service link review", link.id, { decision: next, student_id: link.student_id, comment }),
   ];
   await db().batch(jobs);
   return Response.json({ ok: true });

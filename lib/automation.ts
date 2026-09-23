@@ -28,11 +28,18 @@ export async function policyChecks(u: any, requestId: string) {
   for (const task of due.slice(0, 100))
     jobs.push(notify(task.owner, "Overdue: " + task.title, "student", task.student_id, "Action Required", `due:${task.id}:${task.due}`));
 
-  const qualityLeads = snapshot.staff.filter((staff: any) => staff.active && JSON.parse(staff.roles || "[]").includes("Quality Lead"));
+  // An unreviewed service link is chased with the people who own that
+  // student's group, since the review is theirs.
+  const owners = new Map<string, string[]>(
+    snapshot.students.map((student: any) => [student.id, [student.coordinator, student.supervisor].filter(Boolean)]),
+  );
   const overdueServiceLinks = snapshot.serviceLinks.filter((link: any) => link.qc_status === "Pending" && Date.now() - Date.parse(link.updated_at) > 48 * 3600000);
+  let serviceLinkReminders = 0;
   for (const link of overdueServiceLinks.slice(0, 100))
-    for (const lead of qualityLeads)
-      jobs.push(notify(lead.id, `Service-link QC overdue: ${link.student_name}`, "student", link.student_id, "Action Required", `service-qc-overdue:${link.id}:${link.revision}:${lead.id}`));
+    for (const owner of new Set(owners.get(link.student_id) || [])) {
+      jobs.push(notify(owner, `Service link waiting for review: ${link.student_name}`, "student", link.student_id, "Action Required", `service-review-overdue:${link.id}:${link.revision}:${owner}`));
+      serviceLinkReminders++;
+    }
 
   const summary = {
     planned: plan.length,
@@ -40,7 +47,7 @@ export async function policyChecks(u: any, requestId: string) {
     remaining: Math.max(0, plan.length - batch.length),
     tasks: batch.filter((action) => action.kind === "task").length,
     cases: batch.filter((action) => action.kind === "case").length,
-    notifications: Math.min(due.length, 100) + Math.min(overdueServiceLinks.length, 100) * qualityLeads.length,
+    notifications: Math.min(due.length, 100) + serviceLinkReminders,
     notifications_remaining: Math.max(0, due.length - 100) + Math.max(0, overdueServiceLinks.length - 100),
     overdue_service_links: overdueServiceLinks.length,
   };

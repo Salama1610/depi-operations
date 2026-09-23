@@ -619,5 +619,15 @@
     "iv": "text",
     "updated_by": "text",
     "updated_at": "timestamptz"
+  },
+  "import_mappings": {
+    "id": "text",
+    "module": "text",
+    "name": "text",
+    "key_field": "text",
+    "mapping": "jsonb",
+    "created_by": "text",
+    "created_at": "timestamptz",
+    "updated_at": "timestamptz"
   }
 }

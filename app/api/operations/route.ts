@@ -31,6 +31,10 @@ import {
 import { seed } from "@/lib/seed";
 export const dynamic = "force-dynamic";
 const ops = ["Project Operations", "Operations Coordinator"];
+// Who reviews a student's work in this application. The quality team tracks
+// programme activities in a separate system, so inside this workspace the
+// coordinator is the reviewer, covered by the supervisor above them.
+const reviewers = [...ops, "Team Supervisor"];
 const admin = ["Operations Systems / Admin"];
 
 function programDay(value: string) {
@@ -1460,7 +1464,7 @@ export async function POST(req: Request) {
           permit(u, ops);
           next = "Quality Review";
         } else if (e.status === "Quality Review") {
-          permit(u, ["Quality Member", "Quality Lead"]);
+          permit(u, [...reviewers, "Quality Member", "Quality Lead"]);
           ensure(
             ["Accept", "Reject", "Escalate L3"].includes(x.decision),
             "Choose a Quality decision.",
@@ -1472,7 +1476,7 @@ export async function POST(req: Request) {
                 ? "Rejected"
                 : "L3 Review";
         } else if (e.status === "L3 Review") {
-          permit(u, ["Quality Lead"]);
+          permit(u, ["Project Operations", "Quality Lead"]);
           ensure(
             ["Accept", "Reject", "Final resolution"].includes(x.decision),
             "Choose a final Quality Lead decision.",
@@ -1532,10 +1536,10 @@ export async function POST(req: Request) {
             ),
           );
         } else if (e.status === "Accepted") {
-          permit(u, ["Quality Lead"]);
+          permit(u, ["Project Operations", "Quality Lead"]);
           ensure(
             x.decision === "Reopen" && x.notes?.trim(),
-            "Reopening requires a documented Quality Lead reason.",
+            "Reopening accepted evidence requires a documented reason.",
           );
           next = "L3 Review";
         } else
@@ -1916,8 +1920,14 @@ export async function POST(req: Request) {
       case "policy_check": {
         return Response.json({ ok: true, summary: await policyChecks(u, key) });
       }
+      // The gig phase is reviewed by the people who run the student's group:
+      // the coordinator owns it, with the supervisor and Project Operations
+      // able to cover. `student()` below applies the same scope rule as the
+      // rest of the workspace, so a coordinator cannot reach another team's
+      // students. Quality no longer reviews service links; their activity
+      // review lives outside this application.
       case "service_qc_review": {
-        permit(u, ["Quality Member", "Quality Lead"]);
+        permit(u, reviewers);
         const link: any = await stmt(
           "SELECT * FROM service_links WHERE id=?",
           x.service_id || id,
@@ -1928,29 +1938,25 @@ export async function POST(req: Request) {
           "Choose Lock or Needs Correction.",
         );
         const comment = String(x.comment || "").trim();
-        ensure(comment.length <= 1000, "QC comments must be 1,000 characters or fewer.");
+        ensure(comment.length <= 1000, "Review comments must be 1,000 characters or fewer.");
         ensure(
           x.decision === "Lock" || comment,
           "Add a correction comment for the student.",
         );
-        ensure(link.qc_status !== "Locked", "This service link is already locked.");
-        ensure(!link.qc_actor || link.qc_actor === u.id || can(u.roles, ["Quality Lead"]), "This link is assigned to another reviewer.");
-        const overrideReason = String(x.override_reason || "").trim();
-        ensure(overrideReason.length <= 1000, "Override reasons must be 1,000 characters or fewer.");
-        if (x.decision === "Lock" && link.auto_status === "Failed") {
-          permit(u, ["Quality Lead"]);
-          ensure(
-            overrideReason,
-            "Quality Lead override reason is required for an automatic failure.",
-          );
-        }
+        // A locked link stays locked and a link the automatic gate failed
+        // cannot be locked by anyone: the student corrects it and submits
+        // again. There is no override.
+        ensure(link.qc_status !== "Locked", "This service link is already locked. The student submits a new link instead.");
+        ensure(
+          link.auto_status !== "Failed" || x.decision === "Needs Correction",
+          "The automatic check failed for this link, so it can only be returned for correction.",
+        );
         const next = x.decision === "Lock" ? "Locked" : "Needs Correction";
         auditValue = {
           service_id: link.id,
           student_id: link.student_id,
           decision: next,
           comment,
-          override_reason: overrideReason || null,
         };
         sid = link.student_id;
         s = await student(u, sid);
@@ -1971,7 +1977,7 @@ export async function POST(req: Request) {
             link.id,
             link.revision,
             next,
-            comment || "Verified by QC.",
+            comment || "Verified in coordinator review.",
             u.id,
             t,
           ),
@@ -2009,12 +2015,10 @@ export async function POST(req: Request) {
       }
       // A lead hands out the open quality work, evenly. Passing a reviewer
       // assigns just that item; passing none distributes the whole queue.
-      case "service_qc_assign":
       case "evidence_qc_assign": {
         permit(u, ["Quality Lead"]);
-        const services = x.action === "service_qc_assign";
-        const table = services ? "service_links" : "evidence";
-        const openFilter = services ? "qc_status<>'Locked'" : "status IN ('Quality','Coach','L1')";
+        const table = "evidence";
+        const openFilter = "status IN ('Quality','Coach','L1')";
         const reviewers = (await (await stmt(
           "SELECT id FROM users WHERE active=1 AND (roles LIKE '%Quality Member%' OR roles LIKE '%Quality Lead%') ORDER BY id",
         ).all()).results) as any[];
@@ -2052,17 +2056,6 @@ export async function POST(req: Request) {
           spread: spread(load, allocations),
           mode: "even",
         };
-        break;
-      }
-      case "service_qc_claim": {
-        permit(u, ["Quality Member", "Quality Lead"]);
-        const link: any = await stmt("SELECT * FROM service_links WHERE id=?", x.service_id || id).first();
-        ensure(link && link.qc_status !== "Locked", "Open service link not found.");
-        ensure(!link.qc_actor || link.qc_actor === u.id, "This link is assigned to another reviewer.");
-        await student(u, link.student_id);
-        auditPrevious = link;
-        auditValue = { service_id: link.id, assigned_to: u.id };
-        jobs.push(stmt("UPDATE service_links SET qc_actor=?,updated_at=? WHERE id=? AND qc_status<>'Locked' AND (qc_actor IS NULL OR qc_actor=?)", u.id, t, link.id, u.id));
         break;
       }
       case "load_demo_data": {

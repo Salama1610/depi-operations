@@ -204,6 +204,10 @@ const programCheck = async (action, x = {}) => {
   assert.equal(result.error, undefined, result.error);
   return result;
 };
+const importGet = async (query) => {
+  const response = await importApi.GET(new Request("https://test.local/api/import?" + query));
+  return await response.json();
+};
 const importPost = async (payload) => {
   const response = await importApi.POST(
     new Request("https://test.local/api/import", {
@@ -367,9 +371,10 @@ test("full seeded backend workflow and permission gates", async () => {
   await check("review", { id: "EV1", notes: "Coach confirms delivery" });
   current = { id: "owner", email: "owner@example.com" };
   await check("review", { id: "EV1", notes: "Completeness checked" });
-  current = opsOnly;
+  current = { id: "coach-login", email: "staff-coach@example.invalid" };
   r = await post("review", { id: "EV1", decision: "Accept", notes: "Approve" });
-  assert.match(r.error, /role/);
+  assert.match(r.error, /role/, "a coach cannot take the quality stage");
+  current = opsOnly;
   current = { id: "quality-login", email: "staff-quality@example.invalid" };
   await check("review", {
     id: "EV1",
@@ -692,7 +697,7 @@ test("update-mode spreadsheets merge partial columns into existing records under
   assert.match(preview.rows[4].errors[0].error, /No existing record/);
   assert.equal(preview.rows[5].status, "Unchanged");
   assert.equal(preview.rows[6].status, "Rejected");
-  assert.match(preview.rows[6].errors[0].error, /14-digit/);
+  assert.match(preview.rows[6].errors[0].error, /14 digits/);
 
   // Commit applies only the ready rows, audits each change and replays safely.
   const batch = "update-batch-" + Date.now();
@@ -797,6 +802,200 @@ test("update-mode spreadsheets merge partial columns into existing records under
   assert.match(coach.error, /not permitted/);
   current = { id: "owner", email: "owner@example.com" };
 });
+test("a sheet from another source links on the national ID through a saved mapping", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  const NID = "\u0627\u0644\u0631\u0642\u0645 \u0627\u0644\u0642\u0648\u0645\u064a";
+  const [one, two, three] = await dbRows(
+    "SELECT id, email FROM students WHERE group_id='G101' ORDER BY id LIMIT 3",
+  );
+  // The roster carries no national IDs yet, so they are set the way an export
+  // is edited and sent back: matched on the record reference.
+  const seeded = await importPost({
+    module: "students",
+    mode: "update",
+    rows: [
+      { id: one.id, national_id: "29911260104731" },
+      { id: two.id, national_id: "30105120102345" },
+    ],
+    confirm: true,
+    batch_id: "seed-national-ids",
+  });
+  assert.equal(seeded.updated, 2);
+
+  // The ministry sheet: Arabic headings, an ID damaged by Excel, one for a
+  // student nobody has registered, and a column this workspace has no field for.
+  const sheet = [
+    { [NID]: "2.9911260104731E+13", "\u0627\u0644\u0627\u0633\u0645": "Updated Name", "\u0631\u0642\u0645 \u0627\u0644\u0645\u0648\u0628\u0627\u064a\u0644": "01000000111", "\u0645\u0644\u0627\u062d\u0638\u0627\u062a": "ignore" },
+    { [NID]: "\u0663\u0660\u0661\u0660\u0665\u0661\u0662\u0660\u0661\u0660\u0662\u0663\u0664\u0665", "\u0627\u0644\u0627\u0633\u0645": "", "\u0631\u0642\u0645 \u0627\u0644\u0645\u0648\u0628\u0627\u064a\u0644": "01000000222", "\u0645\u0644\u0627\u062d\u0638\u0627\u062a": "" },
+    { [NID]: "29900000000000", "\u0627\u0644\u0627\u0633\u0645": "Unknown Person", "\u0631\u0642\u0645 \u0627\u0644\u0645\u0648\u0628\u0627\u064a\u0644": "0100", "\u0645\u0644\u0627\u062d\u0638\u0627\u062a": "" },
+    { [NID]: "123", "\u0627\u0644\u0627\u0633\u0645": "Broken Key", "\u0631\u0642\u0645 \u0627\u0644\u0645\u0648\u0628\u0627\u064a\u0644": "", "\u0645\u0644\u0627\u062d\u0638\u0627\u062a": "" },
+  ];
+  const mapping = { [NID]: "national_id", "\u0627\u0644\u0627\u0633\u0645": "name", "\u0631\u0642\u0645 \u0627\u0644\u0645\u0648\u0628\u0627\u064a\u0644": "phone" };
+  const preview = await importPost({
+    module: "students",
+    mode: "update",
+    rows: sheet,
+    mapping,
+    key_field: "national_id",
+  });
+  assert.equal(preview.key_field, "national_id");
+  assert.deepEqual(preview.ignored, ["\u0645\u0644\u0627\u062d\u0638\u0627\u062a"], "an unmapped column is reported, not rejected");
+  assert.equal(preview.rows[0].status, "Ready");
+  assert.equal(preview.rows[0].id, one.id, "Excel's scientific notation still finds the student");
+  assert.deepEqual(preview.rows[0].changes.map((c) => c.field).sort(), ["name", "phone"]);
+  assert.equal(preview.rows[1].status, "Ready");
+  assert.equal(preview.rows[1].id, two.id, "Arabic-Indic digits still find the student");
+  assert.deepEqual(preview.rows[1].changes.map((c) => c.field), ["phone"], "the empty name cell changes nothing");
+  assert.equal(preview.rows[2].status, "Rejected");
+  assert.match(preview.rows[2].errors[0].error, /No student has this national ID/);
+  assert.equal(preview.rows[3].status, "Rejected");
+  assert.match(preview.rows[3].errors[0].error, /14 digits/);
+
+  const applied = await importPost({
+    module: "students",
+    mode: "update",
+    rows: sheet,
+    mapping,
+    key_field: "national_id",
+    confirm: true,
+    batch_id: "ministry-sheet-1",
+  });
+  assert.equal(applied.updated, 2);
+  assert.equal(applied.rejected, 2);
+  assert.equal((await dbRow("SELECT name, phone FROM students WHERE id=?", one.id)).phone, "01000000111");
+  assert.equal((await dbRow("SELECT name FROM students WHERE id=?", one.id)).name, "Updated Name");
+  assert.equal((await dbRow("SELECT phone FROM students WHERE id=?", two.id)).phone, "01000000222");
+  assert.equal((await dbRow("SELECT national_id FROM students WHERE id=?", three.id)).national_id, null, "an untouched student is untouched");
+
+  // The same sheet arrives every month, so the mapping is kept by source name.
+  const saved = await importPost({
+    action: "save_mapping",
+    module: "students",
+    name: "Ministry monthly list",
+    key_field: "national_id",
+    mapping,
+  });
+  assert.equal(saved.ok, true);
+  const listed = await importGet("module=students");
+  assert.equal(listed.mappings.length, 1);
+  assert.equal(listed.mappings[0].name, "Ministry monthly list");
+  assert.equal(listed.mappings[0].key_field, "national_id");
+  assert.deepEqual(listed.mappings[0].mapping, mapping);
+  assert.ok(listed.fields.includes("phone"), "the fields a sheet may fill come back with it");
+  const renamed = await importPost({
+    action: "save_mapping",
+    module: "students",
+    name: "Ministry monthly list",
+    key_field: "national_id",
+    mapping: { ...mapping, "\u0645\u0644\u0627\u062d\u0638\u0627\u062a": "job_profile" },
+  });
+  assert.equal(renamed.ok, true);
+  assert.equal((await importGet("module=students")).mappings.length, 1, "saving again replaces the mapping");
+  assert.match(
+    (await importPost({ action: "save_mapping", module: "students", name: "Bad", mapping: { A: "made_up" } })).error,
+    /not a field/,
+  );
+  assert.equal((await importPost({ action: "delete_mapping", module: "students", name: "Ministry monthly list" })).removed, "Ministry monthly list");
+  assert.equal((await importGet("module=students")).mappings.length, 0);
+
+  // Mapping mistakes are refused before anything is written.
+  assert.match(
+    (await importPost({ module: "students", mode: "update", rows: sheet, mapping: { [NID]: "national_id", "\u0627\u0644\u0627\u0633\u0645": "national_id" } })).error,
+    /same field/,
+  );
+  assert.match(
+    (await importPost({ module: "students", mode: "update", rows: sheet, mapping, key_field: "phone" })).error,
+    /cannot be matched/,
+  );
+});
+
+test("the gig phase is reviewed by the student's own coordinator, not by quality", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  // Two links for a student in G101: one the automatic gate passed, one it
+  // failed. Written directly, because the subject here is the review, not the
+  // submission path the student portal tests already cover.
+  const subject = await dbRow("SELECT id FROM students WHERE group_id='G101' ORDER BY id LIMIT 1");
+  const at = new Date().toISOString();
+  for (const [id, slot, autoStatus] of [
+    ["REVIEW-LINK-PASS", 1, "Needs Review"],
+    ["REVIEW-LINK-FAIL", 2, "Failed"],
+  ])
+    await dbExec(
+      "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,submitted_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      id,
+      subject.id,
+      slot,
+      `https://khamsat.com/marketing/social-media/99${slot}-service`,
+      `https://khamsat.com/marketing/social-media/99${slot}-service`,
+      "Khamsat",
+      autoStatus,
+      JSON.stringify({ message: "Synthetic link for the review test." }),
+      at,
+      "Pending",
+      null,
+      null,
+      null,
+      1,
+      at,
+      at,
+    );
+  const link = await dbRow(
+    "SELECT l.*, g.coordinator, g.supervisor FROM service_links l JOIN students s ON s.id=l.student_id JOIN groups g ON g.id=s.group_id WHERE l.id='REVIEW-LINK-PASS'",
+  );
+  const coordinator = await dbRow("SELECT id, email FROM users WHERE id=?", link.coordinator);
+  const elsewhere = await dbRow(
+    "SELECT u.id, u.email FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.coordinator<>? LIMIT 1",
+    link.coordinator,
+  );
+
+  current = { id: "quality-login", email: "staff-quality@example.invalid" };
+  assert.match(
+    (await post("service_qc_review", { service_id: link.id, decision: "Lock" })).error,
+    /role/,
+    "quality reviews activities in their own system, not service links here",
+  );
+  current = { id: elsewhere.id, email: elsewhere.email };
+  assert.match(
+    (await post("service_qc_review", { service_id: link.id, decision: "Lock" })).error,
+    /scope|not found/i,
+    "a coordinator cannot review another team's student",
+  );
+
+  current = { id: coordinator.id, email: coordinator.email };
+  await check("service_qc_review", { service_id: link.id, decision: "Lock", request_id: "coordinator-lock-1" });
+  const locked = await dbRow("SELECT qc_status, qc_actor FROM service_links WHERE id=?", link.id);
+  assert.equal(locked.qc_status, "Locked");
+  assert.equal(locked.qc_actor, coordinator.id);
+  assert.equal(
+    (await dbRow("SELECT comment FROM service_link_reviews WHERE service_link_id=? ORDER BY reviewed_at DESC LIMIT 1", link.id)).comment,
+    "Verified in coordinator review.",
+  );
+  assert.match(
+    (await post("service_qc_review", { service_id: link.id, decision: "Needs Correction", comment: "Changed my mind" })).error,
+    /already locked/,
+    "a locked link is final: there is no override",
+  );
+
+  // A link the automatic gate failed can only go back to the student.
+  assert.match(
+    (await post("service_qc_review", { service_id: "REVIEW-LINK-FAIL", decision: "Lock" })).error,
+    /automatic check failed/,
+  );
+  await check("service_qc_review", {
+    service_id: "REVIEW-LINK-FAIL",
+    decision: "Needs Correction",
+    comment: "Publish the service page and submit the direct link.",
+    request_id: "coordinator-correction-1",
+  });
+  assert.equal((await dbRow("SELECT qc_status FROM service_links WHERE id='REVIEW-LINK-FAIL'")).qc_status, "Needs Correction");
+
+  // Handing service-link reviews out to a quality pool is gone.
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  assert.match((await post("service_qc_assign", {})).error, /operation|action/i);
+  assert.match((await post("service_qc_claim", { service_id: link.id })).error, /operation|action/i);
+  current = { id: "owner", email: "owner@example.com" };
+});
+
 test("complete program flow governs intake, assessment, withdrawal, certificate and reporting", async () => {
   current = { id: "owner", email: "owner@example.com" };
   await programCheck("application", {
@@ -1326,7 +1525,11 @@ test("student service resubmissions preserve completion and QC errors return JSO
   const denied = await call({ action: "qc_review", service_id: "missing", decision: "Lock" });
   assert.equal(denied.status, 400);
   assert.ok((await denied.json()).error);
-  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  const reviewer = await dbRow(
+    "SELECT u.id, u.email FROM students s JOIN groups g ON g.id=s.group_id JOIN users u ON u.id=g.coordinator WHERE s.id=?",
+    student.id,
+  );
+  current = { id: reviewer.id, email: reviewer.email };
   const missing = await call({ action: "qc_review", service_id: "missing", decision: "Lock" });
   assert.equal(missing.status, 400);
   assert.match((await missing.json()).error, /not found/);
@@ -1348,7 +1551,15 @@ test("student service records are identity-isolated and QC review is single-deci
   assert.equal(secondView.student.id, second.id);
   assert.notDeepEqual(firstView.services.map((link) => link.id), secondView.services.map((link) => link.id));
   const pending = (await dbRow("SELECT * FROM service_links WHERE student_id='S10902' AND qc_status='Pending' LIMIT 1"));
+  // Quality no longer reviews service links; the student's own coordinator does.
   current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  const refused = await servicesApi.POST(new Request("https://test.local/api/student-services", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "qc_review", service_id: pending.id, decision: "Lock" }) }));
+  assert.equal(refused.status, 400);
+  assert.match((await refused.json()).error, /role/);
+  const owner = await dbRow(
+    "SELECT u.id, u.email FROM students s JOIN groups g ON g.id=s.group_id JOIN users u ON u.id=g.coordinator WHERE s.id='S10902'",
+  );
+  current = { id: owner.id, email: owner.email };
   const request = () => servicesApi.POST(new Request("https://test.local/api/student-services", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "qc_review", service_id: pending.id, decision: "Needs Correction", comment: "Submit the direct active service page." }) }));
   const reviewed = await request();
   assert.equal(reviewed.status, 200, await reviewed.clone().text());

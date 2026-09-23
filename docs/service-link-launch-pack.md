@@ -10,7 +10,7 @@
 - Nafezly format: `/service/<numeric-id>-<Arabic-or-English-slug>`, the same shape as Kafiil.
 - The three normalized URLs must be distinct. The same approved platform and category may be used more than once.
 - Coverage: the Quality review module lists every student in the reviewer's or coordinator's scope with one follow-up state, so a student who has submitted nothing is visible alongside those under review. The states are Not submitted, Awaiting QC, Needs student correction and Complete, filterable by track, group and coordinator. Coordinators and supervisors see this list; only Quality roles see the review queue and can decide a link.
-- QC must open the page and confirm it is public, active, owned by the student, and relevant to the assigned track. Login-only, deleted, paused, rejected, unavailable, owner-mismatched, or track-mismatched services require correction.
+- The reviewing coordinator must open the page and confirm it is public, active, owned by the student, and relevant to the assigned track. Login-only, deleted, paused, rejected, unavailable, owner-mismatched, or track-mismatched services require correction.
 - Automatic failure cannot be approved by a Quality Member. A Quality Lead may override it only with a recorded reason; the audit record remains immutable.
 - Marketplace content is not fetched automatically in this release. Availability, owner, title and category are human QC decisions because marketplace contracts, stable page fields, and an approved identity-matching rule have not been supplied.
 
@@ -19,12 +19,12 @@
 1. Sign in with the Supabase account whose email was registered by the program team.
 2. Open the Student services page and add exactly three direct Kafiil, Khamsat or Nafezly service URLs.
 3. Review the normalized links in the confirmation dialog and submit them. Pending links are read-only.
-4. Check the QC updates section. Approved links remain locked. A returned link shows the correction reason and becomes editable.
+4. Check the review updates section. Approved links remain locked. A returned link shows the correction reason and becomes editable.
 5. Correct only returned links, confirm the resubmission, and wait until all three links are approved.
 
 Unsent edits are retained on the current device. Sign out after using a shared device. If sign-in says that no record is linked, ask the program team to correct the roster email; do not create a shared account.
 
-## QC SOP and decision standard
+## Coordinator review SOP and decision standard
 
 Work oldest pending links first and use the filters for platform, track, group, coordinator, age, automatic result and correction count. The normal SLA is 48 hours.
 
@@ -47,7 +47,7 @@ Operations Systems / Admin may perform every action in the workspace; it is the 
 | Activity | Student | Coordinator/Supervisor | Quality Member | Quality Lead | Admin/Project Operations |
 |---|---:|---:|---:|---:|---:|
 | Submit or correct own links | Yes | No | No | No | No |
-| View assigned student service profile | Own only | Assigned scope | Scoped QC | Scoped QC | Authorized scope |
+| View assigned student service profile | Own only | Assigned scope | Scoped review | Scoped review | Authorized scope |
 | Lock format-passing link | No | No | Yes | Yes | No unless separately assigned Quality role |
 | Override automatic failure | No | No | No | Yes, with reason | No unless separately assigned Quality Lead |
 | Import roster | No | Authorized operations roles | No | No | Yes |
@@ -70,7 +70,7 @@ Encrypted backups include submissions, links and review history. Store the backu
 - [ ] Student roster preview completed at 10, 100 and 1,000 rows.
 - [ ] Three reconciled 1,000-row production batches completed with zero unresolved failures.
 - [ ] Administration reports zero missing and zero duplicate student emails.
-- [ ] Link rules and 48-hour QC SLA approved by the program owner.
+- [ ] Link rules and the 48-hour review SLA approved by the program owner.
 - [ ] Required end-to-end scenarios in `docs/student-service-links.md` passed in UAT.
 - [ ] Android/mobile and keyboard/screen-reader checks completed.
 - [ ] Backup, restore and incident-response drill signed off.

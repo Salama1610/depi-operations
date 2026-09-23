@@ -9,6 +9,7 @@ import {
   scopeSql,
 } from "@/lib/server";
 import { can, ensure } from "@/lib/domain/rules";
+import { applyMapping, isNationalId, nationalIdProblem, normalizeNationalId } from "@/lib/domain/sheet-mapping";
 import { POST as operate } from "@/app/api/operations/route";
 import { POST as program } from "@/app/api/program/route";
 const allowed: Record<string, string[]> = {
@@ -251,7 +252,7 @@ type UpdateSpec = {
 const updatable: Record<string, UpdateSpec> = {
   students: {
     table: "students",
-    keys: ["id", "email", "national_id", "tp_id"],
+    keys: ["id", "national_id", "email", "tp_id"],
     editable: ["name", "name_ar", "email", "phone", "national_id", "tp_id", "job_profile", "student_type", "coaching"],
     protectedHints: {
       group_id: "Use the Transfer action to move a student between groups",
@@ -293,7 +294,7 @@ type Lookups = { users: Set<string>; tracks: Set<string> };
 function validateUpdate(module: string, field: string, value: string, lookups: Lookups) {
   if (module === "students") {
     if (field === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return "A valid student email is required for Supabase sign-in";
-    if (field === "national_id" && !/^\d{14}$/.test(value)) return "The national ID is the 14-digit number on the roster";
+    if (field === "national_id" && !isNationalId(value)) return nationalIdProblem(value);
     if (field === "name" && value.length < 2) return "Name is too short";
     if (field === "coaching" && value.length > 80) return "Coaching status is too long";
   }
@@ -330,17 +331,41 @@ async function fetchIn(table: string, columns: string, field: string, values: st
   return rows;
 }
 
-async function reviewUpdates(u: any, module: string, rows: any[]) {
+async function reviewUpdates(u: any, module: string, rawRows: any[], options: { mapping?: Record<string, string>; keyField?: string } = {}) {
   const spec = updatable[module];
   ensure(spec, "Update mode is available for students, groups and accounts.");
   ensure(can(u.roles, spec.roles), "You are not permitted to update this module.");
   const known = new Set([...spec.keys, ...spec.editable, ...Object.keys(spec.protectedHints)]);
 
+  // A sheet from another source arrives with its own headings. The mapping the
+  // person confirmed says which heading fills which field; everything else is
+  // dropped here, so the rest of the review only ever sees this application's
+  // own field names.
+  const mapping = options.mapping;
+  if (mapping) {
+    ensure(typeof mapping === "object" && !Array.isArray(mapping), "The column mapping must be a set of column names.");
+    const fields = Object.values(mapping).filter(Boolean);
+    ensure(fields.length > 0, "Map at least one column before importing.");
+    for (const field of fields)
+      ensure(known.has(field), `"${field}" is not a field this sheet can fill.`);
+    ensure(new Set(fields).size === fields.length, "Two columns are mapped to the same field.");
+  }
+  const rows = mapping ? applyMapping(rawRows, mapping) : rawRows;
+  // Columns the mapping does not use are dropped, but they are still reported:
+  // a heading nobody mapped is usually a heading somebody meant to map.
+  const unmapped = new Set<string>();
+  if (mapping)
+    for (const row of rawRows)
+      for (const [header, value] of Object.entries(row))
+        if (!mapping[header] && String(value ?? "").trim()) unmapped.add(header);
+  const forcedKey = options.keyField;
+  if (forcedKey) ensure(spec.keys.includes(forcedKey), `Rows cannot be matched on "${forcedKey}".`);
+
   // Pass 1: normalize every row and note which identifiers it carries.
   // Exported sheets carry derived columns (track, risk, next task) and sheets
   // from other sources carry their own; both are ignored rather than rejected,
   // and reported so a misspelt column name does not pass unnoticed.
-  const ignored = new Set<string>();
+  const ignored = new Set<string>(unmapped);
   const prepared = rows.map((row) => {
     const clean: Record<string, string> = {};
     for (const [k, v] of Object.entries(row)) {
@@ -351,7 +376,11 @@ async function reviewUpdates(u: any, module: string, rows: any[]) {
       }
       clean[k] = k === "email" ? value.toLowerCase() : value;
     }
-    return { row, clean, keyField: spec.keys.find((k) => clean[k]) };
+    if (clean.national_id) clean.national_id = normalizeNationalId(clean.national_id);
+    // The chosen key is used even when its cell is empty, so the row is
+    // reported as missing its identifier instead of quietly matching on
+    // something else.
+    return { row, clean, keyField: forcedKey || spec.keys.find((k) => clean[k]) };
   });
 
   // Pass 2: everything the review needs, in a handful of queries.
@@ -386,14 +415,27 @@ async function reviewUpdates(u: any, module: string, rows: any[]) {
   prepared.forEach(({ row, clean, keyField }, i) => {
     const line = i + 2;
     const errors: any[] = [];
-    if (!keyField) {
-      errors.push({ row: line, field: spec.keys[0], error: "No identifier", expected: spec.keys.join(" or ") });
+    if (!keyField || !clean[keyField]) {
+      const field = keyField || spec.keys[0];
+      errors.push({
+        row: line,
+        field,
+        error: field === "national_id" ? "No national ID in this row" : "No identifier",
+        expected: forcedKey ? forcedKey.replace(/_/g, " ") : spec.keys.join(" or "),
+      });
       checked.push({ row: line, data: row, errors, changes: [], status: "Rejected" });
       return;
     }
     const record = current.get(`${keyField}:${clean[keyField].toLowerCase()}`);
     if (!record) {
-      errors.push({ row: line, field: keyField, value: clean[keyField], error: "No existing record matches", expected: "An existing " + module.replace(/s$/, "") });
+      const problem = keyField === "national_id" ? nationalIdProblem(clean[keyField]) : null;
+      errors.push({
+        row: line,
+        field: keyField,
+        value: clean[keyField],
+        error: problem || (keyField === "national_id" ? "No student has this national ID" : "No existing record matches"),
+        expected: "An existing " + module.replace(/s$/, ""),
+      });
       checked.push({ row: line, data: row, errors, changes: [], status: "Rejected" });
       return;
     }
@@ -435,7 +477,7 @@ async function reviewUpdates(u: any, module: string, rows: any[]) {
       status: errors.length ? "Rejected" : changes.length ? "Ready" : "Unchanged",
     });
   });
-  return { spec, checked, ignored: [...ignored] };
+  return { spec, checked, ignored: [...ignored], keyField: forcedKey || null };
 }
 
 const programModules = new Set([
@@ -445,11 +487,44 @@ const programModules = new Set([
   "withdrawals",
   "post_program_outcomes",
 ]);
+/**
+ * The mappings saved for a module, newest first.
+ *
+ * They are shared: the sheet belongs to the programme, so whoever uploads it
+ * next gets the mapping the first person confirmed.
+ */
+export async function GET(req: Request) {
+  try {
+    const u = await actor();
+    await rateLimit("import-mappings:" + u.id, 60, 60);
+    const module = new URL(req.url).searchParams.get("module") || "";
+    ensure(updatable[module], "Update mode is available for students, groups and accounts.");
+    const saved = ((await stmt(
+      "SELECT id,name,key_field,mapping,updated_at FROM import_mappings WHERE module=? ORDER BY updated_at DESC",
+      module,
+    ).all()).results || []) as any[];
+    return Response.json({
+      module,
+      fields: updatable[module].editable,
+      keys: updatable[module].keys,
+      mappings: saved.map((m) => ({
+        ...m,
+        mapping: typeof m.mapping === "string" ? JSON.parse(m.mapping) : m.mapping,
+      })),
+    });
+  } catch (e: any) {
+    return Response.json({ error: e.message }, { status: 400 });
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const u = await actor();
     await rateLimit("import:" + u.id, 20, 60);
     const x = await req.json();
+
+    // Remembering, or forgetting, the column mapping for a recurring sheet.
+    if (x.action === "save_mapping" || x.action === "delete_mapping") return await storeMapping(u, x);
     // Creating runs every row through its workflow action; updating is checked
     // in bulk, so a whole roster's worth of corrections fits in one upload.
     const limit = x.mode === "update" ? 5000 : 1000;
@@ -659,11 +734,17 @@ export async function POST(req: Request) {
 }
 
 async function updateRecords(u: any, x: any) {
-  const { spec, checked, ignored } = await reviewUpdates(u, x.module, x.rows);
+  const { spec, checked, ignored, keyField } = await reviewUpdates(u, x.module, x.rows, {
+    mapping: x.mapping,
+    keyField: x.key_field,
+  });
   if (!x.confirm)
     return Response.json({
       rows: checked,
       columns: [...spec.keys, ...spec.editable],
+      fields: spec.editable,
+      keys: spec.keys,
+      key_field: keyField,
       ignored,
       mode: "update",
       notice:
@@ -720,4 +801,63 @@ async function updateRecords(u: any, x: any) {
     auditStmt(u, "Spreadsheet import", x.module, result),
   ]);
   return Response.json(result);
+}
+
+async function storeMapping(u: any, x: any) {
+  const spec = updatable[x.module];
+  ensure(spec, "Update mode is available for students, groups and accounts.");
+  ensure(can(u.roles, spec.roles), "You are not permitted to update this module.");
+  const name = String(x.name ?? "").trim();
+  ensure(name.length >= 2 && name.length <= 80, "Name the source sheet in 2 to 80 characters.");
+  if (x.action === "delete_mapping") {
+    const existing: any = await stmt("SELECT id FROM import_mappings WHERE module=? AND name=?", x.module, name).first();
+    ensure(existing, "No saved mapping by that name.");
+    await db().batch([
+      stmt("DELETE FROM import_mappings WHERE id=?", existing.id),
+      auditStmt(u, "Import mapping removed", existing.id, { module: x.module, name }),
+    ]);
+    return Response.json({ ok: true, removed: name });
+  }
+  const mapping = x.mapping;
+  ensure(mapping && typeof mapping === "object" && !Array.isArray(mapping), "Map the columns before saving.");
+  const known = new Set([...spec.keys, ...spec.editable, ...Object.keys(spec.protectedHints)]);
+  const pairs = Object.entries(mapping).filter(([, field]) => field);
+  ensure(pairs.length > 0 && pairs.length <= 120, "Map between 1 and 120 columns.");
+  for (const [header, field] of pairs) {
+    ensure(String(header).length <= 200, "Column names must be 200 characters or fewer.");
+    ensure(known.has(String(field)), `"${field}" is not a field this sheet can fill.`);
+  }
+  const keyField = String(x.key_field ?? spec.keys[0]);
+  ensure(spec.keys.includes(keyField), `Rows cannot be matched on "${keyField}".`);
+  const clean = Object.fromEntries(pairs.map(([header, field]) => [header, String(field)]));
+  const existing: any = await stmt("SELECT id FROM import_mappings WHERE module=? AND name=?", x.module, name).first();
+  const mappingId = existing?.id || uid("IMAP");
+  await db().batch([
+    existing
+      ? stmt(
+          "UPDATE import_mappings SET key_field=?,mapping=?,updated_at=? WHERE id=?",
+          keyField,
+          JSON.stringify(clean),
+          now(),
+          mappingId,
+        )
+      : stmt(
+          "INSERT INTO import_mappings(id,module,name,key_field,mapping,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+          mappingId,
+          x.module,
+          name,
+          keyField,
+          JSON.stringify(clean),
+          u.id,
+          now(),
+          now(),
+        ),
+    auditStmt(u, existing ? "Import mapping updated" : "Import mapping saved", mappingId, {
+      module: x.module,
+      name,
+      key_field: keyField,
+      columns: pairs.length,
+    }),
+  ]);
+  return Response.json({ ok: true, id: mappingId, name, key_field: keyField, mapping: clean });
 }

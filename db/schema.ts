@@ -1041,3 +1041,23 @@ export const serviceLinkReviews = sqliteTable(
     ),
   ],
 );
+
+export const importMappings = sqliteTable(
+  "import_mappings",
+  {
+    id: text("id").primaryKey(),
+    module: text("module").notNull(),
+    name: text("name").notNull(),
+    keyField: text("key_field").notNull(),
+    mapping: text("mapping", { mode: "json" }).notNull().default("{}"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("import_mapping_source").on(t.module, t.name),
+    index("import_mappings_module_idx").on(t.module, t.name),
+  ],
+);
