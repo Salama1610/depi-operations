@@ -46,7 +46,10 @@ test("a phone number keeps the leading zero Excel drops", () => {
   assert.equal(normalizePhone("+201024665053"), "01024665053", "the international form is dialled locally");
   assert.equal(normalizePhone("00201024665053"), "01024665053");
   assert.equal(normalizePhone(arabic("01024665053")), "01024665053");
+  assert.equal(normalizePhone("1068920710 / 01200451282"), "01068920710 / 01200451282", "two numbers in one cell");
+  assert.equal(normalizePhone("01068920710,01200451282"), "01068920710 / 01200451282");
   assert.equal(normalizePhone("0224012345"), "0224012345", "a landline is left as written");
+  assert.equal(normalizePhone("01024665053 (work) / ask reception"), "01024665053 (work) / ask reception", "a note is left alone");
   assert.equal(normalizePhone(""), "");
 });
 
