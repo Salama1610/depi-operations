@@ -54,6 +54,22 @@ export function normalizeNationalId(value: unknown) {
   return /^\d+$/.test(digits) ? digits : "";
 }
 
+/**
+ * An Egyptian mobile number as somebody would dial it.
+ *
+ * Excel keeps a phone number as a number, which drops the leading zero, so a
+ * sheet arrives with "1024665053" where the person wrote "01024665053". The
+ * international form is folded back to the local one for the same reason: the
+ * record is read by people picking up a phone.
+ */
+export function normalizePhone(value: unknown) {
+  const digits = normalizeDigits(value).trim().replace(/[\s\u00a0()\-.]/g, "");
+  const local = digits.replace(/^(?:\+?20|0020)/, "");
+  if (/^1\d{9}$/.test(local)) return "0" + local;
+  if (/^01\d{9}$/.test(local)) return local;
+  return String(value ?? "").trim();
+}
+
 export function isNationalId(value: unknown) {
   return NATIONAL_ID.test(normalizeNationalId(value));
 }

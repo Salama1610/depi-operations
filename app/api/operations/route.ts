@@ -29,7 +29,7 @@ import {
   validatePolicy,
   controlledPlatforms,
 } from "@/lib/domain/rules";
-import { isNationalId, nationalIdProblem, normalizeNationalId } from "@/lib/domain/sheet-mapping";
+import { isNationalId, nationalIdProblem, normalizeNationalId, normalizePhone } from "@/lib/domain/sheet-mapping";
 import { seed } from "@/lib/seed";
 export const dynamic = "force-dynamic";
 const ops = ["Project Operations", "Operations Coordinator"];
@@ -1859,7 +1859,7 @@ export async function POST(req: Request) {
         // often than by email.
         const nationalId = normalizeNationalId(x.national_id);
         ensure(!x.national_id || isNationalId(nationalId), nationalIdProblem(x.national_id) || "Check the national ID.");
-        const phone = String(x.phone ?? "").trim();
+        const phone = normalizePhone(x.phone);
         ensure(phone.length <= 40, "Phone number is too long.");
         ensure(x.reason?.trim(), "Document the access change reason.");
         const email = String(x.email).trim().toLowerCase();

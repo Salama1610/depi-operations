@@ -17,6 +17,7 @@ import {
   normalizeDigits,
   normalizeHeader,
   normalizeNationalId,
+  normalizePhone,
 } from "../lib/domain/sheet-mapping.ts";
 
 const arabic = (digits) => digits.replace(/\d/g, (d) => String.fromCharCode(0x0660 + Number(d)));
@@ -35,6 +36,18 @@ test("a national ID survives every way a spreadsheet mangles it", () => {
   assert.equal(normalizeNationalId("2,9911260104731e13"), ID, "with a comma decimal mark");
   assert.equal(normalizeNationalId(29911260104731), ID, "a number rather than text");
   for (const value of [null, undefined, "", "   ", "not an id", "N/A"]) assert.equal(normalizeNationalId(value), "");
+});
+
+test("a phone number keeps the leading zero Excel drops", () => {
+  assert.equal(normalizePhone("1024665053"), "01024665053", "Excel stored it as a number");
+  assert.equal(normalizePhone(1024665053), "01024665053");
+  assert.equal(normalizePhone("01024665053"), "01024665053");
+  assert.equal(normalizePhone(" 010 2466 5053 "), "01024665053");
+  assert.equal(normalizePhone("+201024665053"), "01024665053", "the international form is dialled locally");
+  assert.equal(normalizePhone("00201024665053"), "01024665053");
+  assert.equal(normalizePhone(arabic("01024665053")), "01024665053");
+  assert.equal(normalizePhone("0224012345"), "0224012345", "a landline is left as written");
+  assert.equal(normalizePhone(""), "");
 });
 
 test("only a real national ID is accepted as a key", () => {
