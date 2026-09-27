@@ -17,6 +17,9 @@ export const users = sqliteTable("users", {
   // Supabase Auth identity binding. Kept last so positional inserts written
   // against the original column order remain valid on both engines.
   auth_user_id: text("auth_user_id").unique(),
+  // Added after auth_user_id for the same reason: positional inserts keep working.
+  nationalId: text("national_id"),
+  phone: text("phone"),
 });
 export const policies = sqliteTable("policies", {
   id: text("id").primaryKey(),

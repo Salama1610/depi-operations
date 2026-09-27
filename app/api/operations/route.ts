@@ -16,6 +16,7 @@ import {
   graduationStmt,
   appliedPolicy,
   rateLimit,
+  provisionStaffLogin,
 } from "@/lib/server";
 import {
   ensure,
@@ -28,6 +29,7 @@ import {
   validatePolicy,
   controlledPlatforms,
 } from "@/lib/domain/rules";
+import { isNationalId, nationalIdProblem, normalizeNationalId } from "@/lib/domain/sheet-mapping";
 import { seed } from "@/lib/seed";
 export const dynamic = "force-dynamic";
 const ops = ["Project Operations", "Operations Coordinator"];
@@ -251,6 +253,9 @@ export async function POST(req: Request) {
     const t = now();
     const jobs: any[] = [];
     let auditPrevious: any = null;
+    // Set by the staff action: the person who should be able to sign in once
+    // the record is written.
+    let signIn: { email: string; nationalId: string; name: string } | null = null;
     let auditValue: any = { ...x };
     delete auditValue.request_id;
     switch (x.action) {
@@ -1848,6 +1853,14 @@ export async function POST(req: Request) {
             x.roles.every((r: string) => roles.includes(r)),
           "Staff name, email and valid roles are required.",
         );
+        // The national ID is what a new person signs in with, so it is stored
+        // with the record rather than kept in somebody's spreadsheet. The phone
+        // number belongs with it: a coordinator is reached by phone far more
+        // often than by email.
+        const nationalId = normalizeNationalId(x.national_id);
+        ensure(!x.national_id || isNationalId(nationalId), nationalIdProblem(x.national_id) || "Check the national ID.");
+        const phone = String(x.phone ?? "").trim();
+        ensure(phone.length <= 40, "Phone number is too long.");
         ensure(x.reason?.trim(), "Document the access change reason.");
         const email = String(x.email).trim().toLowerCase();
         const old: any = await stmt(
@@ -1861,31 +1874,48 @@ export async function POST(req: Request) {
         const withdrawn = new Set(["0", "false", "inactive", "withdrawn", "no"]);
         const stated = x.active === undefined || String(x.active).trim() === "" ? null : String(x.active).trim().toLowerCase();
         const active = stated === null ? (old ? Number(old.active) : 1) : withdrawn.has(stated) ? 0 : 1;
+        if (nationalId)
+          ensure(
+            !(await stmt(
+              "SELECT id FROM users WHERE trim(national_id)=? AND id<>?",
+              nationalId,
+              old?.id || "",
+            ).first()),
+            "Another member of staff is recorded with this national ID.",
+          );
         if (old && Number(old.active) === 1 && active === 0)
           ensure(old.id !== u.id, "You cannot withdraw your own access.");
         if (old) {
           auditPrevious = old;
           jobs.push(
             stmt(
-              "UPDATE users SET name=?,roles=?,active=? WHERE id=?",
+              "UPDATE users SET name=?,roles=?,active=?,national_id=coalesce(?,national_id),phone=coalesce(?,phone) WHERE id=?",
               x.name,
               JSON.stringify(x.roles),
               active,
+              nationalId || null,
+              phone || null,
               old.id,
             ),
           );
         } else
           jobs.push(
             stmt(
-              "INSERT INTO users(id,email,name,roles,scopes,active) VALUES(?,?,?,?,?,?)",
+              "INSERT INTO users(id,email,name,roles,scopes,active,national_id,phone) VALUES(?,?,?,?,?,?,?,?)",
               uid("USR"),
               email,
               x.name,
               JSON.stringify(x.roles),
               "[]",
               active,
+              nationalId || null,
+              phone || null,
             ),
           );
+        // Recorded on the audit entry so an administrator can see whether the
+        // person can sign in yet, or is only listed.
+        auditValue = { ...auditValue, national_id: nationalId ? "recorded" : "missing", phone: phone ? "recorded" : "missing" };
+        signIn = active === 1 ? { email, nationalId: nationalId || String(old?.national_id || ""), name: String(x.name) } : null;
         break;
       }
       case "policy": {
@@ -2330,6 +2360,24 @@ export async function POST(req: Request) {
       ),
     );
     await db().batch(jobs);
+    // The record exists; now make sure the person can get in. This runs after
+    // the write so a failure here leaves a listed member of staff rather than
+    // an account with no record, and it is reported instead of thrown: the
+    // access change itself has already succeeded.
+    if (signIn) {
+      try {
+        const outcome = await provisionStaffLogin(signIn.email, signIn.nationalId, signIn.name);
+        if (outcome === "created") return Response.json({ ok: true, sign_in: "created" });
+        if (outcome === "skipped" && !signIn.nationalId)
+          return Response.json({
+            ok: true,
+            sign_in: "no_national_id",
+            notice: "Saved. Add this person's national ID to give them a way to sign in.",
+          });
+      } catch (e: any) {
+        return Response.json({ ok: true, sign_in: "failed", notice: e.message });
+      }
+    }
     return Response.json({ ok: true });
   } catch (e: any) {
     const message = /UNIQUE constraint/.test(e.message)

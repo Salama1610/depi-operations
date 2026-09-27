@@ -6,7 +6,9 @@
     "roles": "jsonb",
     "scopes": "jsonb",
     "active": "boolean",
-    "auth_user_id": "uuid"
+    "auth_user_id": "uuid",
+    "national_id": "text",
+    "phone": "text"
   },
   "policies": {
     "id": "text",

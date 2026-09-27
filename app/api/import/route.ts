@@ -13,7 +13,7 @@ import { applyMapping, isNationalId, nationalIdProblem, normalizeNationalId } fr
 import { POST as operate } from "@/app/api/operations/route";
 import { POST as program } from "@/app/api/program/route";
 const allowed: Record<string, string[]> = {
-  staff: ["name", "email", "roles", "active", "reason"],
+  staff: ["name", "email", "roles", "national_id", "phone", "active", "reason"],
   students: ["id", "name", "group_id", "email", "phone", "lifecycle", "engagement", "coaching"],
   groups: [
     "id",
@@ -614,6 +614,12 @@ export async function POST(req: Request) {
             errors.push({ row: i + 2, field: "roles", value: role, error: "Not a role this workspace has", expected: roles.join(", ") });
         if (!listed.length)
           errors.push({ row: i + 2, field: "roles", error: "Give the person at least one role", expected: roles.join(", ") });
+        row.national_id = normalizeNationalId(row.national_id);
+        if (row.national_id && !isNationalId(row.national_id))
+          errors.push({ row: i + 2, field: "national_id", value: row.national_id, error: nationalIdProblem(row.national_id), expected: "The 14-digit national ID" });
+        if (row.national_id && seen.has(`nid:${row.national_id}`))
+          errors.push({ row: i + 2, field: "national_id", value: row.national_id, error: "The same national ID appears twice in this sheet", expected: "One row per person" });
+        if (row.national_id) seen.add(`nid:${row.national_id}`);
         const state = String(row.active ?? "").trim().toLowerCase();
         if (state && !["1", "0", "true", "false", "active", "inactive", "withdrawn", "yes", "no"].includes(state))
           errors.push({ row: i + 2, field: "active", value: row.active, error: "Write active or withdrawn", expected: "active, withdrawn (or leave it empty)" });

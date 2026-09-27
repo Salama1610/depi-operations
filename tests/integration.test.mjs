@@ -1091,12 +1091,13 @@ test("a staff sheet grants and withdraws access, and groups are handed over by e
   current = { id: "owner", email: "owner@example.com" };
   await dbExec("DELETE FROM rate_limits");
   const sheet = [
-    { name: "Mona Fathy", email: "Mona.Fathy@example.org", roles: "Operations Coordinator", reason: "Round 5 intake" },
-    { name: "Hany Adel", email: "hany.adel@example.org", roles: "Team Supervisor, Coach Operations" },
+    { name: "Mona Fathy", email: "Mona.Fathy@example.org", roles: "Operations Coordinator", national_id: "29811181400282", phone: "01027958791", reason: "Round 5 intake" },
+    { name: "Hany Adel", email: "hany.adel@example.org", roles: "Team Supervisor, Coach Operations", national_id: "2.9909302301864E+13", phone: "01284098001" },
     { name: "Broken Roles", email: "broken@example.org", roles: "Chief Wizard" },
     { name: "No Email", email: "not-an-email", roles: "Coach" },
     { name: "No Roles", email: "noroles@example.org", roles: "" },
     { name: "Twice", email: "mona.fathy@example.org", roles: "Coach" },
+    { name: "Bad ID", email: "badid@example.org", roles: "Coach", national_id: "12345" },
   ];
   const preview = await importPost({ module: "staff", rows: sheet });
   assert.equal(preview.rows[0].status, "Ready");
@@ -1105,11 +1106,25 @@ test("a staff sheet grants and withdraws access, and groups are handed over by e
   assert.match(preview.rows[3].errors[0].error, /valid work email/);
   assert.match(preview.rows[4].errors[0].error, /at least one role/);
   assert.match(preview.rows[5].errors[0].error, /appears twice/);
+  assert.match(preview.rows[6].errors[0].error, /14 digits/);
 
   const applied = await importPost({ module: "staff", rows: sheet, confirm: true, batch_id: "staff-sheet-1" });
   assert.equal(applied.created, 2);
-  assert.equal(applied.rejected, 4);
-  const mona = await dbRow("SELECT id, name, email, roles, active FROM users WHERE email='mona.fathy@example.org'");
+  assert.equal(applied.rejected, 5);
+  const mona = await dbRow("SELECT id, name, email, roles, active, national_id, phone FROM users WHERE email='mona.fathy@example.org'");
+  // The identifier and the phone number are kept with the record: the ID is
+  // what the person signs in with, and the number is how they are reached.
+  assert.equal(mona.national_id, "29811181400282");
+  assert.equal(mona.phone, "01027958791");
+  assert.equal(
+    (await dbRow("SELECT national_id FROM users WHERE email='hany.adel@example.org'")).national_id,
+    "29909302301864",
+    "an ID Excel turned into a float is recovered",
+  );
+  assert.match(
+    (await post("staff", { name: "Clash", email: "clash@example.org", roles: ["Coach"], national_id: "29811181400282", reason: "probe" })).error,
+    /already recorded|Another member of staff/,
+  );
   assert.ok(mona, "the email is stored in lower case, the way sign-in looks it up");
   assert.equal(mona.active, 1);
   assert.deepEqual(JSON.parse(mona.roles), ["Operations Coordinator"]);
@@ -1127,6 +1142,11 @@ test("a staff sheet grants and withdraws access, and groups are handed over by e
   });
 
   assert.equal((await dbRow("SELECT count(*) n FROM users WHERE email='mona.fathy@example.org'")).n, 1);
+  assert.equal(
+    (await dbRow("SELECT national_id FROM users WHERE email='mona.fathy@example.org'")).national_id,
+    "29811181400282",
+    "a later sheet without the ID column keeps the stored one",
+  );
   assert.deepEqual(
     JSON.parse((await dbRow("SELECT roles FROM users WHERE email='mona.fathy@example.org'")).roles),
     ["Operations Coordinator", "Team Supervisor"],

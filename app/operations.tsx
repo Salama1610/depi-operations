@@ -1996,7 +1996,17 @@ export default function Operations({ module: initialModule }: { module: string }
               staff,
               [
                 { key: "name", label: "Staff member", render: (r) => <span>{r.name}{(r.active === 0 || r.active === false) && <small className="table-subline"><span className="badge muted">{String(r.id).startsWith("system-unassigned") ? "Placeholder · cannot sign in" : "Inactive"}</span></small>}</span> },
-                { key: "email", label: "Email" },
+                { key: "email", label: "Email", render: (r) => <span>{r.email}<small className="table-subline">{r.phone || "no phone number"}</small></span> },
+                {
+                  key: "national_id",
+                  label: "Sign-in",
+                  render: (r) =>
+                    r.national_id ? (
+                      <span>Ready<small className="table-subline">national ID on record</small></span>
+                    ) : (
+                      <span className="badge muted">No national ID</span>
+                    ),
+                },
                 {
                   key: "roles",
                   label: "Roles",
@@ -2026,7 +2036,8 @@ export default function Operations({ module: initialModule }: { module: string }
             ),
           )}
           <p className="footnote">
-            A person signs in with the email listed here. Whole teams are added
+            A person signs in with the email listed here and their national ID as
+            the first password. Whole teams are added
             from a sheet: the import workspace has a staff template with name,
             email and roles. Groups are then handed over by naming the person —
             their email or their name is enough, and the coordinator of a group
@@ -3582,6 +3593,8 @@ export default function Operations({ module: initialModule }: { module: string }
                   <>
                     {field("name", "Staff name")}
                     {field("email", "Staff email", "email")}
+                    {field("national_id", "National ID (their first password)", "text", false)}
+                    {field("phone", "Phone number", "text", false)}
                     <div className="review-checks">
                       {roles.map((r) => (
                         <label className="check" key={r}>
@@ -3605,8 +3618,10 @@ export default function Operations({ module: initialModule }: { module: string }
                     {choice("active", "Access", ["Active", "Withdrawn"])}
                     {field("reason", "Access change reason")}
                     <p className="footnote">
-                      Withdrawing access stops this person signing in and takes them out of
-                      the list of people a group can be handed to. Their history stays.
+                      A new person can sign in with their email address and their national ID
+                      as the first password, exactly as students do, and should change it on
+                      their first visit. Withdrawing access stops them signing in and takes
+                      them out of the list a group can be handed to. Their history stays.
                     </p>
                   </>
                 );
@@ -3906,6 +3921,8 @@ export default function Operations({ module: initialModule }: { module: string }
                     name: "Example Coordinator",
                     email: "name@example.com",
                     roles: "Operations Coordinator",
+                    national_id: "29001011234567",
+                    phone: "01000000000",
                     active: "active",
                     reason: "Round 5 staffing",
                   },

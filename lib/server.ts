@@ -1,4 +1,6 @@
 import { getSupabaseUser } from "./supabase/server";
+import { getSupabaseAdminClient } from "./supabase/admin";
+import { env } from "./env";
 import { database } from "./data/database";
 import { objectStore } from "./data/storage";
 import {
@@ -104,6 +106,37 @@ export async function currentStudent() {
   );
   return { ...s, identity: i };
 }
+/**
+ * Gives a member of staff a way in, the way students get one: their email
+ * address with their national ID as the first password.
+ *
+ * Only ever creates. A person who already has a sign-in keeps the password they
+ * have, because they may well have changed it, and this is called again every
+ * time their name or roles are edited. Returns what happened so the caller can
+ * tell the administrator whether the person can actually sign in yet.
+ */
+export async function provisionStaffLogin(email: string, nationalId: string, name: string) {
+  const address = String(email || "").trim().toLowerCase();
+  const secret = String(nationalId || "").trim();
+  if (!address || !/^\d{14}$/.test(secret)) return "skipped";
+  // Without Supabase there is nothing to provision: tests and local previews
+  // run on the injected bindings, and sign-in is not part of them.
+  if (!env.SUPABASE_URL?.trim() || !env.SUPABASE_SERVICE_ROLE_KEY?.trim()) return "skipped";
+  const admin = getSupabaseAdminClient();
+  const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 200 });
+  if (error) throw new Error("Could not check existing sign-in accounts: " + error.message);
+  const existing = (data?.users || []).find((user: any) => String(user.email || "").toLowerCase() === address);
+  if (existing) return "existing";
+  const created = await admin.auth.admin.createUser({
+    email: address,
+    password: secret,
+    email_confirm: true,
+    user_metadata: { full_name: name },
+  });
+  if (created.error) throw new Error("Could not create the sign-in account: " + created.error.message);
+  return "created";
+}
+
 export function permit(u: any, allowed: string[]) {
   // Operations Systems / Admin owns the workspace and may perform any action.
   // The separation-of-duties rules are unaffected: they compare identities, not
