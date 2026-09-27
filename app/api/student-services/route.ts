@@ -12,6 +12,7 @@ import {
   student,
 } from "@/lib/server";
 import { normalizeServiceSlots, verifyServiceLink } from "@/lib/domain/service-links";
+import { distributeEvenly } from "@/lib/domain/qc-assignment";
 export const dynamic = "force-dynamic";
 
 function parseLink(row: any) {
@@ -192,6 +193,18 @@ export async function POST(req: Request) {
         );
       }
     }
+    // The student's services go to a reviewer as they are submitted, so the
+    // queue is never an unowned pile and every reviewer can see their share.
+    const reviewer = await reviewerFor(s.id, existing.map((row: any) => row.qc_actor).find(Boolean) || null);
+    if (reviewer)
+      jobs.push(
+        stmt(
+          "UPDATE service_links SET qc_actor=?,updated_at=? WHERE student_id=? AND qc_status<>'Locked'",
+          reviewer,
+          t,
+          s.id,
+        ),
+      );
     jobs.push(stmt(
       `UPDATE service_submissions SET status=CASE
          WHEN (SELECT count(*) FROM service_links WHERE student_id=? AND qc_status='Locked')=3 THEN 'Complete'
@@ -206,15 +219,15 @@ export async function POST(req: Request) {
       `INSERT OR IGNORE INTO notifications(id,recipient,title,entity_type,entity_id,severity,source,created_at,read_at)
        SELECT ?||'-'||id,id,?,'student',?,'Action Required',?||':'||id,?,NULL
        FROM users WHERE active=1 AND id IN (
-         SELECT coordinator FROM groups WHERE id=(SELECT group_id FROM students WHERE id=?)
-         UNION SELECT supervisor FROM groups WHERE id=(SELECT group_id FROM students WHERE id=?)
+         SELECT ?
+         UNION SELECT coordinator FROM groups WHERE id=(SELECT group_id FROM students WHERE id=?)
        )`,
       notificationSeed,
       priorSubmissionTitle(Boolean(existing.length)),
       s.id,
       `service-links:${s.id}:${t}`,
       t,
-      s.id,
+      reviewer,
       s.id,
     ));
     jobs.push(auditStmt(s, "Student service links submitted", s.id, { slots: 3 }, null, uid("REQ")));
@@ -226,17 +239,16 @@ export async function POST(req: Request) {
 }
 
 /**
- * A coordinator's decision on one published service link.
+ * One decision on one published service link.
  *
- * One link at a time, by the people responsible for the student's group:
- * `student()` applies the workspace scope rule, so a coordinator can only
- * review their own students. A locked link is final and a link the automatic
- * gate failed can only go back for correction, so there is no override to
- * argue about.
+ * The reviewer the student was assigned to makes it, one link at a time; the
+ * team leader can decide any of them, because they own the queue. A locked
+ * link is final and a link the automatic gate failed can only go back for
+ * correction, so there is no override to argue about.
  */
 async function qcReview(x: any) {
   const u = await actor();
-  permit(u, ["Project Operations", "Operations Coordinator", "Team Supervisor"]);
+  permit(u, ["Quality Member", "Quality Lead"]);
   if (!["Lock", "Needs Correction"].includes(x.decision))
     throw new Error("Choose Lock or Needs Correction.");
   const comment = String(x.comment || "").trim();
@@ -249,6 +261,8 @@ async function qcReview(x: any) {
     throw new Error("This service link is already locked. The student submits a new link instead.");
   if (link.auto_status === "Failed" && x.decision === "Lock")
     throw new Error("The automatic check failed for this link, so it can only be returned for correction.");
+  if (link.qc_actor && link.qc_actor !== u.id && !u.roles.includes("Quality Lead"))
+    throw new Error("This student is assigned to another reviewer.");
   await student(u, link.student_id);
   const t = now();
   const next = x.decision === "Lock" ? "Locked" : "Needs Correction";
@@ -268,7 +282,7 @@ async function qcReview(x: any) {
       link.id,
       link.revision,
       next,
-      comment || "Verified in coordinator review.",
+      comment || "Verified in quality review.",
       u.id,
       t,
     ),
@@ -290,6 +304,50 @@ async function qcReview(x: any) {
   ];
   await db().batch(jobs);
   return Response.json({ ok: true });
+}
+
+/**
+ * Who reviews student services, and who gets the next student.
+ *
+ * The quality team reviews; the team leader hands the work out and does not
+ * carry a share of it, so the pool is the active Quality Members. Work is
+ * counted in students rather than links, because a student's three services
+ * are one piece of work: the same reviewer sees all three, forms one view of
+ * the person, and decides each link on its own.
+ */
+async function reviewerPool() {
+  const staff = await all("SELECT id, roles FROM users WHERE active=1");
+  return staff
+    .filter((person: any) => {
+      let held: string[] = [];
+      try {
+        held = JSON.parse(person.roles || "[]");
+      } catch {
+        held = [];
+      }
+      return held.includes("Quality Member") && !held.includes("Quality Lead");
+    })
+    .map((person: any) => String(person.id));
+}
+
+/**
+ * The reviewer for this student: the one who already holds them, so a
+ * resubmission goes back to the person who asked for the correction, and
+ * otherwise whoever currently holds the fewest students.
+ */
+export async function reviewerFor(studentId: string, priorActor?: string | null) {
+  const pool = await reviewerPool();
+  if (!pool.length) return null;
+  if (priorActor && pool.includes(priorActor)) return priorActor;
+  const counts = new Map(pool.map((id) => [id, 0]));
+  const held = await all(
+    `SELECT qc_actor, count(DISTINCT student_id) students FROM service_links
+      WHERE qc_actor IS NOT NULL AND qc_status<>'Locked' AND student_id<>? GROUP BY qc_actor`,
+    studentId,
+  );
+  for (const row of held as any[]) if (counts.has(String(row.qc_actor))) counts.set(String(row.qc_actor), Number(row.students) || 0);
+  const [allocation] = distributeEvenly([studentId], [...counts].map(([id, open]) => ({ id, open })));
+  return allocation ? allocation.reviewerId : null;
 }
 
 function priorSubmissionTitle(resubmission: boolean) {

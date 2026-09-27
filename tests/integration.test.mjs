@@ -920,90 +920,170 @@ test("a sheet from another source links on the national ID through a saved mappi
   );
 });
 
-test("the gig phase is reviewed by the student's own coordinator, not by quality", async () => {
+test("a student's services go to one quality reviewer, spread evenly, and the leader can move them", async () => {
   current = { id: "owner", email: "owner@example.com" };
-  // Two links for a student in G101: one the automatic gate passed, one it
-  // failed. Written directly, because the subject here is the review, not the
-  // submission path the student portal tests already cover.
-  const subject = await dbRow("SELECT id FROM students WHERE group_id='G101' ORDER BY id LIMIT 1");
-  const at = new Date().toISOString();
-  for (const [id, slot, autoStatus] of [
-    ["REVIEW-LINK-PASS", 1, "Needs Review"],
-    ["REVIEW-LINK-FAIL", 2, "Failed"],
-  ])
-    await dbExec(
-      "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,submitted_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-      id,
-      subject.id,
-      slot,
-      `https://khamsat.com/marketing/social-media/99${slot}-service`,
-      `https://khamsat.com/marketing/social-media/99${slot}-service`,
-      "Khamsat",
-      autoStatus,
-      JSON.stringify({ message: "Synthetic link for the review test." }),
-      at,
-      "Pending",
-      null,
-      null,
-      null,
-      1,
-      at,
-      at,
+  await dbExec("DELETE FROM rate_limits");
+  const servicesApi = await route("student-services");
+  const submit = (services) =>
+    servicesApi.POST(
+      new Request("https://test.local/api/student-services", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "submit_services", services }),
+      }),
     );
-  const link = await dbRow(
-    "SELECT l.*, g.coordinator, g.supervisor FROM service_links l JOIN students s ON s.id=l.student_id JOIN groups g ON g.id=s.group_id WHERE l.id='REVIEW-LINK-PASS'",
-  );
-  const coordinator = await dbRow("SELECT id, email FROM users WHERE id=?", link.coordinator);
-  const elsewhere = await dbRow(
-    "SELECT u.id, u.email FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.coordinator<>? LIMIT 1",
-    link.coordinator,
-  );
 
-  current = { id: "quality-login", email: "staff-quality@example.invalid" };
+  // A team of four reviewers under one leader: the seeded Quality Member plus
+  // three more. The leader hands work out and carries none of it.
+  for (const [name, email] of [
+    ["Sagda Saad", "sagda.test@example.org"],
+    ["Dunia Hekal", "dunia.test@example.org"],
+    ["Marwa Hammam", "marwa.test@example.org"],
+  ])
+    await check("staff", { name, email, roles: ["Quality Member"], reason: "Round 5 quality team" });
+  const pool = (
+    await dbRows(
+      "SELECT id FROM users WHERE active=1 AND roles LIKE '%Quality Member%' AND roles NOT LIKE '%Quality Lead%' ORDER BY id",
+    )
+  ).map((r) => r.id);
+  assert.equal(pool.length, 4);
+
+  const students = await dbRows("SELECT id, email FROM students WHERE group_id='G110' ORDER BY id LIMIT 4");
+  assert.equal(students.length, 4);
+  const ids = students.map((s) => s.id);
+  const list = ids.map(() => "?").join(",");
+  for (const [index, student] of students.entries()) {
+    current = { id: student.id, email: student.email };
+    const response = await submit(
+      [1, 2, 3].map((slot) => `https://khamsat.com/marketing/social-media/${8100 + index * 10 + slot}-service-${slot}`),
+    );
+    assert.equal(response.status, 200, await response.clone().text());
+  }
+  current = { id: "owner", email: "owner@example.com" };
+
+  // Each student is one piece of work: three links, one reviewer, never the leader.
+  const perStudent = await dbRows(
+    `SELECT student_id, count(*) links, count(DISTINCT qc_actor) reviewers, min(qc_actor) actor
+       FROM service_links WHERE student_id IN (${list}) GROUP BY student_id`,
+    ...ids,
+  );
+  assert.equal(perStudent.length, 4);
+  for (const row of perStudent) {
+    assert.equal(Number(row.links), 3, "three services");
+    assert.equal(Number(row.reviewers), 1, "one reviewer holds all three");
+    assert.ok(pool.includes(row.actor), `${row.actor} is on the team`);
+  }
+
+  // Evenly: nobody holds two more open students than anybody else.
+  const loads = await Promise.all(
+    pool.map(async (id) =>
+      Number(
+        (await dbRow("SELECT count(DISTINCT student_id) n FROM service_links WHERE qc_actor=? AND qc_status<>'Locked'", id)).n,
+      ),
+    ),
+  );
+  assert.ok(Math.max(...loads) - Math.min(...loads) <= 1, `load spread ${JSON.stringify(loads)}`);
+
+  // The reviewer who holds the student decides; another member cannot.
+  const subject = perStudent[0];
+  const holder = await dbRow("SELECT id, email FROM users WHERE id=?", subject.actor);
+  const other = await dbRow("SELECT id, email FROM users WHERE id=? ", pool.find((id) => id !== subject.actor));
+  const firstLink = await dbRow(
+    "SELECT id, slot FROM service_links WHERE student_id=? AND qc_status='Pending' ORDER BY slot LIMIT 1",
+    subject.student_id,
+  );
+  current = { id: other.id, email: other.email };
   assert.match(
-    (await post("service_qc_review", { service_id: link.id, decision: "Lock" })).error,
+    (await post("service_qc_review", { service_id: firstLink.id, decision: "Lock" })).error,
+    /assigned to another reviewer/,
+  );
+  current = { id: holder.id, email: holder.email };
+  await check("service_qc_review", {
+    service_id: firstLink.id,
+    decision: "Needs Correction",
+    comment: "Send the direct public service page.",
+    request_id: "quality-correction-1",
+  });
+  assert.equal((await dbRow("SELECT qc_status FROM service_links WHERE id=?", firstLink.id)).qc_status, "Needs Correction");
+
+  // A resubmission goes back to the reviewer who asked for the correction.
+  const student = students.find((s) => s.id === subject.student_id);
+  current = { id: student.id, email: student.email };
+  const again = await submit(
+    [1, 2, 3].map((slot) =>
+      slot === Number(firstLink.slot)
+        ? "https://kafiil.com/service/8199-corrected-service"
+        : `https://khamsat.com/marketing/social-media/${8100 + slot}-service-${slot}`,
+    ),
+  );
+  assert.equal(again.status, 200, await again.clone().text());
+  current = { id: "owner", email: "owner@example.com" };
+  const returned = await dbRows(
+    "SELECT DISTINCT qc_actor FROM service_links WHERE student_id=? AND qc_status<>'Locked'",
+    subject.student_id,
+  );
+  assert.deepEqual(returned.map((r) => r.qc_actor), [subject.actor], "the same reviewer keeps the student");
+
+  // The leader moves a student; the member cannot.
+  current = { id: holder.id, email: holder.email };
+  assert.match(
+    (await post("service_qc_assign", { student_id: subject.student_id, reviewer_id: other.id })).error,
     /role/,
-    "quality reviews activities in their own system, not service links here",
   );
-  current = { id: elsewhere.id, email: elsewhere.email };
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  await check("service_qc_assign", {
+    student_id: subject.student_id,
+    reviewer_id: other.id,
+    request_id: "quality-reassign-1",
+  });
+  const moved = await dbRows(
+    "SELECT DISTINCT qc_actor FROM service_links WHERE student_id=? AND qc_status<>'Locked'",
+    subject.student_id,
+  );
+  assert.deepEqual(moved.map((r) => r.qc_actor), [other.id], "every open service moves with the student");
   assert.match(
-    (await post("service_qc_review", { service_id: link.id, decision: "Lock" })).error,
-    /scope|not found/i,
-    "a coordinator cannot review another team's student",
+    (await post("service_qc_assign", { student_id: subject.student_id, reviewer_id: "staff-quality-lead" })).error,
+    /active Quality reviewer/,
+    "the leader is not in the pool",
   );
 
-  current = { id: coordinator.id, email: coordinator.email };
-  await check("service_qc_review", { service_id: link.id, decision: "Lock", request_id: "coordinator-lock-1" });
-  const locked = await dbRow("SELECT qc_status, qc_actor FROM service_links WHERE id=?", link.id);
-  assert.equal(locked.qc_status, "Locked");
-  assert.equal(locked.qc_actor, coordinator.id);
-  assert.equal(
-    (await dbRow("SELECT comment FROM service_link_reviews WHERE service_link_id=? ORDER BY reviewed_at DESC LIMIT 1", link.id)).comment,
-    "Verified in coordinator review.",
+  // An unheld student is picked up by the leader's even distribution.
+  const orphan = ids.find((id) => id !== subject.student_id);
+  await dbExec("UPDATE service_links SET qc_actor=NULL WHERE student_id=?", orphan);
+  await check("service_qc_assign", { request_id: "quality-distribute-1" });
+  const adopted = await dbRows(
+    "SELECT DISTINCT qc_actor FROM service_links WHERE student_id=? AND qc_status<>'Locked'",
+    orphan,
   );
-  assert.match(
-    (await post("service_qc_review", { service_id: link.id, decision: "Needs Correction", comment: "Changed my mind" })).error,
-    /already locked/,
-    "a locked link is final: there is no override",
-  );
+  assert.equal(adopted.length, 1);
+  assert.ok(pool.includes(adopted[0].qc_actor));
+  assert.match((await post("service_qc_assign", {})).error, /already has a reviewer/);
 
-  // A link the automatic gate failed can only go back to the student.
+  // A link the automatic gate failed can only go back for correction: there is
+  // no override, for the reviewer or the leader.
+  const failing = await dbRow(
+    "SELECT id FROM service_links WHERE student_id=? AND qc_status='Pending' ORDER BY slot DESC LIMIT 1",
+    orphan,
+  );
+  await dbExec("UPDATE service_links SET auto_status='Failed' WHERE id=?", failing.id);
+  const holder2 = await dbRow("SELECT id, email FROM users WHERE id=?", adopted[0].qc_actor);
+  current = { id: holder2.id, email: holder2.email };
   assert.match(
-    (await post("service_qc_review", { service_id: "REVIEW-LINK-FAIL", decision: "Lock" })).error,
+    (await post("service_qc_review", { service_id: failing.id, decision: "Lock" })).error,
     /automatic check failed/,
   );
-  await check("service_qc_review", {
-    service_id: "REVIEW-LINK-FAIL",
-    decision: "Needs Correction",
-    comment: "Publish the service page and submit the direct link.",
-    request_id: "coordinator-correction-1",
-  });
-  assert.equal((await dbRow("SELECT qc_status FROM service_links WHERE id='REVIEW-LINK-FAIL'")).qc_status, "Needs Correction");
-
-  // Handing service-link reviews out to a quality pool is gone.
   current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
-  assert.match((await post("service_qc_assign", {})).error, /operation|action/i);
-  assert.match((await post("service_qc_claim", { service_id: link.id })).error, /operation|action/i);
+  assert.match(
+    (await post("service_qc_review", { service_id: failing.id, decision: "Lock" })).error,
+    /automatic check failed/,
+    "not even the leader can lock a failed link",
+  );
+  await check("service_qc_review", {
+    service_id: failing.id,
+    decision: "Needs Correction",
+    comment: "Publish the service page, then submit the direct link.",
+    request_id: "quality-failed-correction-1",
+  });
   current = { id: "owner", email: "owner@example.com" };
 });
 
@@ -1039,7 +1119,7 @@ test("a staff sheet grants and withdraws access, and groups are handed over by e
   );
 
   // The same sheet again changes the roles it carries instead of duplicating.
-  const second = await importPost({
+  await importPost({
     module: "staff",
     rows: [{ name: "Mona Fathy", email: "mona.fathy@example.org", roles: "Operations Coordinator, Team Supervisor", reason: "Took over a second team" }],
     confirm: true,
@@ -1064,31 +1144,22 @@ test("a staff sheet grants and withdraws access, and groups are handed over by e
   const g105 = await dbRow("SELECT coordinator, supervisor FROM groups WHERE id='G105'");
   assert.equal(g105.coordinator, mona.id);
   assert.equal(g105.supervisor, (await dbRow("SELECT id FROM users WHERE email='hany.adel@example.org'")).id);
-  // And she can now review her own students, which is the point of the handover.
-  const student = await dbRow("SELECT id FROM students WHERE group_id='G105' ORDER BY id LIMIT 1");
-  const at = new Date().toISOString();
-  await dbExec(
-    "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,submitted_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-    "HANDOVER-LINK",
-    student.id,
-    3,
-    "https://khamsat.com/marketing/social-media/993-service",
-    "https://khamsat.com/marketing/social-media/993-service",
-    "Khamsat",
-    "Needs Review",
-    JSON.stringify({ message: "Synthetic link for the handover test." }),
-    at,
-    "Pending",
-    null,
-    null,
-    null,
-    1,
-    at,
-    at,
-  );
+  // She now owns the group's operational work: her students are in her scope,
+  // and the workspace tells her about their submissions. Reviewing published
+  // services is the quality team's, so that stays closed to her.
+  const inHerGroup = await dbRow("SELECT count(*) n FROM students WHERE group_id='G105'");
+  assert.ok(Number(inHerGroup.n) > 0);
   current = { id: mona.id, email: mona.email };
-  await check("service_qc_review", { service_id: "HANDOVER-LINK", decision: "Lock", request_id: "handover-review-1" });
-  assert.equal((await dbRow("SELECT qc_status FROM service_links WHERE id='HANDOVER-LINK'")).qc_status, "Locked");
+  const scoped = await (await api.GET()).json();
+  assert.ok(
+    scoped.students.every((s) => s.group_id === "G105"),
+    "a coordinator sees their own groups only",
+  );
+  assert.match(
+    (await post("service_qc_review", { service_id: "missing", decision: "Lock" })).error,
+    /role/,
+    "published services are reviewed by the quality team",
+  );
 
   // Access is withdrawn the same way it was granted, and the workspace keeps
   // at least one administrator and never lets one lock themselves out.
@@ -1643,11 +1714,7 @@ test("student service resubmissions preserve completion and QC errors return JSO
   const denied = await call({ action: "qc_review", service_id: "missing", decision: "Lock" });
   assert.equal(denied.status, 400);
   assert.ok((await denied.json()).error);
-  const reviewer = await dbRow(
-    "SELECT u.id, u.email FROM students s JOIN groups g ON g.id=s.group_id JOIN users u ON u.id=g.coordinator WHERE s.id=?",
-    student.id,
-  );
-  current = { id: reviewer.id, email: reviewer.email };
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
   const missing = await call({ action: "qc_review", service_id: "missing", decision: "Lock" });
   assert.equal(missing.status, 400);
   assert.match((await missing.json()).error, /not found/);
@@ -1669,15 +1736,15 @@ test("student service records are identity-isolated and QC review is single-deci
   assert.equal(secondView.student.id, second.id);
   assert.notDeepEqual(firstView.services.map((link) => link.id), secondView.services.map((link) => link.id));
   const pending = (await dbRow("SELECT * FROM service_links WHERE student_id='S10902' AND qc_status='Pending' LIMIT 1"));
-  // Quality no longer reviews service links; the student's own coordinator does.
-  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  // The student's own coordinator does not review published services.
+  const coordinator = await dbRow(
+    "SELECT u.id, u.email FROM students s JOIN groups g ON g.id=s.group_id JOIN users u ON u.id=g.coordinator WHERE s.id='S10902'",
+  );
+  current = { id: coordinator.id, email: coordinator.email };
   const refused = await servicesApi.POST(new Request("https://test.local/api/student-services", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "qc_review", service_id: pending.id, decision: "Lock" }) }));
   assert.equal(refused.status, 400);
   assert.match((await refused.json()).error, /role/);
-  const owner = await dbRow(
-    "SELECT u.id, u.email FROM students s JOIN groups g ON g.id=s.group_id JOIN users u ON u.id=g.coordinator WHERE s.id='S10902'",
-  );
-  current = { id: owner.id, email: owner.email };
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
   const request = () => servicesApi.POST(new Request("https://test.local/api/student-services", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "qc_review", service_id: pending.id, decision: "Needs Correction", comment: "Submit the direct active service page." }) }));
   const reviewed = await request();
   assert.equal(reviewed.status, 200, await reviewed.clone().text());

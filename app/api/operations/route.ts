@@ -31,10 +31,12 @@ import {
 import { seed } from "@/lib/seed";
 export const dynamic = "force-dynamic";
 const ops = ["Project Operations", "Operations Coordinator"];
-// Who reviews a student's work in this application. The quality team tracks
-// programme activities in a separate system, so inside this workspace the
-// coordinator is the reviewer, covered by the supervisor above them.
+// Gig evidence is reviewed inside the operations chain, coach then
+// coordinator, with the supervisor above them able to cover.
 const reviewers = [...ops, "Team Supervisor"];
+// Published student services are reviewed by the quality team: a member holds
+// the student, and the team leader hands the work out.
+const quality = ["Quality Member", "Quality Lead"];
 const admin = ["Operations Systems / Admin"];
 
 function programDay(value: string) {
@@ -1932,14 +1934,11 @@ export async function POST(req: Request) {
       case "policy_check": {
         return Response.json({ ok: true, summary: await policyChecks(u, key) });
       }
-      // The gig phase is reviewed by the people who run the student's group:
-      // the coordinator owns it, with the supervisor and Project Operations
-      // able to cover. `student()` below applies the same scope rule as the
-      // rest of the workspace, so a coordinator cannot reach another team's
-      // students. Quality no longer reviews service links; their activity
-      // review lives outside this application.
+      // One student's three services are one piece of work, held by one
+      // quality reviewer. They decide each link on its own; the team leader can
+      // decide any of them, because the queue is theirs to balance.
       case "service_qc_review": {
-        permit(u, reviewers);
+        permit(u, quality);
         const link: any = await stmt(
           "SELECT * FROM service_links WHERE id=?",
           x.service_id || id,
@@ -1959,6 +1958,10 @@ export async function POST(req: Request) {
         // cannot be locked by anyone: the student corrects it and submits
         // again. There is no override.
         ensure(link.qc_status !== "Locked", "This service link is already locked. The student submits a new link instead.");
+        ensure(
+          !link.qc_actor || link.qc_actor === u.id || can(u.roles, ["Quality Lead"]),
+          "This student is assigned to another reviewer.",
+        );
         ensure(
           link.auto_status !== "Failed" || x.decision === "Needs Correction",
           "The automatic check failed for this link, so it can only be returned for correction.",
@@ -2027,20 +2030,57 @@ export async function POST(req: Request) {
       }
       // A lead hands out the open quality work, evenly. Passing a reviewer
       // assigns just that item; passing none distributes the whole queue.
+      case "service_qc_assign":
       case "evidence_qc_assign": {
         permit(u, ["Quality Lead"]);
-        const table = "evidence";
-        const openFilter = "status IN ('Quality','Coach','L1')";
+        const services = x.action === "service_qc_assign";
+        const table = services ? "service_links" : "evidence";
+        const openFilter = services ? "qc_status<>'Locked'" : "status IN ('Quality','Coach','L1')";
+        // The team leader does not carry a share of the reviewing, so the pool
+        // for service work is the members. Gig evidence keeps its wider pool.
         const reviewers = (await (await stmt(
-          "SELECT id FROM users WHERE active=1 AND (roles LIKE '%Quality Member%' OR roles LIKE '%Quality Lead%') ORDER BY id",
+          services
+            ? "SELECT id FROM users WHERE active=1 AND roles LIKE '%Quality Member%' AND roles NOT LIKE '%Quality Lead%' ORDER BY id"
+            : "SELECT id FROM users WHERE active=1 AND (roles LIKE '%Quality Member%' OR roles LIKE '%Quality Lead%') ORDER BY id",
         ).all()).results) as any[];
         ensure(reviewers.length, "Add an active Quality Member before assigning reviews.");
         if (x.reviewer_id) {
           ensure(reviewers.some((r) => r.id === x.reviewer_id), "Choose an active Quality reviewer.");
+          // Moving a student moves everything of theirs that is still open, so
+          // their three services never end up split between two reviewers.
+          if (services && x.student_id) {
+            const student: any = await stmt(
+              "SELECT student_id, count(*) n FROM service_links WHERE student_id=? AND qc_status<>'Locked' GROUP BY student_id",
+              x.student_id,
+            ).first();
+            ensure(student, "That student has no open services to assign.");
+            auditValue = { student_id: x.student_id, assigned_to: x.reviewer_id, links: Number(student.n), mode: "manual" };
+            jobs.push(
+              stmt(
+                "UPDATE service_links SET qc_actor=?,updated_at=? WHERE student_id=? AND qc_status<>'Locked'",
+                x.reviewer_id,
+                t,
+                x.student_id,
+              ),
+            );
+            break;
+          }
           const item: any = await stmt(`SELECT * FROM ${table} WHERE id=?`, x.item_id || id).first();
           ensure(item, "That review item was not found.");
           auditPrevious = item;
           auditValue = { item_id: item.id, assigned_to: x.reviewer_id, mode: "manual" };
+          if (services) {
+            auditValue = { student_id: item.student_id, assigned_to: x.reviewer_id, mode: "manual" };
+            jobs.push(
+              stmt(
+                "UPDATE service_links SET qc_actor=?,updated_at=? WHERE student_id=? AND qc_status<>'Locked'",
+                x.reviewer_id,
+                t,
+                item.student_id,
+              ),
+            );
+            break;
+          }
           jobs.push(stmt(`UPDATE ${table} SET qc_actor=? WHERE id=?`, x.reviewer_id, item.id));
           break;
         }
@@ -2048,22 +2088,37 @@ export async function POST(req: Request) {
           reviewers.map(async (r) => ({
             id: r.id,
             open: Number(
-              ((await stmt(`SELECT count(*) n FROM ${table} WHERE qc_actor=? AND ${openFilter}`, r.id).first()) as any)?.n || 0,
+              ((await stmt(
+                services
+                  ? `SELECT count(DISTINCT student_id) n FROM ${table} WHERE qc_actor=? AND ${openFilter}`
+                  : `SELECT count(*) n FROM ${table} WHERE qc_actor=? AND ${openFilter}`,
+                r.id,
+              ).first()) as any)?.n || 0,
             ),
           })),
         );
         const pending = (await (await stmt(
-          `SELECT id FROM ${table} WHERE qc_actor IS NULL AND ${openFilter} ORDER BY id`,
+          services
+            ? `SELECT DISTINCT student_id id FROM ${table} WHERE qc_actor IS NULL AND ${openFilter} ORDER BY student_id`
+            : `SELECT id FROM ${table} WHERE qc_actor IS NULL AND ${openFilter} ORDER BY id`,
         ).all()).results) as any[];
-        ensure(pending.length, "Every open review already has a reviewer.");
+        ensure(pending.length, services ? "Every student waiting for review already has a reviewer." : "Every open review already has a reviewer.");
         const allocations = distributeEvenly(pending.map((r) => String(r.id)), load);
         for (const allocation of allocations) {
           jobs.push(
-            stmt(`UPDATE ${table} SET qc_actor=? WHERE id=? AND qc_actor IS NULL`, allocation.reviewerId, allocation.itemId),
+            services
+              ? stmt(
+                  `UPDATE ${table} SET qc_actor=?,updated_at=? WHERE student_id=? AND qc_actor IS NULL AND ${openFilter}`,
+                  allocation.reviewerId,
+                  t,
+                  allocation.itemId,
+                )
+              : stmt(`UPDATE ${table} SET qc_actor=? WHERE id=? AND qc_actor IS NULL`, allocation.reviewerId, allocation.itemId),
           );
         }
         auditValue = {
           assigned: allocations.length,
+          unit: services ? "students" : "items",
           reviewers: load.length,
           spread: spread(load, allocations),
           mode: "even",

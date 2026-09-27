@@ -337,7 +337,7 @@ export default function Operations({ module: initialModule }: { module: string }
     [importRows, setImportRows] = useState<Row[]>([]),
     [preview, setPreview] = useState<Row | null>(null),
     [importId, setImportId] = useState(""),
-    [serviceFilters, setServiceFilters] = useState<Row>({ platform: "All", track: "All", group: "All", coordinator: "All", age: "All", automatic: "All", corrections: "All" }),
+    [serviceFilters, setServiceFilters] = useState<Row>({ platform: "All", track: "All", group: "All", coordinator: "All", reviewer: "All", age: "All", automatic: "All", corrections: "All" }),
     [submissionFilters, setSubmissionFilters] = useState<Row>({ state: "All", track: "All", group: "All", coordinator: "All" }),
     [saved, setSaved] = useState<string[]>([]);
   async function refresh() {
@@ -400,43 +400,59 @@ export default function Operations({ module: initialModule }: { module: string }
     students.find((s) => s.id === id)?.name || id || "—";
   const owner = (id: string) =>
     staff.find((s: Row) => s.id === id)?.name || "Unassigned";
-  // The gig phase belongs to the people who run the student's group. Quality
-  // tracks programme activities in their own system, so they are not reviewers
-  // here; the workspace scope already limits a coordinator to their students.
-  const canReviewServiceLinks = can(user.roles, [
+  // Published services are reviewed by the quality team. Everyone else with a
+  // stake — the coordinator of the group, their supervisor, Project Operations
+  // — watches the queue and the coverage without deciding on it.
+  const canSeeServiceQueue = can(user.roles, [
+    "Quality Member",
+    "Quality Lead",
     "Operations Coordinator",
     "Team Supervisor",
     "Project Operations",
     "Operations Systems / Admin",
   ]);
   const isQualityLead = can(user.roles, ["Quality Lead", "Operations Systems / Admin"]);
-  const qualityReviewers: Row[] = staff.filter((s: Row) => {
-    if (s.active === 0 || s.active === false) return false;
-    let roles: string[] = [];
-    try { roles = Array.isArray(s.roles) ? s.roles : JSON.parse(s.roles || "[]"); } catch { roles = []; }
-    return roles.includes("Quality Member") || roles.includes("Quality Lead");
-  });
-  const shownNav = nav.filter(([m]) =>
-    m === "administration"
-      ? can(user.roles, ["Operations Systems / Admin"])
-      : m === "quality"
-        ? can(user.roles, [
-            "Quality Member",
-            "Quality Lead",
-            "Project Operations",
-            "Operations Coordinator",
-            "Team Supervisor",
-            "Higher Board",
-          ])
-        : m === "accounts"
-          ? can(user.roles, [
-              "Higher Board",
-              "Project Operations",
-              "Operations Coordinator",
-              "Operations Systems / Admin",
-            ])
-          : true,
+  const canDecideServiceLinks = can(user.roles, ["Quality Member", "Quality Lead", "Operations Systems / Admin"]);
+  const heldRoles = (s: Row) => {
+    try { return (Array.isArray(s.roles) ? s.roles : JSON.parse(s.roles || "[]")) as string[]; } catch { return []; }
+  };
+  // The reviewing team: the leader hands the work out and carries none of it,
+  // so they are not in the pool a student can be assigned to.
+  const qualityReviewers: Row[] = staff.filter(
+    (s: Row) =>
+      !(s.active === 0 || s.active === false) &&
+      heldRoles(s).includes("Quality Member") &&
+      !heldRoles(s).includes("Quality Lead"),
   );
+  // The quality team is here to review published services and nothing else, so
+  // that is the whole of their workspace. Anyone who also holds an operations
+  // role keeps the rest of it.
+  const qualityOnly =
+    heldRoles(user).length > 0 &&
+    heldRoles(user).every((role) => role === "Quality Member" || role === "Quality Lead");
+  const shownNav = nav.filter(([m]) =>
+    qualityOnly
+      ? m === "quality"
+      : m === "administration"
+        ? can(user.roles, ["Operations Systems / Admin"])
+        : m === "quality"
+          ? canSeeServiceQueue || can(user.roles, ["Higher Board"])
+          : m === "accounts"
+            ? can(user.roles, [
+                "Higher Board",
+                "Project Operations",
+                "Operations Coordinator",
+                "Operations Systems / Admin",
+              ])
+            : true,
+  );
+  // A module nobody showed them is not a module they can open by typing its
+  // address either.
+  const allowedModules = shownNav.map(([m]) => String(m));
+  useEffect(() => {
+    if (allowedModules.length && !allowedModules.includes(module)) goTo(allowedModules[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [module, allowedModules.join(",")]);
   function open(action: string, row: Row = {}) {
     setModal({ action, ...row });
     setForm({
@@ -1604,6 +1620,13 @@ export default function Operations({ module: initialModule }: { module: string }
       .filter((r) => serviceFilters.track === "All" || r.track === serviceFilters.track)
       .filter((r) => serviceFilters.group === "All" || r.group_id === serviceFilters.group)
       .filter((r) => serviceFilters.coordinator === "All" || r.coordinator === serviceFilters.coordinator)
+      .filter((r) =>
+        serviceFilters.reviewer === "All"
+          ? true
+          : serviceFilters.reviewer === "None"
+            ? !r.qc_actor
+            : r.qc_actor === serviceFilters.reviewer,
+      )
       .filter((r) => serviceFilters.automatic === "All" || r.auto_status === serviceFilters.automatic)
       .filter((r) => serviceFilters.corrections === "All" || (serviceFilters.corrections === "Repeated" ? Number(r.correction_count) > 1 : Number(r.correction_count) === Number(serviceFilters.corrections)))
       .filter((r) => serviceFilters.age === "All" || Date.now() - Date.parse(r.updated_at) >= Number(serviceFilters.age) * 3600000);
@@ -1621,6 +1644,15 @@ export default function Operations({ module: initialModule }: { module: string }
         String(a.student_id).localeCompare(String(b.student_id)) ||
         Number(a.slot) - Number(b.slot),
     );
+    const reviewerStudents = new Map<string, number>();
+    for (const [actor, students] of Object.entries(
+      serviceLinks.reduce((out: Record<string, Set<string>>, link: Row) => {
+        if (!link.qc_actor || link.qc_status === "Locked") return out;
+        (out[link.qc_actor] ||= new Set()).add(link.student_id);
+        return out;
+      }, {}),
+    ))
+      reviewerStudents.set(actor, (students as Set<string>).size);
     const reviewerWorkload = Object.entries(serviceLinkReviews.reduce((out: Row, review: Row) => {
       const key = review.reviewer_name || owner(review.reviewed_by);
       out[key] = (out[key] || 0) + 1;
@@ -1685,7 +1717,7 @@ export default function Operations({ module: initialModule }: { module: string }
       <>
         {module === "quality" && (
           <>
-            {canReviewServiceLinks && (
+            {canSeeServiceQueue && (
             <>
             <div className="mini-stats service-qc-stats">
               <span><strong>{serviceLinks.filter((r) => r.qc_status === "Pending").length}</strong>Awaiting review</span>
@@ -1697,6 +1729,19 @@ export default function Operations({ module: initialModule }: { module: string }
               <Pick label="Platform" value={serviceFilters.platform} onChange={(platform) => setServiceFilters({ ...serviceFilters, platform })} options={["All", ...acceptedServicePlatforms]} />
               <Pick label="Track" value={serviceFilters.track} onChange={(track) => setServiceFilters({ ...serviceFilters, track })} options={["All", ...Array.from(new Set(serviceLinks.map((r) => r.track).filter(Boolean)))]} />
               <Pick label="Group" value={serviceFilters.group} onChange={(group) => setServiceFilters({ ...serviceFilters, group })} options={["All", ...Array.from(new Set(serviceLinks.map((r) => r.group_id).filter(Boolean)))]} />
+              {canDecideServiceLinks && (
+                <Pick
+                  label="Assigned to"
+                  value={serviceFilters.reviewer}
+                  onChange={(reviewer) => setServiceFilters({ ...serviceFilters, reviewer })}
+                  options={[
+                    { value: "All", label: "Anyone" },
+                    { value: user.id, label: "Me" },
+                    { value: "None", label: "Waiting for a reviewer" },
+                    ...qualityReviewers.filter((q) => q.id !== user.id).map((q) => ({ value: q.id, label: q.name })),
+                  ]}
+                />
+              )}
               <Pick label="Coordinator" value={serviceFilters.coordinator} onChange={(coordinator) => setServiceFilters({ ...serviceFilters, coordinator })} options={[{ value: "All", label: "All coordinators" }, ...Array.from(new Set(serviceLinks.map((r) => r.coordinator).filter(Boolean))).map((id) => ({ value: id, label: owner(id) }))]} />
               <Pick label="Submission age" value={serviceFilters.age} onChange={(age) => setServiceFilters({ ...serviceFilters, age })} options={[{ value: "All", label: "Any age" }, { value: "24", label: "24+ hours" }, { value: "48", label: "48+ hours" }, { value: "168", label: "7+ days" }]} />
               <Pick label="Automatic check" value={serviceFilters.automatic} onChange={(automatic) => setServiceFilters({ ...serviceFilters, automatic })} options={["All", "Needs Review", "Failed"]} />
@@ -1704,11 +1749,15 @@ export default function Operations({ module: initialModule }: { module: string }
             </div>
             {isQualityLead && (
               <div className="detail-actions qc-lead-actions">
+                <button className="small-btn" disabled={busy} onClick={() => quick("service_qc_assign", {})}>
+                  <Users size={15} /> Distribute waiting students evenly
+                </button>
                 <button className="small-btn" disabled={busy} onClick={() => quick("evidence_qc_assign", {})}>
                   <Files size={15} /> Distribute gig evidence evenly
                 </button>
                 <small className="qc-lead-note">
-                  Unassigned open gig evidence goes to whoever currently holds the least. Reviewers: {qualityReviewers.map((r) => r.name).join(", ") || "none active"}. Service links are not distributed: each one belongs to the coordinator of the student&apos;s group.
+                  A student&apos;s three services stay together with one reviewer, and a student waiting for review
+                  goes to whoever currently holds the fewest. Reviewers: {qualityReviewers.map((r) => `${r.name} (${reviewerStudents.get(r.id) || 0})`).join(", ") || "none active"}.
                 </small>
               </div>
             )}
@@ -1721,10 +1770,15 @@ export default function Operations({ module: initialModule }: { module: string }
                   { key: "slot", label: "Slot", render: (r) => `Service ${r.slot}` },
                   { key: "url", label: "Link", render: (r) => <a className="text-link" href={r.url} target="_blank" rel="noreferrer">{r.platform} <ExternalLink size={14} /></a> },
                   { key: "auto_status", label: "Automatic check", render: (r) => <Badge value={r.auto_status} /> },
-                  { key: "coordinator", label: "Coordinator", render: (r) => <span>{owner(r.coordinator)}<small className="table-subline">{r.reviewer_name ? `reviewed by ${r.reviewer_name}` : "not reviewed yet"}</small></span> },
+                  { key: "reviewer_name", label: "Reviewer", render: (r) => isQualityLead && r.qc_status !== "Locked"
+                      ? <select className="pick-inline" aria-label="Assign this student to a reviewer" value={r.qc_actor || ""} disabled={busy} onChange={(e) => e.target.value && quick("service_qc_assign", { student_id: r.student_id, reviewer_id: e.target.value })}>
+                          <option value="">Waiting for a reviewer</option>
+                          {qualityReviewers.map((q) => <option key={q.id} value={q.id}>{q.name} ({reviewerStudents.get(q.id) || 0})</option>)}
+                        </select>
+                      : <span>{owner(r.qc_actor) === "Unassigned" ? "Waiting for a reviewer" : owner(r.qc_actor)}<small className="table-subline">{owner(r.coordinator)}</small></span> },
                   { key: "qc_status", label: "Review state", render: (r) => <span><Badge value={r.qc_status} /><small className="table-subline">{Math.round((Date.now() - Date.parse(r.updated_at)) / 3600000)}h · revision {r.revision}</small></span> },
                 ],
-                (r) => <div className="detail-actions"><button className="small-btn" onClick={() => open("service_qc_review", { ...r, service_id: r.id, student_id: r.student_id, decision: r.qc_status === "Needs Correction" ? "Lock" : "" })}>Review</button></div>,
+                (r) => <div className="detail-actions">{canDecideServiceLinks && (!r.qc_actor || r.qc_actor === user.id || isQualityLead) && <button className="small-btn" onClick={() => open("service_qc_review", { ...r, service_id: r.id, student_id: r.student_id, decision: r.qc_status === "Needs Correction" ? "Lock" : "" })}>Review</button>}</div>,
               )),
             )}
             {panel("Reviewer activity", reviewerWorkload.length ? <div className="mini-stats">{reviewerWorkload.map(([reviewer, count]: any) => <span key={reviewer}><strong>{count}</strong>{reviewer}</span>)}</div> : <Empty title="No service-link reviews yet" />)}
