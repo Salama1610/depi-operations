@@ -255,7 +255,7 @@ export async function POST(req: Request) {
     let auditPrevious: any = null;
     // Set by the staff action: the person who should be able to sign in once
     // the record is written.
-    let signIn: { email: string; nationalId: string; name: string } | null = null;
+    let signIn: { email: string; nationalId: string; name: string; active: boolean } | null = null;
     let auditValue: any = { ...x };
     delete auditValue.request_id;
     switch (x.action) {
@@ -1915,7 +1915,7 @@ export async function POST(req: Request) {
         // Recorded on the audit entry so an administrator can see whether the
         // person can sign in yet, or is only listed.
         auditValue = { ...auditValue, national_id: nationalId ? "recorded" : "missing", phone: phone ? "recorded" : "missing" };
-        signIn = active === 1 ? { email, nationalId: nationalId || String(old?.national_id || ""), name: String(x.name) } : null;
+        signIn = { email, nationalId: nationalId || String(old?.national_id || ""), name: String(x.name), active: active === 1 };
         break;
       }
       case "policy": {
@@ -2366,9 +2366,10 @@ export async function POST(req: Request) {
     // access change itself has already succeeded.
     if (signIn) {
       try {
-        const outcome = await provisionStaffLogin(signIn.email, signIn.nationalId, signIn.name);
-        if (outcome === "created") return Response.json({ ok: true, sign_in: "created" });
-        if (outcome === "skipped" && !signIn.nationalId)
+        const outcome = await provisionStaffLogin(signIn.email, signIn.nationalId, signIn.name, signIn.active);
+        if (outcome === "created" || outcome === "suspended" || outcome === "restored")
+          return Response.json({ ok: true, sign_in: outcome });
+        if (outcome === "skipped" && signIn.active && !signIn.nationalId)
           return Response.json({
             ok: true,
             sign_in: "no_national_id",
