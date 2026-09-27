@@ -1,5 +1,4 @@
 import { getSupabaseUser } from "./supabase/server";
-import { getSupabaseAdminClient } from "./supabase/admin";
 import { env } from "./env";
 import { database } from "./data/database";
 import { objectStore } from "./data/storage";
@@ -110,6 +109,28 @@ export async function currentStudent() {
 const SUSPENDED = "876000h";
 
 /**
+ * The identity service, spoken to directly.
+ *
+ * The client library can only page through accounts, and this workspace has
+ * thousands of them — every student has one — so a member of staff could sit
+ * beyond the first page and be mistaken for somebody with no sign-in at all.
+ * The admin endpoint can be asked about one address instead, which is both
+ * exact and cheap.
+ */
+async function authAdmin(path: string, init?: RequestInit) {
+  const url = env.SUPABASE_URL?.trim();
+  const key = env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  if (!url || !key) throw new Error("Supabase is not configured for identity changes.");
+  const response = await fetch(`${url}/auth/v1/admin/${path}`, {
+    ...init,
+    headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+  });
+  const body = await response.text();
+  if (!response.ok) throw new Error(`Identity service refused the change (${response.status}): ${body.slice(0, 200)}`);
+  return body ? JSON.parse(body) : {};
+}
+
+/**
  * Keeps a member of staff's way in matching their access.
  *
  * A new person gets one the way students do: their email address with their
@@ -126,25 +147,23 @@ export async function provisionStaffLogin(email: string, nationalId: string, nam
   // Without Supabase there is nothing to provision: tests and local previews
   // run on the injected bindings, and sign-in is not part of them.
   if (!env.SUPABASE_URL?.trim() || !env.SUPABASE_SERVICE_ROLE_KEY?.trim()) return "skipped";
-  const admin = getSupabaseAdminClient();
-  const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 200 });
-  if (error) throw new Error("Could not check existing sign-in accounts: " + error.message);
-  const existing = (data?.users || []).find((user: any) => String(user.email || "").toLowerCase() === address);
+  // The filter is a text search, so the exact address still has to be picked out.
+  const found = await authAdmin(`users?per_page=20&filter=${encodeURIComponent(address)}`);
+  const existing = (found?.users || []).find((user: any) => String(user.email || "").toLowerCase() === address);
   if (!existing) {
     if (!active || !/^\d{14}$/.test(secret)) return "skipped";
-    const created = await admin.auth.admin.createUser({
-      email: address,
-      password: secret,
-      email_confirm: true,
-      user_metadata: { full_name: name },
+    await authAdmin("users", {
+      method: "POST",
+      body: JSON.stringify({ email: address, password: secret, email_confirm: true, user_metadata: { full_name: name } }),
     });
-    if (created.error) throw new Error("Could not create the sign-in account: " + created.error.message);
     return "created";
   }
   const suspended = Boolean(existing.banned_until && new Date(existing.banned_until).getTime() > Date.now());
   if (suspended === active) {
-    const changed = await admin.auth.admin.updateUserById(existing.id, { ban_duration: active ? "none" : SUSPENDED });
-    if (changed.error) throw new Error("Could not change the sign-in account: " + changed.error.message);
+    await authAdmin(`users/${existing.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ ban_duration: active ? "none" : SUSPENDED }),
+    });
     return active ? "restored" : "suspended";
   }
   return active ? "existing" : "suspended";
