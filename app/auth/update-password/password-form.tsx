@@ -1,9 +1,11 @@
 "use client";
+import { LanguageToggle, useT } from "@/lib/i18n/context";
 
 import { FormEvent, useState } from "react";
 import { ArrowRight, LockKeyhole } from "lucide-react";
 
 export default function PasswordForm() {
+  const t = useT();
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [busy, setBusy] = useState(false);
@@ -11,13 +13,13 @@ export default function PasswordForm() {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (password !== confirmation) return setError("Passwords do not match.");
+    if (password !== confirmation) return setError(t("Passwords do not match."));
     setBusy(true);
     setError("");
     const response = await fetch("/api/auth/update-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
     const value = await response.json();
     if (!response.ok || value.error) {
-      setError(value.error || "Unable to update your password.");
+      setError(value.error || t("Unable to update your password."));
       setBusy(false);
       return;
     }
@@ -31,13 +33,14 @@ export default function PasswordForm() {
           <a className="auth-brand auth-brand-dark" href="/login">
           {/* eslint-disable-next-line @next/next/no-img-element -- a static local logo; the Worker build does not run the image optimizer */}
           <img className="brand-mark-img" src="/brand/mark.png" alt="" width={38} height={38} />
-          <span><strong>DEPI</strong><small>Round 5 operations</small></span></a>
-          <div className="auth-form-heading"><span className="auth-icon"><LockKeyhole size={22} /></span><h2>Choose a new password</h2><p>Use at least eight characters. A longer, unique password is safer.</p></div>
+          <span><strong>{t("DEPI")}</strong><small>{t("Round 5 operations")}</small></span></a>
+          <LanguageToggle className="auth-lang auth-lang-dark" />
+          <div className="auth-form-heading"><span className="auth-icon"><LockKeyhole size={22} /></span><h2>{t("Choose a new password")}</h2><p>{t("Use at least eight characters. A longer, unique password is safer.")}</p></div>
           <form className="auth-form" onSubmit={submit}>
-            <label><span>New password</span><div className="auth-input"><LockKeyhole size={18} /><input type="password" autoComplete="new-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} /></div></label>
-            <label><span>Confirm password</span><div className="auth-input"><LockKeyhole size={18} /><input type="password" autoComplete="new-password" minLength={8} required value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></div></label>
+            <label><span>{t("New password")}</span><div className="auth-input"><LockKeyhole size={18} /><input type="password" autoComplete="new-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} /></div></label>
+            <label><span>{t("Confirm password")}</span><div className="auth-input"><LockKeyhole size={18} /><input type="password" autoComplete="new-password" minLength={8} required value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></div></label>
             {error && <div className="auth-error" role="alert">{error}</div>}
-            <button className="auth-submit" disabled={busy}>{busy ? "Updating…" : "Update password"}<ArrowRight size={18} /></button>
+            <button className="auth-submit" disabled={busy}>{busy ? t("Updating…") : t("Update password")}<ArrowRight size={18} /></button>
           </form>
         </div>
       </section>

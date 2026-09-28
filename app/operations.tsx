@@ -1,4 +1,5 @@
 "use client";
+import { LanguageToggle, useDir, useLocale, useT } from "@/lib/i18n/context";
 import {
   ControlCenter,
   ReportsPanel,
@@ -182,13 +183,11 @@ const actionCopy: Row = {
   service_qc_review:
     "One link at a time. Lock a correct link, or leave a clear correction comment for the student.",
 };
-const fmt = (v: string) =>
-  v
-    ? new Date(v).toLocaleDateString("en-GB", {
-        day: "numeric",
-        month: "short",
-      })
-    : "Not recorded";
+const formatDay = (v: string, locale = "en-GB") =>
+  new Date(v).toLocaleDateString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", {
+    day: "numeric",
+    month: "short",
+  });
 const today = () => new Date().toISOString().slice(0, 10);
 const programDay = (value: Date = new Date()) => {
   const parts = new Intl.DateTimeFormat("en", {
@@ -212,6 +211,7 @@ const weeklyGateChecks = [
   "Supervisor exception review complete",
 ];
 function Badge({ value }: { value: any }) {
+  const t = useT();
   return (
     <span
       className={
@@ -225,7 +225,7 @@ function Badge({ value }: { value: any }) {
               : "neutral")
       }
     >
-      {value}
+      {typeof value === "string" ? t(value) : value}
     </span>
   );
 }
@@ -240,6 +240,7 @@ function Pick({
   options: (string | { value: string; label: string })[];
   label: string;
 }) {
+  const t = useT();
   // The name of the filter is always visible. With only the chosen value
   // shown, a row of filters all read "All" and nobody could tell which was
   // which.
@@ -255,7 +256,7 @@ function Pick({
             const a = typeof o === "string" ? { value: o, label: o } : o;
             return (
               <SelectItem key={a.value} value={a.value}>
-                {a.label}
+                {t(a.label)}
               </SelectItem>
             );
           })}
@@ -268,11 +269,12 @@ function Empty({
   title = "Nothing waiting here",
   text = "Records will appear as your team progresses through the workflow.",
 }) {
+  const t = useT();
   return (
     <div className="empty">
       <CheckCircle2 size={30} />
-      <h3>{title}</h3>
-      <p>{text}</p>
+      <h3>{t(title)}</h3>
+      <p>{t(text)}</p>
     </div>
   );
 }
@@ -293,6 +295,10 @@ function moduleFromPath(pathname: string) {
 const updatableModules = ["students", "groups", "accounts"];
 
 export default function Operations({ module: initialModule }: { module: string }) {
+  const t = useT();
+  const locale = useLocale();
+  const dir = useDir();
+  const fmt = (v: string) => (v ? formatDay(v, locale) : t("Not recorded"));
   // Which module is showing is client state, not a route. The sidebar used to
   // be plain links, so every click reloaded the page and re-fetched the whole
   // workspace. Now a click changes the address bar and this state; the data
@@ -500,7 +506,7 @@ export default function Operations({ module: initialModule }: { module: string }
       for (const k of ["due", "occurred_at", "starts_at"])
         if (f[k]) f[k] = new Date(f[k]).toISOString();
       await mutate(modal!.action, f);
-      toast.success("Saved to the activity history");
+      toast.success(t("Saved to the activity history"));
       setModal(null);
       await refresh();
     } catch (e: any) {
@@ -515,10 +521,12 @@ export default function Operations({ module: initialModule }: { module: string }
       const result = await mutate(action, row);
       toast.success(
         action === "policy_check"
-          ? `${result.summary.processed} policy actions processed${result.summary.remaining ? " · Run again for " + result.summary.remaining + " remaining" : ""}`
+          ? result.summary.remaining
+            ? t("{v0} policy actions processed · Run again for {v1} remaining", { v0: result.summary.processed, v1: result.summary.remaining })
+            : t("{v0} policy actions processed", { v0: result.summary.processed })
           : action === "load_demo_data"
-            ? `Synthetic pilot loaded · ${result.summary.students} students across ${result.summary.groups} groups`
-          : "Updated",
+            ? t("Synthetic pilot loaded · {v0} students across {v1} groups", { v0: result.summary.students, v1: result.summary.groups })
+          : t("Updated"),
       );
       await refresh();
     } catch (e: any) {
@@ -532,7 +540,7 @@ export default function Operations({ module: initialModule }: { module: string }
     setFormError("");
     try {
       if (!form.student_id)
-        throw Error("Choose the student before uploading proof.");
+        throw Error(t("Choose the student before uploading proof."));
       const f = new FormData();
       f.append("file", file);
       f.append("student_id", form.student_id);
@@ -570,7 +578,7 @@ export default function Operations({ module: initialModule }: { module: string }
         [target]: x.id,
         [`${target}_name`]: x.name,
       }));
-      toast.success("Screenshot uploaded securely");
+      toast.success(t("Screenshot uploaded securely"));
     } catch (e: any) {
       setFormError(e.message);
     } finally {
@@ -580,7 +588,7 @@ export default function Operations({ module: initialModule }: { module: string }
   function field(key: string, label: string, type = "text", required = true) {
     return (
       <label className="field" key={key}>
-        {label}
+        {t(label)}
         <input
           type={type}
           value={form[key] ?? ""}
@@ -593,10 +601,10 @@ export default function Operations({ module: initialModule }: { module: string }
   function choice(key: string, label: string, opts: any[], required = true) {
     return (
       <label className="field" key={key}>
-        {label}
+        {t(label)}
         {required ? " *" : ""}
         <Pick
-          label={label}
+          label={t(label)}
           value={form[key] || ""}
           onChange={(v) => setForm({ ...form, [key]: v })}
           options={opts}
@@ -607,7 +615,7 @@ export default function Operations({ module: initialModule }: { module: string }
   const studentPick = () =>
     choice(
       "student_id",
-      "Student",
+      t("Student"),
       students.map((s) => ({ value: s.id, label: s.name + " · " + s.id })),
     );
   const staffPick = (key = "owner", label = "Action owner") =>
@@ -618,14 +626,14 @@ export default function Operations({ module: initialModule }: { module: string }
     );
   const proofField = (key = "proof_id", label = "Screenshot proof") => (
     <div className="proof-field">
-      <label className="field">{label} *</label>
+      <label className="field">{t(label)} *</label>
       {form.student_id &&
         (d.attachments || []).filter(
           (a: Row) => a.student_id === form.student_id,
         ).length > 0 &&
         choice(
           key,
-          `Existing ${label.toLowerCase()}`,
+          t("Existing {v0}", { v0: label.toLowerCase() }),
           (d.attachments || [])
             .filter((a: Row) => a.student_id === form.student_id)
             .map((a: Row) => ({ value: a.id, label: a.name })),
@@ -633,9 +641,9 @@ export default function Operations({ module: initialModule }: { module: string }
       <label className="upload">
         <Upload size={22} />
         <strong>
-          {form[`${key}_name`] || `Upload ${label.toLowerCase()}`}
+          {form[`${key}_name`] || t("Upload {v0}", { v0: label.toLowerCase() })}
         </strong>
-        <span>PNG or JPEG · up to 8 MB</span>
+        <span>{t("PNG or JPEG · up to 8 MB")}</span>
         <input
           type="file"
           accept="image/png,image/jpeg"
@@ -647,7 +655,7 @@ export default function Operations({ module: initialModule }: { module: string }
       </label>
       {form[key] && (
         <span className="proof-ready">
-          <CheckCircle2 size={15} /> Screenshot linked to this student
+          <CheckCircle2 size={15} /> {t("Screenshot linked to this student")}
         </span>
       )}
     </div>
@@ -699,10 +707,10 @@ export default function Operations({ module: initialModule }: { module: string }
               </small>
             </span>
             <span className="student-next">
-              <span>{s.next_task?.title || "No next action"}</span>
+              <span>{s.next_task?.title || t("No next action")}</span>
               <small>
                 {s.coordinator_name} ·{" "}
-                {s.next_task ? fmt(s.next_task.due) : "Assign an action"}
+                {s.next_task ? fmt(s.next_task.due) : t("Assign an action")}
               </small>
             </span>
             <Badge value={s.risk.status} />
@@ -715,50 +723,50 @@ export default function Operations({ module: initialModule }: { module: string }
   function taskRows(rows: Row[]) {
     return rows.length ? (
       <div className="task-list">
-        {rows.map((t) => (
-          <article className="task-row" key={t.id}>
+        {rows.map((task) => (
+          <article className="task-row" key={task.id}>
             <button
               className="complete"
-              aria-label={"Complete " + t.title}
+              aria-label={"Complete " + task.title}
               disabled={busy}
-              onClick={() => quick("complete_task", { id: t.id })}
+              onClick={() => quick("complete_task", { id: task.id })}
             >
               <CheckCheck size={17} />
             </button>
             <div className="task-main">
-              <strong>{t.title}</strong>
+              <strong>{task.title}</strong>
               <button
                 className="text-link muted"
                 onClick={() =>
                   setSelected(
-                    students.find((s) => s.id === t.student_id) || null,
+                    students.find((s) => s.id === task.student_id) || null,
                   )
                 }
               >
-                {name(t.student_id)} <span>· {t.category}</span>
+                {name(task.student_id)} <span>· {task.category}</span>
               </button>
             </div>
-            <span className="task-owner">{owner(t.owner)}</span>
+            <span className="task-owner">{owner(task.owner)}</span>
             <span
-              className={t.due < new Date().toISOString() ? "due late" : "due"}
+              className={task.due < new Date().toISOString() ? "due late" : "due"}
             >
               <Clock3 size={14} />
-              {fmt(t.due)}
+              {fmt(task.due)}
             </span>
-            {t.category === "Contact" ? (
+            {task.category === "Contact" ? (
               <button
                 className="small-btn"
-                onClick={() => open("contact", { student_id: t.student_id })}
+                onClick={() => open("contact", { student_id: task.student_id })}
               >
-                Log contact
+                {t("Log contact")}
               </button>
             ) : (
               <button
                 className="icon-btn"
-                aria-label="Open student"
+                aria-label={t("Open student")}
                 onClick={() =>
                   setSelected(
-                    students.find((s) => s.id === t.student_id) || null,
+                    students.find((s) => s.id === task.student_id) || null,
                   )
                 }
               >
@@ -776,7 +784,7 @@ export default function Operations({ module: initialModule }: { module: string }
     return (
       <section className="panel">
         <div className="panel-heading">
-          <h2>{title}</h2>
+          <h2>{t(title)}</h2>
           {extra}
         </div>
         {content}
@@ -789,20 +797,20 @@ export default function Operations({ module: initialModule }: { module: string }
         {render(rows.slice((page - 1) * 25, page * 25))}
         <div className="pagination">
           <span>
-            {rows.length
-              ? `${(page - 1) * 25 + 1}–${Math.min(page * 25, rows.length)}`
-              : "0"}{" "}
-            of {rows.length} records
+            {t("{v0} of {v1} records", {
+              v0: rows.length ? `${(page - 1) * 25 + 1}–${Math.min(page * 25, rows.length)}` : "0",
+              v1: rows.length,
+            })}
           </span>
           <div>
             <button disabled={page === 1} onClick={() => setPage(page - 1)}>
-              Previous
+              {t("Previous")}
             </button>
             <button
               disabled={page * 25 >= rows.length}
               onClick={() => setPage(page + 1)}
             >
-              Next
+              {t("Next")}
             </button>
           </div>
         </div>
@@ -819,11 +827,11 @@ export default function Operations({ module: initialModule }: { module: string }
         <TableHeader>
           <TableRow>
             {cols.map((c) => (
-              <TableHead key={c.key}>{c.label}</TableHead>
+              <TableHead key={c.key}>{t(c.label)}</TableHead>
             ))}
             {action && (
               <TableHead>
-                <span className="sr-only">Actions</span>
+                <span className="sr-only">{t("Actions")}</span>
               </TableHead>
             )}
           </TableRow>
@@ -847,7 +855,7 @@ export default function Operations({ module: initialModule }: { module: string }
   }
   const studentCol = {
     key: "student_id",
-    label: "Student",
+    label: t("Student"),
     render: (r: Row) => (
       <button
         className="table-name"
@@ -862,7 +870,7 @@ export default function Operations({ module: initialModule }: { module: string }
   };
   const statusCol = {
     key: "status",
-    label: "Status",
+    label: t("Status"),
     render: (r: Row) => <Badge value={r.status} />,
   };
   const filterOpts =
@@ -898,30 +906,30 @@ export default function Operations({ module: initialModule }: { module: string }
   if (module === "home") {
     const stats = [
       {
-        label: "Active students",
+        label: t("Active students"),
         value: students.length,
-        detail: `${groups.length} assigned groups`,
+        detail: t("{v0} assigned groups", { v0: groups.length }),
         icon: Users,
         q: "All",
       },
       {
-        label: "Contact compliance",
+        label: t("Contact compliance"),
         value: compliance + "%",
-        detail: `${noContact.length} students need contact`,
+        detail: t("{v0} students need contact", { v0: noContact.length }),
         icon: MessageSquare,
         q: "No Contact",
       },
       {
-        label: "Evidence waiting",
+        label: t("Evidence waiting"),
         value: reviews.length,
-        detail: `${rejected.length} require correction`,
+        detail: t("{v0} require correction", { v0: rejected.length }),
         icon: Files,
         q: "Evidence Blocker",
       },
       {
-        label: "Graduation progress",
+        label: t("Graduation progress"),
         value: graduates.length,
-        detail: `${students.length ? Math.round((graduates.length / students.length) * 100) : 0}% achieved · 85% target`,
+        detail: t("{v0}% achieved · 85% target", { v0: students.length ? Math.round((graduates.length / students.length) * 100) : 0 }),
         icon: GraduationCap,
         q: "All",
       },
@@ -930,12 +938,12 @@ export default function Operations({ module: initialModule }: { module: string }
       <>
         <div className="greeting">
           <div>
-            <div className="eyebrow">ROUND 5 / OPERATIONS OVERVIEW</div>
-            <h1>Keep every student moving.</h1>
-            <p>Your team’s priorities, progress and exceptions in one place.</p>
+            <div className="eyebrow">{t("ROUND 5 / OPERATIONS OVERVIEW")}</div>
+            <h1>{t("Keep every student moving.")}</h1>
+            <p>{t("Your team’s priorities, progress and exceptions in one place.")}</p>
           </div>
           <button className="primary" onClick={() => open("contact")}>
-            <Plus size={18} /> Log contact
+            <Plus size={18} /> {t("Log contact")}
           </button>
         </div>
         <div className="stats">
@@ -946,7 +954,7 @@ export default function Operations({ module: initialModule }: { module: string }
               onClick={() => routeQueue(s.q)}
             >
               <div>
-                <span>{s.label}</span>
+                <span>{t(s.label)}</span>
                 <s.icon size={19} />
               </div>
               <strong>{s.value}</strong>
@@ -959,11 +967,11 @@ export default function Operations({ module: initialModule }: { module: string }
             <section className="priorities">
               <div className="panel-heading">
                 <div>
-                  <div className="eyebrow">START HERE</div>
-                  <h2>Today needs your attention</h2>
+                  <div className="eyebrow">{t("START HERE")}</div>
+                  <h2>{t("Today needs your attention")}</h2>
                 </div>
                 <a className="text-link" href="/work">
-                  View my work <ArrowRight size={16} />
+                  {t("View my work")}{" "}<ArrowRight size={16} />
                 </a>
               </div>
               <div className="priority-grid">
@@ -971,21 +979,21 @@ export default function Operations({ module: initialModule }: { module: string }
                   {
                     q: "Overdue",
                     n: overdue.length,
-                    text: "Overdue actions",
+                    text: t("Overdue actions"),
                     icon: Clock3,
                     color: "red",
                   },
                   {
                     q: "Critical",
                     n: critical.length,
-                    text: "Critical students",
+                    text: t("Critical students"),
                     icon: AlertTriangle,
                     color: "amber",
                   },
                   {
                     q: "Due Today",
                     n: dueToday.length,
-                    text: "Due today",
+                    text: t("Due today"),
                     icon: CheckCheck,
                     color: "blue",
                   },
@@ -1004,29 +1012,29 @@ export default function Operations({ module: initialModule }: { module: string }
               </div>
             </section>
             {panel(
-              "Next actions",
+              t("Next actions"),
               taskRows([...overdue, ...dueToday].slice(0, 5)),
               <a href="/work" className="text-link">
-                View all <ChevronRight size={16} />
+                {t("View all")}{" "}<ChevronRight size={16} />
               </a>,
             )}
             {panel(
-              "Students needing intervention",
+              t("Students needing intervention"),
               studentRows(critical.slice(0, 4)),
               <span className="count">{critical.length}</span>,
             )}
           </div>
           <div className="side-column">
             <section className="journey-card">
-              <div className="eyebrow">COHORT JOURNEY</div>
-              <h2>Progress with proof.</h2>
-              <p>Only Quality-accepted gigs count toward graduation.</p>
+              <div className="eyebrow">{t("COHORT JOURNEY")}</div>
+              <h2>{t("Progress with proof.")}</h2>
+              <p>{t("Only Quality-accepted gigs count toward graduation.")}</p>
               <div className="journey-total">
                 <strong>{graduates.length}</strong>
                 <span>
-                  of {students.length} students
+                  {t("of {v0} students", { v0: students.length })}
                   <br />
-                  graduated
+                  {t("graduated")}
                 </span>
               </div>
               <Progress
@@ -1037,15 +1045,15 @@ export default function Operations({ module: initialModule }: { module: string }
                 }
               />
               <div className="target-line">
-                <span>Current progress</span>
-                <span>Target 85%</span>
+                <span>{t("Current progress")}</span>
+                <span>{t("Target 85%")}</span>
               </div>
               <div className="journey-stages">
                 {["0/3", "1/3", "2/3", "Graduated"].map((v, i) => (
                   <div key={v}>
                     <span>
                       <i className={"stage-dot dot-" + i} />
-                      {v === "Graduated" ? "Graduated" : v + " qualifying gigs"}
+                      {v === "Graduated" ? t("Graduated") : v + " qualifying gigs"}
                     </span>
                     <strong>
                       {v === "Graduated"
@@ -1056,11 +1064,11 @@ export default function Operations({ module: initialModule }: { module: string }
                 ))}
               </div>
               <a href="/reports">
-                Explore graduation report <ArrowRight size={16} />
+                {t("Explore graduation report")}{" "}<ArrowRight size={16} />
               </a>
             </section>
             {panel(
-              "Upcoming sessions",
+              t("Upcoming sessions"),
               <div className="session-mini">
                 {(d.sessions || []).slice(0, 3).map((s: Row) => (
                   <a key={s.id} href="/sessions">
@@ -1073,13 +1081,13 @@ export default function Operations({ module: initialModule }: { module: string }
                       </small>
                     </span>
                     <span>
-                      <strong>{s.group_id} · Delivery clinic</strong>
+                      <strong>{s.group_id} {t("· Delivery clinic")}</strong>
                       <small>
                         {new Date(s.starts_at).toLocaleTimeString("en", {
                           hour: "2-digit",
                           minute: "2-digit",
                         })}{" "}
-                        · Week {s.week}
+                        {t("· Week")}{" "}{s.week}
                       </small>
                     </span>
                   </a>
@@ -1089,8 +1097,8 @@ export default function Operations({ module: initialModule }: { module: string }
             <div className="policy-note">
               <ShieldCheck size={20} />
               <div>
-                <strong>Every action has a trail</strong>
-                <p>Round 5 policy v1 · Staff access only</p>
+                <strong>{t("Every action has a trail")}</strong>
+                <p>{t("Round 5 policy v1 · Staff access only")}</p>
               </div>
             </div>
           </div>
@@ -1110,7 +1118,7 @@ export default function Operations({ module: initialModule }: { module: string }
           s.risk.status === filter,
       );
     content = panel(
-      "Student directory",
+      t("Student directory"),
       paginate(rows, studentRows),
       <span className="count">{rows.length}</span>,
     );
@@ -1176,7 +1184,7 @@ export default function Operations({ module: initialModule }: { module: string }
           ))}
         </div>
         {panel(
-          filter === "All" ? "Open actions" : filter,
+          filter === "All" ? t("Open actions") : filter,
           paginate(
             rows.sort((a, b) => a.due.localeCompare(b.due)),
             taskRows,
@@ -1203,29 +1211,29 @@ export default function Operations({ module: initialModule }: { module: string }
               </small>
               <h2>{g.name}</h2>
               <p>
-                {g.pathway} pathway · {g.delivery_model || "Regular"} delivery · Week {g.week}
+                {t("{v0} pathway · {v1} delivery · Week {v2}", { v0: t(g.pathway), v1: t(g.delivery_model || "Regular"), v2: g.week })}
               </p>
               <p className="footnote">{g.trajectory_reason}</p>
               <div className="group-metrics">
                 <span>
-                  <strong>{ss.length}</strong> Students
+                  <strong>{ss.length}</strong> {t("Students")}
                 </span>
                 <span>
-                  <strong>{cc}</strong> Critical
+                  <strong>{cc}</strong> {t("Critical")}
                 </span>
                 <span>
                   <strong>
                     {ss.filter((s) => s.graduation.includes("Graduate")).length}
                   </strong>{" "}
-                  Graduated
+                  {t("Graduated")}
                 </span>
               </div>
               <div className="group-owners">
                 <span>
-                  Coordinator <strong>{g.coordinator_name}</strong>
+                  {t("Coordinator")}{" "}<strong>{g.coordinator_name}</strong>
                 </span>
                 <span>
-                  Coach <strong>{g.coach_name}</strong>
+                  {t("Coach")}{" "}<strong>{g.coach_name}</strong>
                 </span>
               </div>
               <div className="detail-actions">
@@ -1239,7 +1247,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     window.scrollTo({ top: 0 });
                   }}
                 >
-                  Open student group <ArrowRight size={16} />
+                  {t("Open student group")}{" "}<ArrowRight size={16} />
                 </button>
                 <button
                   className="small-btn"
@@ -1247,7 +1255,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     open("group_gate", { group_id: g.id, week: g.week })
                   }
                 >
-                  Weekly gate
+                  {t("Weekly gate")}
                 </button>
               </div>
             </section>
@@ -1298,23 +1306,23 @@ export default function Operations({ module: initialModule }: { module: string }
                 ).length
               }
             </strong>
-            Sessions today
+            {t("Sessions today")}
           </span>
           <span>
             <strong>
               {sessions.filter((session) => session.status === "Scheduled").length}
             </strong>
-            Unconfirmed coaches
+            {t("Unconfirmed coaches")}
           </span>
           <span>
             <strong>{missingAttendance.length}</strong>
-            Missing attendance
+            {t("Missing attendance")}
           </span>
           <span>
             <strong>
               {sessions.filter((session) => session.status === "Cancelled").length}
             </strong>
-            Cancelled sessions
+            {t("Cancelled sessions")}
           </span>
           <span>
             <strong>
@@ -1326,21 +1334,21 @@ export default function Operations({ module: initialModule }: { module: string }
                 ).length
               }
             </strong>
-            Coach evidence &gt;24h
+            {t("Coach evidence >24h")}
           </span>
           <span>
             <strong>{coverageGaps.length}</strong>
-            Coverage gaps
+            {t("Coverage gaps")}
           </span>
         </div>
         {panel(
-          "Session schedule",
+          t("Session schedule"),
           generic(
             sessionRows,
         [
           {
             key: "starts_at",
-            label: "Date & time",
+            label: t("Date & time"),
             render: (r) => (
               <>
                 <strong>{fmt(r.starts_at)}</strong>
@@ -1353,17 +1361,17 @@ export default function Operations({ module: initialModule }: { module: string }
               </>
             ),
           },
-          { key: "title", label: "Session" },
-          { key: "group_id", label: "Group" },
+          { key: "title", label: t("Session") },
+          { key: "group_id", label: t("Group") },
           {
             key: "coach_id",
-            label: "Coach",
+            label: t("Coach"),
             render: (r) => owner(r.coach_id),
           },
-          { key: "week", label: "Week" },
+          { key: "week", label: t("Week") },
           {
             key: "duration_minutes",
-            label: "Duration",
+            label: t("Duration"),
             render: (r) => `${r.duration_minutes || 180} min`,
           },
           statusCol,
@@ -1378,7 +1386,7 @@ export default function Operations({ module: initialModule }: { module: string }
                   disabled={busy}
                   onClick={() => quick("session_confirm", { id: r.id })}
                 >
-                  Confirm
+                  {t("Confirm")}
                 </button>
               )}
             {["Scheduled", "Confirmed"].includes(r.status) &&
@@ -1388,13 +1396,13 @@ export default function Operations({ module: initialModule }: { module: string }
                     className="small-btn"
                     onClick={() => open("session_reschedule", r)}
                   >
-                    Reschedule
+                    {t("Reschedule")}
                   </button>
                   <button
                     className="small-btn"
                     onClick={() => open("session_cancel", r)}
                   >
-                    Cancel
+                    {t("Cancel")}
                   </button>
                 </>
               )}
@@ -1404,7 +1412,7 @@ export default function Operations({ module: initialModule }: { module: string }
                 className="small-btn"
                 onClick={() => open("attendance", { session_id: r.id })}
               >
-                Attendance
+                {t("Attendance")}
               </button>
             )}
           </div>
@@ -1418,22 +1426,22 @@ export default function Operations({ module: initialModule }: { module: string }
       <Tabs defaultValue="pool">
         <TabsList>
           <TabsTrigger value="pool">
-            Account pool{" "}
+            {t("Account pool")}{" "}
             <span className="count">{(d.accounts || []).length}</span>
           </TabsTrigger>
           <TabsTrigger value="requests">
-            Requests <span className="count">{(d.requests || []).length}</span>
+            {t("Requests")}{" "}<span className="count">{(d.requests || []).length}</span>
           </TabsTrigger>
         </TabsList>
         <TabsContent value="pool">
           {panel(
-            "Controlled client accounts",
+            t("Controlled client accounts"),
             generic(
               (d.accounts || []).filter(qMatch),
               [
                 {
                   key: "label",
-                  label: "Account",
+                  label: t("Account"),
                   render: (r) => (
                     <>
                       <strong>{r.label}</strong>
@@ -1441,11 +1449,11 @@ export default function Operations({ module: initialModule }: { module: string }
                     </>
                   ),
                 },
-                { key: "platform", label: "Platform" },
+                { key: "platform", label: t("Platform") },
                 statusCol,
                 {
                   key: "credits",
-                  label: "Available credit",
+                  label: t("Available credit"),
                   render: (r) => "$" + r.credits,
                 },
               ],
@@ -1454,14 +1462,14 @@ export default function Operations({ module: initialModule }: { module: string }
                   className="small-btn"
                   onClick={() => open("account_status", r)}
                 >
-                  Manage
+                  {t("Manage")}
                 </button>
               ),
             ),
             <div className="detail-actions">
               {can(user.roles, ["Higher Board"]) && (
                 <button className="small-btn" onClick={() => open("account")}>
-                  Add account
+                  {t("Add account")}
                 </button>
               )}
               {can(user.roles, [
@@ -1469,7 +1477,7 @@ export default function Operations({ module: initialModule }: { module: string }
                 "Operations Systems / Admin",
               ]) && (
                 <button className="small-btn" onClick={() => open("task_bank")}>
-                  Add approved task
+                  {t("Add approved task")}
                 </button>
               )}
             </div>,
@@ -1477,17 +1485,17 @@ export default function Operations({ module: initialModule }: { module: string }
         </TabsContent>
         <TabsContent value="requests">
           {panel(
-            "Account requests",
+            t("Account requests"),
             generic(
               (d.requests || []).filter(qMatch),
               [
                 studentCol,
-                { key: "task", label: "Task" },
-                { key: "platform", label: "Platform" },
-                { key: "value", label: "Credit needed" },
+                { key: "task", label: t("Task") },
+                { key: "platform", label: t("Platform") },
+                { key: "value", label: t("Credit needed") },
                 {
                   key: "status",
-                  label: "Status",
+                  label: t("Status"),
                   render: (r) => {
                     const reservation = (d.reservations || []).find(
                       (z: Row) =>
@@ -1521,7 +1529,7 @@ export default function Operations({ module: initialModule }: { module: string }
                       })
                     }
                   >
-                    Approve allocation
+                    {t("Approve allocation")}
                   </button>
                 ) : (
                   <button
@@ -1533,7 +1541,7 @@ export default function Operations({ module: initialModule }: { module: string }
                       })
                     }
                   >
-                    Reserve account
+                    {t("Reserve account")}
                   </button>
                 );
               },
@@ -1544,16 +1552,16 @@ export default function Operations({ module: initialModule }: { module: string }
     );
   } else if (module === "gigs") {
     content = panel(
-      "Freelancing activity",
+      t("Freelancing activity"),
       generic(
         gigs.filter(qMatch),
         [
           studentCol,
-          { key: "title", label: "Gig / service" },
-          { key: "platform", label: "Platform" },
+          { key: "title", label: t("Gig / service") },
+          { key: "platform", label: t("Platform") },
           {
             key: "value",
-            label: "Value",
+            label: t("Value"),
             render: (r) => {
               const fx = (d.fxApplications || []).find(
                 (x: Row) => x.gig_id === r.id,
@@ -1562,7 +1570,7 @@ export default function Operations({ module: initialModule }: { module: string }
                 <>
                   {r.currency + " " + r.value}
                   {fx && (
-                    <small className="block">Approved USD {fx.usd_value}</small>
+                    <small className="block">{t("Approved USD")}{" "}{fx.usd_value}</small>
                   )}
                 </>
               );
@@ -1578,7 +1586,7 @@ export default function Operations({ module: initialModule }: { module: string }
                 open("gig_transition", { ...r, student_id: r.student_id })
               }
             >
-              Record activity
+              {t("Record activity")}
             </button>
             {r.currency !== "USD" &&
               can(user.roles, ["Project Operations"]) && (
@@ -1588,7 +1596,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     open("fx_apply", { gig_id: r.id, currency: r.currency })
                   }
                 >
-                  Apply FX
+                  {t("Apply FX")}
                 </button>
               )}
             {["Cancelled", "Failed"].includes(r.status) &&
@@ -1601,7 +1609,7 @@ export default function Operations({ module: initialModule }: { module: string }
                   className="small-btn"
                   onClick={() => open("refund_credit", r)}
                 >
-                  Refund credit
+                  {t("Refund credit")}
                 </button>
               )}
           </div>
@@ -1686,29 +1694,29 @@ export default function Operations({ module: initialModule }: { module: string }
     const submissionPanel = serviceSubmissionStatus.length > 0 && (
       <>
         <div className="mini-stats service-qc-stats">
-          <span><strong>{submissionCount("Not submitted")}</strong>Not submitted</span>
-          <span><strong>{submissionCount("Awaiting QC")}</strong>Awaiting QC</span>
-          <span><strong>{submissionCount("Needs student correction")}</strong>Needs student correction</span>
-          <span><strong>{submissionCount("Complete")}</strong>Complete</span>
+          <span><strong>{submissionCount("Not submitted")}</strong>{t("Not submitted")}</span>
+          <span><strong>{submissionCount("Awaiting QC")}</strong>{t("Awaiting QC")}</span>
+          <span><strong>{submissionCount("Needs student correction")}</strong>{t("Needs student correction")}</span>
+          <span><strong>{submissionCount("Complete")}</strong>{t("Complete")}</span>
         </div>
         <div className="filter-row service-qc-filters">
-          <Pick label="Follow-up" value={submissionFilters.state} onChange={(state) => setSubmissionFilters({ ...submissionFilters, state })} options={["All", "Not submitted", "Needs student correction", "Awaiting QC", "Complete"]} />
-          <Pick label="Track" value={submissionFilters.track} onChange={(track) => setSubmissionFilters({ ...submissionFilters, track })} options={["All", ...Array.from(new Set(serviceSubmissionStatus.map((r) => r.track).filter(Boolean)))]} />
-          <Pick label="Group" value={submissionFilters.group} onChange={(group) => setSubmissionFilters({ ...submissionFilters, group })} options={["All", ...Array.from(new Set(serviceSubmissionStatus.map((r) => r.group_id).filter(Boolean)))]} />
-          <Pick label="Coordinator" value={submissionFilters.coordinator} onChange={(coordinator) => setSubmissionFilters({ ...submissionFilters, coordinator })} options={[{ value: "All", label: "All coordinators" }, ...Array.from(new Set(serviceSubmissionStatus.map((r) => r.coordinator).filter(Boolean))).map((id) => ({ value: id, label: owner(id) }))]} />
+          <Pick label={t("Follow-up")} value={submissionFilters.state} onChange={(state) => setSubmissionFilters({ ...submissionFilters, state })} options={["All", "Not submitted", "Needs student correction", "Awaiting QC", "Complete"]} />
+          <Pick label={t("Track")} value={submissionFilters.track} onChange={(track) => setSubmissionFilters({ ...submissionFilters, track })} options={["All", ...Array.from(new Set(serviceSubmissionStatus.map((r) => r.track).filter(Boolean)))]} />
+          <Pick label={t("Group")} value={submissionFilters.group} onChange={(group) => setSubmissionFilters({ ...submissionFilters, group })} options={["All", ...Array.from(new Set(serviceSubmissionStatus.map((r) => r.group_id).filter(Boolean)))]} />
+          <Pick label={t("Coordinator")} value={submissionFilters.coordinator} onChange={(coordinator) => setSubmissionFilters({ ...submissionFilters, coordinator })} options={[{ value: "All", label: t("All coordinators") }, ...Array.from(new Set(serviceSubmissionStatus.map((r) => r.coordinator).filter(Boolean))).map((id) => ({ value: id, label: owner(id) }))]} />
         </div>
         {panel(
-          `Service-link submission status · ${submissionRows.length} matching`,
+          t("Service-link submission status · {v0} matching", { v0: submissionRows.length }),
           paginate(submissionRows, (pageRows) => generic(
             pageRows,
             [
-              { key: "student_name", label: "Student", render: (r) => <span><strong>{r.student_name}</strong><small className="table-subline">{r.student_id}</small></span> },
-              { key: "group_id", label: "Group", render: (r) => <span>{r.group_id}<small className="table-subline">{r.track}</small></span> },
-              { key: "coordinator", label: "Coordinator", render: (r) => owner(r.coordinator) },
-              { key: "follow_up", label: "Follow-up", render: (r) => <Badge value={r.follow_up} /> },
-              { key: "links_submitted", label: "Locked", render: (r) => <span>{r.links_locked}/3<small className="table-subline">{r.submitted_at ? `${r.links_submitted} submitted ${new Date(r.submitted_at).toLocaleDateString()}` : "never submitted"}</small></span> },
+              { key: "student_name", label: t("Student"), render: (r) => <span><strong>{r.student_name}</strong><small className="table-subline">{r.student_id}</small></span> },
+              { key: "group_id", label: t("Group"), render: (r) => <span>{r.group_id}<small className="table-subline">{r.track}</small></span> },
+              { key: "coordinator", label: t("Coordinator"), render: (r) => owner(r.coordinator) },
+              { key: "follow_up", label: t("Follow-up"), render: (r) => <Badge value={r.follow_up} /> },
+              { key: "links_submitted", label: t("Locked"), render: (r) => <span>{r.links_locked}/3<small className="table-subline">{r.submitted_at ? t("{v0} submitted {v1}", { v0: r.links_submitted, v1: new Date(r.submitted_at).toLocaleDateString() }) : t("never submitted")}</small></span> },
             ],
-            (r) => <div className="detail-actions"><button className="small-btn" onClick={() => setSelected(students.find((x) => x.id === r.student_id) || null)}>Open student</button></div>,
+            (r) => <div className="detail-actions"><button className="small-btn" onClick={() => setSelected(students.find((x) => x.id === r.student_id) || null)}>{t("Open student")}</button></div>,
           )),
         )}
       </>
@@ -1753,7 +1761,7 @@ export default function Operations({ module: initialModule }: { module: string }
                   <Users size={15} /> Distribute waiting students evenly
                 </button>
                 <button className="small-btn" disabled={busy} onClick={() => quick("evidence_qc_assign", {})}>
-                  <Files size={15} /> Distribute gig evidence evenly
+                  <Files size={15} /> {t("Distribute gig evidence evenly")}
                 </button>
                 <small className="qc-lead-note">
                   A student&apos;s three services stay together with one reviewer, and a student waiting for review
@@ -1762,7 +1770,7 @@ export default function Operations({ module: initialModule }: { module: string }
               </div>
             )}
             {panel(
-              `Student service-link verification · ${serviceQueue.length} matching`,
+              t("Student service-link verification · {v0} matching", { v0: serviceQueue.length }),
               paginate(serviceQueue, (pageRows) => generic(
                 pageRows,
                 [
@@ -1789,13 +1797,13 @@ export default function Operations({ module: initialModule }: { module: string }
         )}
         <div className="mini-stats">
           <span>
-            <strong>{reviews.length}</strong> Awaiting review
+            <strong>{reviews.length}</strong> {t("Awaiting review")}
           </span>
           <span>
-            <strong>{rejected.length}</strong> Require correction
+            <strong>{rejected.length}</strong> {t("Require correction")}
           </span>
           <span>
-            <strong>{accepted.length}</strong> Accepted
+            <strong>{accepted.length}</strong> {t("Accepted")}
           </span>
           <span>
             <strong>
@@ -1807,28 +1815,28 @@ export default function Operations({ module: initialModule }: { module: string }
                 ).length
               }
             </strong>{" "}
-            Past review SLA
+            {t("Past review SLA")}
           </span>
         </div>
         {panel(
           module === "quality"
-            ? "Quality review queue · oldest first"
-            : "Evidence pipeline",
+            ? t("Quality review queue · oldest first")
+            : t("Evidence pipeline"),
           generic(
             rows,
             [
               studentCol,
-              { key: "gig_id", label: "Gig" },
-              { key: "source", label: "External source" },
+              { key: "gig_id", label: t("Gig") },
+              { key: "source", label: t("External source") },
               statusCol,
               {
                 key: "stage_at",
-                label: "In stage since",
+                label: t("In stage since"),
                 render: (r) => fmt(r.stage_at),
               },
               {
                 key: "proof_id",
-                label: "Proof",
+                label: t("Proof"),
                 render: (r) => (
                   <a
                     className="text-link"
@@ -1836,14 +1844,14 @@ export default function Operations({ module: initialModule }: { module: string }
                     rel="noreferrer"
                     href={"/api/files?id=" + r.proof_id}
                   >
-                    <Paperclip size={15} /> Screenshot
+                    <Paperclip size={15} /> {t("Screenshot")}
                   </a>
                 ),
               },
             ],
             (r) => (
               <button className="small-btn" onClick={() => open("review", r)}>
-                Open review
+                {t("Open review")}
               </button>
             ),
           ),
@@ -1852,27 +1860,27 @@ export default function Operations({ module: initialModule }: { module: string }
     );
   } else if (module === "cases") {
     content = panel(
-      "Incident & intervention register",
+      t("Incident & intervention register"),
       generic(
         (d.cases || []).filter(qMatch),
         [
-          { key: "title", label: "Case" },
+          { key: "title", label: t("Case") },
           studentCol,
           {
             key: "severity",
-            label: "Severity",
+            label: t("Severity"),
             render: (r) => <Badge value={r.severity} />,
           },
           statusCol,
-          { key: "owner", label: "Owner", render: (r) => owner(r.owner) },
-          { key: "due", label: "Due", render: (r) => fmt(r.due) },
+          { key: "owner", label: t("Owner"), render: (r) => owner(r.owner) },
+          { key: "due", label: t("Due"), render: (r) => fmt(r.due) },
         ],
         (r) => (
           <button
             className="small-btn"
             onClick={() => open("case_transition", r)}
           >
-            Update
+            {t("Update")}
           </button>
         ),
       ),
@@ -1883,26 +1891,26 @@ export default function Operations({ module: initialModule }: { module: string }
         <ReportsPanel />
         <div className="stats">
           {[
-            { label: "Contact compliance", n: compliance + "%" },
+            { label: t("Contact compliance"), n: compliance + "%" },
             {
-              label: "Graduation rate",
+              label: t("Graduation rate"),
               n:
                 (students.length
                   ? Math.round((graduates.length / students.length) * 100)
                   : 0) + "%",
             },
-            { label: "Open actions", n: openTasks.length },
-            { label: "Quality backlog", n: reviews.length },
+            { label: t("Open actions"), n: openTasks.length },
+            { label: t("Quality backlog"), n: reviews.length },
           ].map((s) => (
             <div className="stat" key={s.label}>
-              <span>{s.label}</span>
+              <span>{t(s.label)}</span>
               <strong>{s.n}</strong>
-              <small>Current assigned student scope</small>
+              <small>{t("Current assigned student scope")}</small>
             </div>
           ))}
         </div>
         {panel(
-          "Coordinator performance",
+          t("Coordinator performance"),
           generic(
             staff
               .filter((u: Row) => u.roles.includes("Operations Coordinator"))
@@ -1928,49 +1936,43 @@ export default function Operations({ module: initialModule }: { module: string }
                 };
               }),
             [
-              { key: "name", label: "Coordinator" },
-              { key: "students", label: "Students" },
-              { key: "contact", label: "Contact compliance" },
-              { key: "overdue", label: "Overdue" },
-              { key: "critical", label: "Critical" },
-              { key: "graduates", label: "Graduated" },
+              { key: "name", label: t("Coordinator") },
+              { key: "students", label: t("Students") },
+              { key: "contact", label: t("Contact compliance") },
+              { key: "overdue", label: t("Overdue") },
+              { key: "critical", label: t("Critical") },
+              { key: "graduates", label: t("Graduated") },
             ],
           ),
         )}
         <div className="report-grid">
           {panel(
-            "Graduation policy",
+            t("Graduation policy"),
             <div className="prose">
-              <div className="rule-number">3 gigs × $5 minimum</div>
+              <div className="rule-number">{t("3 gigs × $5 minimum")}</div>
               <p>
-                Total qualifying value of at least $15, or one qualifying gig of
-                $300 or more.
+                {t("Total qualifying value of at least $15, or one qualifying gig of $300 or more.")}
               </p>
               <p>
-                Evidence must be Quality Accepted, and the gig must be paid.
-                Non-USD gigs count only after a separately approved rate is
-                applied and stored with the gig.
+                {t("Evidence must be Quality Accepted, and the gig must be paid. Non-USD gigs count only after a separately approved rate is applied and stored with the gig.")}
               </p>
               <Badge value="Round 5 · v1" />
             </div>,
           )}
           {panel(
-            "Metric definitions",
+            t("Metric definitions"),
             <div className="prose">
-              <h3>Contact compliance</h3>
+              <h3>{t("Contact compliance")}</h3>
               <p>
-                Active students with a complete, screenshot-backed contact
-                within 7 days ÷ active students requiring contact.
+                {t("Active students with a complete, screenshot-backed contact within 7 days ÷ active students requiring contact.")}
               </p>
-              <h3>Graduation rate</h3>
+              <h3>{t("Graduation rate")}</h3>
               <p>
-                Students meeting the applicable graduation policy ÷ active
-                students in the selected scope.
+                {t("Students meeting the applicable graduation policy ÷ active students in the selected scope.")}
               </p>
-              <h3>Forecast</h3>
+              <h3>{t("Forecast")}</h3>
               <p>
-                No forecast published until approved weekly milestone and
-                forecasting policies are configured.
+                {t("No forecast published until approved weekly milestone and forecasting policies are configured.")}
               </p>
             </div>,
           )}
@@ -1981,17 +1983,17 @@ export default function Operations({ module: initialModule }: { module: string }
     content = (
       <Tabs defaultValue="staff">
         <TabsList>
-          <TabsTrigger value="staff">Staff & access</TabsTrigger>
-          <TabsTrigger value="policy">Policy versions</TabsTrigger>
-          <TabsTrigger value="fx">FX rates</TabsTrigger>
-          <TabsTrigger value="retention">Retention</TabsTrigger>
-          <TabsTrigger value="audit">Audit history</TabsTrigger>
-          <TabsTrigger value="imports">Data transfer</TabsTrigger>
-          <TabsTrigger value="connections">Connections & recovery</TabsTrigger>
+          <TabsTrigger value="staff">{t("Staff & access")}</TabsTrigger>
+          <TabsTrigger value="policy">{t("Policy versions")}</TabsTrigger>
+          <TabsTrigger value="fx">{t("FX rates")}</TabsTrigger>
+          <TabsTrigger value="retention">{t("Retention")}</TabsTrigger>
+          <TabsTrigger value="audit">{t("Audit history")}</TabsTrigger>
+          <TabsTrigger value="imports">{t("Data transfer")}</TabsTrigger>
+          <TabsTrigger value="connections">{t("Connections & recovery")}</TabsTrigger>
         </TabsList>
         <TabsContent value="staff">
           {panel(
-            "Staff directory",
+            t("Staff directory"),
             generic(
               staff,
               [
@@ -2009,7 +2011,7 @@ export default function Operations({ module: initialModule }: { module: string }
                 },
                 {
                   key: "roles",
-                  label: "Roles",
+                  label: t("Roles"),
                   render: (r) => (
                     <div className="role-tags">
                       {JSON.parse(r.roles).map((v: string) => (
@@ -2030,7 +2032,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     })
                   }
                 >
-                  Edit access
+                  {t("Edit access")}
                 </button>
               ),
             ),
@@ -2046,15 +2048,15 @@ export default function Operations({ module: initialModule }: { module: string }
         </TabsContent>
         <TabsContent value="policy">
           {panel(
-            "Versioned business policy",
+            t("Versioned business policy"),
             generic(
               d.policies || [],
               [
-                { key: "name", label: "Policy" },
+                { key: "name", label: t("Policy") },
                 statusCol,
                 {
                   key: "created_at",
-                  label: "Created",
+                  label: t("Created"),
                   render: (r) => fmt(r.created_at),
                 },
               ],
@@ -2065,20 +2067,20 @@ export default function Operations({ module: initialModule }: { module: string }
                       className="small-btn"
                       onClick={() => open("policy_edit", r)}
                     >
-                      Edit draft
+                      {t("Edit draft")}
                     </button>
                   )}
                   <button
                     className="small-btn"
                     onClick={() => open("policy_transition", r)}
                   >
-                    Review
+                    {t("Review")}
                   </button>
                 </div>
               ),
             ),
             <button className="small-btn" onClick={() => open("policy")}>
-              New draft
+              {t("New draft")}
             </button>,
           )}
           <div className="prose policy-values">
@@ -2094,15 +2096,15 @@ export default function Operations({ module: initialModule }: { module: string }
         </TabsContent>
         <TabsContent value="fx">
           {panel(
-            "Approved currency conversion evidence",
+            t("Approved currency conversion evidence"),
             generic(
               d.fxRates || [],
               [
-                { key: "currency", label: "Currency" },
-                { key: "usd_rate", label: "USD per unit" },
-                { key: "effective_date", label: "Effective date" },
+                { key: "currency", label: t("Currency") },
+                { key: "usd_rate", label: t("USD per unit") },
+                { key: "effective_date", label: t("Effective date") },
                 statusCol,
-                { key: "source", label: "Source" },
+                { key: "source", label: t("Source") },
               ],
               (r) =>
                 r.status === "Draft" &&
@@ -2111,13 +2113,13 @@ export default function Operations({ module: initialModule }: { module: string }
                     className="small-btn"
                     onClick={() => open("fx_rate_approve", r)}
                   >
-                    Approve
+                    {t("Approve")}
                   </button>
                 ) : null,
             ),
             can(user.roles, ["Operations Systems / Admin"]) && (
               <button className="small-btn" onClick={() => open("fx_rate")}>
-                New FX draft
+                {t("New FX draft")}
               </button>
             ),
           )}
@@ -2127,17 +2129,17 @@ export default function Operations({ module: initialModule }: { module: string }
         </TabsContent>
         <TabsContent value="audit">
           {panel(
-            "Immutable activity audit",
+            t("Immutable activity audit"),
             generic(d.audit || [], [
               {
                 key: "created_at",
-                label: "When",
+                label: t("When"),
                 render: (r) => new Date(r.created_at).toLocaleString(),
               },
-              { key: "actor", label: "Actor", render: (r) => owner(r.actor) },
-              { key: "action", label: "Action" },
-              { key: "entity_id", label: "Record" },
-              { key: "reason", label: "Reason" },
+              { key: "actor", label: t("Actor"), render: (r) => owner(r.actor) },
+              { key: "action", label: t("Action") },
+              { key: "entity_id", label: t("Record") },
+              { key: "reason", label: t("Reason") },
             ]),
           )}
         </TabsContent>
@@ -2146,23 +2148,20 @@ export default function Operations({ module: initialModule }: { module: string }
         </TabsContent>
         <TabsContent value="imports">
           <div className="panel prose">
-            <h2>Move operational data safely</h2>
+            <h2>{t("Move operational data safely")}</h2>
             <p>
-              Download a template, upload XLSX or CSV, review validation
-              results, and confirm the import. Protected fields are rejected.
+              {t("Download a template, upload XLSX or CSV, review validation results, and confirm the import. Protected fields are rejected.")}
             </p>
             <div className="detail-actions">
               <button className="primary" onClick={() => setImportOpen(true)}>
-                <Upload size={17} /> Open import workspace
+                <Upload size={17} /> {t("Open import workspace")}
               </button>
               <a className="small-btn" href="/api/export?module=workbook">
-                <Download size={16} /> Download the whole workbook (Excel)
+                <Download size={16} /> {t("Download the whole workbook (Excel)")}
               </a>
             </div>
             <p className="footnote">
-              The workbook holds one tab per dataset. Edit a tab, then upload
-              the file in update mode: the matching tab is read, only the
-              columns present change, and empty cells keep the stored value.
+              {t("The workbook holds one tab per dataset. Edit a tab, then upload the file in update mode: the matching tab is read, only the columns present change, and empty cells keep the stored value.")}
             </p>
           </div>
         </TabsContent>
@@ -2171,8 +2170,8 @@ export default function Operations({ module: initialModule }: { module: string }
   } else
     content = (
       <Empty
-        title="Module not found"
-        text="Choose a workspace from the navigation."
+        title={t("Module not found")}
+        text={t("Choose a workspace from the navigation.")}
       />
     );
   useEffect(() => {
@@ -2186,16 +2185,16 @@ export default function Operations({ module: initialModule }: { module: string }
   }, [module]);
   return (
     <SidebarProvider style={{ "--sidebar-width": "238px" } as any}>
-      <Sidebar className="app-sidebar">
+      <Sidebar className="app-sidebar" side={dir === "rtl" ? "right" : "left"}>
         <SidebarHeader>
           <a className="brand" href="/">
             {/* eslint-disable-next-line @next/next/no-img-element -- a static local logo; the Worker build does not run the image optimizer */}
             <img className="brand-mark-img" src="/brand/mark.png" alt="" width={38} height={38} />
             <div>
               <strong>
-                DEPI<span>operations</span>
+                {t("DEPI")}<span>{t("operations")}</span>
               </strong>
-              <small>CAREER180 × FREELANCE YARD</small>
+              <small>{t("CAREER180 × FREELANCE YARD")}</small>
             </div>
           </a>
           <div className="cohort-switch">
@@ -2203,22 +2202,22 @@ export default function Operations({ module: initialModule }: { module: string }
               <Layers size={17} />
             </span>
             <div>
-              <strong>Round 5</strong>
-              <small>Coaching & freelancing</small>
+              <strong>{t("Round 5")}</strong>
+              <small>{t("Coaching & freelancing")}</small>
             </div>
             <LockKeyhole size={14} />
           </div>
         </SidebarHeader>
         <SidebarContent>
           <SidebarGroup>
-            <SidebarGroupLabel>WORKSPACE</SidebarGroupLabel>
+            <SidebarGroupLabel>{t("WORKSPACE")}</SidebarGroupLabel>
             <SidebarMenu>
               {shownNav.map(([id, label, Icon]) => (
                 <SidebarMenuItem key={id}>
                   <SidebarMenuButton asChild isActive={module === id}>
                     <a href={id === "home" ? "/" : "/" + id} onClick={(event) => goTo(id, event)}>
                       <Icon />
-                      <span>{label}</span>
+                      <span>{t(label)}</span>
                       {id === "work" && overdue.length > 0 && (
                         <b className="nav-count">{overdue.length}</b>
                       )}
@@ -2232,15 +2231,15 @@ export default function Operations({ module: initialModule }: { module: string }
         <SidebarFooter>
           <div className="staff-only">
             <ShieldCheck size={17} />
-            <span>Staff-only workspace</span>
+            <span>{t("Staff-only workspace")}</span>
           </div>
           <div className="profile">
             <span className="avatar navy">{user.name?.slice(0, 1) || "A"}</span>
             <div>
               <strong>{user.name}</strong>
-              <small>{user.roles?.[0] || "Workspace setup"}</small>
+              <small>{user.roles?.[0] || t("Workspace setup")}</small>
             </div>
-            <a className="profile-signout" href="/api/auth/logout" title="Sign out" aria-label="Sign out">
+            <a className="profile-signout" href="/api/auth/logout" title={t("Sign out")} aria-label={t("Sign out")}>
               <LogOut size={17} />
             </a>
           </div>
@@ -2250,14 +2249,15 @@ export default function Operations({ module: initialModule }: { module: string }
         <header className="topbar">
           <div className="breadcrumb">
             <SidebarTrigger />
-            <span>Workspace</span>
+            <span>{t("Workspace")}</span>
             <ChevronRight size={14} />
             <strong>
-              {nav.find((n) => n[0] === module)?.[1] || "Overview"}
+              {t(nav.find((n) => n[0] === module)?.[1] || "Overview")}
             </strong>
           </div>
           <div className="header-actions">
-            <span className="round-tag">ROUND 5</span>
+            <span className="round-tag">{t("ROUND 5")}</span>
+            <LanguageToggle className="icon-btn" />
             <GlobalSearch
               onStudent={(id) =>
                 setSelected(students.find((s) => s.id === id) || null)
@@ -2265,14 +2265,14 @@ export default function Operations({ module: initialModule }: { module: string }
             />
             <button
               className="icon-btn"
-              aria-label="Refresh data"
+              aria-label={t("Refresh data")}
               onClick={refresh}
             >
               <RefreshCw size={18} />
             </button>
             <button
               className="icon-btn notification-btn"
-              aria-label="Open notifications"
+              aria-label={t("Open notifications")}
               onClick={() => setNotifications(true)}
             >
               <Bell size={19} />
@@ -2286,13 +2286,13 @@ export default function Operations({ module: initialModule }: { module: string }
             <div className="demo-banner">
               <span className="demo-label">
                 {d.workspaceMode === "demo"
-                  ? "PILOT WORKSPACE"
-                  : "PRODUCTION WORKSPACE"}
+                  ? t("PILOT WORKSPACE")
+                  : t("PRODUCTION WORKSPACE")}
               </span>
               <span>
                 {d.workspaceMode === "demo"
-                  ? "Synthetic roster · No real student or client data"
-                  : "Live operational records · Staff access only"}
+                  ? t("Synthetic roster · No real student or client data")
+                  : t("Live operational records · Staff access only")}
               </span>
               <span className="banner-date">
                 {new Date().toLocaleDateString("en-GB", {
@@ -2306,13 +2306,13 @@ export default function Operations({ module: initialModule }: { module: string }
           {error ? (
             <div className="error-panel" role="alert">
               <AlertTriangle />
-              <h2>Workspace unavailable</h2>
+              <h2>{t("Workspace unavailable")}</h2>
               <p>{error}</p>
               <button className="primary" onClick={refresh}>
-                Try again
+                {t("Try again")}
               </button>
               <a href="/login">
-                Sign in
+                {t("Sign in")}
               </a>
             </div>
           ) : loading ? (
@@ -2328,17 +2328,15 @@ export default function Operations({ module: initialModule }: { module: string }
           ) : d.setup ? (
             <div className="setup panel">
               {/* eslint-disable-next-line @next/next/no-img-element -- a static local logo; the Worker build does not run the image optimizer */}
-              <img className="brand-logo brand-logo-large" src="/brand/logo.png" alt="Freelance Yard" width={232} height={80} />
-              <h1>Set up your operations workspace</h1>
+              <img className="brand-logo brand-logo-large" src="/brand/logo.png" alt={t("Freelance Yard")} width={232} height={80} />
+              <h1>{t("Set up your operations workspace")}</h1>
               <p>
                 {d.importedRoster
-                  ? "Initialize the imported Round 5 roster as the production workspace."
-                  : "Choose a blank production workspace for real operations, or a separate synthetic pilot dataset for training and workflow testing."}
+                  ? t("Initialize the imported Round 5 roster as the production workspace.")
+                  : t("Choose a blank production workspace for real operations, or a separate synthetic pilot dataset for training and workflow testing.")}
               </p>
               <p>
-                You will receive Project Operations and Systems Admin access.
-                Quality approval and account allocation remain separate,
-                explicitly assigned roles.
+                {t("You will receive Project Operations and Systems Admin access. Quality approval and account allocation remain separate, explicitly assigned roles.")}
               </p>
               <div className="detail-actions">
                 <button
@@ -2347,10 +2345,10 @@ export default function Operations({ module: initialModule }: { module: string }
                   onClick={() => quick("setup", { mode: "production" })}
                 >
                   {busy
-                    ? "Preparing workspace…"
+                    ? t("Preparing workspace…")
                     : d.importedRoster
-                      ? "Initialize imported production roster"
-                      : "Start blank production workspace"}
+                      ? t("Initialize imported production roster")
+                      : t("Start blank production workspace")}
                 </button>
                 {!d.importedRoster && (
                   <button
@@ -2358,14 +2356,12 @@ export default function Operations({ module: initialModule }: { module: string }
                     disabled={busy}
                     onClick={() => quick("setup", { mode: "demo" })}
                   >
-                    Load synthetic pilot
+                    {t("Load synthetic pilot")}
                   </button>
                 )}
               </div>
               <p className="footnote">
-                Initialization is permanent for this workspace. Production mode
-                records your administrator account and preserves the imported
-                roster and reconciliation history.
+                {t("Initialization is permanent for this workspace. Production mode records your administrator account and preserves the imported roster and reconciliation history.")}
               </p>
             </div>
           ) : (
@@ -2375,12 +2371,12 @@ export default function Operations({ module: initialModule }: { module: string }
                   <div className="page-heading">
                     <div>
                       <div className="eyebrow">
-                        ROUND 5 /{" "}
-                        {module === "quality" ? "ASSURANCE" : "OPERATIONS"}
+                        {t("ROUND 5 /")}{" "}
+                        {module === "quality" ? t("ASSURANCE") : t("OPERATIONS")}
                       </div>
-                      <h1>{nav.find((n) => n[0] === module)?.[1]}</h1>
+                      <h1>{t(nav.find((n) => n[0] === module)?.[1] || "")}</h1>
                       <p>
-                        {
+                        {t(
                           (
                             {
                               work: "A clear next action for every student.",
@@ -2404,8 +2400,8 @@ export default function Operations({ module: initialModule }: { module: string }
                               administration:
                                 "Staff access, versioned policies and audit history.",
                             } as Row
-                          )[module]
-                        }
+                          )[module] || "",
+                        )}
                       </p>
                     </div>
                     {module === "administration" && (
@@ -2418,7 +2414,7 @@ export default function Operations({ module: initialModule }: { module: string }
                               onClick={() => quick("load_demo_data", {})}
                             >
                               <Plus size={16} />
-                              Load synthetic pilot
+                              {t("Load synthetic pilot")}
                             </button>
                           )}
                         <button
@@ -2427,7 +2423,7 @@ export default function Operations({ module: initialModule }: { module: string }
                           onClick={() => quick("policy_check", {})}
                         >
                           <RefreshCw size={16} />
-                          Run policy checks
+                          {t("Run policy checks")}
                         </button>
                       </div>
                     )}
@@ -2437,7 +2433,7 @@ export default function Operations({ module: initialModule }: { module: string }
                         onClick={() => open(moduleAction[module])}
                       >
                         <Plus size={17} />
-                        {
+                        {t(
                           (
                             {
                               students: "Add student",
@@ -2450,8 +2446,8 @@ export default function Operations({ module: initialModule }: { module: string }
                               work: "Create action",
                               administration: "Add staff",
                             } as Row
-                          )[module]
-                        }
+                          )[module] || "",
+                        )}
                       </button>
                     )}
                   </div>
@@ -2460,19 +2456,17 @@ export default function Operations({ module: initialModule }: { module: string }
                       <label className="search-box">
                         <Search size={17} />
                         <input
-                          placeholder={
-                            "Search " +
-                            (module === "work" ? "actions" : module) +
-                            "…"
-                          }
+                          placeholder={t("Search {v0}…", {
+                            v0: t(module === "work" ? "actions" : module),
+                          })}
                           value={search}
                           onChange={(e) => setSearch(e.target.value)}
-                          aria-label="Search records"
+                          aria-label={t("Search records")}
                         />
                       </label>
                       {filterOpts.length > 1 && (
                         <Pick
-                          label="Filter records"
+                          label={t("Filter records")}
                           value={filter}
                           onChange={setFilter}
                           options={filterOpts}
@@ -2482,7 +2476,7 @@ export default function Operations({ module: initialModule }: { module: string }
                         (v: Row) => v.module === module,
                       ) && (
                         <Pick
-                          label="Saved views"
+                          label={t("Saved views")}
                           value=""
                           options={(d.savedViews || [])
                             .filter((v: Row) => v.module === module)
@@ -2512,13 +2506,13 @@ export default function Operations({ module: initialModule }: { module: string }
                                 filters: { filter, search },
                               });
                               setSaved([...new Set([...saved, filter])]);
-                              toast.success("View saved to your staff profile");
+                              toast.success(t("View saved to your staff profile"));
                             } catch (e: any) {
                               toast.error(e.message);
                             }
                           }}
                         >
-                          <Filter size={15} /> Save view
+                          <Filter size={15} /> {t("Save view")}
                         </button>
                         <button
                           className="small-btn"
@@ -2531,10 +2525,10 @@ export default function Operations({ module: initialModule }: { module: string }
                             setImportOpen(true);
                           }}
                         >
-                          <Upload size={15} /> Import
+                          <Upload size={15} /> {t("Import")}
                         </button>
                         <Pick
-                          label="Export"
+                          label={t("Export")}
                           value=""
                           options={["CSV", "XLSX", "Workbook (all)"]}
                           onChange={(v) => {
@@ -2566,19 +2560,19 @@ export default function Operations({ module: initialModule }: { module: string }
           )}
         </main>
         <footer className="app-footer">
-          <span>DEPI Round 5 · Coaching & Freelancing Operations</span>
+          <span>{t("DEPI Round 5 · Coaching & Freelancing Operations")}</span>
           <span>
-            <LockKeyhole size={12} /> Private staff workspace
+            <LockKeyhole size={12} /> {t("Private staff workspace")}
           </span>
         </footer>
       </SidebarInset>
       <Toaster richColors position="bottom-right" />
       <Sheet open={!!selected} onOpenChange={(v) => !v && setSelected(null)}>
-        <SheetContent className="student-sheet sm:max-w-[800px] overflow-y-auto">
+        <SheetContent className="student-sheet sm:max-w-[800px] overflow-y-auto" side={dir === "rtl" ? "left" : "right"}>
           <SheetHeader>
-            <SheetTitle>Student 360</SheetTitle>
+            <SheetTitle>{t("Student 360")}</SheetTitle>
             <SheetDescription>
-              Operational record and evidence history
+              {t("Operational record and evidence history")}
             </SheetDescription>
           </SheetHeader>
           {selectedStudent && (
@@ -2601,19 +2595,19 @@ export default function Operations({ module: initialModule }: { module: string }
               </div>
               <div className="status-strip">
                 <div>
-                  <small>Lifecycle</small>
+                  <small>{t("Lifecycle")}</small>
                   <Badge value={selectedStudent.lifecycle} />
                 </div>
                 <div>
-                  <small>Engagement</small>
+                  <small>{t("Engagement")}</small>
                   <Badge value={selectedStudent.engagement} />
                 </div>
                 <div>
-                  <small>Coaching</small>
+                  <small>{t("Coaching")}</small>
                   <Badge value={selectedStudent.coaching} />
                 </div>
                 <div>
-                  <small>Graduation</small>
+                  <small>{t("Graduation")}</small>
                   <Badge value={selectedStudent.graduation} />
                 </div>
               </div>
@@ -2624,7 +2618,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     open("contact", { student_id: selectedStudent.id })
                   }
                 >
-                  <MessageSquare size={16} /> Log contact
+                  <MessageSquare size={16} /> {t("Log contact")}
                 </button>
                 <button
                   className="small-btn"
@@ -2632,7 +2626,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     open("task", { student_id: selectedStudent.id })
                   }
                 >
-                  Next action
+                  {t("Next action")}
                 </button>
                 <button
                   className="small-btn"
@@ -2640,7 +2634,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     open("engagement", { student_id: selectedStudent.id })
                   }
                 >
-                  Review risk
+                  {t("Review risk")}
                 </button>
               </div>
               <Tabs defaultValue="overview">
@@ -2657,9 +2651,9 @@ export default function Operations({ module: initialModule }: { module: string }
                     "cases",
                     "timeline",
                     "audit",
-                  ].map((t) => (
-                    <TabsTrigger key={t} value={t}>
-                      {t[0].toUpperCase() + t.slice(1)}
+                  ].map((tab) => (
+                    <TabsTrigger key={tab} value={tab}>
+                      {t(tab[0].toUpperCase() + tab.slice(1))}
                     </TabsTrigger>
                   ))}
                 </TabsList>
@@ -2668,11 +2662,11 @@ export default function Operations({ module: initialModule }: { module: string }
                     <AlertTriangle size={20} />
                     <div>
                       <strong>
-                        System recommendation: {selectedStudent.risk.status}
+                        {t("System recommendation:")}{" "}{selectedStudent.risk.status}
                       </strong>
                       <p>
                         {selectedStudent.risk.reasons.join(" · ") ||
-                          "No active risk triggers"}
+                          t("No active risk triggers")}
                       </p>
                     </div>
                   </div>
@@ -2681,35 +2675,35 @@ export default function Operations({ module: initialModule }: { module: string }
                       ["Coordinator", owner(selectedStudent.coordinator)],
                       ["Supervisor", owner(selectedStudent.supervisor)],
                       ["Coach", owner(selectedStudent.coach)],
-                      ["Journey", "Week " + selectedStudent.week],
+                      ["Journey", t("Week {v0}", { v0: selectedStudent.week })],
                       ["Pathway", selectedStudent.pathway],
                       ["Last valid contact", fmt(selectedStudent.last_contact)],
                       [
                         "Attendance",
                         selectedStudent.attendance === null
-                          ? "Not recorded"
+                          ? t("Not recorded")
                           : selectedStudent.attendance + "%",
                       ],
                       ["Provider", selectedStudent.provider],
                     ].map(([k, v]) => (
                       <div key={k}>
-                        <small>{k}</small>
+                        <small>{t(k)}</small>
                         <strong>{v}</strong>
                       </div>
                     ))}
                   </div>
                   <div className="next-action-box">
-                    <small>NEXT ACTION</small>
+                    <small>{t("NEXT ACTION")}</small>
                     <h3>
                       {selectedStudent.next_task?.title ||
-                        "No next action assigned"}
+                        t("No next action assigned")}
                     </h3>
                     <p>
                       {selectedStudent.next_task
                         ? owner(selectedStudent.next_task.owner) +
                           " · Due " +
                           fmt(selectedStudent.next_task.due)
-                        : "Create an action with an owner and due date."}
+                        : t("Create an action with an owner and due date.")}
                     </p>
                   </div>
                   <div className="detail-actions">
@@ -2719,7 +2713,7 @@ export default function Operations({ module: initialModule }: { module: string }
                         open("milestone", { student_id: selectedStudent.id })
                       }
                     >
-                      Update milestone
+                      {t("Update milestone")}
                     </button>
                     <button
                       className="small-btn"
@@ -2727,7 +2721,7 @@ export default function Operations({ module: initialModule }: { module: string }
                         open("lifecycle", { student_id: selectedStudent.id })
                       }
                     >
-                      Lifecycle
+                      {t("Lifecycle")}
                     </button>
                     <button
                       className="small-btn"
@@ -2735,7 +2729,7 @@ export default function Operations({ module: initialModule }: { module: string }
                         open("transfer", { student_id: selectedStudent.id })
                       }
                     >
-                      Transfer student
+                      {t("Transfer student")}
                     </button>
                     <button
                       className="small-btn"
@@ -2743,7 +2737,7 @@ export default function Operations({ module: initialModule }: { module: string }
                         open("case", { student_id: selectedStudent.id })
                       }
                     >
-                      Open case
+                      {t("Open case")}
                     </button>
                   </div>
                 </TabsContent>
@@ -2772,8 +2766,8 @@ export default function Operations({ module: initialModule }: { module: string }
                           (c: Row) => c.student_id === selectedStudent.id,
                         ).length === 0 ? (
                           <Empty
-                            title="No contacts recorded"
-                            text="Log a contact with screenshot proof and a next action."
+                            title={t("No contacts recorded")}
+                            text={t("Log a contact with screenshot proof and a next action.")}
                           />
                         ) : (
                           (d.contacts || [])
@@ -2787,13 +2781,13 @@ export default function Operations({ module: initialModule }: { module: string }
                                   {c.channel} · {fmt(c.occurred_at)}
                                 </h3>
                                 <p>{c.next_action}</p>
-                                <small>Recorded by {owner(c.recorder)}</small>
+                                <small>{t("Recorded by")}{" "}{owner(c.recorder)}</small>
                                 <a
                                   href={"/api/files?id=" + c.proof_id}
                                   target="_blank"
                                   rel="noreferrer"
                                 >
-                                  View screenshot <ExternalLink size={14} />
+                                  {t("View screenshot")}{" "}<ExternalLink size={14} />
                                 </a>
                               </article>
                             ))
@@ -2802,13 +2796,13 @@ export default function Operations({ module: initialModule }: { module: string }
                     ) : tab === "services" ? (
                       <div className="history">
                         {serviceLinks.filter((link) => link.student_id === selectedStudent.id).length === 0 ? (
-                          <Empty title="No service links submitted" text="The student has not submitted service links yet." />
+                          <Empty title={t("No service links submitted")} text={t("The student has not submitted service links yet.")} />
                         ) : serviceLinks.filter((link) => link.student_id === selectedStudent.id).map((link) => (
                           <article key={link.id}>
-                            <div className="detail-actions"><Badge value={`Service ${link.slot}`} /><Badge value={link.qc_status} /><Badge value={link.auto_status} /></div>
+                            <div className="detail-actions"><Badge value={t("Service {v0}", { v0: link.slot })} /><Badge value={link.qc_status} /><Badge value={link.auto_status} /></div>
                             <h3><a className="text-link" href={link.url} target="_blank" rel="noreferrer">{link.platform} <ExternalLink size={14} /></a></h3>
-                            <p>{(() => { try { return JSON.parse(link.auto_result || "{}").message; } catch { return "Automatic details unavailable."; } })()}</p>
-                            <small>Revision {link.revision} · submitted {new Date(link.submitted_at).toLocaleString()}{link.qc_at ? ` · reviewed ${new Date(link.qc_at).toLocaleString()} by ${link.reviewer_name || owner(link.qc_actor)}` : ""}</small>
+                            <p>{(() => { try { return JSON.parse(link.auto_result || "{}").message; } catch { return t("Automatic details unavailable."); } })()}</p>
+                            <small>{t("Revision")}{" "}{link.revision} {t("· submitted")}{" "}{new Date(link.submitted_at).toLocaleString()}{link.qc_at ? t(" · reviewed {v0} by {v1}", { v0: new Date(link.qc_at).toLocaleString(), v1: link.reviewer_name || owner(link.qc_actor) }) : ""}</small>
                             {serviceLinkReviews.filter((review) => review.service_link_id === link.id).map((review) => (
                               <div className="info-box" key={review.id}><Badge value={review.decision} /><span>{review.comment}</span><small>{new Date(review.reviewed_at).toLocaleString()} · {review.reviewer_name}</small></div>
                             ))}
@@ -2820,26 +2814,26 @@ export default function Operations({ module: initialModule }: { module: string }
                         evidence.filter(
                           (e) => e.student_id === selectedStudent.id,
                         ),
-                        [{ key: "id", label: "Evidence" }, statusCol],
+                        [{ key: "id", label: t("Evidence") }, statusCol],
                         (r) => (
                           <button
                             className="small-btn"
                             onClick={() => open("review", r)}
                           >
-                            Review
+                            {t("Review")}
                           </button>
                         ),
                       )
                     ) : tab === "gigs" ? (
                       generic(
                         gigs.filter((g) => g.student_id === selectedStudent.id),
-                        [{ key: "title", label: "Gig" }, statusCol],
+                        [{ key: "title", label: t("Gig") }, statusCol],
                         (r) => (
                           <button
                             className="small-btn"
                             onClick={() => open("gig_transition", r)}
                           >
-                            Activity
+                            {t("Activity")}
                           </button>
                         ),
                       )
@@ -2848,21 +2842,21 @@ export default function Operations({ module: initialModule }: { module: string }
                         (d.cases || []).filter(
                           (c: Row) => c.student_id === selectedStudent.id,
                         ),
-                        [{ key: "title", label: "Case" }, statusCol],
+                        [{ key: "title", label: t("Case") }, statusCol],
                       )
                     ) : tab === "accounts" ? (
                       generic(
                         (d.requests || []).filter(
                           (c: Row) => c.student_id === selectedStudent.id,
                         ),
-                        [{ key: "task", label: "Request" }, statusCol],
+                        [{ key: "task", label: t("Request") }, statusCol],
                       )
                     ) : tab === "sessions" ? (
                       generic(
                         (d.attendance || []).filter(
                           (c: Row) => c.student_id === selectedStudent.id,
                         ),
-                        [{ key: "session_id", label: "Session" }, statusCol],
+                        [{ key: "session_id", label: t("Session") }, statusCol],
                       )
                     ) : (
                       generic(
@@ -2872,15 +2866,15 @@ export default function Operations({ module: initialModule }: { module: string }
                             a.value.includes(selectedStudent.id),
                         ),
                         [
-                          { key: "action", label: "Action" },
+                          { key: "action", label: t("Action") },
                           {
                             key: "actor",
-                            label: "Staff recorder",
+                            label: t("Staff recorder"),
                             render: (r) => owner(r.actor),
                           },
                           {
                             key: "created_at",
-                            label: "When",
+                            label: t("When"),
                             render: (r) => fmt(r.created_at),
                           },
                         ],
@@ -2897,11 +2891,11 @@ export default function Operations({ module: initialModule }: { module: string }
         <DialogContent className="action-dialog sm:max-w-[620px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {titles[modal?.action || ""] || "Update record"}
+              {t(titles[modal?.action || ""] || "Update record")}
             </DialogTitle>
             <DialogDescription>
-              {actionCopy[modal?.action || ""] ||
-                "Changes are validated and recorded in the audit history."}
+              {t(actionCopy[modal?.action || ""] ||
+                "Changes are validated and recorded in the audit history.")}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={submit} className="action-form">
@@ -2912,14 +2906,14 @@ export default function Operations({ module: initialModule }: { module: string }
                   <>
                     {studentPick()}
                     <div className="form-grid">
-                      {choice("channel", "Channel", [
+                      {choice("channel", t("Channel"), [
                         "WhatsApp",
                         "Email",
                         "Phone",
                         "Form",
                         "Other",
                       ])}
-                      {choice("outcome", "Outcome", [
+                      {choice("outcome", t("Outcome"), [
                         "Responded",
                         "No Response",
                         "Follow-Up Required",
@@ -2928,32 +2922,32 @@ export default function Operations({ module: initialModule }: { module: string }
                       ])}
                       {field(
                         "occurred_at",
-                        "Contact date & time",
+                        t("Contact date & time"),
                         "datetime-local",
                       )}
                     </div>
                     {proofField()}
-                    {field("next_action", "Next action")}
+                    {field("next_action", t("Next action"))}
                     {staffPick()}
-                    {field("due", "Action due date", "datetime-local")}
-                    {field("notes", "Notes", "text", false)}
+                    {field("due", t("Action due date"), "datetime-local")}
+                    {field("notes", t("Notes"), "text", false)}
                   </>
                 );
               if (a === "task")
                 return (
                   <>
                     {studentPick()}
-                    {field("title", "Next action")}
+                    {field("title", t("Next action"))}
                     {staffPick()}
-                    {field("due", "Due date", "datetime-local")}
-                    {choice("category", "Category", [
+                    {field("due", t("Due date"), "datetime-local")}
+                    {choice("category", t("Category"), [
                       "Follow-up",
                       "Recovery",
                       "Contact",
                       "Evidence",
                       "Account",
                     ])}
-                    {choice("priority", "Priority", [
+                    {choice("priority", t("Priority"), [
                       "Normal",
                       "High",
                       "Urgent",
@@ -2963,49 +2957,49 @@ export default function Operations({ module: initialModule }: { module: string }
               if (a === "student")
                 return (
                   <>
-                    {field("id", "Student ID (e.g. S20001)")}
-                    {field("name", "Full name")}
+                    {field("id", t("Student ID (e.g. S20001)"))}
+                    {field("name", t("Full name"))}
                     {choice(
                       "group_id",
-                      "Group",
+                      t("Group"),
                       groups.map((g) => ({
                         value: g.id,
                         label: g.id + " · " + g.name,
                       })),
                     )}
-                    {field("email", "Supabase sign-in email", "email")}
-                    {field("phone", "Phone", "tel", false)}
-                    {choice("lifecycle", "Lifecycle", ["Active", "Paused", "Transferred", "Withdrawn", "Removed", "Graduate Closed", "Non-Graduate Closed"], false)}
-                    {choice("engagement", "Engagement", ["Active", "At Risk", "Critical", "Unresponsive"], false)}
-                    {field("coaching", "Coaching status", "text", false)}
+                    {field("email", t("Supabase sign-in email"), "email")}
+                    {field("phone", t("Phone"), "tel", false)}
+                    {choice("lifecycle", t("Lifecycle"), ["Active", "Paused", "Transferred", "Withdrawn", "Removed", "Graduate Closed", "Non-Graduate Closed"], false)}
+                    {choice("engagement", t("Engagement"), ["Active", "At Risk", "Critical", "Unresponsive"], false)}
+                    {field("coaching", t("Coaching status"), "text", false)}
                   </>
                 );
               if (a === "group")
                 return (
                   <>
-                    {field("id", "Group ID")}
-                    {field("name", "Group name")}
+                    {field("id", t("Group ID"))}
+                    {field("name", t("Group name"))}
                     {choice(
                       "track",
-                      "Track",
+                      t("Track"),
                       (d.tracks || []).map((track: Row) => track.name),
                     )}
-                    {choice("provider", "Provider", [
+                    {choice("provider", t("Provider"), [
                       "Career180",
                       "Freelance Yard",
                     ])}
-                    {staffPick("coordinator", "Coordinator")}
-                    {staffPick("supervisor", "Supervisor")}
-                    {staffPick("coach", "Coach")}
-                    {choice("pathway", "Pathway", ["Outcome", "Support"])}
-                    {choice("delivery_model", "Delivery model", [
+                    {staffPick("coordinator", t("Coordinator"))}
+                    {staffPick("supervisor", t("Supervisor"))}
+                    {staffPick("coach", t("Coach"))}
+                    {choice("pathway", t("Pathway"), ["Outcome", "Support"])}
+                    {choice("delivery_model", t("Delivery model"), [
                       "Regular",
                       "Industry",
                     ])}
-                    {field("start_date", "Start date", "date")}
+                    {field("start_date", t("Start date"), "date")}
                     {choice(
                       "policy_id",
-                      "Effective policy",
+                      t("Effective policy"),
                       (d.policies || [])
                         .filter((p: Row) => p.status === "Effective")
                         .map((p: Row) => ({ value: p.id, label: p.name })),
@@ -3015,10 +3009,10 @@ export default function Operations({ module: initialModule }: { module: string }
               if (a === "session")
                 return (
                   <>
-                    {field("title", "Session title")}
+                    {field("title", t("Session title"))}
                     {choice(
                       "group_id",
-                      "Group",
+                      t("Group"),
                       groups
                         .filter((g) => g.status === "Active")
                         .map((g) => ({
@@ -3028,7 +3022,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     )}
                     {choice(
                       "coach_id",
-                      "Assigned coach",
+                      t("Assigned coach"),
                       (d.groupCoaches || [])
                         .filter(
                           (coach: Row) =>
@@ -3041,16 +3035,15 @@ export default function Operations({ module: initialModule }: { module: string }
                           label: `${coach.coach_name} · ${coach.coach_type}`,
                         })),
                     )}
-                    {field("starts_at", "Start date & time", "datetime-local")}
-                    {field("week", "Journey week", "number")}
+                    {field("starts_at", t("Start date & time"), "datetime-local")}
+                    {field("week", t("Journey week"), "number")}
                     {field(
                       "duration_minutes",
-                      "Duration in minutes",
+                      t("Duration in minutes"),
                       "number",
                     )}
                     <p className="footnote">
-                      Regular delivery supports 8 weekly sessions; Industry
-                      delivery supports 5. The Round 5 duration is 180 minutes.
+                      {t("Regular delivery supports 8 weekly sessions; Industry delivery supports 5. The Round 5 duration is 180 minutes.")}
                     </p>
                   </>
                 );
@@ -3059,7 +3052,7 @@ export default function Operations({ module: initialModule }: { module: string }
                   <>
                     {choice(
                       "coach_id",
-                      "Assigned coach",
+                      t("Assigned coach"),
                       (d.groupCoaches || [])
                         .filter(
                           (coach: Row) =>
@@ -3072,12 +3065,12 @@ export default function Operations({ module: initialModule }: { module: string }
                           label: `${coach.coach_name} · ${coach.coach_type}`,
                         })),
                     )}
-                    {field("starts_at", "New date & time", "datetime-local")}
-                    {field("reason", "Reason for rescheduling")}
+                    {field("starts_at", t("New date & time"), "datetime-local")}
+                    {field("reason", t("Reason for rescheduling"))}
                   </>
                 );
               if (a === "session_cancel")
-                return <>{field("reason", "Reason for cancellation")}</>;
+                return <>{field("reason", t("Reason for cancellation"))}</>;
               if (a === "attendance")
                 {
                   const selectedSession = sessions.find(
@@ -3087,7 +3080,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     <>
                     {choice(
                       "session_id",
-                      "Session",
+                      t("Session"),
                       sessions
                         .filter(
                           (session) =>
@@ -3101,7 +3094,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     )}
                     {choice(
                       "student_id",
-                      "Student",
+                      t("Student"),
                       students
                         .filter(
                           (student) =>
@@ -3113,13 +3106,13 @@ export default function Operations({ module: initialModule }: { module: string }
                           label: student.name + " · " + student.id,
                         })),
                     )}
-                    {choice("status", "Attendance", [
+                    {choice("status", t("Attendance"), [
                       "Present",
                       "Absent",
                       "Late",
                       "Excused",
                     ])}
-                    {field("source", "Source", "text", false)}
+                    {field("source", t("Source"), "text", false)}
                   </>
                 );
                 }
@@ -3129,7 +3122,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     {studentPick()}
                     {choice(
                       "task_bank_id",
-                      "Approved task",
+                      t("Approved task"),
                       (d.taskBank || [])
                         .filter(
                           (task: Row) =>
@@ -3147,33 +3140,31 @@ export default function Operations({ module: initialModule }: { module: string }
                             task.value,
                         })),
                     )}
-                    {field("job_profile", "Student job profile")}
+                    {field("job_profile", t("Student job profile"))}
                     {field(
                       "gig_number",
-                      "Controlled gig number (1–3)",
+                      t("Controlled gig number (1–3)"),
                       "number",
                     )}
-                    {field("notes", "Request notes", "text", false)}
+                    {field("notes", t("Request notes"), "text", false)}
                     <p className="footnote">
-                      Controlled account requests are limited to Support-path
-                      students and tasks approved for their technical track.
+                      {t("Controlled account requests are limited to Support-path students and tasks approved for their technical track.")}
                     </p>
                   </>
                 );
               if (a === "account")
                 return (
                   <>
-                    {field("id", "Account ID")}
-                    {field("label", "Account label")}
+                    {field("id", t("Account ID"))}
+                    {field("label", t("Account label"))}
                     {choice(
                       "platform",
-                      "Controlled platform",
+                      t("Controlled platform"),
                       controlledPlatforms,
                     )}
-                    {field("credits", "Available credit (USD)", "number")}
+                    {field("credits", t("Available credit (USD)"), "number")}
                     <p className="footnote">
-                      Store credentials in your approved vault. Do not enter
-                      passwords here.
+                      {t("Store credentials in your approved vault. Do not enter passwords here.")}
                     </p>
                   </>
                 );
@@ -3182,7 +3173,7 @@ export default function Operations({ module: initialModule }: { module: string }
                   <>
                     {choice(
                       "request",
-                      "Account request",
+                      t("Account request"),
                       (d.requests || [])
                         .filter((r: Row) => r.status === "Submitted")
                         .map((r: Row) => ({
@@ -3192,7 +3183,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     )}
                     {choice(
                       "account",
-                      "Controlled account",
+                      t("Controlled account"),
                       (d.accounts || []).map((c: Row) => ({
                         value: c.id,
                         label:
@@ -3206,8 +3197,7 @@ export default function Operations({ module: initialModule }: { module: string }
                       })),
                     )}
                     <p className="footnote">
-                      Reservations hold one eligible account for 15 minutes and
-                      prevent a concurrent allocation from using it.
+                      {t("Reservations hold one eligible account for 15 minutes and prevent a concurrent allocation from using it.")}
                     </p>
                   </>
                 );
@@ -3215,11 +3205,10 @@ export default function Operations({ module: initialModule }: { module: string }
                 return (
                   <>
                     <div className="info-box">
-                      <strong>Reserved account {form.account}</strong>
-                      <span>Request {form.request}</span>
+                      <strong>{t("Reserved account")}{" "}{form.account}</strong>
+                      <span>{t("Request")}{" "}{form.request}</span>
                       <small>
-                        Complete the independent fit check before the
-                        reservation expires.
+                        {t("Complete the independent fit check before the reservation expires.")}
                       </small>
                     </div>
                     <label className="check">
@@ -3229,7 +3218,7 @@ export default function Operations({ module: initialModule }: { module: string }
                           setForm({ ...form, task_fit: v === true })
                         }
                       />
-                      I have reviewed and approved the task fit.
+                      {t("I have reviewed and approved the task fit.")}
                     </label>
                   </>
                 );
@@ -3240,41 +3229,40 @@ export default function Operations({ module: initialModule }: { module: string }
                       <strong>{modal!.title}</strong>
                       <Badge value={modal!.status} />
                       <small>
-                        Gig {modal!.id} · account {modal!.account_id}
+                        {t("Gig")}{" "}{modal!.id} {t("· account")}{" "}{modal!.account_id}
                       </small>
                     </div>
-                    {field("reason", "Approved refund reason")}
+                    {field("reason", t("Approved refund reason"))}
                   </>
                 );
               if (a === "gig")
                 return (
                   <>
                     {studentPick()}
-                    {field("title", "Task / service")}
-                    {field("platform", "Platform / source")}
-                    {field("order_ref", "Unique order reference")}
+                    {field("title", t("Task / service"))}
+                    {field("platform", t("Platform / source"))}
+                    {field("order_ref", t("Unique order reference"))}
                     <div className="form-grid">
-                      {field("value", "Value", "number")}
-                      {choice("currency", "Currency", [
+                      {field("value", t("Value"), "number")}
+                      {choice("currency", t("Currency"), [
                         "USD",
                         "EGP",
                         "EUR",
                         "GBP",
                       ])}
                     </div>
-                    {field("due", "Due date", "datetime-local")}
+                    {field("due", t("Due date"), "datetime-local")}
                   </>
                 );
               if (a === "fx_rate")
                 return (
                   <>
-                    {choice("currency", "Currency", ["EGP", "EUR", "GBP"])}
-                    {field("usd_rate", "USD per one currency unit", "number")}
-                    {field("effective_date", "Effective date", "date")}
-                    {field("source", "Approved reference / publication")}
+                    {choice("currency", t("Currency"), ["EGP", "EUR", "GBP"])}
+                    {field("usd_rate", t("USD per one currency unit"), "number")}
+                    {field("effective_date", t("Effective date"), "date")}
+                    {field("source", t("Approved reference / publication"))}
                     <p className="footnote">
-                      A separate Project Operations user must approve the rate
-                      before it can affect graduation.
+                      {t("A separate Project Operations user must approve the rate before it can affect graduation.")}
                     </p>
                   </>
                 );
@@ -3282,25 +3270,25 @@ export default function Operations({ module: initialModule }: { module: string }
                 return (
                   <>
                     <div className="info-box">
-                      <strong>{modal!.currency} → USD</strong>
+                      <strong>{modal!.currency} {t("→ USD")}</strong>
                       <span>
-                        {modal!.usd_rate} · effective {modal!.effective_date}
+                        {modal!.usd_rate} {t("· effective")}{" "}{modal!.effective_date}
                       </span>
                       <small>{modal!.source}</small>
                     </div>
-                    {field("reason", "Approval reason")}
+                    {field("reason", t("Approval reason"))}
                   </>
                 );
               if (a === "fx_apply")
                 return (
                   <>
                     <div className="info-box">
-                      <strong>Gig {form.gig_id}</strong>
-                      <span>Currency: {form.currency}</span>
+                      <strong>{t("Gig")}{" "}{form.gig_id}</strong>
+                      <span>{t("Currency:")}{" "}{form.currency}</span>
                     </div>
                     {choice(
                       "fx_rate_id",
-                      "Approved FX rate",
+                      t("Approved FX rate"),
                       (d.fxRates || [])
                         .filter(
                           (r: Row) =>
@@ -3318,8 +3306,7 @@ export default function Operations({ module: initialModule }: { module: string }
                         })),
                     )}
                     <p className="footnote">
-                      The applied USD value is calculated once from the original
-                      gig value and stored with the exact approved rate.
+                      {t("The applied USD value is calculated once from the original gig value and stored with the exact approved rate.")}
                     </p>
                   </>
                 );
@@ -3328,9 +3315,9 @@ export default function Operations({ module: initialModule }: { module: string }
                   <>
                     {studentPick()}
                     <div className="info-box">
-                      Current step: <Badge value={modal?.status} />
+                      {t("Current step:")}{" "}<Badge value={modal?.status} />
                     </div>
-                    {choice("status", "Record next step", [
+                    {choice("status", t("Record next step"), [
                       "Gig Opened",
                       "Work Submitted",
                       "Delivered",
@@ -3338,14 +3325,14 @@ export default function Operations({ module: initialModule }: { module: string }
                       "Cancelled",
                       "Failed",
                     ])}
-                    {choice("performed_by", "Who performed the activity?", [
+                    {choice("performed_by", t("Who performed the activity?"), [
                       "STUDENT",
                       "CLIENT",
                       "STAFF",
                     ])}
                     {field(
                       "occurred_at",
-                      "Activity date & time",
+                      t("Activity date & time"),
                       "datetime-local",
                     )}
                     {proofField()}
@@ -3357,7 +3344,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     {studentPick()}
                     {choice(
                       "gig_id",
-                      "Paid gig",
+                      t("Paid gig"),
                       gigs
                         .filter(
                           (g) =>
@@ -3369,14 +3356,14 @@ export default function Operations({ module: initialModule }: { module: string }
                           label: g.title + " · " + g.currency + " " + g.value,
                         })),
                     )}
-                    {choice("source", "External source", [
+                    {choice("source", t("External source"), [
                       "WhatsApp",
                       "Email",
                       "Freelancing platform",
                       "Form",
                     ])}
-                    {proofField("proof_id", "Delivery proof")}
-                    {proofField("payment_proof_id", "Payment proof")}
+                    {proofField("proof_id", t("Delivery proof"))}
+                    {proofField("payment_proof_id", t("Payment proof"))}
                   </>
                 );
               if (a === "review")
@@ -3391,7 +3378,7 @@ export default function Operations({ module: initialModule }: { module: string }
                         rel="noreferrer"
                         href={"/api/files?id=" + modal!.proof_id}
                       >
-                        Open submitted screenshot <ExternalLink size={16} />
+                        {t("Open submitted screenshot")}{" "}<ExternalLink size={16} />
                       </a>
                     </div>
                     {modal!.code && (
@@ -3408,7 +3395,7 @@ export default function Operations({ module: initialModule }: { module: string }
                       <>
                         {choice(
                           "decision",
-                          "Decision",
+                          t("Decision"),
                           modal!.status === "L3 Review"
                             ? ["Accept", "Reject", "Final resolution"]
                             : ["Accept", "Reject", "Escalate L3"],
@@ -3448,24 +3435,24 @@ export default function Operations({ module: initialModule }: { module: string }
                     {form.decision === "Reject" &&
                       choice(
                         "code",
-                        "Rejection code",
+                        t("Rejection code"),
                         rejectionCodes.map((c) => ({
                           value: c.slice(0, 4),
                           label: c,
                         })),
                       )}
                     {modal!.status === "Accepted" &&
-                      choice("decision", "Controlled reopening", ["Reopen"])}
+                      choice("decision", t("Controlled reopening"), ["Reopen"])}
                     {modal!.status === "Rejected" && (
                       <>
-                        {proofField("proof_id", "Corrected delivery proof")}
+                        {proofField("proof_id", t("Corrected delivery proof"))}
                         {proofField(
                           "payment_proof_id",
-                          "Corrected payment proof",
+                          t("Corrected payment proof"),
                         )}
                       </>
                     )}
-                    {field("notes", "Decision notes / correction requirements")}
+                    {field("notes", t("Decision notes / correction requirements"))}
                   </>
                 );
               if (a === "service_qc_review")
@@ -3473,14 +3460,14 @@ export default function Operations({ module: initialModule }: { module: string }
                   <>
                     <div className="info-box">
                       <strong>{modal!.student_name || name(modal!.student_id)}</strong>
-                      <Badge value={`Service ${modal!.slot}`} />
+                      <Badge value={t("Service {v0}", { v0: modal!.slot })} />
                       <a className="text-link" href={modal!.url} target="_blank" rel="noreferrer">
-                        Open submitted service <ExternalLink size={16} />
+                        {t("Open submitted service")}{" "}<ExternalLink size={16} />
                       </a>
                     </div>
                     <div className="info-box">
-                      <span>Automatic check: <Badge value={modal!.auto_status} /></span>
-                      <small>{modal!.platform} · revision {modal!.revision}</small>
+                      <span>{t("Automatic check:")}{" "}<Badge value={modal!.auto_status} /></span>
+                      <small>{modal!.platform} {t("· revision")}{" "}{modal!.revision}</small>
                     </div>
                     {(() => {
                       try {
@@ -3491,14 +3478,14 @@ export default function Operations({ module: initialModule }: { module: string }
                     {choice("decision", "Review decision", ["Lock", "Needs Correction"])}
                     {form.decision === "Needs Correction" && (
                       <Pick
-                        label="Correction template"
+                        label={t("Correction template")}
                         value=""
                         onChange={(comment) => setForm({ ...form, comment })}
                         options={[
-                          { value: "The link does not open the submitted service page. Send the direct public service URL.", label: "Direct link required" },
-                          { value: "The service owner could not be matched to your student record. Confirm the seller profile and resubmit.", label: "Owner mismatch" },
-                          { value: "The service is unavailable, paused or deleted. Submit an active public service.", label: "Service unavailable" },
-                          { value: "The service category or title does not match your assigned track. Submit a track-relevant service.", label: "Track mismatch" },
+                          { value: "The link does not open the submitted service page. Send the direct public service URL.", label: t("Direct link required") },
+                          { value: "The service owner could not be matched to your student record. Confirm the seller profile and resubmit.", label: t("Owner mismatch") },
+                          { value: "The service is unavailable, paused or deleted. Submit an active public service.", label: t("Service unavailable") },
+                          { value: "The service category or title does not match your assigned track. Submit a track-relevant service.", label: t("Track mismatch") },
                         ]}
                       />
                     )}
@@ -3512,8 +3499,8 @@ export default function Operations({ module: initialModule }: { module: string }
                 return (
                   <>
                     {studentPick()}
-                    {field("title", "Case title")}
-                    {choice("type", "Case type", [
+                    {field("title", t("Case title"))}
+                    {choice("type", t("Case type"), [
                       "Student",
                       "Account",
                       "Gig",
@@ -3523,14 +3510,14 @@ export default function Operations({ module: initialModule }: { module: string }
                       "Technical",
                       "System",
                     ])}
-                    {choice("severity", "Severity", [
+                    {choice("severity", t("Severity"), [
                       "S1 Critical",
                       "S2 High",
                       "S3 Standard",
                       "S4 Low",
                     ])}
                     {staffPick()}
-                    {field("due", "Due date", "datetime-local")}
+                    {field("due", t("Due date"), "datetime-local")}
                   </>
                 );
               if (a === "case_transition")
@@ -3540,7 +3527,7 @@ export default function Operations({ module: initialModule }: { module: string }
                       {modal!.title}
                       <Badge value={modal!.status} />
                     </div>
-                    {choice("status", "Next case stage", [
+                    {choice("status", t("Next case stage"), [
                       "Triaged",
                       "Assigned",
                       "In Progress",
@@ -3549,29 +3536,29 @@ export default function Operations({ module: initialModule }: { module: string }
                       "Verified",
                       "Closed",
                     ])}
-                    {field("resolution", "Resolution", "text", false)}
-                    {field("root_cause", "Root cause", "text", false)}
-                    {field("prevention", "Preventive action", "text", false)}
+                    {field("resolution", t("Resolution"), "text", false)}
+                    {field("root_cause", t("Root cause"), "text", false)}
+                    {field("prevention", t("Preventive action"), "text", false)}
                   </>
                 );
               if (a === "engagement")
                 return (
                   <>
                     {studentPick()}
-                    {choice("status", "Operational engagement", [
+                    {choice("status", t("Operational engagement"), [
                       "Active",
                       "At Risk",
                       "Critical",
                       "Unresponsive",
                     ])}
-                    {field("reason", "Reason for confirmation or override")}
+                    {field("reason", t("Reason for confirmation or override"))}
                   </>
                 );
               if (a === "lifecycle")
                 return (
                   <>
                     {studentPick()}
-                    {choice("status", "Lifecycle status", [
+                    {choice("status", t("Lifecycle status"), [
                       "Active",
                       "Paused",
                       "Transferred",
@@ -3580,11 +3567,9 @@ export default function Operations({ module: initialModule }: { module: string }
                       "Graduate Closed",
                       "Non-Graduate Closed",
                     ])}
-                    {field("reason", "Lifecycle decision reason")}
+                    {field("reason", t("Lifecycle decision reason"))}
                     <p className="footnote">
-                      Closure is blocked while open actions or cases remain.
-                      Graduate closure also requires a calculated qualifying
-                      result.
+                      {t("Closure is blocked while open actions or cases remain. Graduate closure also requires a calculated qualifying result.")}
                     </p>
                   </>
                 );
@@ -3633,7 +3618,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     {studentPick()}
                     {field(
                       "milestone",
-                      "Completed journey milestone (0–8)",
+                      t("Completed journey milestone (0–8)"),
                       "number",
                     )}
                   </>
@@ -3641,14 +3626,14 @@ export default function Operations({ module: initialModule }: { module: string }
               if (a === "task_bank")
                 return (
                   <>
-                    {field("track", "Technical track")}
-                    {field("title", "Approved controlled task")}
+                    {field("track", t("Technical track"))}
+                    {field("title", t("Approved controlled task"))}
                     {choice(
                       "platform",
-                      "Controlled platform",
+                      t("Controlled platform"),
                       controlledPlatforms,
                     )}
-                    {field("value", "Approved value (USD)", "number")}
+                    {field("value", t("Approved value (USD)"), "number")}
                   </>
                 );
               if (a === "group_gate")
@@ -3656,21 +3641,21 @@ export default function Operations({ module: initialModule }: { module: string }
                   <>
                     {choice(
                       "group_id",
-                      "Group",
+                      t("Group"),
                       groups.map((g) => ({
                         value: g.id,
                         label: g.id + " · " + g.name,
                       })),
                     )}
-                    {field("week", "Group-relative week", "number")}
-                    {choice("check_key", "Checkpoint", weeklyGateChecks)}
-                    {choice("status", "Checkpoint status", [
+                    {field("week", t("Group-relative week"), "number")}
+                    {choice("check_key", t("Checkpoint"), weeklyGateChecks)}
+                    {choice("status", t("Checkpoint status"), [
                       "Pending",
                       "Complete",
                       "Exception",
                     ])}
                     {staffPick()}
-                    {field("due", "Checkpoint due", "datetime-local")}
+                    {field("due", t("Checkpoint due"), "datetime-local")}
                   </>
                 );
               if (a === "transfer")
@@ -3679,24 +3664,24 @@ export default function Operations({ module: initialModule }: { module: string }
                     {studentPick()}
                     {choice(
                       "group_id",
-                      "Destination group",
+                      t("Destination group"),
                       groups.map((g) => ({
                         value: g.id,
                         label: g.id + " · " + g.name,
                       })),
                     )}
-                    {field("reason", "Transfer reason")}
+                    {field("reason", t("Transfer reason"))}
                   </>
                 );
               if (a === "policy" || a === "policy_edit")
                 return (
                   <>
-                    {a === "policy" && field("name", "Policy version name")}
+                    {a === "policy" && field("name", t("Policy version name"))}
                     <div className="form-grid">
                       {Object.entries(baselinePolicy).map(
                         ([key, defaultValue]) => (
                           <label className="field" key={key}>
-                            {
+                            {t(
                               (
                                 {
                                   contactDays: "Contact interval (days)",
@@ -3730,8 +3715,8 @@ export default function Operations({ module: initialModule }: { module: string }
                                   sessionMinutes:
                                     "Session duration (minutes)",
                                 } as Row
-                              )[key]
-                            }
+                              )[key] || key,
+                            )}
                             <input
                               required
                               type="number"
@@ -3766,30 +3751,29 @@ export default function Operations({ module: initialModule }: { module: string }
                         ),
                       )}
                     </div>
-                    {field("reason", "Change reason")}
+                    {field("reason", t("Change reason"))}
                     <p className="footnote">
-                      Approval requires a separate Project Operations user.
-                      Existing groups keep their applied policy.
+                      {t("Approval requires a separate Project Operations user. Existing groups keep their applied policy.")}
                     </p>
                   </>
                 );
               if (a === "policy_transition")
                 return (
                   <>
-                    {choice("status", "Next policy stage", [
+                    {choice("status", t("Next policy stage"), [
                       "Reviewed",
                       "Approved",
                       "Effective",
                       "Superseded",
                     ])}
-                    {field("reason", "Decision reason")}
+                    {field("reason", t("Decision reason"))}
                   </>
                 );
               if (a === "account_status")
                 return (
                   <>
                     <CredentialPanel account={modal!.id} />
-                    {choice("status", "Next account state", [
+                    {choice("status", t("Next account state"), [
                       "Available",
                       "Cooldown",
                       "Blocked",
@@ -3798,10 +3782,10 @@ export default function Operations({ module: initialModule }: { module: string }
                       "Under Review",
                       "Retired",
                     ])}
-                    {field("reason", "Reason")}
+                    {field("reason", t("Reason"))}
                   </>
                 );
-              return field("reason", "Reason");
+              return field("reason", t("Reason"));
             })()}
             {formError && (
               <div className="form-error" role="alert">
@@ -3810,32 +3794,32 @@ export default function Operations({ module: initialModule }: { module: string }
             )}
             <div className="form-footer">
               <span>
-                <LockKeyhole size={13} /> Recorded in audit history
+                <LockKeyhole size={13} /> {t("Recorded in audit history")}
               </span>
               <button
                 type="button"
                 className="small-btn"
                 onClick={() => setModal(null)}
               >
-                Cancel
+                {t("Cancel")}
               </button>
               <button className="primary" type="submit" disabled={busy}>
                 {busy
-                  ? "Saving…"
+                  ? t("Saving…")
                   : modal?.action === "review"
-                    ? "Save review"
-                    : "Save record"}
+                    ? t("Save review")
+                    : t("Save record")}
               </button>
             </div>
           </form>
         </DialogContent>
       </Dialog>
       <Sheet open={notifications} onOpenChange={setNotifications}>
-        <SheetContent className="notifications overflow-y-auto">
+        <SheetContent className="notifications overflow-y-auto" side={dir === "rtl" ? "left" : "right"}>
           <SheetHeader>
-            <SheetTitle>Action notifications</SheetTitle>
+            <SheetTitle>{t("Action notifications")}</SheetTitle>
             <SheetDescription>
-              Your assigned alerts, including read history.
+              {t("Your assigned alerts, including read history.")}
             </SheetDescription>
           </SheetHeader>
           <NotificationCenter
@@ -3849,14 +3833,14 @@ export default function Operations({ module: initialModule }: { module: string }
       <Dialog open={importOpen} onOpenChange={setImportOpen}>
         <DialogContent className="sm:max-w-[780px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Spreadsheet import</DialogTitle>
+            <DialogTitle>{t("Spreadsheet import")}</DialogTitle>
             <DialogDescription>
-              Template → upload → validation → confirm → reconciliation
+              {t("Template → upload → validation → confirm → reconciliation")}
             </DialogDescription>
           </DialogHeader>
           <div className="filter-row">
             <Pick
-              label="What the sheet does"
+              label={t("What the sheet does")}
               value={importMode === "update" ? "Update existing records" : "Add new records"}
               onChange={(v) => {
                 const mode = v.startsWith("Update") ? "update" : "create";
@@ -3876,7 +3860,7 @@ export default function Operations({ module: initialModule }: { module: string }
               : "Every row creates a record through the same workflow rules as the forms (up to 1,000 rows per upload). Rows whose ID already exists are rejected; use update mode to change them."}
           </p>
           <Pick
-            label="Import module"
+            label={t("Import module")}
             value={importModule}
             onChange={(v) => {
               setImportModule(v);
@@ -3960,7 +3944,7 @@ export default function Operations({ module: initialModule }: { module: string }
                   },
                   tasks: {
                     student_id: "S10001",
-                    title: "Follow up",
+                    title: t("Follow up"),
                     owner: staff[0]?.id,
                     due: new Date(Date.now() + 86400000).toISOString(),
                     category: "Follow-up",
@@ -3970,7 +3954,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     id: "SES-new",
                     group_id: "G101",
                     coach_id: "staff-coach",
-                    title: "Coaching session",
+                    title: t("Coaching session"),
                     starts_at: new Date().toISOString(),
                     week: 1,
                     duration_minutes: 180,
@@ -3984,13 +3968,13 @@ export default function Operations({ module: initialModule }: { module: string }
                   task_bank: {
                     id: "TB-new",
                     track: "Graphic Design",
-                    title: "Approved design service",
+                    title: t("Approved design service"),
                     platform: "Khamsat",
                     value: 5,
                   },
                   accounts: {
                     id: "ACC-new",
-                    label: "Client workspace",
+                    label: t("Client workspace"),
                     platform: "Khamsat",
                     credits: 50,
                   },
@@ -4005,7 +3989,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     id: "GIG-new",
                     student_id: "S10001",
                     platform: "Fiverr",
-                    title: "Banner design",
+                    title: t("Banner design"),
                     value: 5,
                     currency: "USD",
                     order_ref: "unique-order",
@@ -4020,7 +4004,7 @@ export default function Operations({ module: initialModule }: { module: string }
                   },
                   cases: {
                     student_id: "S10001",
-                    title: "Delivery blocker",
+                    title: t("Delivery blocker"),
                     type: "Student",
                     severity: "S3 Standard",
                     owner: staff[0]?.id,
@@ -4041,7 +4025,7 @@ export default function Operations({ module: initialModule }: { module: string }
                   assessments: {
                     id: "ASM-new",
                     group_id: "G101",
-                    title: "Final readiness",
+                    title: t("Final readiness"),
                     type: "Final",
                     max_score: 100,
                     pass_score: 60,
@@ -4068,7 +4052,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     student_id: "S10001",
                     type: "Employment",
                     organization: "",
-                    title: "Role title",
+                    title: t("Role title"),
                     value: "",
                     currency: "",
                     status: "Reported",
@@ -4087,10 +4071,10 @@ export default function Operations({ module: initialModule }: { module: string }
               }}
             >
               <Download size={16} />{" "}
-              {importMode === "update" ? "Download current data (Excel)" : "Download XLSX template"}
+              {importMode === "update" ? t("Download current data (Excel)") : t("Download XLSX template")}
             </button>
             <label className="small-btn">
-              <Upload size={16} /> Upload XLSX / CSV
+              <Upload size={16} /> {t("Upload XLSX / CSV")}
               <input
                 className="sr-only"
                 type="file"
@@ -4286,29 +4270,25 @@ export default function Operations({ module: initialModule }: { module: string }
           {preview?.rows && (
             <>
               <div className="info-box">
-                <strong>{preview.rows.length} rows reviewed</strong>
+                <strong>{t("{v0} rows reviewed", { v0: preview.rows.length })}</strong>
                 <span>
-                  {preview.rows.filter((r: Row) => r.status === "Ready").length}{" "}
-                  ready ·{" "}
+                  {t("{v0} ready", { v0: preview.rows.filter((r: Row) => r.status === "Ready").length })}
                   {preview.mode === "update"
-                    ? preview.rows.filter((r: Row) => r.status === "Unchanged").length + " unchanged · "
+                    ? " · " + t("{v0} unchanged", { v0: preview.rows.filter((r: Row) => r.status === "Unchanged").length })
                     : ""}
-                  {
-                    preview.rows.filter((r: Row) => r.status === "Rejected")
-                      .length
-                  }{" "}
-                  rejected
+                  {" · "}
+                  {t("{v0} rejected", { v0: preview.rows.filter((r: Row) => r.status === "Rejected").length })}
                 </span>
               </div>
               {generic(preview.rows.slice(0, 50), [
-                { key: "row", label: "Row" },
-                ...(preview.mode === "update" ? [{ key: "id", label: "Record" }] : []),
+                { key: "row", label: t("Row") },
+                ...(preview.mode === "update" ? [{ key: "id", label: t("Record") }] : []),
                 statusCol,
                 ...(preview.mode === "update"
                   ? [
                       {
                         key: "changes",
-                        label: "Changes",
+                        label: t("Changes"),
                         render: (r: Row) =>
                           r.changes?.length
                             ? r.changes.map((c: Row) => (
@@ -4317,25 +4297,25 @@ export default function Operations({ module: initialModule }: { module: string }
                                 </span>
                               ))
                             : r.status === "Unchanged"
-                              ? "Matches the stored record"
+                              ? t("Matches the stored record")
                               : "",
                       },
                     ]
                   : []),
                 {
                   key: "errors",
-                  label: "Validation",
+                  label: t("Validation"),
                   render: (r) =>
                     r.errors.map((e: Row) => (e.field ? e.field + ": " : "") + e.error).join("; ") ||
-                    (preview.mode === "update" ? "" : "Ready for workflow validation"),
+                    (preview.mode === "update" ? "" : t("Ready for workflow validation")),
                 },
               ])}
               {preview.rows.length > 50 && (
-                <p className="footnote">Showing the first 50 of {preview.rows.length} rows; every row is validated.</p>
+                <p className="footnote">{t("Showing the first 50 of {v0} rows; every row is validated.", { v0: preview.rows.length })}</p>
               )}
               {preview.ignored?.length > 0 && (
                 <p className="footnote">
-                  Columns ignored (not editable through this sheet): {preview.ignored.join(", ")}
+                  {t("Columns ignored (not editable through this sheet):")}{" "}{preview.ignored.join(", ")}
                 </p>
               )}
               <p className="footnote">{preview.notice}</p>
@@ -4363,7 +4343,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     if (v.error) throw Error(v.error);
                     setPreview(v);
                     await refresh();
-                    toast.success("Import reconciliation ready");
+                    toast.success(t("Import reconciliation ready"));
                   } catch (e: any) {
                     toast.error(e.message);
                   } finally {
@@ -4372,20 +4352,20 @@ export default function Operations({ module: initialModule }: { module: string }
                 }}
               >
                 {busy
-                  ? "Importing…"
+                  ? t("Importing…")
                   : importMode === "update"
-                    ? `Apply ${preview.rows.filter((r: Row) => r.status === "Ready").length} changes`
-                    : "Confirm import"}
+                    ? t("Apply {v0} changes", { v0: preview.rows.filter((r: Row) => r.status === "Ready").length })
+                    : t("Confirm import")}
               </button>
             </>
           )}
           {preview && "created" in preview && (
             <div className="prose">
-              <h3>Import complete</h3>
+              <h3>{t("Import complete")}</h3>
               <p>
-                {preview.created} created · {preview.updated} updated ·{" "}
-                {preview.skipped} skipped · {preview.conflicted} conflicted ·{" "}
-                {preview.rejected} rejected
+                {t("{v0} created · {v1} updated · {v2} skipped · {v3} conflicted · {v4} rejected", {
+                  v0: preview.created, v1: preview.updated, v2: preview.skipped, v3: preview.conflicted, v4: preview.rejected,
+                })}
               </p>
             </div>
           )}
@@ -4403,7 +4383,7 @@ export default function Operations({ module: initialModule }: { module: string }
                 )
               }
             >
-              Download error report
+              {t("Download error report")}
             </button>
           )}
         </DialogContent>

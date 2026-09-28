@@ -1,4 +1,5 @@
 "use client";
+import { useT } from "@/lib/i18n/context";
 import { useState, useEffect } from "react";
 import { Download, LockKeyhole, RefreshCw, Search } from "lucide-react";
 import {
@@ -9,6 +10,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 export function ControlCenter() {
+  const t = useT();
   const [data, setData] = useState<any>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
@@ -25,7 +27,7 @@ export function ControlCenter() {
   }, []);
   async function backup() {
     setBusy(true);
-    setMessage("Preparing encrypted database and evidence export…");
+    setMessage(t("Preparing encrypted database and evidence export…"));
     try {
       const r = await fetch("/api/backup", { method: "POST" });
       if (!r.ok) throw Error((await r.json()).error);
@@ -37,7 +39,7 @@ export function ControlCenter() {
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
       setMessage(
-        "Encrypted export downloaded. Store it and the recovery key separately.",
+        t("Encrypted export downloaded. Store it and the recovery key separately."),
       );
     } catch (e: any) {
       setMessage(e.message);
@@ -47,7 +49,7 @@ export function ControlCenter() {
   }
   return (
     <div className="prose">
-      <h2>Connections and recovery</h2>
+      <h2>{t("Connections and recovery")}</h2>
       {error && <p role="alert">{error}</p>}
       <div className="report-grid">
         {[
@@ -56,34 +58,33 @@ export function ControlCenter() {
           ["backup_encryption", "Encrypted backups"],
         ].map(([key, title]) => (
           <div className="panel prose" key={key}>
-            <h3>{title}</h3>
+            <h3>{t(title)}</h3>
             <span
               className={
                 "badge " + (data?.connections[key] ? "green" : "amber")
               }
             >
-              {data?.connections[key] ? "Configured" : "Connection required"}
+              {data?.connections[key] ? t("Configured") : t("Connection required")}
             </span>
           </div>
         ))}
       </div>
       <p>
-        Connections are configured through protected deployment settings. Secret
-        values are never shown here.
+        {t("Connections are configured through protected deployment settings. Secret values are never shown here.")}
       </p>
-      <h3>Student roster readiness</h3>
+      <h3>{t("Student roster readiness")}</h3>
       <div className="mini-stats">
-        <span><strong>{data?.roster?.total ?? "—"}</strong>Total students</span>
-        <span><strong>{data?.roster?.active ?? "—"}</strong>Active students</span>
-        <span><strong>{data?.roster?.missing_email ?? "—"}</strong>Missing sign-in email</span>
-        <span><strong>{data?.roster?.duplicate_emails?.length ?? "—"}</strong>Duplicate emails</span>
+        <span><strong>{data?.roster?.total ?? "—"}</strong>{t("Total students")}</span>
+        <span><strong>{data?.roster?.active ?? "—"}</strong>{t("Active students")}</span>
+        <span><strong>{data?.roster?.missing_email ?? "—"}</strong>{t("Missing sign-in email")}</span>
+        <span><strong>{data?.roster?.duplicate_emails?.length ?? "—"}</strong>{t("Duplicate emails")}</span>
       </div>
       {(data?.roster?.missing_email_rows?.length > 0 || data?.roster?.duplicate_emails?.length > 0) && (
         <div className="info-box">
-          <strong>Roster corrections required before student launch</strong>
-          {data.roster.missing_email_rows.slice(0, 20).map((student: any) => <span key={student.id}>{student.id} · {student.name} · {student.group_id} · missing email</span>)}
+          <strong>{t("Roster corrections required before student launch")}</strong>
+          {data.roster.missing_email_rows.slice(0, 20).map((student: any) => <span key={student.id}>{student.id} · {student.name} · {student.group_id} {t("· missing email")}</span>)}
           {data.roster.duplicate_emails.slice(0, 20).map((row: any) => <span key={row.email}>{row.email} · {row.student_ids}</span>)}
-          {(data.roster.missing_email_rows.length > 20 || data.roster.duplicate_emails.length > 20) && <small>Only the first 20 rows in each category are shown. Correct the source roster and rerun import preview.</small>}
+          {(data.roster.missing_email_rows.length > 20 || data.roster.duplicate_emails.length > 20) && <small>{t("Only the first 20 rows in each category are shown. Correct the source roster and rerun import preview.")}</small>}
         </div>
       )}
       <button
@@ -92,12 +93,12 @@ export function ControlCenter() {
         onClick={backup}
       >
         <Download size={16} />
-        {busy ? "Preparing backup…" : "Download encrypted backup"}
+        {busy ? t("Preparing backup…") : t("Download encrypted backup")}
       </button>
       <p role="status">{message}</p>
-      <h3>Scheduled workflow runs</h3>
+      <h3>{t("Scheduled workflow runs")}</h3>
       <label className="field">
-        Reason for retry authorization
+        {t("Reason for retry authorization")}
         <input
           value={retryReason}
           onChange={(e) => setRetryReason(e.target.value)}
@@ -105,7 +106,7 @@ export function ControlCenter() {
       </label>
       <button className="small-btn" onClick={load}>
         <RefreshCw size={16} />
-        Refresh run log
+        {t("Refresh run log")}
       </button>
       {data?.runs.map((r: any) => (
         <div className="info-box" key={r.id}>
@@ -118,7 +119,7 @@ export function ControlCenter() {
               onClick={async () => {
                 const reason = retryReason.trim();
                 if (!reason) {
-                  setError("Record the retry reason first.");
+                  setError(t("Record the retry reason first."));
                   return;
                 }
                 const response = await fetch("/api/system", {
@@ -134,22 +135,23 @@ export function ControlCenter() {
                 if (x.error) setError(x.error);
                 else {
                   setMessage(
-                    "Retry authorized. Resubmit the same event ID and contents from the runner.",
+                    t("Retry authorized. Resubmit the same event ID and contents from the runner."),
                   );
                   load();
                 }
               }}
             >
-              Authorize retry
+              {t("Authorize retry")}
             </button>
           )}
         </div>
       ))}
-      {data?.runs.length === 0 && <p>No scheduled runs yet.</p>}
+      {data?.runs.length === 0 && <p>{t("No scheduled runs yet.")}</p>}
     </div>
   );
 }
 export function ReportsPanel() {
+  const t = useT();
   const [data, setData] = useState<any>(null),
     [from, setFrom] = useState(""),
     [to, setTo] = useState(""),
@@ -180,12 +182,12 @@ export function ReportsPanel() {
   return (
     <section className="panel">
       <div className="panel-heading">
-        <h2>Period activity and capacity</h2>
+        <h2>{t("Period activity and capacity")}</h2>
       </div>
       <div className="prose">
         <div className="form-grid">
           <label className="field">
-            Activity from
+            {t("Activity from")}
             <input
               type="date"
               value={from}
@@ -193,7 +195,7 @@ export function ReportsPanel() {
             />
           </label>
           <label className="field">
-            Activity through
+            {t("Activity through")}
             <input
               type="date"
               value={to}
@@ -203,70 +205,66 @@ export function ReportsPanel() {
         </div>
         <div className="detail-actions">
           <button className="primary" onClick={load}>
-            Apply period
+            {t("Apply period")}
           </button>
           <a
             className="small-btn"
             href={"/api/reports?format=xlsx&from=" + from + "&to=" + to}
           >
-            Export group report
+            {t("Export group report")}
           </a>
-          <a className="small-btn" href={"/api/reports?dataset=service_links&format=csv&from=" + from + "&to=" + to}>Export service links CSV</a>
-          <a className="small-btn" href={"/api/reports?dataset=service_links&format=xlsx&from=" + from + "&to=" + to}>Export service links XLSX</a>
+          <a className="small-btn" href={"/api/reports?dataset=service_links&format=csv&from=" + from + "&to=" + to}>{t("Export service links CSV")}</a>
+          <a className="small-btn" href={"/api/reports?dataset=service_links&format=xlsx&from=" + from + "&to=" + to}>{t("Export service links XLSX")}</a>
         </div>
         {error && <p role="alert">{error}</p>}
         {data && (
           <>
             <div className="mini-stats">
               <span>
-                <strong>{data.activity.contacts}</strong>Contacts in period
+                <strong>{data.activity.contacts}</strong>{t("Contacts in period")}
               </span>
               <span>
-                <strong>{data.activity.accepted_evidence}</strong>Accepted in
-                period
+                <strong>{data.activity.accepted_evidence}</strong>{t("Accepted in period")}
               </span>
               <span>
-                <strong>{data.metrics.sla_breaches}</strong>Current SLA breaches
+                <strong>{data.metrics.sla_breaches}</strong>{t("Current SLA breaches")}
               </span>
               <span>
-                <strong>{data.metrics.available_accounts}</strong>Accounts
-                available
+                <strong>{data.metrics.available_accounts}</strong>{t("Accounts available")}
               </span>
             </div>
-            <h3>Graduation scenarios</h3>
+            <h3>{t("Graduation scenarios")}</h3>
             <p>
-              {data.graduation_scenarios.confirmed} confirmed graduates.{" "}
+              {data.graduation_scenarios.confirmed} {t("confirmed graduates.")}{" "}
               {data.graduation_scenarios.with_all_pending_evidence_accepted}{" "}
-              would qualify if every pending review in the scenario were
-              accepted.
+              {t("would qualify if every pending review in the scenario were accepted.")}
             </p>
             <p>{data.graduation_scenarios.description}</p>
-            <h3>Student service-link QC</h3>
+            <h3>{t("Student service-link QC")}</h3>
             <div className="mini-stats">
-              <span><strong>{data.service_links.submitted_percent}%</strong>Submitted</span>
-              <span><strong>{data.service_links.fully_approved_percent}%</strong>Fully approved</span>
-              <span><strong>{data.service_links.needs_correction_percent}%</strong>Need correction</span>
-              <span><strong>{data.service_links.average_qc_turnaround_hours ?? "—"}</strong>Average QC hours</span>
-              <span><strong>{data.service_links.automatic_failure_rate}%</strong>Automatic failures</span>
-              <span><strong>{data.service_links.average_revisions}</strong>Average revisions</span>
+              <span><strong>{data.service_links.submitted_percent}%</strong>{t("Submitted")}</span>
+              <span><strong>{data.service_links.fully_approved_percent}%</strong>{t("Fully approved")}</span>
+              <span><strong>{data.service_links.needs_correction_percent}%</strong>{t("Need correction")}</span>
+              <span><strong>{data.service_links.average_qc_turnaround_hours ?? "—"}</strong>{t("Average QC hours")}</span>
+              <span><strong>{data.service_links.automatic_failure_rate}%</strong>{t("Automatic failures")}</span>
+              <span><strong>{data.service_links.average_revisions}</strong>{t("Average revisions")}</span>
             </div>
             <div className="report-grid">
-              <div className="info-box"><strong>Students by submitted links</strong>{data.service_links.students_by_link_count.map((row: any) => <span key={row.count}>{row.count} links · {row.students} students</span>)}</div>
-              <div className="info-box"><strong>Platform distribution</strong>{Object.entries(data.service_links.platform_distribution).map(([platform, count]: any) => <span key={platform}>{platform} · {count}</span>)}</div>
-              <div className="info-box"><strong>Reviewer activity</strong>{Object.entries(data.service_links.reviewer_workload).map(([reviewer, count]: any) => <span key={reviewer}>{reviewer} · {count}</span>)}</div>
+              <div className="info-box"><strong>{t("Students by submitted links")}</strong>{data.service_links.students_by_link_count.map((row: any) => <span key={row.count}>{row.count} {t("links ·")}{" "}{row.students} {t("students")}</span>)}</div>
+              <div className="info-box"><strong>{t("Platform distribution")}</strong>{Object.entries(data.service_links.platform_distribution).map(([platform, count]: any) => <span key={platform}>{platform} · {count}</span>)}</div>
+              <div className="info-box"><strong>{t("Reviewer activity")}</strong>{Object.entries(data.service_links.reviewer_workload).map(([reviewer, count]: any) => <span key={reviewer}>{reviewer} · {count}</span>)}</div>
             </div>
-            <h3>Account capacity by platform</h3>
+            <h3>{t("Account capacity by platform")}</h3>
             {Object.entries(data.capacity).map(([platform, r]: any) => (
               <div className="info-box" key={platform}>
                 <strong>{platform}</strong>
-                <span>{r.available} available accounts</span>
-                <span>${r.credits} credits</span>
-                <span>{r.requests} pending requests</span>
+                <span>{r.available} {t("available accounts")}</span>
+                <span>${r.credits} {t("credits")}</span>
+                <span>{r.requests} {t("pending requests")}</span>
               </div>
             ))}
             <p>
-              Activity counts use the selected period. Backlog, capacity and
-              graduation show the current position.
+              {t("Activity counts use the selected period. Backlog, capacity and graduation show the current position.")}
             </p>
           </>
         )}
@@ -275,6 +273,7 @@ export function ReportsPanel() {
   );
 }
 export function CredentialPanel({ account }: { account: string }) {
+  const t = useT();
   const [purpose, setPurpose] = useState(""),
     [reference, setReference] = useState(""),
     [secret, setSecret] = useState<any>(null),
@@ -286,8 +285,8 @@ export function CredentialPanel({ account }: { account: string }) {
   }, [account]);
   useEffect(() => {
     if (!secret) return;
-    const t = setTimeout(() => setSecret(null), 30000);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setSecret(null), 30000);
+    return () => clearTimeout(timer);
   }, [secret]);
   async function act(action: string) {
     setBusy(true);
@@ -308,8 +307,8 @@ export function CredentialPanel({ account }: { account: string }) {
       if (action === "reveal") setSecret(x);
       setMessage(
         action === "reveal"
-          ? "Credentials hide after 30 seconds."
-          : "Recorded in the audit history.",
+          ? t("Credentials hide after 30 seconds.")
+          : t("Recorded in the audit history."),
       );
     } catch (e: any) {
       setMessage(e.message);
@@ -319,9 +318,9 @@ export function CredentialPanel({ account }: { account: string }) {
   }
   return (
     <div className="prose">
-      <h3>Controlled credential access</h3>
+      <h3>{t("Controlled credential access")}</h3>
       <label className="field">
-        Access purpose
+        {t("Access purpose")}
         <input
           value={purpose}
           onChange={(e) => setPurpose(e.target.value)}
@@ -336,7 +335,7 @@ export function CredentialPanel({ account }: { account: string }) {
           onClick={() => act("reveal")}
         >
           <LockKeyhole size={16} />
-          Retrieve credentials
+          {t("Retrieve credentials")}
         </button>
         <button
           type="button"
@@ -344,25 +343,25 @@ export function CredentialPanel({ account }: { account: string }) {
           className="small-btn"
           onClick={() => act("report_exposure")}
         >
-          Report exposure
+          {t("Report exposure")}
         </button>
       </div>
       {secret && (
         <div className="info-box">
-          <span>Username: {secret.username}</span>
-          <span>Password: {secret.password}</span>
+          <span>{t("Username:")}{" "}{secret.username}</span>
+          <span>{t("Password:")}{" "}{secret.password}</span>
           <button type="button" onClick={() => setSecret(null)}>
-            Hide now
+            {t("Hide now")}
           </button>
         </div>
       )}
       <p role="status">{message}</p>
       <label className="field">
-        Approved vault reference
+        {t("Approved vault reference")}
         <input
           value={reference}
           onChange={(e) => setReference(e.target.value)}
-          placeholder="depi/client-account-101"
+          placeholder={t("depi/client-account-101")}
         />
       </label>
       <button
@@ -371,7 +370,7 @@ export function CredentialPanel({ account }: { account: string }) {
         className="small-btn"
         onClick={() => act("set_reference")}
       >
-        Save reference
+        {t("Save reference")}
       </button>
     </div>
   );
@@ -381,6 +380,7 @@ export function NotificationCenter({
 }: {
   onStudent: (id: string) => void;
 }) {
+  const t = useT();
   const [items, setItems] = useState<any[]>([]),
     [error, setError] = useState("");
   useEffect(() => {
@@ -391,7 +391,7 @@ export function NotificationCenter({
   }, []);
   return (
     <div className="notification-list">
-      {error && <p role="alert">{error}</p>}
+      {error && <p role="alert">{t(error)}</p>}
       {items.map((n) => (
         <button
           key={n.id}
@@ -423,7 +423,7 @@ export function NotificationCenter({
           </span>
         </button>
       ))}
-      {!items.length && !error && <p>No notifications assigned to you yet.</p>}
+      {!items.length && !error && <p>{t("No notifications assigned to you yet.")}</p>}
     </div>
   );
 }
@@ -433,6 +433,7 @@ export function GlobalSearch({
 }: {
   onStudent: (id: string) => void;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false),
     [query, setQuery] = useState(""),
     [results, setResults] = useState<any[]>([]),
@@ -486,7 +487,7 @@ export function GlobalSearch({
     <>
       <button
         className="icon-btn"
-        aria-label="Search the workspace"
+        aria-label={t("Search the workspace")}
         onClick={() => setOpen(true)}
       >
         <Search size={18} />
@@ -494,10 +495,9 @@ export function GlobalSearch({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-[620px]">
           <DialogHeader>
-            <DialogTitle>Search the workspace</DialogTitle>
+            <DialogTitle>{t("Search the workspace")}</DialogTitle>
             <DialogDescription>
-              Find scoped students, applications, groups, gigs, evidence,
-              certificates, outcomes, cases and authorized accounts.
+              {t("Find scoped students, applications, groups, gigs, evidence, certificates, outcomes, cases and authorized accounts.")}
             </DialogDescription>
           </DialogHeader>
           <label className="search-box">
@@ -506,8 +506,8 @@ export function GlobalSearch({
               autoFocus
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Name, ID, phone, order reference…"
-              aria-label="Global search"
+              placeholder={t("Name, ID, phone, order reference…")}
+              aria-label={t("Global search")}
             />
           </label>
           {error && <p role="alert">{error}</p>}
@@ -523,7 +523,7 @@ export function GlobalSearch({
               </button>
             ))}
             {query.length >= 2 && !results.length && !error && (
-              <p>No matching records in your assigned scope.</p>
+              <p>{t("No matching records in your assigned scope.")}</p>
             )}
           </div>
         </DialogContent>
@@ -533,6 +533,7 @@ export function GlobalSearch({
 }
 
 export function RetentionPanel() {
+  const t = useT();
   const [data, setData] = useState<any>(null),
     [form, setForm] = useState({
       scope: "attachments",
@@ -559,7 +560,7 @@ export function RetentionPanel() {
     const x = await r.json();
     setMessage(
       x.error ||
-        "Approved retention policy recorded; execution remains pending controlled implementation.",
+        t("Approved retention policy recorded; execution remains pending controlled implementation."),
     );
     if (!x.error) load();
   }
@@ -567,14 +568,13 @@ export function RetentionPanel() {
     setForm({ ...form, [key]: e.target.value });
   return (
     <div className="prose">
-      <h2>Retention policy controls</h2>
+      <h2>{t("Retention policy controls")}</h2>
       <p>
-        Periods are intentionally blank until the organization supplies an
-        approved legal or contractual rule.
+        {t("Periods are intentionally blank until the organization supplies an approved legal or contractual rule.")}
       </p>
       <div className="form-grid">
         <label className="field">
-          Data scope
+          {t("Data scope")}
           <select value={form.scope} onChange={field("scope")}>
             {[
               "audit_events",
@@ -589,7 +589,7 @@ export function RetentionPanel() {
           </select>
         </label>
         <label className="field">
-          Approved action
+          {t("Approved action")}
           <select
             value={form.retention_action}
             onChange={field("retention_action")}
@@ -600,7 +600,7 @@ export function RetentionPanel() {
           </select>
         </label>
         <label className="field">
-          Retention days
+          {t("Retention days")}
           <input
             type="number"
             min="1"
@@ -610,7 +610,7 @@ export function RetentionPanel() {
           />
         </label>
         <label className="field">
-          Policy / legal authority
+          {t("Policy / legal authority")}
           <input
             value={form.authority}
             onChange={field("authority")}
@@ -618,7 +618,7 @@ export function RetentionPanel() {
         </label>
       </div>
       <label className="field">
-        Decision reason
+        {t("Decision reason")}
         <input value={form.reason} onChange={field("reason")} />
       </label>
       <button
@@ -626,14 +626,14 @@ export function RetentionPanel() {
         disabled={!form.days || !form.authority.trim() || !form.reason.trim()}
         onClick={save}
       >
-        Record approved policy
+        {t("Record approved policy")}
       </button>
       <p role="status">{message}</p>
       {data?.configurations?.map((x: any) => (
         <div className="info-box" key={x.key}>
           <strong>{x.key}</strong>
           <span>
-            {JSON.parse(x.value).days} days · {JSON.parse(x.value).action}
+            {JSON.parse(x.value).days} {t("days ·")}{" "}{JSON.parse(x.value).action}
           </span>
           <small>{JSON.parse(x.value).authority}</small>
         </div>

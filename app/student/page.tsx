@@ -1,4 +1,5 @@
 "use client";
+import { LanguageToggle, useT } from "@/lib/i18n/context";
 
 import { useEffect, useMemo, useState } from "react";
 import { Check, ExternalLink, LockKeyhole, RefreshCw, Send, ShieldCheck } from "lucide-react";
@@ -45,6 +46,7 @@ function needsSignIn(message: string) {
 }
 
 export default function StudentServicesPage() {
+  const t = useT();
   const [student, setStudent] = useState<{ id: string; name: string; email?: string } | null>(null);
   const [services, setServices] = useState<Service[]>(empty());
   const [submission, setSubmission] = useState<any>(null);
@@ -62,7 +64,7 @@ export default function StudentServicesPage() {
     try {
       const response = await fetch("/api/student-services", { cache: "no-store" });
       const value = await response.json();
-      if (!response.ok || value.error) throw new Error(value.error || "Unable to load your services.");
+      if (!response.ok || value.error) throw new Error(value.error || t("Unable to load your services."));
       setStudent(value.student);
       const serverServices = value.services || empty();
       const draftKey = `depi-service-draft:${value.student.id}`;
@@ -122,7 +124,7 @@ export default function StudentServicesPage() {
         body: JSON.stringify({ action: "submit_services", services: services.map((service) => service.url) }),
       });
       const value = await response.json();
-      if (!response.ok || value.error) throw new Error(value.error || "Unable to submit your links.");
+      if (!response.ok || value.error) throw new Error(value.error || t("Unable to submit your links."));
       setServices(value.services || empty());
       setSubmission(value.submission);
       setReviews(value.reviews || []);
@@ -139,26 +141,29 @@ export default function StudentServicesPage() {
   return (
     <main className="student-shell">
       <header className="student-header">
-        <a className="student-brand" href="/student" aria-label="DEPI student services">
+        <a className="student-brand" href="/student" aria-label={t("DEPI student services")}>
           {/* eslint-disable-next-line @next/next/no-img-element -- a static local logo; the Worker build does not run the image optimizer */}
           <img className="brand-mark-img" src="/brand/mark.png" alt="" width={34} height={34} />
-          <span><strong>DEPI</strong><small>Student services</small></span>
+          <span><strong>{t("DEPI")}</strong><small>{t("Student services")}</small></span>
         </a>
-        <a className="student-signout" href="/api/auth/logout">Sign out</a>
+        <span className="student-header-actions">
+          <LanguageToggle />
+          <a className="student-signout" href="/api/auth/logout">{t("Sign out")}</a>
+        </span>
       </header>
 
       {loading ? (
-        <section className="student-card student-loading"><RefreshCw className="spin" size={22} /> Loading your service links…</section>
+        <section className="student-card student-loading"><RefreshCw className="spin" size={22} /> {t("Loading your service links…")}</section>
       ) : error ? (
         <section className="student-card student-error" role="alert">
           <ShieldCheck size={24} />
           <div>
-            <h1>{needsSignIn(error) ? "Student sign-in required" : "We could not load your service links"}</h1>
+            <h1>{needsSignIn(error) ? t("Student sign-in required") : t("We could not load your service links")}</h1>
             <p>{error}</p>
           </div>
           <div className="student-actions">
-            {needsSignIn(error) ? <a className="student-primary" href="/login">Sign in</a> : null}
-            <button className={needsSignIn(error) ? "student-secondary" : "student-primary"} onClick={refresh}>Try again</button>
+            {needsSignIn(error) ? <a className="student-primary" href="/login">{t("Sign in")}</a> : null}
+            <button className={needsSignIn(error) ? "student-secondary" : "student-primary"} onClick={refresh}>{t("Try again")}</button>
           </div>
         </section>
       ) : (
@@ -179,8 +184,8 @@ export default function StudentServicesPage() {
             </div>
             {submission && (
               <div className="student-meta student-submission-meta">
-                <span>Submitted {new Date(submission.submitted_at).toLocaleString()}</span>
-                <span>Last reviewed {lastReviewedAt ? new Date(lastReviewedAt).toLocaleString() : "Not reviewed yet"}</span>
+                <span>{t("Submitted")}{" "}{new Date(submission.submitted_at).toLocaleString()}</span>
+                <span>{t("Last reviewed")}{" "}{lastReviewedAt ? new Date(lastReviewedAt).toLocaleString() : t("Not reviewed yet")}</span>
               </div>
             )}
             <form onSubmit={requestSubmit}>
@@ -190,12 +195,12 @@ export default function StudentServicesPage() {
                   const correction = service.qc_status === "Needs Correction";
                   return (
                     <article className={`student-service-row ${locked ? "is-locked" : correction ? "is-correction" : ""}`} key={service.slot}>
-                      <div className="student-slot"><span>0{service.slot}</span><strong>Service {service.slot}</strong></div>
+                      <div className="student-slot"><span>0{service.slot}</span><strong>{t("Service")}{" "}{service.slot}</strong></div>
                       <div className="student-url-field">
-                        <label htmlFor={`service-${service.slot}`}>Public service URL</label>
+                        <label htmlFor={`service-${service.slot}`}>{t("Public service URL")}</label>
                         <div className="student-url-wrap">
-                          <input id={`service-${service.slot}`} type="url" required value={service.url} disabled={locked || busy} placeholder="https://…" onChange={(e) => update(service.slot, e.target.value)} />
-                          {service.url && <a href={service.url} target="_blank" rel="noreferrer" aria-label={`Open service ${service.slot}`}><ExternalLink size={17} /></a>}
+                          <input id={`service-${service.slot}`} type="url" required value={service.url} disabled={locked || busy} placeholder={t("https://…")} onChange={(e) => update(service.slot, e.target.value)} />
+                          {service.url && <a href={service.url} target="_blank" rel="noreferrer" aria-label={t("Open service {v0}", { v0: service.slot })}><ExternalLink size={17} /></a>}
                         </div>
                         <div className="student-meta">
                           {service.platform && <span>{service.platform}</span>}
@@ -219,14 +224,14 @@ export default function StudentServicesPage() {
               <div className="student-form-footer">
                 <span>
                   {!submission
-                    ? "Add all three links, then submit them together."
+                    ? t("Add all three links, then submit them together.")
                     : editable.length > 0
-                      ? `${editable.length} link${editable.length === 1 ? "" : "s"} can be updated.`
+                      ? t("{v0} link{v1} can be updated.", { v0: editable.length, v1: editable.length === 1 ? "" : "s" })
                       : lockedCount === 3
                         ? "All three links are approved. Nothing more is needed."
                         : "Your links are with your coordinator. Nothing can be changed until they respond."}
                 </span>
-                <button className="student-primary" disabled={!ready || busy || (Boolean(submission) && editable.length === 0)} type="submit"><Send size={16} />{busy ? "Submitting…" : submission ? "Resubmit editable links" : "Submit 3 links"}</button>
+                <button className="student-primary" disabled={!ready || busy || (Boolean(submission) && editable.length === 0)} type="submit"><Send size={16} />{busy ? t("Submitting…") : submission ? t("Resubmit editable links") : t("Submit 3 links")}</button>
               </div>
             </form>
           </section>
@@ -253,11 +258,11 @@ export default function StudentServicesPage() {
             <DialogDescription>Pending links become read-only until your coordinator reviews them. You can edit only links returned for correction.</DialogDescription>
           </DialogHeader>
           <ol className="student-confirm-list">
-            {services.map((service) => <li key={service.slot}><strong>Service {service.slot}</strong><span>{service.url}</span></li>)}
+            {services.map((service) => <li key={service.slot}><strong>{t("Service")}{" "}{service.slot}</strong><span>{service.url}</span></li>)}
           </ol>
           <div className="student-actions">
-            <button type="button" className="student-secondary" onClick={() => setConfirmOpen(false)}>Review links</button>
-            <button type="button" className="student-primary" disabled={busy} onClick={submit}>Confirm submission</button>
+            <button type="button" className="student-secondary" onClick={() => setConfirmOpen(false)}>{t("Review links")}</button>
+            <button type="button" className="student-primary" disabled={busy} onClick={submit}>{t("Confirm submission")}</button>
           </div>
         </DialogContent>
       </Dialog>

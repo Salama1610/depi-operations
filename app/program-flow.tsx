@@ -1,4 +1,5 @@
 "use client";
+import { useT } from "@/lib/i18n/context";
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -43,6 +44,7 @@ const onboardingChecks = [
 ];
 
 function Badge({ value }: { value: string }) {
+  const t = useT();
   const color = /Block|Ineligible|Needs|Withdrawn|Archived|Approval missing/.test(value)
     ? "red"
     : /Warn|Wait|Pending|Submitted|Reported/.test(value)
@@ -52,20 +54,22 @@ function Badge({ value }: { value: string }) {
           )
         ? "green"
         : "neutral";
-  return <span className={`badge ${color}`}>{value}</span>;
+  return <span className={`badge ${color}`}>{t(value)}</span>;
 }
 
 function Empty({ text }: { text: string }) {
+  const t = useT();
   return (
     <div className="empty">
       <CheckCircle2 size={28} />
-      <h3>No records yet</h3>
-      <p>{text}</p>
+      <h3>{t("No records yet")}</h3>
+      <p>{t(text)}</p>
     </div>
   );
 }
 
 export function ProgramFlow() {
+  const t = useT();
   const [data, setData] = useState<Row | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -165,7 +169,7 @@ export function ProgramFlow() {
       });
       const value = await response.json();
       if (value.error) throw new Error(value.error);
-      toast.success("Program record saved");
+      toast.success(t("Program record saved"));
       setModal(null);
       await load();
     } catch (e: any) {
@@ -230,7 +234,7 @@ export function ProgramFlow() {
     required = true,
   ) => (
     <label className="field" key={key}>
-      {label}
+      {t(label)}
       <input
         required={required}
         type={type}
@@ -245,13 +249,13 @@ export function ProgramFlow() {
     options: Array<string | { value: string; label: string }>,
   ) => (
     <label className="field" key={key}>
-      {label}
+      {t(label)}
       <select
         required
         value={form[key] || ""}
         onChange={(e) => setForm({ ...form, [key]: e.target.value })}
       >
-        <option value="">Choose…</option>
+        <option value="">{t("Choose…")}</option>
         {options.map((option) => {
           const item =
             typeof option === "string"
@@ -259,7 +263,7 @@ export function ProgramFlow() {
               : option;
           return (
             <option value={item.value} key={item.value}>
-              {item.label}
+              {t(item.label)}
             </option>
           );
         })}
@@ -281,18 +285,18 @@ export function ProgramFlow() {
               })
             }
           />
-          {option}
+          {t(option)}
         </label>
       ))}
     </div>
   );
   const textarea = (key: string, label: string, placeholder = "") => (
     <label className="field" key={key}>
-      {label}
+      {t(label)}
       <textarea
         required
         rows={4}
-        placeholder={placeholder}
+        placeholder={t(placeholder)}
         value={form[key] ?? ""}
         onChange={(e) => setForm({ ...form, [key]: e.target.value })}
       />
@@ -302,16 +306,16 @@ export function ProgramFlow() {
   if (!data && !error)
     return (
       <div className="panel prose">
-        <p>Loading the complete program flow…</p>
+        <p>{t("Loading the complete program flow…")}</p>
       </div>
     );
   if (error)
     return (
       <div className="error-panel" role="alert">
-        <h2>Program flow unavailable</h2>
+        <h2>{t("Program flow unavailable")}</h2>
         <p>{error}</p>
         <button className="primary" onClick={load}>
-          Try again
+          {t("Try again")}
         </button>
       </div>
     );
@@ -326,44 +330,43 @@ export function ProgramFlow() {
           ["Certificates", d.counts.certificates],
         ].map(([label, value]) => (
           <div className="stat" key={String(label)}>
-            <span>{label}</span>
+            <span>{t(String(label))}</span>
             <strong>{value}</strong>
-            <small>Current authorized scope</small>
+            <small>{t("Current authorized scope")}</small>
           </div>
         ))}
       </div>
       <Tabs defaultValue="intake">
         <TabsList className="detail-tabs">
-          <TabsTrigger value="intake">1 · Intake</TabsTrigger>
-          <TabsTrigger value="coaching">2 · Coaching team</TabsTrigger>
-          <TabsTrigger value="assessment">3 · Assessments</TabsTrigger>
+          <TabsTrigger value="intake">{t("1 · Intake")}</TabsTrigger>
+          <TabsTrigger value="coaching">{t("2 · Coaching team")}</TabsTrigger>
+          <TabsTrigger value="assessment">{t("3 · Assessments")}</TabsTrigger>
           <TabsTrigger value="outcomes">
-            4 · Certificates & outcomes
+            {t("4 · Certificates & outcomes")}
           </TabsTrigger>
-          <TabsTrigger value="closure">5 · Closure</TabsTrigger>
-          <TabsTrigger value="bulk">Bulk control</TabsTrigger>
-          <TabsTrigger value="readiness">Launch readiness</TabsTrigger>
+          <TabsTrigger value="closure">{t("5 · Closure")}</TabsTrigger>
+          <TabsTrigger value="bulk">{t("Bulk control")}</TabsTrigger>
+          <TabsTrigger value="readiness">{t("Launch readiness")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="intake">
           <section className="panel">
             <div className="panel-heading">
               <div>
-                <h2>Registration, screening and assignment</h2>
+                <h2>{t("Registration, screening and assignment")}</h2>
                 <p>
-                  One application becomes one admitted learner only after an
-                  eligibility decision.
+                  {t("One application becomes one admitted learner only after an eligibility decision.")}
                 </p>
               </div>
               <div className="detail-actions">
                 {allowed(["Project Operations", "Operations Systems / Admin"]) && (
                   <button className="small-btn" onClick={() => open("track")}>
-                    <Plus size={16} /> Manage tracks
+                    <Plus size={16} /> {t("Manage tracks")}
                   </button>
                 )}
                 {allowed(["Project Operations", "Operations Coordinator", "Operations Systems / Admin"]) && (
                   <button className="primary" disabled={!tracks.length} onClick={() => open("application")}>
-                    <Plus size={16} /> Register applicant
+                    <Plus size={16} /> {t("Register applicant")}
                   </button>
                 )}
               </div>
@@ -372,22 +375,22 @@ export function ProgramFlow() {
               {tracks.map((track) => (
                 <div className="info-box" key={track.id}>
                   <strong>{track.name}</strong>
-                  <small>{track.provider || "Shared provider"} · capacity {track.capacity ?? "not set"}</small>
+                  <small>{track.provider || t("Shared provider")} {t("· capacity")}{" "}{track.capacity ?? t("not set")}</small>
                 </div>
               ))}
-              {!tracks.length && <p className="footnote">Add the approved track structure before registration.</p>}
+              {!tracks.length && <p className="footnote">{t("Add the approved track structure before registration.")}</p>}
             </div>
             {!applications.length ? (
-              <Empty text="Register the first applicant to begin screening." />
+              <Empty text={t("Register the first applicant to begin screening.")} />
             ) : (
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Applicant</TableHead>
-                    <TableHead>Track</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Latest decision</TableHead>
-                    <TableHead>Action</TableHead>
+                    <TableHead>{t("Applicant")}</TableHead>
+                    <TableHead>{t("Track")}</TableHead>
+                    <TableHead>{t("Status")}</TableHead>
+                    <TableHead>{t("Latest decision")}</TableHead>
+                    <TableHead>{t("Action")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -404,7 +407,7 @@ export function ProgramFlow() {
                         <Badge value={a.status} />
                       </TableCell>
                       <TableCell>
-                        {latestScreen[a.id]?.reason || "Awaiting screening"}
+                        {latestScreen[a.id]?.reason || t("Awaiting screening")}
                       </TableCell>
                       <TableCell>
                         <div className="detail-actions">
@@ -419,7 +422,7 @@ export function ProgramFlow() {
                                 })
                               }
                             >
-                              Screen
+                              {t("Screen")}
                             </button>
                           )}
                           {allowed(["Project Operations"]) && a.status === "Eligible" && (
@@ -431,7 +434,7 @@ export function ProgramFlow() {
                                 })
                               }
                             >
-                              Assign group
+                              {t("Assign group")}
                             </button>
                           )}
                         </div>
@@ -448,15 +451,15 @@ export function ProgramFlow() {
           <div className="report-grid">
             <section className="panel">
               <div className="panel-heading">
-                <h2>Coach matching & onboarding</h2>
+                <h2>{t("Coach matching & onboarding")}</h2>
                 {allowed(["Coach Operations", "Project Operations"]) && (
                   <button className="small-btn" onClick={() => open("assign_coach")}>
-                    <Plus size={16} /> Assign coach
+                    <Plus size={16} /> {t("Assign coach")}
                   </button>
                 )}
               </div>
               {!groups.length ? (
-                <Empty text="Create groups before matching coaches." />
+                <Empty text={t("Create groups before matching coaches.")} />
               ) : (
                 groups.map((g) => {
                   const assigned = (d.groupCoaches || []).filter(
@@ -474,7 +477,7 @@ export function ProgramFlow() {
                         </small>
                       ))}
                       {!assigned.length && (
-                        <small>No functional coach assignment recorded.</small>
+                        <small>{t("No functional coach assignment recorded.")}</small>
                       )}
                     </div>
                   );
@@ -483,10 +486,10 @@ export function ProgramFlow() {
             </section>
             <section className="panel">
               <div className="panel-heading">
-                <h2>Session delivery handoff</h2>
+                <h2>{t("Session delivery handoff")}</h2>
                 <button className="small-btn" onClick={load}>
                   <RefreshCw size={15} />
-                  Refresh
+                  {t("Refresh")}
                 </button>
               </div>
               {(d.sessions || [])
@@ -499,7 +502,7 @@ export function ProgramFlow() {
                   <div className="info-box" key={s.id}>
                     <strong>{s.title}</strong>
                     <span>
-                      {s.group_id} · {s.coach_name || "Coach not assigned"} ·{" "}
+                      {s.group_id} · {s.coach_name || t("Coach not assigned")} ·{" "}
                       {new Date(s.starts_at).toLocaleString()}
                     </span>
                     <Badge value={s.status} />
@@ -512,7 +515,7 @@ export function ProgramFlow() {
                         }
                         onClick={() => open("complete_session", { session_id: s.id })}
                       >
-                        Notes & reconciliation
+                        {t("Notes & reconciliation")}
                       </button>
                     )}
                   </div>
@@ -520,7 +523,7 @@ export function ProgramFlow() {
               {(d.sessions || [])
                 .filter((s: Row) => s.status !== "Cancelled")
                 .every((s: Row) => sessionReports.has(s.id)) && (
-                <Empty text="All started sessions have delivery notes and attendance reconciliation." />
+                <Empty text={t("All started sessions have delivery notes and attendance reconciliation.")} />
               )}
             </section>
           </div>
@@ -530,36 +533,35 @@ export function ProgramFlow() {
           <section className="panel">
             <div className="panel-heading">
               <div>
-                <h2>Assessment register</h2>
+                <h2>{t("Assessment register")}</h2>
                 <p>
-                  Results are calculated from the recorded score and the
-                  assessment pass mark.
+                  {t("Results are calculated from the recorded score and the assessment pass mark.")}
                 </p>
               </div>
               <div className="detail-actions">
                 {allowed(["Coach Operations", "Project Operations"]) && (
                   <button className="small-btn" onClick={() => open("assessment")}>
-                    <Plus size={16} /> Create assessment
+                    <Plus size={16} /> {t("Create assessment")}
                   </button>
                 )}
                 {allowed(["Coach", "Coach Operations", "Project Operations", "Quality Member"]) && (
                   <button className="primary" onClick={() => open("assessment_result")}>
-                    Record result
+                    {t("Record result")}
                   </button>
                 )}
               </div>
             </div>
             {!(d.assessments || []).length ? (
-              <Empty text="Create the first technical, coaching or final assessment." />
+              <Empty text={t("Create the first technical, coaching or final assessment.")} />
             ) : (
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Assessment</TableHead>
-                    <TableHead>Group</TableHead>
-                    <TableHead>Pass mark</TableHead>
-                    <TableHead>Due</TableHead>
-                    <TableHead>Results</TableHead>
+                    <TableHead>{t("Assessment")}</TableHead>
+                    <TableHead>{t("Group")}</TableHead>
+                    <TableHead>{t("Pass mark")}</TableHead>
+                    <TableHead>{t("Due")}</TableHead>
+                    <TableHead>{t("Results")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -595,15 +597,15 @@ export function ProgramFlow() {
           <div className="report-grid">
             <section className="panel">
               <div className="panel-heading">
-                <h2>Certificate issue register</h2>
+                <h2>{t("Certificate issue register")}</h2>
                 {allowed(["Project Operations", "Quality Lead"]) && (
                   <button className="primary" onClick={() => open("issue_certificate")}>
-                    <Plus size={16} /> Issue certificate
+                    <Plus size={16} /> {t("Issue certificate")}
                   </button>
                 )}
               </div>
               {!(d.certificates || []).length ? (
-                <Empty text="Certificates appear after computed graduation, final closure and any required final assessment." />
+                <Empty text={t("Certificates appear after computed graduation, final closure and any required final assessment.")} />
               ) : (
                 d.certificates.map((c: Row) => (
                   <div className="info-box" key={c.id}>
@@ -620,15 +622,15 @@ export function ProgramFlow() {
             </section>
             <section className="panel">
               <div className="panel-heading">
-                <h2>Post-program outcomes</h2>
+                <h2>{t("Post-program outcomes")}</h2>
                 {canRecordOutcome && (
                   <button className="small-btn" onClick={() => open("post_program_outcome")}>
-                    <Plus size={16} /> Record outcome
+                    <Plus size={16} /> {t("Record outcome")}
                   </button>
                 )}
               </div>
               {!(d.outcomes || []).length ? (
-                <Empty text="Record verified employment, freelancing, internship or business outcomes after closure." />
+                <Empty text={t("Record verified employment, freelancing, internship or business outcomes after closure.")} />
               ) : (
                 d.outcomes.map((o: Row) => (
                   <div className="info-box" key={o.id}>
@@ -640,7 +642,7 @@ export function ProgramFlow() {
                     </span>
                     <Badge value={o.status} />
                     <small>
-                      Follow up {new Date(o.follow_up_at).toLocaleDateString()}
+                      {t("Follow up")}{" "}{new Date(o.follow_up_at).toLocaleDateString()}
                     </small>
                   </div>
                 ))
@@ -654,20 +656,19 @@ export function ProgramFlow() {
             <section className="panel">
               <div className="panel-heading">
                 <div>
-                  <h2>Ministry withdrawal decisions</h2>
+                  <h2>{t("Ministry withdrawal decisions")}</h2>
                   <p>
-                    The system records the decision and preserves the learner
-                    history.
+                    {t("The system records the decision and preserves the learner history.")}
                   </p>
                 </div>
                 {allowed(["Project Operations"]) && (
                   <button className="small-btn" onClick={() => open("withdrawal_decision")}>
-                    <Plus size={16} /> Record decision
+                    <Plus size={16} /> {t("Record decision")}
                   </button>
                 )}
               </div>
               {!(d.withdrawals || []).length ? (
-                <Empty text="No Ministry withdrawal decisions recorded." />
+                <Empty text={t("No Ministry withdrawal decisions recorded.")} />
               ) : (
                 d.withdrawals.map((w: Row) => (
                   <div className="info-box" key={w.id}>
@@ -683,10 +684,9 @@ export function ProgramFlow() {
             <section className="panel">
               <div className="panel-heading">
                 <div>
-                  <h2>Group closure & archive</h2>
+                  <h2>{t("Group closure & archive")}</h2>
                   <p>
-                    Closure reconciles learners, actions, cases, gigs and
-                    evidence. Archive makes the group read-only.
+                    {t("Closure reconciles learners, actions, cases, gigs and evidence. Archive makes the group read-only.")}
                   </p>
                 </div>
               </div>
@@ -702,7 +702,7 @@ export function ProgramFlow() {
                         className="small-btn"
                         onClick={() => open("group_close", { group_id: g.id })}
                       >
-                        Run closure
+                        {t("Run closure")}
                       </button>
                     )}
                     {allowed(["Project Operations"]) && g.status === "Closed" && (
@@ -712,7 +712,7 @@ export function ProgramFlow() {
                           open("group_archive", { group_id: g.id })
                         }
                       >
-                        Archive read-only
+                        {t("Archive read-only")}
                       </button>
                     )}
                   </div>}
@@ -725,53 +725,51 @@ export function ProgramFlow() {
         <TabsContent value="bulk">
           <div className="report-grid">
             <section className="panel prose">
-              <h2>Safe bulk operations</h2>
+              <h2>{t("Safe bulk operations")}</h2>
               <p>
-                Apply one validated change to up to 100 authorized records. Every
-                batch is atomic and written to the audit history.
+                {t("Apply one validated change to up to 100 authorized records. Every batch is atomic and written to the audit history.")}
               </p>
               <div className="detail-actions">
                 {allowed(["Project Operations", "Team Supervisor"]) && (
                   <button className="small-btn" onClick={() => open("bulk_group_owner")}>
-                    Assign group owners
+                    {t("Assign group owners")}
                   </button>
                 )}
                 {allowed(["Project Operations", "Team Supervisor"]) && (
                   <button className="small-btn" onClick={() => open("bulk_classification")}>
-                    Update classifications
+                    {t("Update classifications")}
                   </button>
                 )}
                 {allowed(["Project Operations", "Operations Coordinator", "Team Supervisor", "Coach"]) && (
                   <button className="small-btn" onClick={() => open("bulk_tasks")}>
-                    Create learner tasks
+                    {t("Create learner tasks")}
                   </button>
                 )}
               </div>
               <p className="footnote">
-                Quality approval, graduation and account allocation are deliberately
-                excluded from bulk actions.
+                {t("Quality approval, graduation and account allocation are deliberately excluded from bulk actions.")}
               </p>
             </section>
             <section className="panel prose">
-              <h2>Controlled lifecycle exports</h2>
-              <p>Exports include only records within the current staff member’s authorized scope.</p>
+              <h2>{t("Controlled lifecycle exports")}</h2>
+              <p>{t("Exports include only records within the current staff member’s authorized scope.")}</p>
               <div className="detail-actions">
                 <a className="small-btn" href="/api/program?format=csv&dataset=lifecycle">
-                  <Download size={16} /> Lifecycle CSV
+                  <Download size={16} /> {t("Lifecycle CSV")}
                 </a>
                 <a className="small-btn" href="/api/program?format=xlsx&dataset=lifecycle">
-                  <Download size={16} /> Lifecycle XLSX
+                  <Download size={16} /> {t("Lifecycle XLSX")}
                 </a>
                 {allowed(["Project Operations", "Operations Coordinator", "Team Supervisor", "Operations Systems / Admin"]) && (
                   <a className="small-btn" href="/api/program?format=xlsx&dataset=applications">
-                    <Download size={16} /> Applications XLSX
+                    <Download size={16} /> {t("Applications XLSX")}
                   </a>
                 )}
                 <a className="small-btn" href="/api/program?format=xlsx&dataset=assessments">
-                  <Download size={16} /> Assessments XLSX
+                  <Download size={16} /> {t("Assessments XLSX")}
                 </a>
                 <a className="small-btn" href="/api/program?format=xlsx&dataset=outcomes">
-                  <Download size={16} /> Outcomes XLSX
+                  <Download size={16} /> {t("Outcomes XLSX")}
                 </a>
               </div>
             </section>
@@ -783,10 +781,9 @@ export function ProgramFlow() {
             <section className="panel">
               <div className="panel-heading">
                 <div>
-                  <h2>Launch readiness</h2>
+                  <h2>{t("Launch readiness")}</h2>
                   <p>
-                    Policy-dependent gates stay blocked until an authorized rule
-                    is recorded.
+                    {t("Policy-dependent gates stay blocked until an authorized rule is recorded.")}
                   </p>
                 </div>
               </div>
@@ -799,7 +796,7 @@ export function ProgramFlow() {
               ))}
             </section>
             <section className="panel prose">
-              <h2>Ministry reporting handoff</h2>
+              <h2>{t("Ministry reporting handoff")}</h2>
               {activeReport ? (
                 <>
                   <div className="info-box">
@@ -809,22 +806,21 @@ export function ProgramFlow() {
                   </div>
                   {allowed(["Project Operations", "Operations Systems / Admin"]) && <div className="detail-actions">
                     <a className="primary" href={`/api/program?format=ministry_csv&definition=${activeReport.id}`}>
-                      <Download size={16} /> Export CSV
+                      <Download size={16} /> {t("Export CSV")}
                     </a>
                     <a className="small-btn" href={`/api/program?format=ministry_xlsx&definition=${activeReport.id}`}>
-                      <Download size={16} /> Export XLSX
+                      <Download size={16} /> {t("Export XLSX")}
                     </a>
                   </div>}
                 </>
               ) : (
                 <p>
-                  No format is active. Record only the columns supplied by the
-                  Ministry.
+                  {t("No format is active. Record only the columns supplied by the Ministry.")}
                 </p>
               )}
               {allowed(["Project Operations", "Operations Systems / Admin"]) && (
                 <button className="small-btn" onClick={() => open("report_definition")}>
-                  <ShieldCheck size={16} /> Create draft format
+                  <ShieldCheck size={16} /> {t("Create draft format")}
                 </button>
               )}
               {(d.reportDefinitions || []).map((definition: Row) => (
@@ -834,17 +830,17 @@ export function ProgramFlow() {
                   <small>{JSON.parse(definition.columns).join(", ")}</small>
                   {definition.status === "Draft" && definition.created_by !== d.user.id && allowed(["Project Operations", "Operations Systems / Admin"]) && (
                     <button className="small-btn" onClick={() => open("approve_report_definition", { id: definition.id })}>
-                      Approve independently
+                      {t("Approve independently")}
                     </button>
                   )}
                 </div>
               ))}
               {!!(d.reportRuns || []).length && (
                 <div>
-                  <h3>Recent report runs</h3>
+                  <h3>{t("Recent report runs")}</h3>
                   {(d.reportRuns || []).slice(0, 5).map((run: Row) => (
                     <p className="footnote" key={run.id}>
-                      {new Date(run.created_at).toLocaleString()} · {run.count} rows · {run.actor}
+                      {new Date(run.created_at).toLocaleString()} · {run.count} {t("rows ·")}{" "}{run.actor}
                     </p>
                   ))}
                 </div>
@@ -859,7 +855,8 @@ export function ProgramFlow() {
           <DialogHeader>
             <DialogTitle>
               {modal &&
-                (
+                t(
+                  (
                   {
                     application: "Register applicant",
                     track: "Add or update technical track",
@@ -880,11 +877,11 @@ export function ProgramFlow() {
                     bulk_classification: "Update learner classifications",
                     bulk_tasks: "Create learner tasks in bulk",
                   } as Row
-                )[modal.action]}
+                  )[modal.action] || "",
+                )}
             </DialogTitle>
             <DialogDescription>
-              Required decisions and transitions are written to the audit
-              history.
+              {t("Required decisions and transitions are written to the audit history.")}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={submit} className="action-form">
@@ -892,18 +889,18 @@ export function ProgramFlow() {
               <>
                 {field(
                   "external_ref",
-                  "Ministry / source reference",
+                  t("Ministry / source reference"),
                   "text",
                   false,
                 )}
-                {field("name", "Applicant name")}
-                {field("email", "Email", "email", false)}
-                {field("phone", "Phone", "tel", false)}
+                {field("name", t("Applicant name"))}
+                {field("email", t("Email"), "email", false)}
+                {field("phone", t("Phone"), "tel", false)}
                 {select("preferred_track", "Preferred technical track", tracks.map((track) => track.name))}
-                {field("source", "Registration source")}
+                {field("source", t("Registration source"))}
                 {field(
                   "consent_ref",
-                  "Consent / privacy reference",
+                  t("Consent / privacy reference"),
                   "text",
                   false,
                 )}
@@ -914,15 +911,15 @@ export function ProgramFlow() {
                     .filter((s) => JSON.parse(s.roles).some((role: string) => ["Project Operations", "Operations Coordinator"].includes(role)))
                     .map((s) => ({ value: s.id, label: s.name })),
                 )}
-                {field("submitted_at", "Submitted at", "datetime-local")}
+                {field("submitted_at", t("Submitted at"), "datetime-local")}
               </>
             )}
             {modal?.action === "track" && (
               <>
-                {field("name", "Technical track name")}
+                {field("name", t("Technical track name"))}
                 {select("provider", "Primary provider", ["Career180", "Freelance Yard"])}
-                {field("capacity", "Approved learner capacity", "number")}
-                {field("reason", "Track setup authority and reason")}
+                {field("capacity", t("Approved learner capacity"), "number")}
+                {field("reason", t("Track setup authority and reason"))}
               </>
             )}
             {modal?.action === "screen_application" && (
@@ -933,12 +930,12 @@ export function ProgramFlow() {
                   "Waitlisted",
                 ])}
                 {checklist("criteria", screeningChecks)}
-                {field("reason", "Decision reason")}
+                {field("reason", t("Decision reason"))}
               </>
             )}
             {modal?.action === "admit_application" && (
               <>
-                {field("student_id", "Unique student ID")}
+                {field("student_id", t("Unique student ID"))}
                 {select(
                   "group_id",
                   "Matched active group",
@@ -972,13 +969,12 @@ export function ProgramFlow() {
                 ])}
                 {checklist("checklist", onboardingChecks)}
                 <p className="footnote">
-                  All four checks complete onboarding. A partial checklist
-                  leaves the assignment pending.
+                  {t("All four checks complete onboarding. A partial checklist leaves the assignment pending.")}
                 </p>
               </>
             )}
             {modal?.action === "complete_session" && (
-              <>{field("notes", "Delivery, engagement and follow-up notes")}</>
+              <>{field("notes", t("Delivery, engagement and follow-up notes"))}</>
             )}
             {modal?.action === "assessment" && (
               <>
@@ -989,15 +985,15 @@ export function ProgramFlow() {
                     .filter((g) => g.status === "Active")
                     .map((g) => ({ value: g.id, label: g.name })),
                 )}
-                {field("title", "Assessment title")}
+                {field("title", t("Assessment title"))}
                 {select("type", "Assessment type", [
                   "Technical",
                   "Coaching",
                   "Final",
                 ])}
-                {field("max_score", "Maximum score", "number")}
-                {field("pass_score", "Pass score", "number")}
-                {field("due_at", "Due at", "datetime-local")}
+                {field("max_score", t("Maximum score"), "number")}
+                {field("pass_score", t("Pass score"), "number")}
+                {field("due_at", t("Due at"), "datetime-local")}
               </>
             )}
             {modal?.action === "assessment_result" && (
@@ -1020,8 +1016,8 @@ export function ProgramFlow() {
                     label: `${s.name} · ${s.id}`,
                   })),
                 )}
-                {field("score", "Score", "number")}
-                {field("notes", "Assessment notes")}
+                {field("score", t("Score"), "number")}
+                {field("notes", t("Assessment notes"))}
               </>
             )}
             {modal?.action === "issue_certificate" && (
@@ -1047,7 +1043,7 @@ export function ProgramFlow() {
                   "Achievement",
                   "$300 Graduate",
                 ])}
-                {field("external_ref", "External certificate reference")}
+                {field("external_ref", t("External certificate reference"))}
               </>
             )}
             {modal?.action === "post_program_outcome" && (
@@ -1077,10 +1073,10 @@ export function ProgramFlow() {
                   "Business",
                   "Other",
                 ])}
-                {field("title", "Role / outcome title")}
-                {field("organization", "Organization / client", "text", false)}
-                {field("value", "Value", "number", false)}
-                {field("currency", "Currency", "text", false)}
+                {field("title", t("Role / outcome title"))}
+                {field("organization", t("Organization / client"), "text", false)}
+                {field("value", t("Value"), "number", false)}
+                {field("currency", t("Currency"), "text", false)}
                 {select("status", "Verification status", [
                   "Reported",
                   "Verified",
@@ -1100,7 +1096,7 @@ export function ProgramFlow() {
                   "Outcome owner",
                   staff.map((s) => ({ value: s.id, label: s.name })),
                 )}
-                {field("follow_up_at", "Next follow-up", "datetime-local")}
+                {field("follow_up_at", t("Next follow-up"), "datetime-local")}
               </>
             )}
             {modal?.action === "withdrawal_decision" && (
@@ -1117,47 +1113,45 @@ export function ProgramFlow() {
                       label: `${s.name} · ${s.lifecycle}`,
                     })),
                 )}
-                {field("ministry_reference", "Ministry decision reference")}
+                {field("ministry_reference", t("Ministry decision reference"))}
                 {select("decision", "Ministry decision", [
                   "Approved",
                   "Declined",
                 ])}
-                {field("decided_at", "Decision date", "date")}
-                {field("reason", "Decision reason")}
+                {field("decided_at", t("Decision date"), "date")}
+                {field("reason", t("Decision reason"))}
               </>
             )}
             {modal?.action === "group_close" && (
               <>
-                {field("reason", "Closure reason")}
+                {field("reason", t("Closure reason"))}
                 <p className="footnote">
-                  The system will block closure until all learners, actions,
-                  cases, gigs and evidence are reconciled.
+                  {t("The system will block closure until all learners, actions, cases, gigs and evidence are reconciled.")}
                 </p>
               </>
             )}
             {modal?.action === "group_archive" && (
               <>
-                {field("reason", "Archive authority and reason")}
+                {field("reason", t("Archive authority and reason"))}
                 <p className="footnote">
-                  Archive is read-only. No retention period or deletion rule is
-                  assumed.
+                  {t("Archive is read-only. No retention period or deletion rule is assumed.")}
                 </p>
               </>
             )}
             {modal?.action === "report_definition" && (
               <>
-                {field("name", "Ministry report format name")}
+                {field("name", t("Ministry report format name"))}
                 {checklist("columns", d.reportFields || [])}
-                {field("reason", "Authority / change reason")}
+                {field("reason", t("Authority / change reason"))}
               </>
             )}
             {modal?.action === "approve_report_definition" && (
               <>
                 <div className="info-box">
                   <strong>{(d.reportDefinitions || []).find((r: Row) => r.id === form.id)?.name}</strong>
-                  <span>Independent approval activates this version and supersedes the previous format.</span>
+                  <span>{t("Independent approval activates this version and supersedes the previous format.")}</span>
                 </div>
-                {field("reason", "Approval authority and reason")}
+                {field("reason", t("Approval authority and reason"))}
               </>
             )}
             {modal?.action === "bulk_group_owner" && (
@@ -1177,37 +1171,37 @@ export function ProgramFlow() {
                     .filter((s) => JSON.parse(s.roles).includes(form.owner_type === "Supervisor" ? "Team Supervisor" : "Operations Coordinator"))
                     .map((s) => ({ value: s.id, label: s.name })),
                 )}
-                {field("reason", "Bulk ownership reason")}
+                {field("reason", t("Bulk ownership reason"))}
               </>
             )}
             {modal?.action === "bulk_classification" && (
               <>
                 {textarea("student_ids", "Student IDs", "S10001, S10002, S10003")}
                 {select("status", "Engagement classification", ["Active", "At Risk", "Critical"])}
-                {field("reason", "Classification reason")}
+                {field("reason", t("Classification reason"))}
               </>
             )}
             {modal?.action === "bulk_tasks" && (
               <>
                 {textarea("student_ids", "Student IDs", "S10001, S10002, S10003")}
-                {field("title", "Task title")}
+                {field("title", t("Task title"))}
                 {select("owner", "Task owner", staff.map((s) => ({ value: s.id, label: s.name })))}
-                {field("due", "Due at", "datetime-local")}
+                {field("due", t("Due at"), "datetime-local")}
                 {select("priority", "Priority", ["Normal", "High", "Critical"])}
-                {field("reason", "Bulk task reason")}
+                {field("reason", t("Bulk task reason"))}
               </>
             )}
             <div className="form-footer">
-              <span>Recorded in audit history</span>
+              <span>{t("Recorded in audit history")}</span>
               <button
                 type="button"
                 className="small-btn"
                 onClick={() => setModal(null)}
               >
-                Cancel
+                {t("Cancel")}
               </button>
               <button className="primary" disabled={busy} type="submit">
-                {busy ? "Saving…" : "Save record"}
+                {busy ? t("Saving…") : t("Save record")}
               </button>
             </div>
           </form>
