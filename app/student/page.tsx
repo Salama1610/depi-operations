@@ -170,17 +170,17 @@ export default function StudentServicesPage() {
         <>
           <section className="student-intro">
             <div>
-              <span className="student-kicker">SERVICE LINKS / ROUND 5</span>
-              <h1>{student?.name ? `Hi ${student.name.split(" ")[0]}, submit your services.` : "Submit your services."}</h1>
-              <p>Add exactly three public links to services you provide. Each link is checked automatically, then reviewed by your coordinator.</p>
+              <span className="student-kicker">{t("SERVICE LINKS / ROUND 5")}</span>
+              <h1>{student?.name ? t("Hi {v0}, submit your services.", { v0: student.name.split(" ")[0] }) : t("Submit your services.")}</h1>
+              <p>{t("Add exactly three public links to services you provide. Each link is checked automatically, then reviewed by your coordinator.")}</p>
             </div>
-            <div className="student-progress"><strong>{lockedCount}/3</strong><span>approved</span></div>
+            <div className="student-progress"><strong>{lockedCount}/3</strong><span>{t("approved")}</span></div>
           </section>
 
           <section className="student-card">
             <div className="student-card-heading">
-              <div><h2>Your three service links</h2><p>Approved links cannot be changed. Links needing correction stay editable with your coordinator&apos;s comment.</p></div>
-              {submission && <span className={statusTone(submission.status)}>{label(submission.status)}</span>}
+              <div><h2>{t("Your three service links")}</h2><p>{t("Approved links cannot be changed. Links needing correction stay editable with your coordinator’s comment.")}</p></div>
+              {submission && <span className={statusTone(submission.status)}>{t(label(submission.status))}</span>}
             </div>
             {submission && (
               <div className="student-meta student-submission-meta">
@@ -204,7 +204,7 @@ export default function StudentServicesPage() {
                         </div>
                         <div className="student-meta">
                           {service.platform && <span>{service.platform}</span>}
-                          {service.auto_status && <span className={statusTone(service.auto_status)}>{service.auto_status === "Needs Review" ? "Automatic check passed" : label(service.auto_status)}</span>}
+                          {service.auto_status && <span className={statusTone(service.auto_status)}>{service.auto_status === "Needs Review" ? t("Automatic check passed") : t(label(service.auto_status))}</span>}
                         </div>
                         {service.auto_result?.message && <p className="student-check-note">{service.auto_result.message}</p>}
                         {service.auto_result?.checks?.length ? (
@@ -212,15 +212,15 @@ export default function StudentServicesPage() {
                             {service.auto_result.checks.map((check) => <li key={check}>{check}</li>)}
                           </ul>
                         ) : null}
-                        {correction && <div className="student-qc-note"><strong>Correction needed:</strong> {service.qc_comment}</div>}
-                        {locked && <div className="student-locked-note"><LockKeyhole size={15} /> Approved by your coordinator{service.qc_comment ? ` · ${service.qc_comment}` : ""}</div>}
+                        {correction && <div className="student-qc-note"><strong>{t("Correction needed:")}</strong> {service.qc_comment}</div>}
+                        {locked && <div className="student-locked-note"><LockKeyhole size={15} /> {t("Approved by your coordinator")}{service.qc_comment ? ` · ${service.qc_comment}` : ""}</div>}
                       </div>
                     </article>
                   );
                 })}
               </div>
               {error && <p className="student-form-error" role="alert">{error}</p>}
-              {saved && <p className="student-saved"><Check size={17} /> Saved. Your coordinator can now review your links.</p>}
+              {saved && <p className="student-saved"><Check size={17} /> {t("Saved. Your coordinator can now review your links.")}</p>}
               <div className="student-form-footer">
                 <span>
                   {!submission
@@ -228,8 +228,8 @@ export default function StudentServicesPage() {
                     : editable.length > 0
                       ? t("{v0} link{v1} can be updated.", { v0: editable.length, v1: editable.length === 1 ? "" : "s" })
                       : lockedCount === 3
-                        ? "All three links are approved. Nothing more is needed."
-                        : "Your links are with your coordinator. Nothing can be changed until they respond."}
+                        ? t("All three links are approved. Nothing more is needed.")
+                        : t("Your links are with your coordinator. Nothing can be changed until they respond.")}
                 </span>
                 <button className="student-primary" disabled={!ready || busy || (Boolean(submission) && editable.length === 0)} type="submit"><Send size={16} />{busy ? t("Submitting…") : submission ? t("Resubmit editable links") : t("Submit 3 links")}</button>
               </div>
@@ -237,25 +237,25 @@ export default function StudentServicesPage() {
           </section>
           {reviews.length > 0 && (
             <section className="student-card" aria-labelledby="review-history-title">
-              <div className="student-card-heading"><div><h2 id="review-history-title">Review updates</h2><p>Your approval and correction history.</p></div></div>
+              <div className="student-card-heading"><div><h2 id="review-history-title">{t("Review updates")}</h2><p>{t("Your approval and correction history.")}</p></div></div>
               <div className="student-service-list">
                 {reviews.map((review) => (
                   <article className="student-service-row" key={review.id}>
-                    <div className="student-slot"><span>0{review.slot}</span><strong>Service {review.slot}</strong></div>
-                    <div><span className={statusTone(review.decision)}>{label(review.decision)}</span><p>{review.comment}</p><small>{new Date(review.reviewed_at).toLocaleString()} · revision {review.revision}</small></div>
+                    <div className="student-slot"><span>0{review.slot}</span><strong>{t("Service")}{" "}{review.slot}</strong></div>
+                    <div><span className={statusTone(review.decision)}>{t(label(review.decision))}</span><p>{review.comment}</p><small>{new Date(review.reviewed_at).toLocaleString()} {t("· revision")}{" "}{review.revision}</small></div>
                   </article>
                 ))}
               </div>
             </section>
           )}
-          <p className="student-footnote"><ShieldCheck size={15} /> Your links are visible to the DEPI operations team only for verification.</p>
+          <p className="student-footnote"><ShieldCheck size={15} /> {t("Your links are visible to the DEPI operations team only for verification.")}</p>
         </>
       )}
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Submit these three service links?</DialogTitle>
-            <DialogDescription>Pending links become read-only until your coordinator reviews them. You can edit only links returned for correction.</DialogDescription>
+            <DialogTitle>{t("Submit these three service links?")}</DialogTitle>
+            <DialogDescription>{t("Pending links become read-only until your coordinator reviews them. You can edit only links returned for correction.")}</DialogDescription>
           </DialogHeader>
           <ol className="student-confirm-list">
             {services.map((service) => <li key={service.slot}><strong>{t("Service")}{" "}{service.slot}</strong><span>{service.url}</span></li>)}

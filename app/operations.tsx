@@ -1741,44 +1741,43 @@ export default function Operations({ module: initialModule }: { module: string }
             {canSeeServiceQueue && (
             <>
             <div className="mini-stats service-qc-stats">
-              <span><strong>{serviceLinks.filter((r) => r.qc_status === "Pending").length}</strong>Awaiting review</span>
-              <span><strong>{serviceLinks.filter((r) => r.qc_status === "Needs Correction").length}</strong>Need student correction</span>
-              <span><strong>{serviceLinks.filter((r) => r.auto_status === "Failed").length}</strong>Automatic check failed</span>
-              <span><strong>{serviceLinks.filter((r) => r.qc_status === "Pending" && Date.now() - Date.parse(r.updated_at) > 48 * 3600000).length}</strong>Past 48-hour SLA</span>
+              <span><strong>{serviceLinks.filter((r) => r.qc_status === "Pending").length}</strong>{t("Awaiting review")}</span>
+              <span><strong>{serviceLinks.filter((r) => r.qc_status === "Needs Correction").length}</strong>{t("Need student correction")}</span>
+              <span><strong>{serviceLinks.filter((r) => r.auto_status === "Failed").length}</strong>{t("Automatic check failed")}</span>
+              <span><strong>{serviceLinks.filter((r) => r.qc_status === "Pending" && Date.now() - Date.parse(r.updated_at) > 48 * 3600000).length}</strong>{t("Past 48-hour SLA")}</span>
             </div>
             <div className="filter-row service-qc-filters">
-              <Pick label="Platform" value={serviceFilters.platform} onChange={(platform) => setServiceFilters({ ...serviceFilters, platform })} options={["All", ...acceptedServicePlatforms]} />
-              <Pick label="Track" value={serviceFilters.track} onChange={(track) => setServiceFilters({ ...serviceFilters, track })} options={["All", ...Array.from(new Set(serviceLinks.map((r) => r.track).filter(Boolean)))]} />
-              <Pick label="Group" value={serviceFilters.group} onChange={(group) => setServiceFilters({ ...serviceFilters, group })} options={["All", ...Array.from(new Set(serviceLinks.map((r) => r.group_id).filter(Boolean)))]} />
+              <Pick label={t("Platform")} value={serviceFilters.platform} onChange={(platform) => setServiceFilters({ ...serviceFilters, platform })} options={["All", ...acceptedServicePlatforms]} />
+              <Pick label={t("Track")} value={serviceFilters.track} onChange={(track) => setServiceFilters({ ...serviceFilters, track })} options={["All", ...Array.from(new Set(serviceLinks.map((r) => r.track).filter(Boolean)))]} />
+              <Pick label={t("Group")} value={serviceFilters.group} onChange={(group) => setServiceFilters({ ...serviceFilters, group })} options={["All", ...Array.from(new Set(serviceLinks.map((r) => r.group_id).filter(Boolean)))]} />
               {canDecideServiceLinks && (
                 <Pick
-                  label="Assigned to"
+                  label={t("Assigned to")}
                   value={serviceFilters.reviewer}
                   onChange={(reviewer) => setServiceFilters({ ...serviceFilters, reviewer })}
                   options={[
-                    { value: "All", label: "Anyone" },
-                    { value: user.id, label: "Me" },
-                    { value: "None", label: "Waiting for a reviewer" },
+                    { value: "All", label: t("Anyone") },
+                    { value: user.id, label: t("Me") },
+                    { value: "None", label: t("Waiting for a reviewer") },
                     ...qualityReviewers.filter((q) => q.id !== user.id).map((q) => ({ value: q.id, label: q.name })),
                   ]}
                 />
               )}
-              <Pick label="Coordinator" value={serviceFilters.coordinator} onChange={(coordinator) => setServiceFilters({ ...serviceFilters, coordinator })} options={[{ value: "All", label: "All coordinators" }, ...Array.from(new Set(serviceLinks.map((r) => r.coordinator).filter(Boolean))).map((id) => ({ value: id, label: owner(id) }))]} />
-              <Pick label="Submission age" value={serviceFilters.age} onChange={(age) => setServiceFilters({ ...serviceFilters, age })} options={[{ value: "All", label: "Any age" }, { value: "24", label: "24+ hours" }, { value: "48", label: "48+ hours" }, { value: "168", label: "7+ days" }]} />
-              <Pick label="Automatic check" value={serviceFilters.automatic} onChange={(automatic) => setServiceFilters({ ...serviceFilters, automatic })} options={["All", "Needs Review", "Failed"]} />
-              <Pick label="Corrections" value={serviceFilters.corrections} onChange={(corrections) => setServiceFilters({ ...serviceFilters, corrections })} options={[{ value: "All", label: "Any revision" }, { value: "0", label: "No prior review" }, { value: "1", label: "One review" }, { value: "Repeated", label: "Repeated corrections" }]} />
+              <Pick label={t("Coordinator")} value={serviceFilters.coordinator} onChange={(coordinator) => setServiceFilters({ ...serviceFilters, coordinator })} options={[{ value: "All", label: t("All coordinators") }, ...Array.from(new Set(serviceLinks.map((r) => r.coordinator).filter(Boolean))).map((id) => ({ value: id, label: owner(id) }))]} />
+              <Pick label={t("Submission age")} value={serviceFilters.age} onChange={(age) => setServiceFilters({ ...serviceFilters, age })} options={[{ value: "All", label: t("Any age") }, { value: "24", label: t("24+ hours") }, { value: "48", label: t("48+ hours") }, { value: "168", label: t("7+ days") }]} />
+              <Pick label={t("Automatic check")} value={serviceFilters.automatic} onChange={(automatic) => setServiceFilters({ ...serviceFilters, automatic })} options={["All", "Needs Review", "Failed"]} />
+              <Pick label={t("Corrections")} value={serviceFilters.corrections} onChange={(corrections) => setServiceFilters({ ...serviceFilters, corrections })} options={[{ value: "All", label: t("Any revision") }, { value: "0", label: t("No prior review") }, { value: "1", label: t("One review") }, { value: "Repeated", label: t("Repeated corrections") }]} />
             </div>
             {isQualityLead && (
               <div className="detail-actions qc-lead-actions">
                 <button className="small-btn" disabled={busy} onClick={() => quick("service_qc_assign", {})}>
-                  <Users size={15} /> Distribute waiting students evenly
+                  <Users size={15} /> {t("Distribute waiting students evenly")}
                 </button>
                 <button className="small-btn" disabled={busy} onClick={() => quick("evidence_qc_assign", {})}>
                   <Files size={15} /> {t("Distribute gig evidence evenly")}
                 </button>
                 <small className="qc-lead-note">
-                  A student&apos;s three services stay together with one reviewer, and a student waiting for review
-                  goes to whoever currently holds the fewest. Reviewers: {qualityReviewers.map((r) => `${r.name} (${reviewerStudents.get(r.id) || 0})`).join(", ") || "none active"}.
+                  {t("A student’s three services stay together with one reviewer, and a student waiting for review goes to whoever currently holds the fewest. Reviewers:")}{" "}{qualityReviewers.map((r) => `${r.name} (${reviewerStudents.get(r.id) || 0})`).join(", ") || t("none active")}.
                 </small>
               </div>
             )}
@@ -1787,22 +1786,22 @@ export default function Operations({ module: initialModule }: { module: string }
               paginate(serviceQueue, (pageRows) => generic(
                 pageRows,
                 [
-                  { key: "student_name", label: "Student", render: (r) => { const own = serviceLinks.filter((l) => l.student_id === r.student_id); const decided = own.filter((l) => l.qc_status !== "Pending").length; return <span><strong>{r.student_name}</strong><small className="table-subline">{r.student_id} · {decided}/{own.length} reviewed</small></span>; } },
-                  { key: "slot", label: "Slot", render: (r) => `Service ${r.slot}` },
-                  { key: "url", label: "Link", render: (r) => <a className="text-link" href={r.url} target="_blank" rel="noreferrer">{r.platform} <ExternalLink size={14} /></a> },
-                  { key: "auto_status", label: "Automatic check", render: (r) => <Badge value={r.auto_status} /> },
-                  { key: "reviewer_name", label: "Reviewer", render: (r) => isQualityLead && r.qc_status !== "Locked"
-                      ? <select className="pick-inline" aria-label="Assign this student to a reviewer" value={r.qc_actor || ""} disabled={busy} onChange={(e) => e.target.value && quick("service_qc_assign", { student_id: r.student_id, reviewer_id: e.target.value })}>
-                          <option value="">Waiting for a reviewer</option>
+                  { key: "student_name", label: t("Student"), render: (r) => { const own = serviceLinks.filter((l) => l.student_id === r.student_id); const decided = own.filter((l) => l.qc_status !== "Pending").length; return <span><strong>{r.student_name}</strong><small className="table-subline">{r.student_id} · {decided}/{own.length} {t("reviewed")}</small></span>; } },
+                  { key: "slot", label: t("Slot"), render: (r) => `Service ${r.slot}` },
+                  { key: "url", label: t("Link"), render: (r) => <a className="text-link" href={r.url} target="_blank" rel="noreferrer">{r.platform} <ExternalLink size={14} /></a> },
+                  { key: "auto_status", label: t("Automatic check"), render: (r) => <Badge value={r.auto_status} /> },
+                  { key: "reviewer_name", label: t("Reviewer"), render: (r) => isQualityLead && r.qc_status !== "Locked"
+                      ? <select className="pick-inline" aria-label={t("Assign this student to a reviewer")} value={r.qc_actor || ""} disabled={busy} onChange={(e) => e.target.value && quick("service_qc_assign", { student_id: r.student_id, reviewer_id: e.target.value })}>
+                          <option value="">{t("Waiting for a reviewer")}</option>
                           {qualityReviewers.map((q) => <option key={q.id} value={q.id}>{q.name} ({reviewerStudents.get(q.id) || 0})</option>)}
                         </select>
-                      : <span>{owner(r.qc_actor) === "Unassigned" ? "Waiting for a reviewer" : owner(r.qc_actor)}<small className="table-subline">{owner(r.coordinator)}</small></span> },
-                  { key: "qc_status", label: "Review state", render: (r) => <span><Badge value={r.qc_status} /><small className="table-subline">{Math.round((Date.now() - Date.parse(r.updated_at)) / 3600000)}h · revision {r.revision}</small></span> },
+                      : <span>{owner(r.qc_actor) === "Unassigned" ? t("Waiting for a reviewer") : owner(r.qc_actor)}<small className="table-subline">{owner(r.coordinator)}</small></span> },
+                  { key: "qc_status", label: t("Review state"), render: (r) => <span><Badge value={r.qc_status} /><small className="table-subline">{Math.round((Date.now() - Date.parse(r.updated_at)) / 3600000)}{t("h · revision")}{" "}{r.revision}</small></span> },
                 ],
-                (r) => <div className="detail-actions">{canDecideServiceLinks && (!r.qc_actor || r.qc_actor === user.id || isQualityLead) && <button className="small-btn" onClick={() => open("service_qc_review", { ...r, service_id: r.id, student_id: r.student_id, decision: r.qc_status === "Needs Correction" ? "Lock" : "" })}>Review</button>}</div>,
+                (r) => <div className="detail-actions">{canDecideServiceLinks && (!r.qc_actor || r.qc_actor === user.id || isQualityLead) && <button className="small-btn" onClick={() => open("service_qc_review", { ...r, service_id: r.id, student_id: r.student_id, decision: r.qc_status === "Needs Correction" ? "Lock" : "" })}>{t("Review")}</button>}</div>,
               )),
             )}
-            {panel("Reviewer activity", reviewerWorkload.length ? <div className="mini-stats">{reviewerWorkload.map(([reviewer, count]: any) => <span key={reviewer}><strong>{count}</strong>{reviewer}</span>)}</div> : <Empty title="No service-link reviews yet" />)}
+            {panel(t("Reviewer activity"), reviewerWorkload.length ? <div className="mini-stats">{reviewerWorkload.map(([reviewer, count]: any) => <span key={reviewer}><strong>{count}</strong>{reviewer}</span>)}</div> : <Empty title={t("No service-link reviews yet")} />)}
             </>
             )}
             {submissionPanel}
@@ -2018,16 +2017,16 @@ export default function Operations({ module: initialModule }: { module: string }
             generic(
               staff,
               [
-                { key: "name", label: "Staff member", render: (r) => <span>{r.name}{r.title && <small className="table-subline">{t(r.title)}</small>}{(r.active === 0 || r.active === false) && <small className="table-subline"><span className="badge muted">{String(r.id).startsWith("system-unassigned") ? "Placeholder · cannot sign in" : "Inactive"}</span></small>}</span> },
-                { key: "email", label: "Email", render: (r) => <span>{r.email}<small className="table-subline">{r.phone || "no phone number"}</small></span> },
+                { key: "name", label: t("Staff member"), render: (r) => <span>{r.name}{r.title && <small className="table-subline">{t(r.title)}</small>}{(r.active === 0 || r.active === false) && <small className="table-subline"><span className="badge muted">{String(r.id).startsWith("system-unassigned") ? t("Placeholder · cannot sign in") : t("Inactive")}</span></small>}</span> },
+                { key: "email", label: t("Email"), render: (r) => <span>{r.email}<small className="table-subline">{r.phone || t("no phone number")}</small></span> },
                 {
                   key: "national_id",
-                  label: "Sign-in",
+                  label: t("Sign-in"),
                   render: (r) =>
                     r.national_id ? (
-                      <span>Ready<small className="table-subline">national ID on record</small></span>
+                      <span>{t("Ready")}<small className="table-subline">{t("national ID on record")}</small></span>
                     ) : (
-                      <span className="badge muted">No national ID</span>
+                      <span className="badge muted">{t("No national ID")}</span>
                     ),
                 },
                 {
@@ -2059,12 +2058,7 @@ export default function Operations({ module: initialModule }: { module: string }
             ),
           )}
           <p className="footnote">
-            A person signs in with the email listed here and their national ID as
-            the first password. Whole teams are added
-            from a sheet: the import workspace has a staff template with name,
-            email and roles. Groups are then handed over by naming the person —
-            their email or their name is enough, and the coordinator of a group
-            reviews that group&apos;s students.
+            {t("A person signs in with the email listed here and their national ID as the first password. Whole teams are added from a sheet: the import workspace has a staff template with name, email and roles. Groups are then handed over by naming the person — their email or their name is enough, and the coordinator of a group reviews that group’s students.")}
           </p>
         </TabsContent>
         <TabsContent value="policy">
@@ -3502,7 +3496,7 @@ export default function Operations({ module: initialModule }: { module: string }
                         return <div className="info-box"><strong>{automatic.message}</strong>{(automatic.checks || []).map((check: string) => <small key={check}>{check}</small>)}</div>;
                       } catch { return null; }
                     })()}
-                    {choice("decision", "Review decision", ["Lock", "Needs Correction"])}
+                    {choice("decision", t("Review decision"), ["Lock", "Needs Correction"])}
                     {form.decision === "Needs Correction" && (
                       <Pick
                         label={t("Correction template")}
@@ -3516,9 +3510,9 @@ export default function Operations({ module: initialModule }: { module: string }
                         ]}
                       />
                     )}
-                    {field("comment", "Comment / correction guidance", "text", form.decision === "Needs Correction")}
+                    {field("comment", t("Comment / correction guidance"), "text", form.decision === "Needs Correction")}
                     <p className="footnote">
-                      Lock only when the service page is active, correct, track-relevant and belongs to the student. A locked link is final, and a link the automatic check failed can only be returned for correction.
+                      {t("Lock only when the service page is active, correct, track-relevant and belongs to the student. A locked link is final, and a link the automatic check failed can only be returned for correction.")}
                     </p>
                   </>
                 );
@@ -3603,10 +3597,10 @@ export default function Operations({ module: initialModule }: { module: string }
               if (a === "staff")
                 return (
                   <>
-                    {field("name", "Staff name")}
-                    {field("email", "Staff email", "email")}
-                    {field("national_id", "National ID (their first password)", "text", false)}
-                    {field("phone", "Phone number", "text", false)}
+                    {field("name", t("Staff name"))}
+                    {field("email", t("Staff email"), "email")}
+                    {field("national_id", t("National ID (their first password)"), "text", false)}
+                    {field("phone", t("Phone number"), "text", false)}
                     <div className="review-checks">
                       {roles.map((r) => (
                         <label className="check" key={r}>
@@ -3627,15 +3621,11 @@ export default function Operations({ module: initialModule }: { module: string }
                         </label>
                       ))}
                     </div>
-                    {choice("active", "Access", ["Active", "Withdrawn"])}
-                    {choice("reset_sign_in", "Sign-in", ["Leave their password alone", "Reset to the national ID"], false)}
-                    {field("reason", "Access change reason")}
+                    {choice("active", t("Access"), ["Active", "Withdrawn"])}
+                    {choice("reset_sign_in", t("Sign-in"), ["Leave their password alone", "Reset to the national ID"], false)}
+                    {field("reason", t("Access change reason"))}
                     <p className="footnote">
-                      A new person can sign in with their email address and their national ID
-                      as the first password, exactly as students do, and should change it on
-                      their first visit. Resetting puts somebody who has forgotten theirs back
-                      to that same national ID. Withdrawing access stops them signing in and takes
-                      them out of the list a group can be handed to. Their history stays.
+                      {t("A new person can sign in with their email address and their national ID as the first password, exactly as students do, and should change it on their first visit. Resetting puts somebody who has forgotten theirs back to that same national ID. Withdrawing access stops them signing in and takes them out of the list a group can be handed to. Their history stays.")}
                     </p>
                   </>
                 );
@@ -3883,8 +3873,8 @@ export default function Operations({ module: initialModule }: { module: string }
           </div>
           <p className="footnote">
             {importMode === "update"
-              ? "Rows are matched on the national ID, or on another identifier you choose; up to 5,000 rows per upload. Only the columns you map change, empty cells keep the stored value, and the mapping can be remembered for the next time this sheet arrives. Group moves, lifecycle, engagement and account status stay with their own actions."
-              : "Every row creates a record through the same workflow rules as the forms (up to 1,000 rows per upload). Rows whose ID already exists are rejected; use update mode to change them."}
+              ? t("Rows are matched on the national ID, or on another identifier you choose; up to 5,000 rows per upload. Only the columns you map change, empty cells keep the stored value, and the mapping can be remembered for the next time this sheet arrives. Group moves, lifecycle, engagement and account status stay with their own actions.")
+              : t("Every row creates a record through the same workflow rules as the forms (up to 1,000 rows per upload). Rows whose ID already exists are rejected; use update mode to change them.")}
           </p>
           <Pick
             label={t("Import module")}
@@ -4162,12 +4152,12 @@ export default function Operations({ module: initialModule }: { module: string }
           {importMode === "update" && sheetHeaders.length > 0 && (
             <div className="mapping-step">
               <div className="info-box">
-                <strong>{sheetHeaders.length} columns · {importRows.length} rows read</strong>
-                <span>Say which column fills which field. Unmapped columns are ignored.</span>
+                <strong>{t("{v0} columns · {v1} rows read", { v0: sheetHeaders.length, v1: importRows.length })}</strong>
+                <span>{t("Say which column fills which field. Unmapped columns are ignored.")}</span>
               </div>
               {savedMappings.length > 0 && (
                 <Pick
-                  label="Saved mapping"
+                  label={t("Saved mapping")}
                   value=""
                   onChange={(name) => {
                     const saved = savedMappings.find((m: Row) => m.name === name);
@@ -4182,7 +4172,7 @@ export default function Operations({ module: initialModule }: { module: string }
               )}
               <table className="mapping-table">
                 <thead>
-                  <tr><th>Column in your sheet</th><th>First value</th><th>Fills this field</th></tr>
+                  <tr><th>{t("Column in your sheet")}</th><th>{t("First value")}</th><th>{t("Fills this field")}</th></tr>
                 </thead>
                 <tbody>
                   {sheetHeaders.map((header) => (
@@ -4192,7 +4182,7 @@ export default function Operations({ module: initialModule }: { module: string }
                       <td>
                         <select
                           className="pick-inline"
-                          aria-label={`Field filled by ${header}`}
+                          aria-label={t("Field filled by {v0}", { v0: header })}
                           value={importMapping[header] || ""}
                           onChange={(e) => {
                             const field = e.target.value;
@@ -4205,7 +4195,7 @@ export default function Operations({ module: initialModule }: { module: string }
                             setImportMapping(next);
                           }}
                         >
-                          <option value="">Ignore this column</option>
+                          <option value="">{t("Ignore this column")}</option>
                           {[...mappingKeys, ...mappingFields.filter((f) => !mappingKeys.includes(f))].map((field) => (
                             <option key={field} value={field}>{field.replace(/_/g, " ")}</option>
                           ))}
@@ -4217,14 +4207,14 @@ export default function Operations({ module: initialModule }: { module: string }
               </table>
               <div className="filter-row">
                 <Pick
-                  label="Match rows on"
+                  label={t("Match rows on")}
                   value={importKey}
                   onChange={setImportKey}
                   options={mappingKeys.map((k) => ({ value: k, label: k.replace(/_/g, " ") }))}
                 />
                 <label className="pick-field">
-                  <span className="pick-label">Remember this sheet as</span>
-                  <input value={mappingName} onChange={(e) => setMappingName(e.target.value)} placeholder="Ministry monthly list" />
+                  <span className="pick-label">{t("Remember this sheet as")}</span>
+                  <input value={mappingName} onChange={(e) => setMappingName(e.target.value)} placeholder={t("Ministry monthly list")} />
                 </label>
               </div>
               <div className="detail-actions">
@@ -4255,7 +4245,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     }
                   }}
                 >
-                  Check these rows
+                  {t("Check these rows")}
                 </button>
                 <button
                   className="small-btn"
@@ -4278,7 +4268,7 @@ export default function Operations({ module: initialModule }: { module: string }
                       if (v.error) throw Error(v.error);
                       const meta = await (await fetch("/api/import?module=" + importModule, { cache: "no-store" })).json();
                       setSavedMappings(meta.mappings || []);
-                      toast.success("Saved. The next upload of this sheet is mapped already.");
+                      toast.success(t("Saved. The next upload of this sheet is mapped already."));
                     } catch (e: any) {
                       toast.error(e.message);
                     } finally {
@@ -4286,11 +4276,11 @@ export default function Operations({ module: initialModule }: { module: string }
                     }
                   }}
                 >
-                  Remember this mapping
+                  {t("Remember this mapping")}
                 </button>
               </div>
               {!Object.values(importMapping).includes(importKey) && (
-                <p className="footnote">Map one column to {importKey.replace(/_/g, " ")} before checking the rows.</p>
+                <p className="footnote">{t("Map one column to {v0} before checking the rows.", { v0: importKey.replace(/_/g, " ") })}</p>
               )}
             </div>
           )}
