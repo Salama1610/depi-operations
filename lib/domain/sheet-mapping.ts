@@ -64,10 +64,10 @@ export function normalizeNationalId(value: unknown) {
  */
 export function normalizePhone(value: unknown) {
   const written = String(value ?? "").trim();
-  // People often give two numbers in one cell, separated by a slash or a comma.
-  // Each is straightened on its own, and the cell is only rewritten when every
-  // part is a mobile; anything else stays exactly as the person wrote it.
-  const parts = normalizeDigits(written).split(/\s*[/,;]+\s*/).filter(Boolean);
+  // People often give two numbers in one cell, separated by a slash, a backslash
+  // or a comma. Each is straightened on its own, and the cell is only rewritten
+  // when every part is a mobile; anything else stays as the person wrote it.
+  const parts = normalizeDigits(written).split(/\s*[/\\,;]+\s*/).filter(Boolean);
   const mobiles = parts.map((part) => {
     const digits = part.replace(/[\s\u00a0()\-.]/g, "").replace(/^(?:\+?20|0020)/, "");
     if (/^1\d{9}$/.test(digits)) return "0" + digits;
