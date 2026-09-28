@@ -375,7 +375,9 @@ test("full seeded backend workflow and permission gates", async () => {
   r = await post("review", { id: "EV1", decision: "Accept", notes: "Approve" });
   assert.match(r.error, /role/, "a coach cannot take the quality stage");
   current = opsOnly;
-  current = { id: "quality-login", email: "staff-quality@example.invalid" };
+  // Quality members see only the students whose services they were assigned,
+  // so the evidence chain's quality stage is taken by the team leader here.
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
   await check("review", {
     id: "EV1",
     decision: "Reject",
@@ -401,7 +403,7 @@ test("full seeded backend workflow and permission gates", async () => {
     payment_proof_id: "PROOF-2",
     notes: "Corrected package",
   });
-  current = { id: "quality-login", email: "staff-quality@example.invalid" };
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
   await check("review", {
     id: "EV1",
     decision: "Accept",
@@ -728,8 +730,15 @@ test("update-mode spreadsheets merge partial columns into existing records under
   assert.equal(replay.updated, 2, "a replayed batch returns the recorded summary without applying again");
   assert.equal((await dbRow("SELECT count(*) n FROM import_rows WHERE import_id=?", batch)).n, 4);
 
-  // A coordinator may only touch students in groups they are responsible for.
+  // Coordinators work on records in place: spreadsheets are for the leaders,
+  // the supervisors and the administrators.
   current = { id: "coordinator-login", email: "staff-sara@example.invalid" };
+  const byCoordinator = await importPost({ module: "students", mode: "update", rows: [{ id: inG101.id, phone: "01000000002" }] });
+  assert.match(byCoordinator.error, /limited to leaders, supervisors and administrators/);
+
+  // A supervisor may only touch students in the groups they supervise.
+  await dbExec("UPDATE groups SET supervisor='staff-omar' WHERE id='G102'");
+  current = { id: "supervisor-login", email: "staff-nour@example.invalid" };
   const scoped = await importPost({
     module: "students",
     mode: "update",
@@ -738,11 +747,12 @@ test("update-mode spreadsheets merge partial columns into existing records under
       { id: inG102.id, phone: "01000000003" },
     ],
   });
+  await dbExec("UPDATE groups SET supervisor='staff-nour' WHERE id='G102'");
   assert.equal(scoped.rows[0].status, "Ready");
   assert.equal(scoped.rows[1].status, "Rejected");
   assert.match(scoped.rows[1].errors[0].error, /outside your scope/);
-  const groupsByCoordinator = await importPost({ module: "groups", mode: "update", rows: [{ id: "G101", name: "Renamed" }] });
-  assert.match(groupsByCoordinator.error, /not permitted/, "group data is Project Operations work");
+  const groupsBySupervisor = await importPost({ module: "groups", mode: "update", rows: [{ id: "G101", name: "Renamed" }] });
+  assert.match(groupsBySupervisor.error, /not permitted/, "group data is Project Operations work");
 
   // Groups: staff references must be active staff IDs; status stays with its actions.
   current = { id: "ops-only-login", email: "ops-only@example.com" };
@@ -809,7 +819,22 @@ test("update-mode spreadsheets merge partial columns into existing records under
   assert.match(unsupported.error, /students, groups and accounts/);
   current = { id: "coach-login", email: "staff-coach@example.invalid" };
   const coach = await importPost({ module: "students", mode: "update", rows: [{ id: inG101.id, phone: "0" }] });
-  assert.match(coach.error, /not permitted/);
+  assert.match(coach.error, /limited to leaders, supervisors and administrators/);
+  current = { id: "owner", email: "owner@example.com" };
+});
+
+test("only leaders, supervisors and administrators download spreadsheets", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  const download = () => programApi.GET(new Request("https://test.local/api/program?format=csv&dataset=lifecycle"));
+  current = { id: "coordinator-login", email: "staff-sara@example.invalid" };
+  const refused = await download();
+  assert.match((await refused.json()).error, /limited to leaders, supervisors and administrators/);
+  current = { id: "quality-login", email: "staff-quality@example.invalid" };
+  assert.match((await (await download()).json()).error, /limited to leaders, supervisors and administrators/);
+  current = { id: "supervisor-login", email: "staff-nour@example.invalid" };
+  const allowed = await download();
+  assert.equal(allowed.status, 200);
+  assert.match(allowed.headers.get("content-type") || "", /csv/);
   current = { id: "owner", email: "owner@example.com" };
 });
 test("a sheet from another source links on the national ID through a saved mapping", async () => {
@@ -1058,6 +1083,37 @@ test("a student's services go to one quality reviewer, spread evenly, and the le
   assert.equal(adopted.length, 1);
   assert.ok(pool.includes(adopted[0].qc_actor));
   assert.match((await post("service_qc_assign", {})).error, /already has a reviewer/);
+
+  // A reviewer's workspace is the students they hold and nothing else.
+  current = { id: holder.id, email: holder.email };
+  const holderResponse = await api.GET();
+  const holderView = await holderResponse.json();
+  assert.equal(holderResponse.status, 200, "reviewer workspace: " + JSON.stringify(holderView).slice(0, 300));
+  const mine = await dbRows(
+    "SELECT DISTINCT student_id FROM service_links WHERE qc_actor=? AND qc_status<>'Locked'",
+    holder.id,
+  );
+  assert.ok(holderView.students.length > 0, "the reviewer sees their own students");
+  assert.equal(
+    holderView.students.length,
+    mine.length,
+    "and only those: one row per student they were assigned",
+  );
+  assert.deepEqual(
+    holderView.students.map((s) => s.id).sort(),
+    mine.map((r) => r.student_id).sort(),
+  );
+  assert.ok(
+    holderView.serviceLinks.every((l) => l.qc_actor === holder.id),
+    "the queue they load is their own",
+  );
+  assert.ok(
+    holderView.groups.every((g) => holderView.students.some((s) => s.group_id === g.id)),
+    "the groups they see are the ones those students are in",
+  );
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  const leadView = await (await api.GET()).json();
+  assert.ok(leadView.students.length > holderView.students.length, "the leader still sees the whole programme");
 
   // A link the automatic gate failed can only go back for correction: there is
   // no override, for the reviewer or the leader.
@@ -1481,7 +1537,7 @@ test("second evidence rejection routes through L3 and closes correction work", a
   await dbExec("INSERT INTO evidence_packages VALUES(?,?,?,?,?,?)", "EPK-L3-1", "EV-L3", 1, "Submitted", "owner", created);
   await dbExec("INSERT INTO evidence_package_items VALUES(?,?,?,?,?)", "EPI-L3-1", "EPK-L3-1", "Delivery", "L3-DELIVERY-1", created);
   await dbExec("INSERT INTO evidence_package_items VALUES(?,?,?,?,?)", "EPI-L3-2", "EPK-L3-1", "Payment", "L3-PAYMENT-1", created);
-  current = { id: "quality-login", email: "staff-quality@example.invalid" };
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
   await check("review", { id: "EV-L3", decision: "Reject", code: "EV07", notes: "Second rejection requires L3 review" });
   current = { id: "owner", email: "owner@example.com" };
   await check("review", {

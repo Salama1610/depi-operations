@@ -19,7 +19,7 @@ const custodians = ["Higher Board", "Operations Systems / Admin"];
 async function mayReveal(u: any, accountId: string) {
   if (can(u.roles, custodians)) return true;
   if (!can(u.roles, ["Project Operations", "Operations Coordinator", "Team Supervisor"])) return false;
-  const scope = scopeSql(u);
+  const scope = scopeSql(u, "g", null);
   const row = await stmt(
     `SELECT n.id FROM account_assignments n JOIN groups g ON g.id=n.group_id WHERE n.account_id=? AND ${scope.sql} LIMIT 1`,
     accountId,

@@ -704,6 +704,10 @@ export default function Operations({ module: initialModule }: { module: string }
               <strong>{s.name}</strong>
               <small>
                 {s.id} <span>·</span> {s.track}
+                {s.provider ? <> <span>·</span> {s.provider}</> : null}
+                {s.round_1 && s.round_1 !== "Current Round" ? (
+                  <> <span className="badge muted">{t(s.round_1)}</span></>
+                ) : null}
               </small>
             </span>
             <span className="student-next">
@@ -2672,6 +2676,9 @@ export default function Operations({ module: initialModule }: { module: string }
                   </div>
                   <div className="detail-grid">
                     {[
+                      ["Training provider", selectedStudent.provider || t("Not recorded")],
+                      ["Round", selectedStudent.round_1 || t("Not recorded")],
+                      ["Enrolment", selectedStudent.student_type || t("Not recorded")],
                       ["Coordinator", owner(selectedStudent.coordinator)],
                       ["Supervisor", owner(selectedStudent.supervisor)],
                       ["Coach", owner(selectedStudent.coach)],

@@ -193,22 +193,43 @@ export function permit(u: any, allowed: string[]) {
   if (can(u.roles, ["Operations Systems / Admin"])) return;
   ensure(can(u.roles, allowed), "Your staff role does not permit this action.");
 }
-export function scopeSql(u: any, alias = "g") {
+/**
+ * Who a member of staff may see.
+ *
+ * Most roles are scoped by group: the people who run a group see its students.
+ * A quality reviewer is scoped by assignment instead — they see the students
+ * whose services they were given, and nobody else's — because their job is
+ * those students and a reviewer has no reason to read the whole programme.
+ * The team leader still sees everything, since the queue is theirs to balance.
+ *
+ * `studentAlias` is the students table in the caller's query. A query that has
+ * no students in it passes null and gets the same rule expressed through the
+ * group, so a reviewer sees the groups their students are in.
+ */
+export function scopeSql(u: any, alias = "g", studentAlias: string | null = "s") {
   if (
     can(u.roles, [
       "Project Operations",
       "Operations Systems / Admin",
-      "Quality Member",
       "Quality Lead",
       "Higher Board",
       "Coach Operations",
     ])
   )
     return { sql: "1=1", args: [] };
-  return {
-    sql: `(${alias}.coordinator=? OR ${alias}.supervisor=? OR ${alias}.coach=? OR ${alias}.account_manager=? OR EXISTS (SELECT 1 FROM group_coaches gc WHERE gc.group_id=${alias}.id AND gc.user_id=? AND gc.status='Active'))`,
-    args: [u.id, u.id, u.id, u.id, u.id],
-  };
+  const clauses = [
+    `(${alias}.coordinator=? OR ${alias}.supervisor=? OR ${alias}.coach=? OR ${alias}.account_manager=? OR EXISTS (SELECT 1 FROM group_coaches gc WHERE gc.group_id=${alias}.id AND gc.user_id=? AND gc.status='Active'))`,
+  ];
+  const args: string[] = [u.id, u.id, u.id, u.id, u.id];
+  if (can(u.roles, ["Quality Member"])) {
+    clauses.push(
+      studentAlias
+        ? `EXISTS (SELECT 1 FROM service_links sl WHERE sl.student_id=${studentAlias}.id AND sl.qc_actor=?)`
+        : `EXISTS (SELECT 1 FROM service_links sl JOIN students ss ON ss.id=sl.student_id WHERE ss.group_id=${alias}.id AND sl.qc_actor=?)`,
+    );
+    args.push(u.id);
+  }
+  return { sql: clauses.length > 1 ? `(${clauses.join(" OR ")})` : clauses[0], args };
 }
 export async function student(u: any, id: string) {
   const q = scopeSql(u);
@@ -278,6 +299,8 @@ export const loadTimings: Record<string, number> = {};
 
 export async function loadData(u: any) {
   const q = scopeSql(u);
+  // The same rule for queries that carry no students of their own.
+  const qg = scopeSql(u, "g", null);
   const loadStarted = Date.now();
   // Every independent read is issued at once. Over the HTTPS transport the
   // adapter coalesces concurrent reads into a single round trip, so this block
@@ -335,8 +358,8 @@ export async function loadData(u: any) {
     staff,
   ] = await Promise.all([
     all(
-      `SELECT g.*,c.name coordinator_name,s.name supervisor_name,h.name coach_name,m.name account_manager_name FROM groups g JOIN users c ON c.id=g.coordinator JOIN users s ON s.id=g.supervisor JOIN users h ON h.id=g.coach LEFT JOIN users m ON m.id=g.account_manager WHERE ${q.sql}`,
-      ...q.args,
+      `SELECT g.*,c.name coordinator_name,s.name supervisor_name,h.name coach_name,m.name account_manager_name FROM groups g JOIN users c ON c.id=g.coordinator JOIN users s ON s.id=g.supervisor JOIN users h ON h.id=g.coach LEFT JOIN users m ON m.id=g.account_manager WHERE ${qg.sql}`,
+      ...qg.args,
     ),
     all(
       `SELECT s.*,g.track,g.provider,g.pathway,g.start_date,g.policy_id,g.coordinator,g.supervisor,g.coach,c.name coordinator_name FROM students s JOIN groups g ON g.id=s.group_id JOIN users c ON c.id=g.coordinator WHERE ${q.sql}`,
@@ -358,12 +381,12 @@ export async function loadData(u: any) {
       ...q.args,
     ),
     all(
-      `SELECT t.* FROM sessions t JOIN groups g ON g.id=t.group_id WHERE ${q.sql}`,
-      ...q.args,
+      `SELECT t.* FROM sessions t JOIN groups g ON g.id=t.group_id WHERE ${qg.sql}`,
+      ...qg.args,
     ),
     all(
-      `SELECT x.*,u.name coach_name FROM group_coaches x JOIN users u ON u.id=x.user_id JOIN groups g ON g.id=x.group_id WHERE ${q.sql} ORDER BY x.assigned_at DESC`,
-      ...q.args,
+      `SELECT x.*,u.name coach_name FROM group_coaches x JOIN users u ON u.id=x.user_id JOIN groups g ON g.id=x.group_id WHERE ${qg.sql} ORDER BY x.assigned_at DESC`,
+      ...qg.args,
     ),
     all("SELECT * FROM policies"),
     all(
@@ -436,8 +459,8 @@ export async function loadData(u: any) {
     all("SELECT * FROM task_bank WHERE active=1 ORDER BY track,title"),
     all("SELECT * FROM saved_views WHERE user_id=? ORDER BY created_at DESC", u.id),
     all(
-      `SELECT x.* FROM group_gate_checks x JOIN groups g ON g.id=x.group_id WHERE ${q.sql}`,
-      ...q.args,
+      `SELECT x.* FROM group_gate_checks x JOIN groups g ON g.id=x.group_id WHERE ${qg.sql}`,
+      ...qg.args,
     ),
     all(
       `SELECT x.* FROM student_status_events x JOIN students s ON s.id=x.student_id JOIN groups g ON g.id=s.group_id WHERE ${q.sql} ORDER BY x.created_at DESC LIMIT 500`,
@@ -448,8 +471,8 @@ export async function loadData(u: any) {
       ...q.args,
     ),
     all(
-      `SELECT x.* FROM attachment_context x JOIN groups g ON g.id=x.group_id WHERE ${q.sql}`,
-      ...q.args,
+      `SELECT x.* FROM attachment_context x JOIN groups g ON g.id=x.group_id WHERE ${qg.sql}`,
+      ...qg.args,
     ),
     can(u.roles, ["Project Operations", "Operations Systems / Admin", "Quality Lead"])
       ? all("SELECT * FROM fx_rates ORDER BY effective_date DESC")
