@@ -829,6 +829,9 @@ test("only leaders, supervisors and administrators download spreadsheets", async
   current = { id: "coordinator-login", email: "staff-sara@example.invalid" };
   const refused = await download();
   assert.match((await refused.json()).error, /limited to leaders, supervisors and administrators/);
+  // A quality reviewer loads the programme view, but may not download it.
+  current = { id: "quality-login", email: "staff-quality@example.invalid" };
+  assert.match((await (await download()).json()).error, /limited to leaders, supervisors and administrators/);
   current = { id: "supervisor-login", email: "staff-nour@example.invalid" };
   const allowed = await download();
   assert.equal(allowed.status, 200);

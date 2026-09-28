@@ -141,20 +141,20 @@ async function programData(u: any) {
     closures,
   ] = await Promise.all([
     all(
-      `SELECT x.*,u.name coach_name FROM group_coaches x JOIN users u ON u.id=x.user_id JOIN groups g ON g.id=x.group_id WHERE ${q.sql} ORDER BY x.assigned_at DESC`,
-      ...q.args,
+      `SELECT x.*,u.name coach_name FROM group_coaches x JOIN users u ON u.id=x.user_id JOIN groups g ON g.id=x.group_id WHERE ${qg.sql} ORDER BY x.assigned_at DESC`,
+      ...qg.args,
     ),
     all(
-      `SELECT x.*,u.name coach_name FROM sessions x JOIN groups g ON g.id=x.group_id LEFT JOIN users u ON u.id=x.coach_id WHERE ${q.sql} ORDER BY x.starts_at DESC LIMIT 1000`,
-      ...q.args,
+      `SELECT x.*,u.name coach_name FROM sessions x JOIN groups g ON g.id=x.group_id LEFT JOIN users u ON u.id=x.coach_id WHERE ${qg.sql} ORDER BY x.starts_at DESC LIMIT 1000`,
+      ...qg.args,
     ),
     all(
-      `SELECT x.* FROM session_reports x JOIN sessions z ON z.id=x.session_id JOIN groups g ON g.id=z.group_id WHERE ${q.sql} ORDER BY x.submitted_at DESC LIMIT 1000`,
-      ...q.args,
+      `SELECT x.* FROM session_reports x JOIN sessions z ON z.id=x.session_id JOIN groups g ON g.id=z.group_id WHERE ${qg.sql} ORDER BY x.submitted_at DESC LIMIT 1000`,
+      ...qg.args,
     ),
     all(
-      `SELECT x.* FROM assessments x LEFT JOIN groups g ON g.id=x.group_id WHERE x.group_id IS NULL OR ${q.sql} ORDER BY x.due_at DESC LIMIT 1000`,
-      ...q.args,
+      `SELECT x.* FROM assessments x LEFT JOIN groups g ON g.id=x.group_id WHERE x.group_id IS NULL OR ${qg.sql} ORDER BY x.due_at DESC LIMIT 1000`,
+      ...qg.args,
     ),
     all(
       `SELECT x.* FROM assessment_results x JOIN students s ON s.id=x.student_id JOIN groups g ON g.id=s.group_id WHERE ${q.sql} ORDER BY x.assessed_at DESC LIMIT 3000`,
@@ -173,8 +173,8 @@ async function programData(u: any) {
       ...q.args,
     ),
     all(
-      `SELECT x.* FROM group_closures x JOIN groups g ON g.id=x.group_id WHERE ${q.sql} ORDER BY x.created_at DESC`,
-      ...q.args,
+      `SELECT x.* FROM group_closures x JOIN groups g ON g.id=x.group_id WHERE ${qg.sql} ORDER BY x.created_at DESC`,
+      ...qg.args,
     ),
   ]);
   const [staff, definitions, reportRuns, retention, attachments, accountControls] = await Promise.all([
