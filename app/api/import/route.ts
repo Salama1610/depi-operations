@@ -409,7 +409,7 @@ async function reviewUpdates(u: any, module: string, rawRows: any[], options: { 
     for (const record of await fetchIn(spec.table, `id, ${field}`, field, values))
       taken.set(`${field}:${String(record[field] ?? "").trim().toLowerCase()}`, record.id);
   }
-  const scope = scopeSql(u);
+  const scope = scopeSql(u, "g", null);
   const groupsInScope =
     module === "students" && scope.sql !== "1=1"
       ? new Set(((await stmt(`SELECT g.id FROM groups g WHERE ${scope.sql}`, ...scope.args).all()).results || []).map((g: any) => g.id))

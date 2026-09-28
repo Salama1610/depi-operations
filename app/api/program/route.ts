@@ -83,12 +83,13 @@ async function requireAssignedCoach(u: any, groupId: string, coachType?: string)
 
 async function programData(u: any) {
   const q = scopeSql(u);
+  const qg = scopeSql(u, "g", null);
   const tracks = await all("SELECT * FROM tracks WHERE active=1 ORDER BY name");
   const groups = await all(
     `SELECT g.*,c.name coordinator_name,s.name supervisor_name FROM groups g
      JOIN users c ON c.id=g.coordinator JOIN users s ON s.id=g.supervisor
-     WHERE ${q.sql} ORDER BY g.start_date DESC,g.id`,
-    ...q.args,
+     WHERE ${qg.sql} ORDER BY g.start_date DESC,g.id`,
+    ...qg.args,
   );
   const students = await all(
     `SELECT s.*,g.name group_name,g.track,g.status group_status,g.coordinator,g.supervisor,
