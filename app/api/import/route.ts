@@ -8,7 +8,7 @@ import {
   rateLimit,
   scopeSql,
 } from "@/lib/server";
-import { can, ensure, roles } from "@/lib/domain/rules";
+import { can, dataTransferRefusal, dataTransferRoles, ensure, roles } from "@/lib/domain/rules";
 import { applyMapping, isNationalId, nationalIdProblem, normalizeNationalId } from "@/lib/domain/sheet-mapping";
 import { POST as operate } from "@/app/api/operations/route";
 import { POST as program } from "@/app/api/program/route";
@@ -263,7 +263,9 @@ const updatable: Record<string, UpdateSpec> = {
       engagement: "Use the Engagement action; it records the reason and evidence",
     },
     unique: ["email", "national_id", "tp_id"],
-    roles: ["Project Operations", "Operations Coordinator", "Operations Systems / Admin"],
+    // Supervisors update only the students of their own groups: the review
+    // below matches rows inside the importer's scope.
+    roles: ["Project Operations", "Coach Operations", "Team Supervisor", "Operations Systems / Admin"],
   },
   groups: {
     table: "groups",
@@ -546,6 +548,7 @@ const programModules = new Set([
 export async function GET(req: Request) {
   try {
     const u = await actor();
+    ensure(can(u.roles, dataTransferRoles), dataTransferRefusal);
     await rateLimit("import-mappings:" + u.id, 60, 60);
     const module = new URL(req.url).searchParams.get("module") || "";
     ensure(updatable[module], "Update mode is available for students, groups and accounts.");
@@ -570,6 +573,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const u = await actor();
+    ensure(can(u.roles, dataTransferRoles), dataTransferRefusal);
     await rateLimit("import:" + u.id, 20, 60);
     const x = await req.json();
 

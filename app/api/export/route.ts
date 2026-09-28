@@ -1,6 +1,6 @@
 import { actor, loadData, auditStmt, stmt, db, uid, now, rateLimit } from "@/lib/server";
 import { toCSV, toWorkbook, type Sheet } from "@/lib/spreadsheet";
-import { ensure } from "@/lib/domain/rules";
+import { can, dataTransferRefusal, dataTransferRoles, ensure } from "@/lib/domain/rules";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +39,7 @@ function flat(rows: any[]) {
 export async function GET(req: Request) {
   try {
     const u = await actor();
+    ensure(can(u.roles, dataTransferRoles), dataTransferRefusal);
     await rateLimit("export:" + u.id, 30, 60);
     const url = new URL(req.url);
     const module = url.searchParams.get("module") || "students";

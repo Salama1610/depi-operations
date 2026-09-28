@@ -8,7 +8,8 @@
     "active": "boolean",
     "auth_user_id": "uuid",
     "national_id": "text",
-    "phone": "text"
+    "phone": "text",
+    "title": "text"
   },
   "policies": {
     "id": "text",
@@ -32,7 +33,8 @@
     "start_date": "date",
     "status": "text",
     "policy_id": "text",
-    "account_manager": "text"
+    "account_manager": "text",
+    "session_link": "text"
   },
   "students": {
     "id": "text",

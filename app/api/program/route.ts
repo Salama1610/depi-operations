@@ -11,7 +11,7 @@ import {
   student,
   uid,
 } from "@/lib/server";
-import { can, ensure } from "@/lib/domain/rules";
+import { can, dataTransferRefusal, dataTransferRoles, ensure } from "@/lib/domain/rules";
 import { toCSV, toXLSX } from "@/lib/spreadsheet";
 
 export const dynamic = "force-dynamic";
@@ -369,6 +369,7 @@ export async function GET(req: Request) {
     const data = await programData(u);
     const q = new URL(req.url).searchParams;
     if (["csv", "xlsx"].includes(q.get("format") || "")) {
+      ensure(can(u.roles, dataTransferRoles), dataTransferRefusal);
       const dataset = q.get("dataset") || "lifecycle";
       const datasets: Record<string, any[]> = {
         lifecycle: data.students,

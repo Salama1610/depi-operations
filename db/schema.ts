@@ -20,6 +20,9 @@ export const users = sqliteTable("users", {
   // Added after auth_user_id for the same reason: positional inserts keep working.
   nationalId: text("national_id"),
   phone: text("phone"),
+  // What the person is called (Project Coordinator, Operations Coordinator).
+  // Permissions come from roles, never from the title.
+  title: text("title"),
 });
 export const policies = sqliteTable("policies", {
   id: text("id").primaryKey(),
@@ -55,6 +58,8 @@ export const groups = sqliteTable("groups", {
   // sits last: both engines append a new column, and positional inserts
   // written against the original order must keep working.
   accountManager: text("account_manager").references(() => users.id),
+  // The standing Teams or LMS link the group meets on.
+  sessionLink: text("session_link"),
 });
 export const students = sqliteTable(
   "students",

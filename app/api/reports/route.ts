@@ -1,6 +1,7 @@
 import { actor, auditStmt, rateLimit } from "@/lib/server";
 import { report } from "@/lib/reports";
 import { toCSV, toXLSX } from "@/lib/spreadsheet";
+import { can, dataTransferRefusal, dataTransferRoles, ensure } from "@/lib/domain/rules";
 export async function GET(req: Request) {
   try {
     const u = await actor();
@@ -13,6 +14,7 @@ export async function GET(req: Request) {
     );
     const format = q.get("format");
     if (format) {
+      ensure(can(u.roles, dataTransferRoles), dataTransferRefusal);
       await auditStmt(u, "Report export", "reports", {
         from: q.get("from"),
         to: q.get("to"),

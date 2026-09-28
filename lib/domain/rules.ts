@@ -170,6 +170,15 @@ export function risk(
   }
   return { status, reasons };
 }
+/**
+ * Who may move records in or out of the workspace as a spreadsheet: the
+ * programme leaders, the team supervisors and the administrators. Everyone
+ * else works on the records in place. What a person may export or change is
+ * still limited to the groups they can see.
+ */
+export const dataTransferRoles = ["Project Operations", "Coach Operations", "Team Supervisor", "Operations Systems / Admin"];
+export const dataTransferRefusal = "Importing and exporting spreadsheets is limited to leaders, supervisors and administrators.";
+
 export function can(roleList: string[], allowed: string[]) {
   return roleList.some((r) => allowed.includes(r));
 }
