@@ -3616,11 +3616,13 @@ export default function Operations({ module: initialModule }: { module: string }
                       ))}
                     </div>
                     {choice("active", "Access", ["Active", "Withdrawn"])}
+                    {choice("reset_sign_in", "Sign-in", ["Leave their password alone", "Reset to the national ID"], false)}
                     {field("reason", "Access change reason")}
                     <p className="footnote">
                       A new person can sign in with their email address and their national ID
                       as the first password, exactly as students do, and should change it on
-                      their first visit. Withdrawing access stops them signing in and takes
+                      their first visit. Resetting puts somebody who has forgotten theirs back
+                      to that same national ID. Withdrawing access stops them signing in and takes
                       them out of the list a group can be handed to. Their history stays.
                     </p>
                   </>

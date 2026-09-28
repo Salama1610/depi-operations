@@ -140,7 +140,13 @@ async function authAdmin(path: string, init?: RequestInit) {
  * so a person who has left cannot even reach the door; restoring it lets them
  * back in with the password they had.
  */
-export async function provisionStaffLogin(email: string, nationalId: string, name: string, active = true) {
+export async function provisionStaffLogin(
+  email: string,
+  nationalId: string,
+  name: string,
+  active = true,
+  reset = false,
+) {
   const address = String(email || "").trim().toLowerCase();
   const secret = String(nationalId || "").trim();
   if (!address) return "skipped";
@@ -157,6 +163,17 @@ export async function provisionStaffLogin(email: string, nationalId: string, nam
       body: JSON.stringify({ email: address, password: secret, email_confirm: true, user_metadata: { full_name: name } }),
     });
     return "created";
+  }
+  // Putting somebody back to the credential they were given. Deliberate and
+  // audited: it is how a person who has forgotten theirs, or who was set up
+  // before the programme settled on this, gets back in.
+  if (reset && active) {
+    ensure(/^\d{14}$/.test(secret), "Record this person's national ID before resetting their sign-in.");
+    await authAdmin(`users/${existing.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ password: secret, email_confirm: true, ban_duration: "none" }),
+    });
+    return "reset";
   }
   const suspended = Boolean(existing.banned_until && new Date(existing.banned_until).getTime() > Date.now());
   if (suspended === active) {

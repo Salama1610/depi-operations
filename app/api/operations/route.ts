@@ -255,7 +255,7 @@ export async function POST(req: Request) {
     let auditPrevious: any = null;
     // Set by the staff action: the person who should be able to sign in once
     // the record is written.
-    let signIn: { email: string; nationalId: string; name: string; active: boolean } | null = null;
+    let signIn: { email: string; nationalId: string; name: string; active: boolean; reset: boolean } | null = null;
     let auditValue: any = { ...x };
     delete auditValue.request_id;
     switch (x.action) {
@@ -1914,8 +1914,19 @@ export async function POST(req: Request) {
           );
         // Recorded on the audit entry so an administrator can see whether the
         // person can sign in yet, or is only listed.
-        auditValue = { ...auditValue, national_id: nationalId ? "recorded" : "missing", phone: phone ? "recorded" : "missing" };
-        signIn = { email, nationalId: nationalId || String(old?.national_id || ""), name: String(x.name), active: active === 1 };
+        auditValue = {
+          ...auditValue,
+          national_id: nationalId ? "recorded" : "missing",
+          phone: phone ? "recorded" : "missing",
+          sign_in_reset: x.reset_sign_in ? true : undefined,
+        };
+        signIn = {
+          email,
+          nationalId: nationalId || String(old?.national_id || ""),
+          name: String(x.name),
+          active: active === 1,
+          reset: x.reset_sign_in === true || x.reset_sign_in === "Reset to the national ID",
+        };
         break;
       }
       case "policy": {
@@ -2366,8 +2377,8 @@ export async function POST(req: Request) {
     // access change itself has already succeeded.
     if (signIn) {
       try {
-        const outcome = await provisionStaffLogin(signIn.email, signIn.nationalId, signIn.name, signIn.active);
-        if (outcome === "created" || outcome === "suspended" || outcome === "restored")
+        const outcome = await provisionStaffLogin(signIn.email, signIn.nationalId, signIn.name, signIn.active, signIn.reset);
+        if (outcome === "created" || outcome === "suspended" || outcome === "restored" || outcome === "reset")
           return Response.json({ ok: true, sign_in: outcome });
         if (outcome === "skipped" && signIn.active && !signIn.nationalId)
           return Response.json({
