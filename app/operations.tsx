@@ -9,6 +9,7 @@ import {
   RetentionPanel,
 } from "./control-center";
 import { ProgramFlow } from "./program-flow";
+import { WeeklyProgress } from "./weekly-progress";
 import { acceptedServicePlatforms } from "@/lib/domain/service-links";
 import { useState, useEffect } from "react";
 import {
@@ -42,6 +43,7 @@ import {
   ExternalLink,
   RefreshCw,
   GraduationCap,
+  CalendarRange,
   LockKeyhole,
 } from "lucide-react";
 import {
@@ -99,6 +101,7 @@ import {
   can,
   policy as baselinePolicy,
   controlledPlatforms,
+  dataTransferRoles,
 } from "@/lib/domain/rules";
 import { readSheet, toCSV, toXLSX } from "@/lib/spreadsheet";
 import { guessKeyColumn, guessMapping } from "@/lib/domain/sheet-mapping";
@@ -107,6 +110,7 @@ const nav = [
   ["home", "Overview", Home],
   ["program", "Program flow", Flag],
   ["work", "My work", CheckCheck],
+  ["weekly", "Weekly progress", CalendarRange],
   ["students", "Students", Users],
   ["groups", "Groups", Layers],
   ["sessions", "Sessions", CalendarDays],
@@ -436,11 +440,16 @@ export default function Operations({ module: initialModule }: { module: string }
   const qualityOnly =
     heldRoles(user).length > 0 &&
     heldRoles(user).every((role) => role === "Quality Member" || role === "Quality Lead");
+  // Spreadsheets in and out are for leaders, supervisors and administrators;
+  // the server refuses everyone else, so the buttons are not offered either.
+  const canTransfer = can(user.roles, dataTransferRoles);
   const shownNav = nav.filter(([m]) =>
     qualityOnly
       ? m === "quality"
       : m === "administration"
         ? can(user.roles, ["Operations Systems / Admin"])
+        : m === "weekly"
+          ? can(user.roles, ["Team Supervisor", "Project Operations", "Coach Operations", "Operations Systems / Admin", "Higher Board"])
         : m === "quality"
           ? canSeeServiceQueue || can(user.roles, ["Higher Board"])
           : m === "accounts"
@@ -1889,10 +1898,17 @@ export default function Operations({ module: initialModule }: { module: string }
         ),
       ),
     );
+  } else if (module === "weekly") {
+    content = (
+      <WeeklyProgress
+        data={d}
+        onStudent={(id) => setSelected(students.find((s) => s.id === id) || null)}
+      />
+    );
   } else if (module === "reports") {
     content = (
       <>
-        <ReportsPanel />
+        <ReportsPanel canExport={canTransfer} />
         <div className="stats">
           {[
             { label: t("Contact compliance"), n: compliance + "%" },
@@ -1923,6 +1939,7 @@ export default function Operations({ module: initialModule }: { module: string }
                 return {
                   id: u.id,
                   name: u.name,
+                  title: u.title || "",
                   students: s.length,
                   contact: s.length
                     ? Math.round(
@@ -1940,7 +1957,7 @@ export default function Operations({ module: initialModule }: { module: string }
                 };
               }),
             [
-              { key: "name", label: t("Coordinator") },
+              { key: "name", label: t("Coordinator"), render: (r: Row) => <span className="table-name">{r.name}{r.title && <small>{t(r.title)}</small>}</span> },
               { key: "students", label: t("Students") },
               { key: "contact", label: t("Contact compliance") },
               { key: "overdue", label: t("Overdue") },
@@ -2001,7 +2018,7 @@ export default function Operations({ module: initialModule }: { module: string }
             generic(
               staff,
               [
-                { key: "name", label: "Staff member", render: (r) => <span>{r.name}{(r.active === 0 || r.active === false) && <small className="table-subline"><span className="badge muted">{String(r.id).startsWith("system-unassigned") ? "Placeholder · cannot sign in" : "Inactive"}</span></small>}</span> },
+                { key: "name", label: "Staff member", render: (r) => <span>{r.name}{r.title && <small className="table-subline">{t(r.title)}</small>}{(r.active === 0 || r.active === false) && <small className="table-subline"><span className="badge muted">{String(r.id).startsWith("system-unassigned") ? "Placeholder · cannot sign in" : "Inactive"}</span></small>}</span> },
                 { key: "email", label: "Email", render: (r) => <span>{r.email}<small className="table-subline">{r.phone || "no phone number"}</small></span> },
                 {
                   key: "national_id",
@@ -2241,7 +2258,7 @@ export default function Operations({ module: initialModule }: { module: string }
             <span className="avatar navy">{user.name?.slice(0, 1) || "A"}</span>
             <div>
               <strong>{user.name}</strong>
-              <small>{user.roles?.[0] || t("Workspace setup")}</small>
+              <small>{user.title ? t(user.title) : user.roles?.[0] || t("Workspace setup")}</small>
             </div>
             <a className="profile-signout" href="/api/auth/logout" title={t("Sign out")} aria-label={t("Sign out")}>
               <LogOut size={17} />
@@ -2384,6 +2401,7 @@ export default function Operations({ module: initialModule }: { module: string }
                           (
                             {
                               work: "A clear next action for every student.",
+                              weekly: "Coordinators and their students, Friday to Thursday.",
                               program:
                                 "Registration through screening, delivery, graduation, outcomes and controlled closure.",
                               students:
@@ -2455,7 +2473,7 @@ export default function Operations({ module: initialModule }: { module: string }
                       </button>
                     )}
                   </div>
-                  {!["administration", "program"].includes(module) && (
+                  {!["administration", "program", "weekly"].includes(module) && (
                     <div className="toolbar">
                       <label className="search-box">
                         <Search size={17} />
@@ -2518,6 +2536,7 @@ export default function Operations({ module: initialModule }: { module: string }
                         >
                           <Filter size={15} /> {t("Save view")}
                         </button>
+                        {canTransfer && (<>
                         <button
                           className="small-btn"
                           onClick={() => {
@@ -2554,6 +2573,7 @@ export default function Operations({ module: initialModule }: { module: string }
                                 encodeURIComponent(search);
                           }}
                         />
+                        </>)}
                       </div>
                     </div>
                   )}

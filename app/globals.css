@@ -737,3 +737,20 @@ input:focus-visible {
   .auth-trust { display: flex; }
   .auth-trust > svg, .auth-trust > span { display: none; }
 }
+
+/* Weekly progress (supervisors and leaders) */
+.weekly-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+.weekly-range{display:flex;align-items:center;gap:10px;color:#20304d}
+.weekly-range strong{font-size:17px}
+.weekly-nav{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.weekly-filter{border:1px solid #dfe5ef;border-radius:6px;background:#fff;padding:7px 10px;font-size:13px;color:#53627d;min-height:34px}
+.weekly-note{margin:0 0 18px}
+.weekly-stats{grid-template-columns:repeat(5,minmax(0,1fr))}
+.weekly-row{cursor:pointer}
+.weekly-row:hover{background:#fafbff}
+.weekly-row[aria-expanded=true]{background:#f4f7fe}
+.weekly-detail>td{background:#f8faff;padding:0 !important}
+.weekly-students{padding:6px 12px 14px;overflow-x:auto}
+.weekly-students .text-link{padding:0;font-size:13px}
+:root[dir="rtl"] .flip-rtl{transform:scaleX(-1)}
+@media(max-width:980px){.weekly-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}

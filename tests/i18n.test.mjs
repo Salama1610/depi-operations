@@ -23,6 +23,7 @@ after(async () => {
 const pages = [
   "app/operations.tsx",
   "app/program-flow.tsx",
+  "app/weekly-progress.tsx",
   "app/control-center.tsx",
   "app/student/page.tsx",
   "app/login/login-form.tsx",

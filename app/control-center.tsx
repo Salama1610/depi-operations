@@ -150,7 +150,7 @@ export function ControlCenter() {
     </div>
   );
 }
-export function ReportsPanel() {
+export function ReportsPanel({ canExport = false }: { canExport?: boolean }) {
   const t = useT();
   const [data, setData] = useState<any>(null),
     [from, setFrom] = useState(""),
@@ -207,6 +207,7 @@ export function ReportsPanel() {
           <button className="primary" onClick={load}>
             {t("Apply period")}
           </button>
+          {canExport && (<>
           <a
             className="small-btn"
             href={"/api/reports?format=xlsx&from=" + from + "&to=" + to}
@@ -215,6 +216,7 @@ export function ReportsPanel() {
           </a>
           <a className="small-btn" href={"/api/reports?dataset=service_links&format=csv&from=" + from + "&to=" + to}>{t("Export service links CSV")}</a>
           <a className="small-btn" href={"/api/reports?dataset=service_links&format=xlsx&from=" + from + "&to=" + to}>{t("Export service links XLSX")}</a>
+          </>)}
         </div>
         {error && <p role="alert">{error}</p>}
         {data && (

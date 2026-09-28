@@ -496,7 +496,13 @@ export async function loadData(u: any) {
       "Project Operations",
       "Operations Systems / Admin",
     ]) ? all("SELECT id,label,platform,status,credits FROM accounts") : none,
-    all("SELECT id,name,email,roles,scopes,active FROM users"),
+    // Everyone sees who their colleagues are and how to reach them; the
+    // national ID is a first password, so only an administrator sees it.
+    all(
+      can(u.roles, ["Operations Systems / Admin"])
+        ? "SELECT id,name,email,roles,scopes,active,title,phone,national_id FROM users"
+        : "SELECT id,name,email,roles,scopes,active,title,phone FROM users",
+    ),
   ]);
   loadTimings.db = Date.now() - loadStarted;
   const initialized: any = initializedRows[0];

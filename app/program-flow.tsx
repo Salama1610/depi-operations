@@ -1,4 +1,5 @@
 "use client";
+import { dataTransferRoles } from "@/lib/domain/rules";
 import { useT } from "@/lib/i18n/context";
 
 import { useEffect, useMemo, useState } from "react";
@@ -750,7 +751,7 @@ export function ProgramFlow() {
                 {t("Quality approval, graduation and account allocation are deliberately excluded from bulk actions.")}
               </p>
             </section>
-            <section className="panel prose">
+            {allowed(dataTransferRoles) && <section className="panel prose">
               <h2>{t("Controlled lifecycle exports")}</h2>
               <p>{t("Exports include only records within the current staff member’s authorized scope.")}</p>
               <div className="detail-actions">
@@ -772,7 +773,7 @@ export function ProgramFlow() {
                   <Download size={16} /> {t("Outcomes XLSX")}
                 </a>
               </div>
-            </section>
+            </section>}
           </div>
         </TabsContent>
 
