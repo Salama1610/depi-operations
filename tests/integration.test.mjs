@@ -909,21 +909,39 @@ test("a quality reviewer sees and decides only the work assigned to them", async
   current = { id: "owner", email: "owner@example.com" };
 });
 
-test("only leaders, supervisors and administrators download spreadsheets", async () => {
+test("Program flow and its downloads are for the leaders and administrators", async () => {
   await dbExec("DELETE FROM rate_limits");
+  const view = () => programApi.GET(new Request("https://test.local/api/program"));
   const download = () => programApi.GET(new Request("https://test.local/api/program?format=csv&dataset=lifecycle"));
-  current = { id: "coordinator-login", email: "staff-sara@example.invalid" };
-  const refused = await download();
-  assert.match((await refused.json()).error, /limited to leaders, supervisors and administrators/);
-  // A quality reviewer loads the programme view, but may not download it.
-  current = { id: "quality-login", email: "staff-quality@example.invalid" };
-  assert.match((await (await download()).json()).error, /limited to leaders, supervisors and administrators/);
-  current = { id: "supervisor-login", email: "staff-nour@example.invalid" };
+  // Coordinators, quality reviewers and supervisors do not reach the programme view at all.
+  for (const who of [
+    { id: "coordinator-login", email: "staff-sara@example.invalid" },
+    { id: "quality-login", email: "staff-quality@example.invalid" },
+    { id: "supervisor-login", email: "staff-nour@example.invalid" },
+  ]) {
+    current = who;
+    assert.match((await (await view()).json()).error, /role/, who.email + " sees Program flow");
+    assert.match((await (await download()).json()).error, /role/, who.email + " downloads from Program flow");
+  }
+  // A leader does, and may download it.
+  current = { id: "coach-ops-login", email: "staff-coach-ops@example.invalid" };
+  assert.equal((await view()).status, 200);
   const allowed = await download();
   assert.equal(allowed.status, 200);
   assert.match(allowed.headers.get("content-type") || "", /csv/);
   current = { id: "owner", email: "owner@example.com" };
 });
+test("only administrators create groups and record the weekly gate", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  const ops = await dbRow("SELECT id, email FROM users WHERE email='ops-only@example.com'");
+  current = { id: ops.id, email: ops.email };
+  assert.match((await post("group", { id: "G-NEW", name: "New group", track: "Web Development", provider: "YAT" })).error, /role/);
+  assert.match((await post("group_gate", { group_id: "G101", week: 1, check_key: "Current statuses recorded", status: "Pass" })).error, /role/);
+  current = { id: "supervisor-login", email: "staff-nour@example.invalid" };
+  assert.match((await post("group_gate", { group_id: "G101", week: 1, check_key: "Current statuses recorded", status: "Pass" })).error, /role/);
+  current = { id: "owner", email: "owner@example.com" };
+});
+
 test("a sheet from another source links on the national ID through a saved mapping", async () => {
   current = { id: "owner", email: "owner@example.com" };
   await dbExec("DELETE FROM rate_limits");

@@ -672,7 +672,8 @@ export async function POST(req: Request) {
         break;
       }
       case "group": {
-        permit(u, ["Project Operations", ...admin]);
+        // Groups are created by the administrators only.
+        permit(u, admin);
         for (const k of [
           "name",
           "track",
@@ -1895,11 +1896,8 @@ export async function POST(req: Request) {
         break;
       }
       case "group_gate": {
-        permit(u, [
-          "Project Operations",
-          "Team Supervisor",
-          "Coach Operations",
-        ]);
+        // The weekly group gate is the administrators' check.
+        permit(u, admin);
         ensure(
           x.group_id &&
             Number.isInteger(+x.week) &&

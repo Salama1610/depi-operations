@@ -208,7 +208,12 @@ const programDay = (value: Date = new Date()) => {
     parts.find((item) => item.type === type)?.value || "";
   return `${part("year")}-${part("month")}-${part("day")}`;
 };
-const future = () => new Date(Date.now() + 86400000).toISOString().slice(0, 16);
+/** The end of the programme week (Friday to Thursday, Cairo): the coming Thursday, end of day. */
+const weekDue = () => {
+  const day = new Date(programDay() + "T12:00:00Z");
+  day.setUTCDate(day.getUTCDate() + ((4 - day.getUTCDay() + 7) % 7));
+  return day.toISOString().slice(0, 10) + "T23:59";
+};
 const weeklyGateChecks = [
   "Current statuses recorded",
   "Next action and due date",
@@ -502,7 +507,7 @@ export default function Operations({ module: initialModule }: { module: string }
       ...row,
       student_id: row.student_id || selected?.id || "",
       owner: row.owner || user.id,
-      due: row.due?.slice(0, 16) || future(),
+      due: row.due?.slice(0, 16) || weekDue(),
       occurred_at: new Date().toISOString().slice(0, 16),
       channel: "WhatsApp",
       outcome: "Responded",
@@ -1317,14 +1322,16 @@ export default function Operations({ module: initialModule }: { module: string }
                 >
                   {t("Open student group")}{" "}<ArrowRight size={16} />
                 </button>
-                <button
-                  className="small-btn"
-                  onClick={() =>
-                    open("group_gate", { group_id: g.id, week: g.week })
-                  }
-                >
-                  {t("Weekly gate")}
-                </button>
+                {can(user.roles, ["Operations Systems / Admin"]) && (
+                  <button
+                    className="small-btn"
+                    onClick={() =>
+                      open("group_gate", { group_id: g.id, week: g.week })
+                    }
+                  >
+                    {t("Weekly gate")}
+                  </button>
+                )}
               </div>
             </section>
           );
@@ -2587,7 +2594,8 @@ export default function Operations({ module: initialModule }: { module: string }
                         </button>
                       </div>
                     )}
-                    {moduleAction[module] && (
+                    {moduleAction[module] &&
+                      (module !== "groups" || can(user.roles, ["Operations Systems / Admin"])) && (
                       <button
                         className="primary"
                         onClick={() => open(moduleAction[module])}

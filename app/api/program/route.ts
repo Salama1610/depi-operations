@@ -365,6 +365,10 @@ async function programData(u: any) {
 export async function GET(req: Request) {
   try {
     const u = await actor();
+    // Program flow is for the leaders and the administrators; its individual
+    // actions keep their own permits, so a supervisor can still change a
+    // group's coordinator from the group card.
+    permit(u, ["Project Operations", "Coach Operations"]);
     await rateLimit(`program:${u.id}`, 90, 60);
     const data = await programData(u);
     const q = new URL(req.url).searchParams;
