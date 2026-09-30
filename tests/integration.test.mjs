@@ -606,6 +606,15 @@ test("session delivery enforces model limits, coach coverage and lifecycle contr
     reason: "Coach availability changed",
   });
   assert.match(r.error, /role/);
+  // Only the leaders move a session: not the group's coordinator, not a supervisor.
+  for (const who of [
+    { id: "coordinator-login", email: "staff-sara@example.invalid" },
+    { id: "supervisor-login", email: "staff-nour@example.invalid" },
+  ]) {
+    current = who;
+    r = await post("session_reschedule", { id: "SES-RULE-1", starts_at: rescheduledAt, reason: "Coach availability changed" });
+    assert.match(r.error, /role/, who.email + " rescheduled a session");
+  }
   current = { id: "owner", email: "owner@example.com" };
   await check("session_reschedule", {
     id: "SES-RULE-1",

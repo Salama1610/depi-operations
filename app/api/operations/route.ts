@@ -861,7 +861,9 @@ export async function POST(req: Request) {
         break;
       }
       case "session_reschedule": {
-        permit(u, [...sessionLeaders, "Operations Coordinator"]);
+        // Moving a session is the leaders' decision: Project Operations and
+        // Coach Operations. Coordinators schedule and cancel, but do not move.
+        permit(u, sessionLeaders);
         const current: any = await stmt(
           "SELECT * FROM sessions WHERE id=?",
           id,

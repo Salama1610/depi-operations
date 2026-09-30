@@ -1525,12 +1525,14 @@ export default function Operations({ module: initialModule }: { module: string }
             {["Scheduled", "Confirmed"].includes(r.status) &&
               plansSession(r) && (
                 <>
-                  <button
-                    className="small-btn"
-                    onClick={() => open("session_reschedule", r)}
-                  >
-                    {t("Reschedule")}
-                  </button>
+                  {can(user.roles, ["Coach Operations", "Project Operations", "Operations Systems / Admin"]) && (
+                    <button
+                      className="small-btn"
+                      onClick={() => open("session_reschedule", r)}
+                    >
+                      {t("Reschedule")}
+                    </button>
+                  )}
                   <button
                     className="small-btn"
                     onClick={() => open("session_cancel", r)}
