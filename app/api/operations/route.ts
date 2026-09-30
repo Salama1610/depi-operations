@@ -58,6 +58,38 @@ function programDay(value: string) {
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
+/**
+ * Everything that puts a paid gig's proof into review: the evidence record at
+ * Coach Review, its first package holding the delivery and the payment proof
+ * (Quality acceptance requires both in the latest package), and the context of
+ * both screenshots. The caller has already checked the gig is paid and that
+ * both proofs are separate uploads belonging to the student.
+ */
+function evidenceIntake(u: any, g: any, policyId: string, x: any, t: string, evidenceId: string) {
+  const evidencePackage = uid("EPK");
+  const source = x.source || g.platform;
+  return [
+    stmt(
+      "INSERT INTO evidence(id,student_id,gig_id,proof_id,source,status,recorder,stage_at,created_at,policy_id) VALUES(?,?,?,?,?,?,?,?,?,?)",
+      evidenceId, g.student_id, g.id, x.proof_id, source, "Coach Review", u.id, t, t, policyId,
+    ),
+    stmt(
+      "INSERT INTO evidence_packages(id,evidence_id,revision,status,created_by,created_at) VALUES(?,?,1,'Submitted',?,?)",
+      evidencePackage, evidenceId, u.id, t,
+    ),
+    stmt("INSERT INTO evidence_package_items VALUES(?,?,?,?,?)", uid("EPI"), evidencePackage, "Delivery", x.proof_id, t),
+    stmt("INSERT INTO evidence_package_items VALUES(?,?,?,?,?)", uid("EPI"), evidencePackage, "Payment", x.payment_proof_id, t),
+    stmt(
+      "UPDATE attachment_context SET gig_id=?,account_id=?,activity_type='Evidence submission',platform=?,source=?,performed_by_type='STUDENT',performed_by_student_id=? WHERE attachment_id=?",
+      g.id, g.account_id || null, g.platform, source, g.student_id, x.proof_id,
+    ),
+    stmt(
+      "UPDATE attachment_context SET gig_id=?,account_id=?,activity_type='Payment evidence',platform=?,source=?,performed_by_type='STUDENT',performed_by_student_id=? WHERE attachment_id=?",
+      g.id, g.account_id || null, g.platform, source, g.student_id, x.payment_proof_id,
+    ),
+  ];
+}
+
 async function validateSessionSlot(x: any, excludeId?: string) {
   ensure(
     x.group_id && x.coach_id && x.title?.trim() && x.starts_at,
@@ -1153,30 +1185,50 @@ export async function POST(req: Request) {
         break;
       }
       case "gig": {
+        // A gig is recorded once it is paid, together with its proof: the
+        // delivery screenshot and the payment screenshot. It enters review at
+        // once, so there is no separate evidence step to forget.
         permit(u, ops);
         ensure(
-          s &&
-            x.title &&
-            x.platform &&
-            Number(x.value) > 0 &&
-            x.order_ref?.trim() &&
-            Date.parse(x.due),
-          "Student, task, platform, order reference, value and due date are required.",
+          s && x.title?.trim() && x.platform && Number(x.value) > 0 && x.order_ref?.trim(),
+          "Student, title, platform, order number and value are required.",
         );
+        ensure(x.proof_id && x.payment_proof_id, "Upload the delivery proof and the payment proof.");
+        ensure(x.payment_proof_id !== x.proof_id, "Delivery and payment proof must be separate uploaded records.");
+        await proof(u, x.proof_id, sid);
+        await proof(u, x.payment_proof_id, sid);
+        const orderRef = String(x.order_ref).trim();
+        ensure(
+          !(await stmt("SELECT id FROM gigs WHERE platform=? AND trim(order_ref)=?", x.platform, orderRef).first()),
+          `Order ${orderRef} is already recorded on ${x.platform}.`,
+        );
+        const gig = { id, student_id: sid, account_id: null, platform: x.platform };
         jobs.push(
           stmt(
             "INSERT INTO gigs(id,student_id,platform,title,value,currency,order_ref,status,due,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
             id,
             sid,
             x.platform,
-            x.title,
+            x.title.trim(),
             Number(x.value),
             x.currency || "USD",
-            x.order_ref,
-            "Account Assigned",
-            x.due,
+            orderRef,
+            "Paid",
+            x.due && Date.parse(x.due) ? x.due : t,
             t,
           ),
+          stmt(
+            "INSERT INTO gig_events VALUES(?,?,?,?,?,?,?,?)",
+            uid("GE"),
+            id,
+            "Paid",
+            x.payment_proof_id,
+            "STUDENT",
+            u.id,
+            t,
+            t,
+          ),
+          ...evidenceIntake(u, gig, s.policy_id, x, t, uid("EV")),
         );
         break;
       }
@@ -1371,6 +1423,12 @@ export async function POST(req: Request) {
           g && g.status === "Paid",
           "Evidence intake requires a completed, paid gig.",
         );
+        // A recorded gig brings its evidence with it; this path is for a gig
+        // that reached Paid step by step, and it takes one evidence record.
+        ensure(
+          !(await stmt("SELECT id FROM evidence WHERE gig_id=?", g.id).first()),
+          "This gig already has its evidence in review.",
+        );
         const st = await student(u, g.student_id);
         await proof(u, x.proof_id, g.student_id);
         await proof(u, x.payment_proof_id, g.student_id);
@@ -1379,63 +1437,7 @@ export async function POST(req: Request) {
           x.payment_proof_id !== x.proof_id,
           "Delivery and payment proof must be separate uploaded records.",
         );
-        const evidencePackage = uid("EPK");
-        jobs.push(
-          stmt(
-            "INSERT INTO evidence(id,student_id,gig_id,proof_id,source,status,recorder,stage_at,created_at,policy_id) VALUES(?,?,?,?,?,?,?,?,?,?)",
-            id,
-            g.student_id,
-            g.id,
-            x.proof_id,
-            x.source,
-            "Coach Review",
-            u.id,
-            t,
-            t,
-            st.policy_id,
-          ),
-          stmt(
-            "INSERT INTO evidence_packages(id,evidence_id,revision,status,created_by,created_at) VALUES(?,?,1,'Submitted',?,?)",
-            evidencePackage,
-            id,
-            u.id,
-            t,
-          ),
-          stmt(
-            "INSERT INTO evidence_package_items VALUES(?,?,?,?,?)",
-            uid("EPI"),
-            evidencePackage,
-            "Delivery",
-            x.proof_id,
-            t,
-          ),
-          stmt(
-            "INSERT INTO evidence_package_items VALUES(?,?,?,?,?)",
-            uid("EPI"),
-            evidencePackage,
-            "Payment",
-            x.payment_proof_id,
-            t,
-          ),
-          stmt(
-            "UPDATE attachment_context SET gig_id=?,account_id=?,activity_type='Evidence submission',platform=?,source=?,performed_by_type='STUDENT',performed_by_student_id=? WHERE attachment_id=?",
-            g.id,
-            g.account_id || null,
-            g.platform,
-            x.source,
-            g.student_id,
-            x.proof_id,
-          ),
-          stmt(
-            "UPDATE attachment_context SET gig_id=?,account_id=?,activity_type='Payment evidence',platform=?,source=?,performed_by_type='STUDENT',performed_by_student_id=? WHERE attachment_id=?",
-            g.id,
-            g.account_id || null,
-            g.platform,
-            x.source,
-            g.student_id,
-            x.payment_proof_id,
-          ),
-        );
+        jobs.push(...evidenceIntake(u, g, st.policy_id, x, t, id));
         break;
       }
       case "review": {

@@ -122,13 +122,15 @@ const nav = [
   ["reports", "Reports", ChartNoAxesCombined],
   ["administration", "Administration", Settings2],
 ] as const;
+/** Where students take paid work. One spelling each, so an order number is unique per platform. */
+const gigPlatforms = ["Khamsat", "Mostaql", "Kafeel", "Nafezly", "Upwork", "Fiverr", "Freelancer", "Freelance Yard", "Other"];
 const moduleAction: Row = {
   students: "student",
   groups: "group",
   sessions: "session",
   accounts: "account_request",
   gigs: "gig",
-  evidence: "evidence",
+  evidence: "gig",
   cases: "case",
   work: "task",
   administration: "staff",
@@ -145,7 +147,7 @@ const titles: Row = {
   account: "Add client account",
   reserve_account: "Reserve eligible account",
   allocate: "Allocate account",
-  gig: "Record external gig",
+  gig: "Record a paid gig",
   gig_transition: "Record client activity",
   evidence: "Submit evidence",
   review: "Review evidence",
@@ -178,6 +180,7 @@ const actionCopy: Row = {
     "Attach a screenshot of this activity before progressing the gig.",
   staff: "Access changes take effect immediately and are audited.",
   evidence: "Only completed, paid gigs can enter the review pipeline.",
+  gig: "Record the gig once it is paid. Its delivery and payment screenshots go straight into review.",
   session:
     "Sessions follow the group delivery model, approved duration and coach-assignment controls.",
   session_reschedule:
@@ -578,7 +581,7 @@ export default function Operations({ module: initialModule }: { module: string }
           ? form.status || "Client activity"
           : modal?.action === "contact"
             ? "Student contact"
-            : modal?.action === "evidence"
+            : modal?.action === "evidence" || modal?.action === "gig"
               ? "Evidence submission"
               : "Supporting evidence",
       );
@@ -2481,7 +2484,7 @@ export default function Operations({ module: initialModule }: { module: string }
                               sessions: "Schedule session",
                               accounts: "Request account",
                               gigs: "Record gig",
-                              evidence: "Submit evidence",
+                              evidence: "Record gig",
                               cases: "Open case",
                               work: "Create action",
                               administration: "Add staff",
@@ -3285,9 +3288,11 @@ export default function Operations({ module: initialModule }: { module: string }
                 return (
                   <>
                     {studentPick()}
-                    {field("title", t("Task / service"))}
-                    {field("platform", t("Platform / source"))}
-                    {field("order_ref", t("Unique order reference"))}
+                    {field("title", t("Gig title"))}
+                    <div className="form-grid">
+                      {choice("platform", t("Platform"), gigPlatforms)}
+                      {field("order_ref", t("Order number"))}
+                    </div>
                     <div className="form-grid">
                       {field("value", t("Value"), "number")}
                       {choice("currency", t("Currency"), [
@@ -3297,7 +3302,8 @@ export default function Operations({ module: initialModule }: { module: string }
                         "GBP",
                       ])}
                     </div>
-                    {field("due", t("Due date"), "datetime-local")}
+                    {proofField("proof_id", t("Delivery proof"))}
+                    {proofField("payment_proof_id", t("Payment proof"))}
                   </>
                 );
               if (a === "fx_rate")
@@ -3395,7 +3401,8 @@ export default function Operations({ module: initialModule }: { module: string }
                         .filter(
                           (g) =>
                             g.student_id === form.student_id &&
-                            g.status === "Paid",
+                            g.status === "Paid" &&
+                            !evidence.some((e) => e.gig_id === g.id),
                         )
                         .map((g) => ({
                           value: g.id,

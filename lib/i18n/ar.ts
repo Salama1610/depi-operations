@@ -1167,6 +1167,12 @@ export const ar: Record<string, string> = {
   "Pending links become read-only until your coordinator reviews them. You can edit only links returned for correction.": "تصبح الروابط المعلقة للقراءة فقط حتى يراجعها منسقك. يمكنك تعديل الروابط المُعادة للتصحيح فقط.",
   "With your coordinator": "لدى منسقك",
 
+  // ---- Recording a paid gig with its proof -----------------------------------
+  "Record a paid gig": "تسجيل عمل مدفوع",
+  "Record the gig once it is paid. Its delivery and payment screenshots go straight into review.": "سجّل العمل بعد أن يُدفع. تذهب لقطات التسليم والدفع مباشرة إلى المراجعة.",
+  "Gig title": "عنوان العمل",
+  "Order number": "رقم الطلب",
+
   // ---- Validation messages from domain rules ------------------------------------------
   "Choose a valid contact outcome.": "اختر نتيجة تواصل صالحة.",
   "Contact date cannot be in the future.": "لا يمكن أن يكون تاريخ التواصل في المستقبل.",

@@ -1758,6 +1758,37 @@ test("policy checks create recovery and supervisor actions without duplicates", 
   current = { id: "coordinator", email: "staff-sara@example.invalid" };
   assert.match((await post("policy_check")).error, /role/);
 });
+test("a gig is recorded once, paid, with its delivery and payment proof going straight into review", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  await dbExec("DELETE FROM rate_limits");
+  const created = new Date().toISOString();
+  const [mine, theirs] = await dbRows("SELECT id FROM students WHERE group_id='G122' ORDER BY id LIMIT 2");
+  for (const [id, student] of [["GIG-DELIVERY", mine.id], ["GIG-PAYMENT", mine.id], ["GIG-OTHER", theirs.id]])
+    await dbExec("INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)", id, student, id.toLowerCase(), id + ".png", "image/png", 120, id + "-hash", "owner", created);
+  const gig = { student_id: mine.id, title: "Logo design", platform: "Khamsat", value: 25, currency: "USD", order_ref: "KH-84211" };
+
+  assert.match((await post("gig", { ...gig, id: "GIG-1" })).error, /Upload the delivery proof and the payment proof/);
+  assert.match((await post("gig", { ...gig, id: "GIG-1", proof_id: "GIG-DELIVERY", payment_proof_id: "GIG-DELIVERY" })).error, /separate/);
+  assert.ok((await post("gig", { ...gig, id: "GIG-1", proof_id: "GIG-DELIVERY", payment_proof_id: "GIG-OTHER" })).error, "another student's screenshot is refused");
+
+  await check("gig", { ...gig, id: "GIG-1", proof_id: "GIG-DELIVERY", payment_proof_id: "GIG-PAYMENT" });
+  assert.equal((await dbRow("SELECT status FROM gigs WHERE id='GIG-1'")).status, "Paid");
+  const evidence = await dbRow("SELECT * FROM evidence WHERE gig_id='GIG-1'");
+  assert.equal(evidence.status, "Coach Review", "the proof enters review at once");
+  assert.equal(evidence.proof_id, "GIG-DELIVERY");
+  const items = await dbRows(
+    "SELECT i.item_type, i.attachment_id FROM evidence_package_items i JOIN evidence_packages p ON p.id=i.package_id WHERE p.evidence_id=? ORDER BY i.item_type",
+    evidence.id,
+  );
+  assert.deepEqual(items.map((i) => [i.item_type, i.attachment_id]), [["Delivery", "GIG-DELIVERY"], ["Payment", "GIG-PAYMENT"]]);
+  assert.equal((await dbRow("SELECT status FROM gig_events WHERE gig_id='GIG-1'")).status, "Paid");
+
+  // The same order on the same platform is the same gig.
+  assert.match((await post("gig", { ...gig, id: "GIG-2", proof_id: "GIG-DELIVERY", payment_proof_id: "GIG-PAYMENT" })).error, /already recorded/);
+  // Its evidence is already in review; a second submission is refused.
+  assert.match((await post("evidence", { gig_id: "GIG-1", source: "Form", proof_id: "GIG-DELIVERY", payment_proof_id: "GIG-PAYMENT" })).error, /already has its evidence/);
+});
+
 test("controlled platforms and separately approved FX applications are enforced", async () => {
   current = { id: "owner", email: "owner@example.com" };
   await assert.rejects(dbExec("INSERT INTO accounts(id,platform,label,status,credits) VALUES('BAD-PLATFORM','Fiverr','Invalid','Available',10)"),
@@ -1774,23 +1805,9 @@ test("controlled platforms and separately approved FX applications are enforced"
       "owner",
       new Date().toISOString(),
     );
-  await check("gig", {
-    id: "GIG-FX",
-    student_id: "S10003",
-    platform: "Fiverr",
-    title: "Converted service",
-    value: 300,
-    currency: "EGP",
-    order_ref: "fx-order-1",
-    due: "2027-01-01T00:00:00Z",
-  });
-  for (const status of ["Gig Opened", "Work Submitted", "Delivered", "Paid"])
-    await check("gig_transition", {
-      id: "GIG-FX",
-      status,
-      proof_id: "PROOF-FX",
-      occurred_at: new Date().toISOString(),
-    });
+  // A paid non-USD gig already in the workspace; how it was recorded is covered elsewhere.
+  await dbExec("INSERT INTO gigs(id,student_id,platform,title,value,currency,order_ref,status,due,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+    "GIG-FX", "S10003", "Fiverr", "Converted gig", 300, "EGP", "fx-order-1", "Paid", "2027-01-01T00:00:00Z", new Date().toISOString());
   await dbExec("INSERT INTO evidence(id,student_id,gig_id,proof_id,source,status,rejections,recorder,stage_at,created_at,policy_id) VALUES(?,?,?,?,?,'Accepted',0,?,?,?,?)", 
       "EV-FX",
       "S10003",
