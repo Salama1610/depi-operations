@@ -2471,3 +2471,19 @@ test("a supervisor assigns coordinators only within their own team", async () =>
   await programCheck("bulk_group_owner", { group_ids: [mine.id], owner_type: "Coordinator", owner: mine.coordinator, reason: "Restore" });
   await dbExec("DELETE FROM groups WHERE id='G-TEAM2'");
 });
+
+test("a client account is requested for any student's gig, three at most", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  const learner = await dbRow("SELECT s.id FROM students s JOIN groups g ON g.id=s.group_id WHERE g.pathway='Outcome' AND g.status='Active' AND s.lifecycle='Active' AND s.id NOT IN (SELECT student_id FROM account_requests) LIMIT 1");
+  const ask = (n, extra = {}) => post("account_request", { id: `REQ-CLIENT-${n}`, student_id: learner.id, platform: "Khamsat", title: `Logo order ${n}`, value: 20, ...extra });
+  assert.match((await ask(0, { platform: "Fiverr" })).error, /marketplace/);
+  assert.match((await ask(0, { title: "" })).error, /gig the client account will order/);
+  assert.match((await ask(0, { value: 0 })).error, /credit/);
+  for (const n of [1, 2, 3]) assert.equal((await ask(n)).error, undefined, "an Outcome-path student without an approved task may ask");
+  const saved = await dbRow("SELECT r.task,r.platform,r.value,d.task_bank_id,d.gig_number FROM account_requests r JOIN account_request_details d ON d.request_id=r.id WHERE r.id='REQ-CLIENT-3'");
+  assert.equal(saved.task, "Logo order 3");
+  assert.equal(Number(saved.value), 20);
+  assert.equal(saved.task_bank_id, null);
+  assert.equal(saved.gig_number, 3);
+  assert.match((await ask(4)).error, /three client-account requests/);
+});

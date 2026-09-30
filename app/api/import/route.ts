@@ -54,9 +54,10 @@ const allowed: Record<string, string[]> = {
   accounts: ["id", "label", "platform", "credits"],
   requests: [
     "student_id",
+    "platform",
+    "title",
+    "value",
     "task_bank_id",
-    "job_profile",
-    "gig_number",
     "notes",
   ],
   gigs: [
@@ -180,7 +181,7 @@ const required: Record<string, string[]> = {
   attendance: ["session_id", "student_id", "status", "source"],
   task_bank: ["id", "track", "title", "platform", "value"],
   accounts: ["id", "label", "platform", "credits"],
-  requests: ["student_id", "task_bank_id", "job_profile", "gig_number"],
+  requests: ["student_id"],
   gigs: [
     "id",
     "student_id",

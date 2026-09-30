@@ -1623,8 +1623,8 @@ export default function Operations({ module: initialModule }: { module: string }
               (d.requests || []).filter(qMatch),
               [
                 studentCol,
-                { key: "task", label: t("Task") },
-                { key: "platform", label: t("Platform") },
+                { key: "task", label: t("Gig") },
+                { key: "platform", label: t("Marketplace") },
                 { key: "value", label: t("Credit needed") },
                 {
                   key: "status",
@@ -3331,35 +3331,12 @@ export default function Operations({ module: initialModule }: { module: string }
                 return (
                   <>
                     {studentPick()}
-                    {choice(
-                      "task_bank_id",
-                      t("Approved task"),
-                      (d.taskBank || [])
-                        .filter(
-                          (task: Row) =>
-                            task.track ===
-                            students.find((s) => s.id === form.student_id)
-                              ?.track,
-                        )
-                        .map((task: Row) => ({
-                          value: task.id,
-                          label:
-                            task.title +
-                            " · " +
-                            task.platform +
-                            " · $" +
-                            task.value,
-                        })),
-                    )}
-                    {field("job_profile", t("Student job profile"))}
-                    {field(
-                      "gig_number",
-                      t("Controlled gig number (1–3)"),
-                      "number",
-                    )}
+                    {choice("platform", t("Marketplace"), controlledPlatforms)}
+                    {field("title", t("Gig the client account will order"))}
+                    {field("value", t("Credit needed (USD)"), "number")}
                     {field("notes", t("Request notes"), "text", false)}
                     <p className="footnote">
-                      {t("Controlled account requests are limited to Support-path students and tasks approved for their technical track.")}
+                      {t("The programme's client account on this marketplace orders the student's gig. Up to three requests per student.")}
                     </p>
                   </>
                 );
@@ -4213,9 +4190,10 @@ export default function Operations({ module: initialModule }: { module: string }
                   },
                   requests: {
                     student_id: "S10001",
-                    task_bank_id: "TB-DM-1",
-                    job_profile: "Digital marketing specialist",
-                    gig_number: 1,
+                    platform: "Khamsat",
+                    title: t("Logo design order"),
+                    value: 25,
+                    task_bank_id: "",
                     notes: "",
                   },
                   gigs: {

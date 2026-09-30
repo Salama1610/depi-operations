@@ -1068,50 +1068,43 @@ export async function POST(req: Request) {
         break;
       }
       case "account_request": {
+        // A request for one of the programme's client accounts on a
+        // marketplace: the account acts as the client that orders the
+        // student's gig. An approved task, when there is one, fills it in.
         permit(u, ops);
+        ensure(s, "Choose the student.");
+        const task: any = x.task_bank_id
+          ? await stmt("SELECT * FROM task_bank WHERE id=? AND active=1", x.task_bank_id).first()
+          : null;
+        ensure(!x.task_bank_id || task, "That approved task is not active.");
+        const platform = task?.platform || x.platform;
+        const title = String(task?.title || x.title || "").trim();
+        const value = Number(task?.value ?? x.value);
         ensure(
-          s &&
-            x.task_bank_id &&
-            x.job_profile?.trim() &&
-            Number.isInteger(+x.gig_number) &&
-            +x.gig_number >= 1 &&
-            +x.gig_number <= 3,
-          "Student, approved task, job profile and gig number 1–3 are required.",
+          controlledPlatforms.includes(platform),
+          `Choose the marketplace: ${controlledPlatforms.join(", ")}.`,
         );
-        const g: any = await stmt(
-          "SELECT track,pathway FROM groups WHERE id=?",
-          s.group_id,
+        ensure(title, "Describe the gig the client account will order.");
+        ensure(
+          Number.isFinite(value) && value > 0,
+          "Enter the credit the client account needs, in USD.",
+        );
+        const open: any = await stmt(
+          "SELECT count(*) n FROM account_requests WHERE student_id=? AND status NOT IN ('Rejected','Cancelled')",
+          sid,
         ).first();
         ensure(
-          g?.pathway === "Support",
-          "Controlled account requests are available only for the Support / Internal-Service pathway.",
-        );
-        const task: any = await stmt(
-          "SELECT * FROM task_bank WHERE id=? AND active=1",
-          x.task_bank_id,
-        ).first();
-        ensure(
-          task &&
-            task.track === g.track &&
-            controlledPlatforms.includes(task.platform),
-          "Choose an active task approved for this student track and controlled platform.",
-        );
-        ensure(
-          !(await stmt(
-            "SELECT r.id FROM account_requests r JOIN account_request_details d ON d.request_id=r.id WHERE r.student_id=? AND d.gig_number=? AND r.status NOT IN ('Rejected','Cancelled')",
-            sid,
-            +x.gig_number,
-          ).first()),
-          "This student already has an active request for that controlled gig number.",
+          Number(open.n) < 3,
+          "This student already has three client-account requests.",
         );
         jobs.push(
           stmt(
             "INSERT INTO account_requests VALUES(?,?,?,?,?,?,?,?,?)",
             id,
             sid,
-            task.title,
-            task.platform,
-            task.value,
+            title,
+            platform,
+            value,
             "Submitted",
             0,
             u.id,
@@ -1120,9 +1113,9 @@ export async function POST(req: Request) {
           stmt(
             "INSERT INTO account_request_details VALUES(?,?,?,?,?)",
             id,
-            task.id,
-            x.job_profile,
-            +x.gig_number,
+            task?.id || null,
+            String(x.job_profile || "").trim(),
+            Number(open.n) + 1,
             x.notes || "",
           ),
         );

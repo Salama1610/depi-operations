@@ -1237,4 +1237,9 @@ export const ar: Record<string, string> = {
   "Only the group's coordinator or the session's coach can confirm it.": "لا يؤكد الجلسة إلا منسق المجموعة أو مدرب الجلسة.",
   "You can plan sessions only for your own groups.": "يمكنك تخطيط الجلسات لمجموعاتك فقط.",
   "You have already confirmed this session.": "لقد أكدت هذه الجلسة بالفعل.",
+  "Marketplace": "المنصة",
+  "Gig the client account will order": "الخدمة التي سيطلبها حساب العميل",
+  "Credit needed (USD)": "الرصيد المطلوب (دولار)",
+  "The programme's client account on this marketplace orders the student's gig. Up to three requests per student.": "يطلب حساب العميل التابع للبرنامج على هذه المنصة خدمة الطالب. بحد أقصى ثلاثة طلبات لكل طالب.",
+  "Logo design order": "طلب تصميم شعار",
 };
