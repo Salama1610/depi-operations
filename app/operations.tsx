@@ -922,6 +922,14 @@ export default function Operations({ module: initialModule }: { module: string }
     ),
   };
   const sessionGroupOf = (r: Row) => groups.find((g) => g.id === r.group_id);
+  // The page's main "add" button is offered only to people the server lets
+  // add that kind of record: supervisors add no students, sessions or groups.
+  const createRoles: Record<string, string[]> = {
+    students: ["Project Operations", "Operations Coordinator", "Operations Systems / Admin"],
+    sessions: ["Coach Operations", "Project Operations", "Operations Coordinator", "Operations Systems / Admin"],
+    groups: ["Operations Systems / Admin"],
+  };
+  const canCreate = (m: string) => !createRoles[m] || can(user.roles, createRoles[m]);
   const plansSession = (r: Row) =>
     can(user.roles, ["Coach Operations", "Project Operations", "Operations Systems / Admin"]) ||
     (can(user.roles, ["Operations Coordinator"]) && sessionGroupOf(r)?.coordinator === user.id);
@@ -2624,10 +2632,7 @@ export default function Operations({ module: initialModule }: { module: string }
                         </button>
                       </div>
                     )}
-                    {moduleAction[module] &&
-                      (module !== "groups" || can(user.roles, ["Operations Systems / Admin"])) &&
-                      (module !== "sessions" ||
-                        can(user.roles, ["Operations Coordinator", "Coach Operations", "Project Operations", "Operations Systems / Admin"])) && (
+                    {moduleAction[module] && canCreate(module) && (
                       <button
                         className="primary"
                         onClick={() => open(moduleAction[module])}

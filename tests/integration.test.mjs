@@ -1005,6 +1005,20 @@ test("only administrators create groups and record the weekly gate", async () =>
   current = { id: "owner", email: "owner@example.com" };
 });
 
+test("a supervisor adds no students, sessions or groups", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "supervisor-login", email: "staff-nour@example.invalid" };
+  assert.match((await post("student", { id: "S-SUP", name: "Supervisor Added", group_id: "G101", email: "sup-added@example.invalid" })).error, /role/);
+  assert.match((await post("session", { group_id: "G101", title: "Session", starts_at: "2027-01-07T17:00:00Z", week: 1 })).error, /role/);
+  const session = await dbRow("SELECT id FROM sessions WHERE status IN ('Scheduled','Confirmed') LIMIT 1");
+  if (session) {
+    assert.match((await post("session_reschedule", { id: session.id, starts_at: "2027-01-08T17:00:00Z", reason: "Supervisor move" })).error, /role/);
+    assert.match((await post("session_cancel", { id: session.id, reason: "Supervisor cancel" })).error, /role/);
+  }
+  assert.match((await post("group", { id: "G-SUP", name: "Supervisor group", track: "Web Development", provider: "YAT" })).error, /role/);
+  current = { id: "owner", email: "owner@example.com" };
+});
+
 test("a sheet from another source links on the national ID through a saved mapping", async () => {
   current = { id: "owner", email: "owner@example.com" };
   await dbExec("DELETE FROM rate_limits");
