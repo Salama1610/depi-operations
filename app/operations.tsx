@@ -921,6 +921,22 @@ export default function Operations({ module: initialModule }: { module: string }
       </button>
     ),
   };
+  const sessionGroupOf = (r: Row) => groups.find((g) => g.id === r.group_id);
+  const plansSession = (r: Row) =>
+    can(user.roles, ["Coach Operations", "Project Operations", "Operations Systems / Admin"]) ||
+    (can(user.roles, ["Operations Coordinator"]) && sessionGroupOf(r)?.coordinator === user.id);
+  const confirmsAsCoach = (r: Row) =>
+    can(user.roles, ["Coach"]) &&
+    !r.coach_confirmed_at &&
+    (r.coach_id
+      ? r.coach_id === user.id
+      : (d.groupCoaches || []).some(
+          (c: Row) => c.group_id === r.group_id && c.user_id === user.id && c.status === "Active",
+        ));
+  const confirmsAsCoordinator = (r: Row) =>
+    can(user.roles, ["Operations Coordinator"]) &&
+    !r.coordinator_confirmed_at &&
+    sessionGroupOf(r)?.coordinator === user.id;
   const statusCol = {
     key: "status",
     label: t("Status"),
@@ -1452,6 +1468,21 @@ export default function Operations({ module: initialModule }: { module: string }
           },
           statusCol,
           {
+            key: "confirmations",
+            label: t("Confirmed by"),
+            render: (r) =>
+              r.status === "Cancelled" ? (
+                "—"
+              ) : (
+                <span>
+                  {t("Coordinator")} {r.coordinator_confirmed_at ? "✓" : "…"}
+                  <small className="table-subline">
+                    {t("Coach")} {r.coach_confirmed_at ? "✓" : "…"}
+                  </small>
+                </span>
+              ),
+          },
+          {
             key: "link",
             label: t("Link"),
             render: (r) => {
@@ -1469,8 +1500,7 @@ export default function Operations({ module: initialModule }: { module: string }
             (r) => (
           <div className="detail-actions">
             {r.status === "Scheduled" &&
-              r.coach_id === user.id &&
-              can(user.roles, ["Coach"]) && (
+              (confirmsAsCoach(r) || confirmsAsCoordinator(r)) && (
                 <button
                   className="small-btn"
                   disabled={busy}
@@ -1480,7 +1510,7 @@ export default function Operations({ module: initialModule }: { module: string }
                 </button>
               )}
             {["Scheduled", "Confirmed"].includes(r.status) &&
-              can(user.roles, ["Coach Operations", "Project Operations"]) && (
+              plansSession(r) && (
                 <>
                   <button
                     className="small-btn"
@@ -2595,7 +2625,9 @@ export default function Operations({ module: initialModule }: { module: string }
                       </div>
                     )}
                     {moduleAction[module] &&
-                      (module !== "groups" || can(user.roles, ["Operations Systems / Admin"])) && (
+                      (module !== "groups" || can(user.roles, ["Operations Systems / Admin"])) &&
+                      (module !== "sessions" ||
+                        can(user.roles, ["Operations Coordinator", "Coach Operations", "Project Operations", "Operations Systems / Admin"])) && (
                       <button
                         className="primary"
                         onClick={() => open(moduleAction[module])}
@@ -3203,6 +3235,7 @@ export default function Operations({ module: initialModule }: { module: string }
                           value: coach.user_id,
                           label: `${coach.coach_name} · ${coach.coach_type}`,
                         })),
+                      false,
                     )}
                     {field("starts_at", t("Start date & time"), "datetime-local")}
                     {field("week", t("Journey week"), "number")}
@@ -3212,7 +3245,8 @@ export default function Operations({ module: initialModule }: { module: string }
                       "number",
                     )}
                     <p className="footnote">
-                      {t("Groups run 8 weekly sessions of 180 minutes.")}
+                      {t("Groups run 8 weekly sessions of 180 minutes.")}{" "}
+                      {t("The group's coordinator and its coach both confirm the session; until they do it is followed as a case.")}
                     </p>
                   </>
                 );

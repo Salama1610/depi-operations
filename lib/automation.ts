@@ -41,7 +41,25 @@ export async function policyChecks(u: any, requestId: string) {
       serviceLinkReminders++;
     }
 
+  // A session in the coming week that its coordinator and coach have not both
+  // confirmed is followed as a case, owned by the coordinator. Sessions
+  // scheduled in the app open theirs at once; this catches the imported
+  // calendar a week at a time instead of all at once.
+  const groupsById = new Map<string, any>(snapshot.groups.map((group: any) => [group.id, group]));
+  const soon = Date.now() + 7 * 86400000;
+  const unconfirmed = snapshot.sessions.filter(
+    (session: any) => session.status === "Scheduled" && Date.parse(session.starts_at) > Date.now() && Date.parse(session.starts_at) <= soon && groupsById.get(session.group_id)?.coordinator,
+  );
+  for (const session of unconfirmed.slice(0, 100)) {
+    const group = groupsById.get(session.group_id);
+    jobs.push(stmt(
+      "INSERT OR IGNORE INTO cases(id,student_id,title,type,severity,status,owner,due,source,created_at,group_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+      uid("CASE"), null, `Confirm session · ${group.id} · Week ${session.week}`, "Session", "S3 Standard", "Open", group.coordinator, session.starts_at, "session-" + session.id, now(), group.id,
+    ));
+  }
+
   const summary = {
+    session_cases: Math.min(unconfirmed.length, 100),
     planned: plan.length,
     processed: batch.length,
     remaining: Math.max(0, plan.length - batch.length),

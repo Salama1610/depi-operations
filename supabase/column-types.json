@@ -186,7 +186,8 @@
     "prevention": "text",
     "verifier": "text",
     "source": "text",
-    "created_at": "timestamptz"
+    "created_at": "timestamptz",
+    "group_id": "text"
   },
   "sessions": {
     "id": "text",
@@ -200,7 +201,9 @@
     "week": "integer",
     "confirmed_at": "timestamptz",
     "cancel_reason": "text",
-    "updated_at": "timestamptz"
+    "updated_at": "timestamptz",
+    "coordinator_confirmed_at": "timestamptz",
+    "coach_confirmed_at": "timestamptz"
   },
   "attendance": {
     "id": "text",

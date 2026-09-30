@@ -131,17 +131,55 @@ function evidenceIntake(u: any, g: any, policyId: string, x: any, t: string, evi
   ];
 }
 
+const sessionLeaders = ["Coach Operations", "Project Operations", "Operations Systems / Admin"];
+
+/** The group a session belongs to, if this person may plan its sessions. */
+async function sessionGroup(u: any, groupId: string) {
+  const group: any = await stmt("SELECT * FROM groups WHERE id=?", groupId).first();
+  ensure(group, "Group not found.");
+  if (!can(u.roles, sessionLeaders))
+    ensure(
+      can(u.roles, ["Operations Coordinator"]) && group.coordinator === u.id,
+      "You can plan sessions only for your own groups.",
+    );
+  return group;
+}
+
+/**
+ * A session's schedule is followed as a case until the group's coordinator and
+ * the coach have both confirmed it. The case is keyed by the session, so it is
+ * reopened on a reschedule rather than duplicated.
+ */
+async function sessionCase(session: any, group: any, status: string, note: string, actor: string, t: string) {
+  const source = "session-" + session.id;
+  const existing: any = await stmt("SELECT id FROM cases WHERE source=?", source).first();
+  const caseId = existing?.id || uid("CASE");
+  const resolution = ["Resolved", "Closed"].includes(status) ? note : null;
+  return [
+    existing
+      ? stmt("UPDATE cases SET status=?,due=?,resolution=? WHERE id=?", status, session.starts_at, resolution, caseId)
+      : stmt(
+          "INSERT INTO cases(id,student_id,title,type,severity,status,owner,due,resolution,source,created_at,group_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+          caseId, null, `Confirm session · ${group.id} · Week ${session.week}`, "Session", "S3 Standard",
+          status, actor, session.starts_at, resolution, source, t, group.id,
+        ),
+    stmt("INSERT INTO case_events VALUES(?,?,?,?,?,?)", uid("CASEEV"), caseId, status, actor, note, t),
+  ];
+}
+
 async function validateSessionSlot(x: any, excludeId?: string) {
+  // The coach may be named later: a session without one is confirmed by the
+  // group's active coach, who is then attached to it.
   ensure(
-    x.group_id && x.coach_id && x.title?.trim() && x.starts_at,
-    "Group, assigned coach, title and date are required.",
+    x.group_id && x.title?.trim() && x.starts_at,
+    "Group, title and date are required.",
   );
   const group: any = await stmt(
     "SELECT g.*,p.config policy_config FROM groups g JOIN policies p ON p.id=g.policy_id WHERE g.id=? AND g.status='Active'",
     x.group_id,
   ).first();
   ensure(group, "Choose an active group.");
-  const assigned = await stmt(
+  const assigned = !x.coach_id || await stmt(
     "SELECT gc.id FROM group_coaches gc JOIN users u ON u.id=gc.user_id WHERE gc.group_id=? AND gc.user_id=? AND gc.status='Active' AND gc.onboarding_status='Complete' AND u.active=1",
     group.id,
     x.coach_id,
@@ -182,7 +220,7 @@ async function validateSessionSlot(x: any, excludeId?: string) {
     !groupConflict,
     `This group already has an active session for Week ${week}. Reschedule the existing session instead.`,
   );
-  const coachConflict = await stmt(
+  const coachConflict = x.coach_id && await stmt(
     `SELECT id FROM sessions WHERE coach_id=? AND session_day=? AND status<>'Cancelled'${excludeId ? " AND id<>?" : ""}`,
     x.coach_id,
     day,
@@ -727,14 +765,19 @@ export async function POST(req: Request) {
         break;
       }
       case "session": {
-        permit(u, ["Coach Operations", "Project Operations"]);
+        permit(u, [...sessionLeaders, "Operations Coordinator"]);
+        const group = await sessionGroup(u, x.group_id);
         const session = await validateSessionSlot(x);
         jobs.push(
+          ...(await sessionCase(
+            { id, starts_at: session.startsAt, week: session.week },
+            group, "Open", "Scheduled. Waiting for the coordinator and the coach to confirm.", u.id, t,
+          )),
           stmt(
             "INSERT INTO sessions(id,group_id,coach_id,title,starts_at,session_day,duration_minutes,status,week,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
             id,
             x.group_id,
-            x.coach_id,
+            x.coach_id || null,
             x.title.trim(),
             session.startsAt,
             session.day,
@@ -747,33 +790,69 @@ export async function POST(req: Request) {
         break;
       }
       case "session_confirm": {
-        permit(u, ["Coach"]);
+        // Two people confirm a session: the group's coordinator and its coach.
+        // It reads Confirmed only once both have.
+        permit(u, ["Coach", "Operations Coordinator"]);
         const session: any = await stmt(
           "SELECT * FROM sessions WHERE id=?",
           id,
         ).first();
         ensure(session, "Session not found.");
         ensure(
-          session.coach_id === u.id,
-          "Only the coach assigned to this session can confirm it.",
-        );
-        ensure(
           session.status === "Scheduled",
           "Only a scheduled session can be confirmed.",
         );
+        const group: any = await stmt("SELECT * FROM groups WHERE id=?", session.group_id).first();
+        const asCoach =
+          can(u.roles, ["Coach"]) &&
+          (session.coach_id
+            ? session.coach_id === u.id
+            : Boolean(
+                await stmt(
+                  "SELECT id FROM group_coaches WHERE group_id=? AND user_id=? AND status='Active'",
+                  session.group_id,
+                  u.id,
+                ).first(),
+              ));
+        const asCoordinator = group?.coordinator === u.id && can(u.roles, ["Operations Coordinator"]);
+        ensure(
+          asCoach || asCoordinator,
+          "Only the group's coordinator or the session's coach can confirm it.",
+        );
+        const coachAt = session.coach_confirmed_at || (asCoach ? t : null);
+        const coordinatorAt = session.coordinator_confirmed_at || (asCoordinator ? t : null);
+        ensure(
+          coachAt !== session.coach_confirmed_at || coordinatorAt !== session.coordinator_confirmed_at,
+          "You have already confirmed this session.",
+        );
+        const both = Boolean(coachAt && coordinatorAt);
         auditPrevious = session;
         jobs.push(
           stmt(
-            "UPDATE sessions SET status='Confirmed',confirmed_at=?,updated_at=? WHERE id=?",
-            t,
+            "UPDATE sessions SET coach_id=?,coach_confirmed_at=?,coordinator_confirmed_at=?,status=?,confirmed_at=?,updated_at=? WHERE id=?",
+            session.coach_id || (asCoach ? u.id : null),
+            coachAt,
+            coordinatorAt,
+            both ? "Confirmed" : "Scheduled",
+            both ? t : null,
             t,
             id,
           ),
+          ...(await sessionCase(
+            session, group,
+            both ? "Resolved" : "In Progress",
+            both
+              ? "Confirmed by the coordinator and the coach."
+              : asCoach
+                ? "The coach confirmed. Waiting for the coordinator."
+                : "The coordinator confirmed. Waiting for the coach.",
+            u.id, t,
+          )),
         );
         break;
       }
       case "session_reschedule": {
-        permit(u, ["Coach Operations", "Project Operations"]);
+        permit(u, [...sessionLeaders, "Operations Coordinator"]);
         const current: any = await stmt(
           "SELECT * FROM sessions WHERE id=?",
           id,
@@ -782,6 +861,7 @@ export async function POST(req: Request) {
           current && ["Scheduled", "Confirmed"].includes(current.status),
           "Only a scheduled or confirmed session can be rescheduled.",
         );
+        const group = await sessionGroup(u, current.group_id);
         ensure(
           x.reason?.trim().length >= 5,
           "Record a rescheduling reason.",
@@ -800,18 +880,23 @@ export async function POST(req: Request) {
         auditPrevious = current;
         jobs.push(
           stmt(
-            "UPDATE sessions SET coach_id=?,starts_at=?,session_day=?,status='Scheduled',confirmed_at=NULL,cancel_reason=NULL,updated_at=? WHERE id=?",
+            "UPDATE sessions SET coach_id=?,starts_at=?,session_day=?,status='Scheduled',confirmed_at=NULL,coach_confirmed_at=NULL,coordinator_confirmed_at=NULL,cancel_reason=NULL,updated_at=? WHERE id=?",
             x.coach_id || current.coach_id,
             session.startsAt,
             session.day,
             t,
             id,
           ),
+          // A new time needs both confirmations again.
+          ...(await sessionCase(
+            { ...current, starts_at: session.startsAt },
+            group, "Open", "Rescheduled: " + x.reason.trim() + ". Both confirm again.", u.id, t,
+          )),
         );
         break;
       }
       case "session_cancel": {
-        permit(u, ["Coach Operations", "Project Operations"]);
+        permit(u, [...sessionLeaders, "Operations Coordinator"]);
         const current: any = await stmt(
           "SELECT * FROM sessions WHERE id=?",
           id,
@@ -820,6 +905,7 @@ export async function POST(req: Request) {
           current && ["Scheduled", "Confirmed"].includes(current.status),
           "Only a scheduled or confirmed session can be cancelled.",
         );
+        const group = await sessionGroup(u, current.group_id);
         ensure(
           x.reason?.trim().length >= 5,
           "Record a cancellation reason.",
@@ -839,6 +925,7 @@ export async function POST(req: Request) {
             t,
             id,
           ),
+          ...(await sessionCase(current, group, "Closed", "Session cancelled: " + x.reason.trim(), u.id, t)),
         );
         break;
       }

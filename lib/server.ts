@@ -361,7 +361,7 @@ export async function loadData(u: any) {
     scoped("account_requests"),
     scoped("attendance"),
     all(
-      `SELECT t.* FROM cases t LEFT JOIN students s ON s.id=t.student_id LEFT JOIN groups g ON g.id=s.group_id WHERE t.student_id IS NULL OR ${q.sql}`,
+      `SELECT t.* FROM cases t LEFT JOIN students s ON s.id=t.student_id LEFT JOIN groups g ON g.id=COALESCE(s.group_id,t.group_id) WHERE (t.student_id IS NULL AND t.group_id IS NULL) OR ${q.sql}`,
       ...q.args,
     ),
     all(
@@ -455,7 +455,7 @@ export async function loadData(u: any) {
       ...q.args,
     ),
     all(
-      `SELECT x.* FROM case_events x JOIN cases c ON c.id=x.case_id LEFT JOIN students s ON s.id=c.student_id LEFT JOIN groups g ON g.id=s.group_id WHERE c.student_id IS NULL OR ${q.sql} ORDER BY x.created_at DESC LIMIT 500`,
+      `SELECT x.* FROM case_events x JOIN cases c ON c.id=x.case_id LEFT JOIN students s ON s.id=c.student_id LEFT JOIN groups g ON g.id=COALESCE(s.group_id,c.group_id) WHERE (c.student_id IS NULL AND c.group_id IS NULL) OR ${q.sql} ORDER BY x.created_at DESC LIMIT 500`,
       ...q.args,
     ),
     all(

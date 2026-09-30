@@ -1230,4 +1230,9 @@ export const ar: Record<string, string> = {
   "You ({v0})": "أنت ({v0})",
   "Groups run 8 weekly sessions of 180 minutes.": "تعقد المجموعات 8 جلسات أسبوعية مدة كل منها 180 دقيقة.",
   "{v0} pathway · Week {v1}": "مسار {v0} · الأسبوع {v1}",
+  "Confirmed by": "تم التأكيد من",
+  "The group's coordinator and its coach both confirm the session; until they do it is followed as a case.": "يؤكد منسق المجموعة ومدربها الجلسة، وتُتابع كحالة حتى يؤكدا.",
+  "Only the group's coordinator or the session's coach can confirm it.": "لا يؤكد الجلسة إلا منسق المجموعة أو مدرب الجلسة.",
+  "You can plan sessions only for your own groups.": "يمكنك تخطيط الجلسات لمجموعاتك فقط.",
+  "You have already confirmed this session.": "لقد أكدت هذه الجلسة بالفعل.",
 };

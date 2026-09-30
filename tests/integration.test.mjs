@@ -469,6 +469,38 @@ test("Depi Industry groups and their students are hidden from everyone", async (
     await dbExec("DELETE FROM groups WHERE id='IND-HIDDEN'");
   }
 });
+test("a coordinator schedules their own group's session and the group's coach confirms it", async () => {
+  const group = await dbRow("SELECT g.id,u.id uid,u.email FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.status='Active' AND g.id NOT IN (SELECT group_id FROM sessions WHERE week=7) LIMIT 1");
+  const other = await dbRow("SELECT id FROM groups WHERE status='Active' AND coordinator<>? LIMIT 1", group.uid);
+  current = { id: group.uid, email: group.email };
+  const slot = { title: "Week 7 coaching", starts_at: new Date(Date.now() + 120 * 86400000).toISOString(), week: 7, duration_minutes: 180 };
+  assert.match((await post("session", { ...slot, id: "SES-COORD-OTHER", group_id: other.id })).error, /only for your own groups/);
+  await check("session", { ...slot, id: "SES-COORD-1", group_id: group.id });
+  const created = await dbRow("SELECT * FROM sessions WHERE id='SES-COORD-1'");
+  assert.equal(created.coach_id, null, "the coach can be named later");
+  const kase = await dbRow("SELECT * FROM cases WHERE source='session-SES-COORD-1'");
+  assert.equal(kase.owner, group.uid, "the case belongs to whoever scheduled it");
+  assert.equal(kase.type, "Session");
+  // Another coordinator does not see this group's session case.
+  const outsider = await dbRow("SELECT id,email FROM users WHERE roles LIKE '%Operations Coordinator%' AND id<>?", group.uid);
+  current = { id: outsider.id, email: outsider.email };
+  const theirs = await (await api.GET()).json();
+  if (!theirs.groups.some((g) => g.id === group.id))
+    assert.ok(!theirs.cases.some((c) => c.source === "session-SES-COORD-1"), "a session case stays with its group");
+  current = { id: group.uid, email: group.email };
+  await check("session_confirm", { id: "SES-COORD-1" });
+  await dbExec(
+    "INSERT INTO group_coaches(id,group_id,user_id,coach_type,status,onboarding_status,assigned_by,assigned_at) VALUES(?,?,?,?,?,?,?,?)",
+    "GC-COORD-1", group.id, "staff-support-coach", "Outcome Coach", "Active", "Pending", "owner", new Date().toISOString(),
+  );
+  current = { id: "support-coach-login", email: "staff-support-coach@example.invalid" };
+  await check("session_confirm", { id: "SES-COORD-1" });
+  const done = await dbRow("SELECT * FROM sessions WHERE id='SES-COORD-1'");
+  assert.equal(done.status, "Confirmed");
+  assert.equal(done.coach_id, "staff-support-coach", "the confirming coach is attached");
+  await dbExec("DELETE FROM group_coaches WHERE id='GC-COORD-1'");
+  current = { id: "owner", email: "owner@example.com" };
+});
 test("verified Supabase email recovers staff identity when the auth id changes", async () => {
   current = { id: "supabase-new-id", email: "owner@example.com" };
   const data = await (await api.GET()).json();
@@ -542,11 +574,32 @@ test("session delivery enforces model limits, coach coverage and lifecycle contr
     duration_minutes: 60,
   });
   assert.match(r.error, /180 minutes/);
+  // Scheduling opened a case that follows the session until both confirm.
+  const sessionCase = () => dbRow("SELECT * FROM cases WHERE source='session-SES-RULE-1'");
+  assert.equal((await sessionCase()).status, "Open");
+  assert.equal((await sessionCase()).group_id, "G101");
   current = { id: "coach-login", email: "staff-coach@example.invalid" };
   await check("session_confirm", { id: "SES-RULE-1" });
-  assert.ok(
-    (await dbRow("SELECT confirmed_at FROM sessions WHERE id='SES-RULE-1'")).confirmed_at,
+  let confirmed = await dbRow("SELECT * FROM sessions WHERE id='SES-RULE-1'");
+  assert.ok(confirmed.coach_confirmed_at);
+  assert.equal(confirmed.status, "Scheduled", "the coach alone does not confirm a session");
+  assert.equal(confirmed.confirmed_at, null);
+  assert.equal((await sessionCase()).status, "In Progress");
+  assert.match((await post("session_confirm", { id: "SES-RULE-1" })).error, /already confirmed/);
+  const coordinatorOf = async (groupId) =>
+    (await dbRow("SELECT u.id,u.email FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.id=?", groupId));
+  const otherCoordinator = await dbRow(
+    "SELECT u.id,u.email FROM users u WHERE u.roles LIKE '%Operations Coordinator%' AND u.id<>(SELECT coordinator FROM groups WHERE id='G101')",
   );
+  current = { id: otherCoordinator.id, email: otherCoordinator.email };
+  assert.match((await post("session_confirm", { id: "SES-RULE-1" })).error, /coordinator or the session's coach/);
+  current = await coordinatorOf("G101");
+  await check("session_confirm", { id: "SES-RULE-1" });
+  confirmed = await dbRow("SELECT * FROM sessions WHERE id='SES-RULE-1'");
+  assert.equal(confirmed.status, "Confirmed", "confirmed once the coordinator and the coach both have");
+  assert.ok(confirmed.confirmed_at && confirmed.coordinator_confirmed_at);
+  assert.equal((await sessionCase()).status, "Resolved");
+  current = { id: "coach-login", email: "staff-coach@example.invalid" };
   r = await post("session_reschedule", {
     id: "SES-RULE-1",
     starts_at: rescheduledAt,
@@ -560,9 +613,12 @@ test("session delivery enforces model limits, coach coverage and lifecycle contr
     starts_at: rescheduledAt,
     reason: "Coach availability changed",
   });
-  const moved = (await dbRow("SELECT status,confirmed_at,starts_at FROM sessions WHERE id='SES-RULE-1'"));
+  const moved = (await dbRow("SELECT * FROM sessions WHERE id='SES-RULE-1'"));
   assert.equal(moved.status, "Scheduled");
   assert.equal(moved.confirmed_at, null);
+  assert.equal(moved.coach_confirmed_at, null, "a new time needs both confirmations again");
+  assert.equal(moved.coordinator_confirmed_at, null);
+  assert.equal((await sessionCase()).status, "Open", "and the case reopens");
   assert.equal(moved.starts_at, rescheduledAt);
   await check("session_cancel", {
     id: "SES-RULE-1",
@@ -573,6 +629,7 @@ test("session delivery enforces model limits, coach coverage and lifecycle contr
       .status,
     "Cancelled",
   );
+  assert.equal((await sessionCase()).status, "Closed");
   r = await post("attendance", {
     session_id: "SES-RULE-1",
     student_id: "S10001",
@@ -595,6 +652,12 @@ test("session delivery enforces model limits, coach coverage and lifecycle contr
     email: "staff-support-coach@example.invalid",
   };
   await check("session_confirm", { id: "SES-RULE-COMPLETE" });
+  current = await coordinatorOf("G103");
+  await check("session_confirm", { id: "SES-RULE-COMPLETE" });
+  current = {
+    id: "support-coach-login",
+    email: "staff-support-coach@example.invalid",
+  };
   r = await programPost("complete_session", {
     session_id: "SES-RULE-COMPLETE",
     notes: "Delivery completed with documented follow-up actions.",
