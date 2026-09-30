@@ -116,7 +116,6 @@ const nav = [
   ["sessions", "Sessions", CalendarDays],
   ["accounts", "Accounts", WalletCards],
   ["gigs", "Gigs", BriefcaseBusiness],
-  ["evidence", "Evidence", Files],
   ["quality", "Quality review", ShieldCheck],
   ["cases", "Cases", Flag],
   ["reports", "Reports", ChartNoAxesCombined],
@@ -293,8 +292,11 @@ function saveBlob(bytes: any, name: string, type: string) {
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 /** The module a path points at: "/" is the overview, "/students" is students. */
+/** Pages that were folded into another: evidence now lives on each gig. */
+const movedModules: Record<string, string> = { evidence: "gigs" };
 function moduleFromPath(pathname: string) {
-  const segment = pathname.replace(/^\/+|\/+$/g, "").split("/")[0];
+  const raw = pathname.replace(/^\/+|\/+$/g, "").split("/")[0];
+  const segment = movedModules[raw] || raw;
   return segment && nav.some(([id]) => id === segment) ? segment : "home";
 }
 
@@ -311,7 +313,7 @@ export default function Operations({ module: initialModule }: { module: string }
   // workspace. Now a click changes the address bar and this state; the data
   // already in memory is reused, and a fresh load happens only on a real
   // reload. Back and forward still work through popstate.
-  const [module, setModule] = useState(initialModule);
+  const [module, setModule] = useState(movedModules[initialModule] || initialModule);
   useEffect(() => {
     const onPop = () => setModule(moduleFromPath(window.location.pathname));
     window.addEventListener("popstate", onPop);
@@ -924,7 +926,7 @@ export default function Operations({ module: initialModule }: { module: string }
             "Account Requests Pending",
             "Open Escalations",
           ]
-        : module === "quality" || module === "evidence"
+        : module === "quality" || module === "gigs"
           ? [
               "All",
               "Coach Review",
@@ -1586,13 +1588,35 @@ export default function Operations({ module: initialModule }: { module: string }
       </Tabs>
     );
   } else if (module === "gigs") {
+    // One row per gig: the paid job and the review of its proof together.
+    const latestEvidence = new Map<string, Row>();
+    for (const e of evidence)
+      if (!latestEvidence.has(e.gig_id) || String(e.created_at) > String(latestEvidence.get(e.gig_id)!.created_at))
+        latestEvidence.set(e.gig_id, e);
+    const latestPackage = new Map<string, Row>();
+    for (const p of d.evidencePackages || [])
+      if (!latestPackage.has(p.evidence_id) || Number(p.revision) > Number(latestPackage.get(p.evidence_id)!.revision))
+        latestPackage.set(p.evidence_id, p);
+    const proofOf = (ev: Row | undefined, type: string) => {
+      const pkg = ev && latestPackage.get(ev.id);
+      const item = pkg && (d.evidencePackageItems || []).find((i: Row) => i.package_id === pkg.id && i.item_type === type);
+      return item?.attachment_id || (type === "Delivery" ? ev?.proof_id : null);
+    };
+    const rows = gigs
+      .map((g): Row => {
+        const ev = latestEvidence.get(g.id);
+        return { ...g, evidence: ev, stage: ev ? ev.status : g.status, stage_at: ev ? ev.stage_at : g.created_at };
+      })
+      .filter(qMatch)
+      .filter((r) => filter === "All" || r.stage === filter)
+      .sort((a, b) => String(a.stage_at).localeCompare(String(b.stage_at)));
     content = panel(
-      t("Freelancing activity"),
+      t("Gigs and their review"),
       generic(
-        gigs.filter(qMatch),
+        rows,
         [
           studentCol,
-          { key: "title", label: t("Gig / service") },
+          { key: "title", label: t("Gig") },
           { key: "platform", label: t("Platform") },
           {
             key: "value",
@@ -1611,18 +1635,66 @@ export default function Operations({ module: initialModule }: { module: string }
               );
             },
           },
-          statusCol,
+          {
+            key: "stage",
+            label: t("Review stage"),
+            render: (r) => (
+              <span>
+                <Badge value={r.stage} />
+                <small className="table-subline">{t("since {v0}", { v0: fmt(r.stage_at) })}</small>
+              </span>
+            ),
+          },
+          {
+            key: "proof",
+            label: t("Proof"),
+            render: (r) => {
+              const delivery = proofOf(r.evidence, "Delivery"), payment = proofOf(r.evidence, "Payment");
+              return delivery || payment ? (
+                <span className="detail-actions">
+                  {delivery && (
+                    <a className="text-link" target="_blank" rel="noreferrer" href={"/api/files?id=" + delivery}>
+                      <Paperclip size={15} /> {t("Delivery")}
+                    </a>
+                  )}
+                  {payment && (
+                    <a className="text-link" target="_blank" rel="noreferrer" href={"/api/files?id=" + payment}>
+                      <Paperclip size={15} /> {t("Payment")}
+                    </a>
+                  )}
+                </span>
+              ) : (
+                <span className="badge amber">{t("No proof yet")}</span>
+              );
+            },
+          },
         ],
         (r) => (
           <div className="detail-actions">
-            <button
-              className="small-btn"
-              onClick={() =>
-                open("gig_transition", { ...r, student_id: r.student_id })
-              }
-            >
-              {t("Record activity")}
-            </button>
+            {r.evidence && (
+              <button className="small-btn" onClick={() => open("review", r.evidence)}>
+                {t("Open review")}
+              </button>
+            )}
+            {/* A controlled-account gig still moves step by step until it is paid. */}
+            {!r.evidence && !["Paid", "Cancelled", "Failed"].includes(r.status) && (
+              <button
+                className="small-btn"
+                onClick={() =>
+                  open("gig_transition", { ...r, student_id: r.student_id })
+                }
+              >
+                {t("Record activity")}
+              </button>
+            )}
+            {!r.evidence && r.status === "Paid" && (
+              <button
+                className="small-btn"
+                onClick={() => open("evidence", { student_id: r.student_id, gig_id: r.id })}
+              >
+                {t("Add proof")}
+              </button>
+            )}
             {r.currency !== "USD" &&
               can(user.roles, ["Project Operations"]) && (
                 <button

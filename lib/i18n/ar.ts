@@ -1172,6 +1172,11 @@ export const ar: Record<string, string> = {
   "Record the gig once it is paid. Its delivery and payment screenshots go straight into review.": "سجّل العمل بعد أن يُدفع. تذهب لقطات التسليم والدفع مباشرة إلى المراجعة.",
   "Gig title": "عنوان العمل",
   "Order number": "رقم الطلب",
+  "Gigs and their review": "الأعمال ومراجعتها",
+  "Review stage": "مرحلة المراجعة",
+  "since {v0}": "منذ {v0}",
+  "No proof yet": "لا يوجد إثبات بعد",
+  "Add proof": "إضافة إثبات",
 
   // ---- Validation messages from domain rules ------------------------------------------
   "Choose a valid contact outcome.": "اختر نتيجة تواصل صالحة.",
