@@ -1180,6 +1180,10 @@ export const ar: Record<string, string> = {
   "Join": "انضمام",
   "Session link": "رابط الجلسة",
   "Paid on": "تاريخ الدفع",
+  "Change coordinator": "تغيير المنسق",
+  "New coordinator": "المنسق الجديد",
+  "Reason for the change": "سبب التغيير",
+  "The group and its students move to the coordinator you choose. The change is audited.": "تنتقل المجموعة وطلابها إلى المنسق الذي تختاره. يُسجَّل التغيير في سجل التدقيق.",
   "Paid {v0}": "دُفع في {v0}",
 
   // ---- Validation messages from domain rules ------------------------------------------

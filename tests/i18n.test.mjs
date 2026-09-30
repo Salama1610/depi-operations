@@ -127,7 +127,9 @@ test("the student portal shell renders in Arabic", async () => {
 test("the staff console shell renders in Arabic with the sidebar on the right", async () => {
   const html = await renderIn("ar", "/app/operations.tsx", "default", { module: "home" });
   assert.match(html, /نظرة عامة/);
-  assert.match(html, /مسار البرنامج/);
+  assert.match(html, /مهامي/);
+  // Program flow is for leaders and administrators; a person with no role does not see it.
+  assert.doesNotMatch(html, /مسار البرنامج/);
   assert.match(html, /data-side="right"/);
   assert.doesNotMatch(html, />Overview</);
 

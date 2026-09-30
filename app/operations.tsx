@@ -169,6 +169,7 @@ const titles: Row = {
   policy_transition: "Progress policy review",
   group_close: "Close group",
   service_qc_review: "Review student service link",
+  bulk_group_owner: "Change coordinator",
 };
 const actionCopy: Row = {
   contact: "Screenshot proof, an outcome and a next action are required.",
@@ -187,6 +188,8 @@ const actionCopy: Row = {
     "Cancelled sessions remain in the operational history and require a reason.",
   service_qc_review:
     "One link at a time. Lock a correct link, or leave a clear correction comment for the student.",
+  bulk_group_owner:
+    "The group and its students move to the coordinator you choose. The change is audited.",
 };
 const formatDay = (v: string, locale = "en-GB") =>
   new Date(v).toLocaleDateString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", {
@@ -456,6 +459,8 @@ export default function Operations({ module: initialModule }: { module: string }
       ? m === "quality"
       : m === "administration"
         ? can(user.roles, ["Operations Systems / Admin"])
+        : m === "program"
+          ? can(user.roles, ["Project Operations", "Coach Operations", "Operations Systems / Admin"])
         : m === "weekly"
           ? can(user.roles, [
               "Operations Coordinator",
@@ -516,7 +521,7 @@ export default function Operations({ module: initialModule }: { module: string }
     setFormError("");
   }
   async function mutate(action: string, values: Row) {
-    const r = await fetch("/api/operations", {
+    const r = await fetch(action === "bulk_group_owner" ? "/api/program" : "/api/operations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1273,6 +1278,21 @@ export default function Operations({ module: initialModule }: { module: string }
                 </span>
               </div>
               <div className="detail-actions">
+                {(can(user.roles, ["Project Operations", "Operations Systems / Admin"]) ||
+                  (can(user.roles, ["Team Supervisor"]) && g.supervisor === user.id)) && (
+                  <button
+                    className="small-btn"
+                    onClick={() =>
+                      open("bulk_group_owner", {
+                        group_ids: [g.id],
+                        owner_type: "Coordinator",
+                        owner: g.coordinator,
+                      })
+                    }
+                  >
+                    {t("Change coordinator")}
+                  </button>
+                )}
                 {g.session_link && (
                   <a className="small-btn" href={g.session_link} target="_blank" rel="noreferrer">
                     <ExternalLink size={14} /> {t("Session link")}
@@ -3371,6 +3391,25 @@ export default function Operations({ module: initialModule }: { module: string }
                       </small>
                     </div>
                     {field("reason", t("Approved refund reason"))}
+                  </>
+                );
+              if (a === "bulk_group_owner")
+                return (
+                  <>
+                    <div className="info-box">
+                      <strong>{(form.group_ids || []).join(", ")}</strong>
+                    </div>
+                    {choice(
+                      "owner",
+                      t("New coordinator"),
+                      staff
+                        .filter((u: Row) => {
+                          const held = Array.isArray(u.roles) ? u.roles : JSON.parse(u.roles || "[]");
+                          return u.active !== false && u.active !== 0 && held.includes("Operations Coordinator");
+                        })
+                        .map((u: Row) => ({ value: u.id, label: u.name + (u.title ? " · " + t(u.title) : "") })),
+                    )}
+                    {field("reason", t("Reason for the change"))}
                   </>
                 );
               if (a === "gig")
