@@ -989,7 +989,7 @@ export default function Operations({ module: initialModule }: { module: string }
         q: "No Contact",
       },
       {
-        label: t("Evidence waiting"),
+        label: t("Gigs waiting for review"),
         value: reviews.length,
         detail: t("{v0} require correction", { v0: rejected.length }),
         icon: Files,
@@ -2847,7 +2847,6 @@ export default function Operations({ module: initialModule }: { module: string }
                     "sessions",
                     "gigs",
                     "services",
-                    "evidence",
                     "accounts",
                     "cases",
                     "timeline",
@@ -2951,7 +2950,6 @@ export default function Operations({ module: initialModule }: { module: string }
                   "sessions",
                   "gigs",
                   "services",
-                  "evidence",
                   "accounts",
                   "cases",
                   "timeline",
@@ -3013,34 +3011,34 @@ export default function Operations({ module: initialModule }: { module: string }
                           </article>
                         ))}
                       </div>
-                    ) : tab === "evidence" ? (
-                      generic(
-                        evidence.filter(
-                          (e) => e.student_id === selectedStudent.id,
-                        ),
-                        [{ key: "id", label: t("Evidence") }, statusCol],
-                        (r) =>
-                          (!assignedOnly || r.qc_actor === user.id) && (
-                            <button
-                              className="small-btn"
-                              onClick={() => open("review", r)}
-                            >
-                              {t("Review")}
-                            </button>
-                          ),
-                      )
+
                     ) : tab === "gigs" ? (
                       generic(
-                        gigs.filter((g) => g.student_id === selectedStudent.id),
-                        [{ key: "title", label: t("Gig") }, statusCol],
-                        (r) => (
-                          <button
-                            className="small-btn"
-                            onClick={() => open("gig_transition", r)}
-                          >
-                            {t("Activity")}
-                          </button>
-                        ),
+                        gigs
+                          .filter((g) => g.student_id === selectedStudent.id)
+                          .map((g): Row => {
+                            const review = evidence
+                              .filter((e) => e.gig_id === g.id)
+                              .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+                            return { ...g, review, stage: review ? review.status : g.status };
+                          }),
+                        [
+                          { key: "title", label: t("Gig") },
+                          { key: "value", label: t("Value"), render: (r) => r.currency + " " + r.value },
+                          { key: "stage", label: t("Review stage"), render: (r) => <Badge value={r.stage} /> },
+                        ],
+                        (r) =>
+                          r.review ? (
+                            (!assignedOnly || r.review.qc_actor === user.id) && (
+                              <button className="small-btn" onClick={() => open("review", r.review)}>
+                                {t("Review")}
+                              </button>
+                            )
+                          ) : !["Paid", "Cancelled", "Failed"].includes(r.status) ? (
+                            <button className="small-btn" onClick={() => open("gig_transition", r)}>
+                              {t("Activity")}
+                            </button>
+                          ) : null,
                       )
                     ) : tab === "cases" ? (
                       generic(

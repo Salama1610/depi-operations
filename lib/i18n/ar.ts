@@ -1181,6 +1181,8 @@ export const ar: Record<string, string> = {
   "Session link": "رابط الجلسة",
   "Paid on": "تاريخ الدفع",
   "Change coordinator": "تغيير المنسق",
+  "Gigs waiting for review": "أعمال بانتظار المراجعة",
+  "Gigs recorded": "الأعمال المسجلة",
   "New coordinator": "المنسق الجديد",
   "Reason for the change": "سبب التغيير",
   "The group and its students move to the coordinator you choose. The change is audited.": "تنتقل المجموعة وطلابها إلى المنسق الذي تختاره. يُسجَّل التغيير في سجل التدقيق.",
