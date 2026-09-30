@@ -1177,6 +1177,8 @@ export const ar: Record<string, string> = {
   "since {v0}": "منذ {v0}",
   "No proof yet": "لا يوجد إثبات بعد",
   "Add proof": "إضافة إثبات",
+  "Join": "انضمام",
+  "Session link": "رابط الجلسة",
 
   // ---- Validation messages from domain rules ------------------------------------------
   "Choose a valid contact outcome.": "اختر نتيجة تواصل صالحة.",

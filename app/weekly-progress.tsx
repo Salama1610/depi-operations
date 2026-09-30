@@ -68,6 +68,10 @@ export function WeeklyProgress({ data, onStudent }: { data: Row; onStudent: (id:
   const leader = operations || coachOperations;
   // Anyone who is not above a team is reading their own week.
   const ownWeek = !operations && !coachOperations && !supervises;
+  // Each group meets on one standing Teams or LMS link, from the calendar.
+  const links = new Map<string, string>(
+    (data.groups || []).filter((g: Row) => g.session_link).map((g: Row) => [g.id, g.session_link]),
+  );
   const [offset, setOffset] = useState(0);
   const [supervisor, setSupervisor] = useState("All");
   const [coordinator, setCoordinator] = useState("All");
@@ -378,7 +382,7 @@ export function WeeklyProgress({ data, onStudent }: { data: Row; onStudent: (id:
         ])}
 
       {(coachOperations || operations) &&
-        peopleTable("Coaches this week", "Coach", view.coaches, (c) => <SessionWeek sessions={c.ownSessions} clock={clock} label={label} />, [
+        peopleTable("Coaches this week", "Coach", view.coaches, (c) => <SessionWeek sessions={c.ownSessions} clock={clock} label={label} links={links} />, [
           "No coaches in this view",
           "Coaches appear here once they are assigned to a group.",
         ])}
@@ -407,7 +411,7 @@ export function WeeklyProgress({ data, onStudent }: { data: Row; onStudent: (id:
             <span className="count">{view.schedule.length}</span>
           </div>
           {view.schedule.length ? (
-            <SessionWeek sessions={view.schedule} clock={clock} label={label} />
+            <SessionWeek sessions={view.schedule} clock={clock} label={label} links={links} />
           ) : (
             <div className="empty">
               <h3>{t("Nothing scheduled this week")}</h3>
@@ -425,10 +429,12 @@ function SessionWeek({
   sessions,
   clock,
   label,
+  links,
 }: {
   sessions: Row[];
   clock: (value: string) => string;
   label: (day: string) => string;
+  links: Map<string, string>;
 }) {
   const t = useT();
   return (
@@ -436,7 +442,7 @@ function SessionWeek({
       <Table>
         <TableHeader>
           <TableRow>
-            {["Day", "Time", "Group", "Session", "Week", "State"].map((h) => (
+            {["Day", "Time", "Group", "Session", "Week", "State", "Link"].map((h) => (
               <TableHead key={h}>{t(h)}</TableHead>
             ))}
           </TableRow>
@@ -461,6 +467,15 @@ function SessionWeek({
                 >
                   {t(s.status)}
                 </span>
+              </TableCell>
+              <TableCell>
+                {links.get(s.group_id) ? (
+                  <a className="text-link" href={links.get(s.group_id)} target="_blank" rel="noreferrer">
+                    {t("Join")}
+                  </a>
+                ) : (
+                  "—"
+                )}
               </TableCell>
             </TableRow>
           ))}

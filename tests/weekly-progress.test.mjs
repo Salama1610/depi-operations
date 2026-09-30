@@ -154,3 +154,12 @@ test("the coordinator filter narrows a leader's view to one team", () => {
   assert.match(html, /Every coordinator/, "a leader can narrow to one coordinator");
   assert.match(html, /Every track/);
 });
+
+test("a coordinator's schedule carries the group's meeting link", () => {
+  const data = workspace(["Operations Coordinator"]);
+  data.user = { id: "coord-1", roles: ["Operations Coordinator"] };
+  data.groups = data.groups.map((g) => ({ ...g, session_link: g.id === "G1" ? "https://teams.microsoft.com/l/meetup-join/g1" : null }));
+  const html = render(data);
+  assert.match(html, /href="https:\/\/teams\.microsoft\.com\/l\/meetup-join\/g1"/);
+  assert.match(html, />Join</);
+});

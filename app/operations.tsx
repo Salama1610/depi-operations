@@ -1274,6 +1274,11 @@ export default function Operations({ module: initialModule }: { module: string }
                 </span>
               </div>
               <div className="detail-actions">
+                {g.session_link && (
+                  <a className="small-btn" href={g.session_link} target="_blank" rel="noreferrer">
+                    <ExternalLink size={14} /> {t("Session link")}
+                  </a>
+                )}
                 <button
                   className="group-link"
                   onClick={() => {
@@ -1393,6 +1398,7 @@ export default function Operations({ module: initialModule }: { module: string }
                   {new Date(r.starts_at).toLocaleTimeString("en", {
                     hour: "2-digit",
                     minute: "2-digit",
+                    timeZone: "Africa/Cairo",
                   })}
                 </small>
               </>
@@ -1412,6 +1418,20 @@ export default function Operations({ module: initialModule }: { module: string }
             render: (r) => `${r.duration_minutes || 180} min`,
           },
           statusCol,
+          {
+            key: "link",
+            label: t("Link"),
+            render: (r) => {
+              const link = groups.find((g) => g.id === r.group_id)?.session_link;
+              return link ? (
+                <a className="text-link" href={link} target="_blank" rel="noreferrer">
+                  <ExternalLink size={14} /> {t("Join")}
+                </a>
+              ) : (
+                "—"
+              );
+            },
+          },
         ],
             (r) => (
           <div className="detail-actions">
