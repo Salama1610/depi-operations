@@ -672,7 +672,9 @@ export async function POST(req: Request) {
         break;
       }
       case "assign_coach": {
-        permit(u, ["Coach Operations", "Project Operations"]);
+        // Matching a group with its coach or backup (Support) coach is Coach
+        // Operations' work.
+        permit(u, ["Coach Operations"]);
         const group: any = await stmt(
           "SELECT * FROM groups WHERE id=? AND status='Active'",
           x.group_id,
@@ -1126,11 +1128,11 @@ export async function POST(req: Request) {
           ["Coordinator", "Supervisor", "Coach"].includes(x.owner_type),
           "Choose coordinator, supervisor or coach ownership.",
         );
-        // Who may hand a group to whom: Project Operations across the
-        // programme, a supervisor for the coordinators of their own groups,
-        // and Coach Operations for the coaches, which is their tier.
+        // Who may hand a group to whom: Project Operations the supervisors and
+        // coordinators, a supervisor the coordinators of their own groups, and
+        // Coach Operations alone the coaches.
         if (x.owner_type === "Supervisor") permit(u, ["Project Operations"]);
-        else if (x.owner_type === "Coach") permit(u, ["Project Operations", "Coach Operations"]);
+        else if (x.owner_type === "Coach") permit(u, ["Coach Operations"]);
         else permit(u, ["Project Operations", "Team Supervisor"]);
         const requiredRole =
           x.owner_type === "Coordinator"

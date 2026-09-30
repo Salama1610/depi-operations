@@ -1019,6 +1019,22 @@ test("a supervisor adds no students, sessions or groups", async () => {
   current = { id: "owner", email: "owner@example.com" };
 });
 
+test("coaches and backup coaches are assigned by Coach Operations, who assign no coordinators", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  const coach = { group_id: "G101", user_id: "staff-support-coach", coach_type: "Support Coach", checklist: [] };
+  // Project Operations no longer matches coaches, neither directly nor in bulk.
+  current = { id: "ops-only-login", email: "ops-only@example.com" };
+  assert.match((await programPost("assign_coach", coach)).error, /role/);
+  assert.match((await programPost("bulk_group_owner", { group_ids: ["G101"], owner_type: "Coach", owner: "staff-coach", reason: "Cover" })).error, /role/);
+  // Coach Operations does, for a main coach and a backup (Support) coach.
+  current = { id: "coach-ops-login", email: "staff-coach-ops@example.invalid" };
+  const assigned = await programPost("assign_coach", coach);
+  assert.equal(assigned.error, undefined, assigned.error);
+  // But hands no group to a coordinator.
+  assert.match((await programPost("bulk_group_owner", { group_ids: ["G101"], owner_type: "Coordinator", owner: "staff-omar", reason: "Swap" })).error, /role/);
+  current = { id: "owner", email: "owner@example.com" };
+});
+
 test("a sheet from another source links on the national ID through a saved mapping", async () => {
   current = { id: "owner", email: "owner@example.com" };
   await dbExec("DELETE FROM rate_limits");

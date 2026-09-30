@@ -458,7 +458,7 @@ export function ProgramFlow() {
             <section className="panel">
               <div className="panel-heading">
                 <h2>{t("Coach matching & onboarding")}</h2>
-                {allowed(["Coach Operations", "Project Operations"]) && (
+                {allowed(["Coach Operations", "Operations Systems / Admin"]) && (
                   <button className="small-btn" onClick={() => open("assign_coach")}>
                     <Plus size={16} /> {t("Assign coach")}
                   </button>
@@ -1166,11 +1166,13 @@ export function ProgramFlow() {
                 {select(
                   "owner_type",
                   "Ownership field",
-                  allowed(["Project Operations"])
+                  allowed(["Operations Systems / Admin"])
                     ? ["Coordinator", "Supervisor", "Coach"]
-                    : allowed(["Coach Operations"])
-                      ? ["Coach"]
-                      : ["Coordinator"],
+                    : allowed(["Project Operations"])
+                      ? ["Coordinator", "Supervisor"]
+                      : allowed(["Coach Operations"])
+                        ? ["Coach"]
+                        : ["Coordinator"],
                 )}
                 {select(
                   "owner",
