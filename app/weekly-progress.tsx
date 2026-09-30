@@ -66,6 +66,9 @@ export function WeeklyProgress({ data, onStudent }: { data: Row; onStudent: (id:
   const coachOperations = can(user.roles, ["Coach Operations"]);
   const supervises = can(user.roles, ["Team Supervisor"]);
   const leader = operations || coachOperations;
+  // Coach Operations follows every student, group and coach, but a coordinator
+  // or supervisor is a name on a group to them, never a row of performance.
+  const coachesOnly = coachOperations && !operations && !supervises;
   // Anyone who is not above a team is reading their own week.
   const ownWeek = !operations && !coachOperations && !supervises;
   // Each group meets on one standing Teams or LMS link, from the calendar.
@@ -323,7 +326,7 @@ export function WeeklyProgress({ data, onStudent }: { data: Row; onStudent: (id:
               ))}
             </select>
           )}
-          {!ownWeek && view.coordinatorOptions.length > 1 && (
+          {!ownWeek && !coachesOnly && view.coordinatorOptions.length > 1 && (
             <select className="weekly-filter" value={coordinator} onChange={(e) => setCoordinator(e.target.value)} aria-label={t("Coordinator")}>
               <option value="All">{t("Every coordinator")}</option>
               {view.coordinatorOptions.map((s: Row) => (
@@ -376,6 +379,7 @@ export function WeeklyProgress({ data, onStudent }: { data: Row; onStudent: (id:
         ])}
 
       {!ownWeek &&
+        !coachesOnly &&
         peopleTable("Coordinators this week", "Coordinator", view.coordinators, (c) => studentsOf(c.list), [
           "No coordinators in this view",
           "Coordinators appear here once they are assigned to groups you supervise.",

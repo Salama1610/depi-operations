@@ -459,6 +459,11 @@ export default function Operations({ module: initialModule }: { module: string }
   // Spreadsheets in and out are for leaders, supervisors and administrators;
   // the server refuses everyone else, so the buttons are not offered either.
   const canTransfer = can(user.roles, dataTransferRoles);
+  // Coach Operations follows every student, group and coach, but not how the
+  // coordinators, supervisors or quality reviewers themselves are performing.
+  const coachesOnly =
+    can(user.roles, ["Coach Operations"]) &&
+    !can(user.roles, ["Project Operations", "Operations Systems / Admin", "Higher Board", "Team Supervisor"]);
   const shownNav = nav.filter(([m]) =>
     qualityOnly
       ? m === "quality"
@@ -2094,7 +2099,7 @@ export default function Operations({ module: initialModule }: { module: string }
   } else if (module === "reports") {
     content = (
       <>
-        <ReportsPanel canExport={canTransfer} />
+        <ReportsPanel canExport={canTransfer} showStaff={!coachesOnly} />
         <div className="stats">
           {[
             { label: t("Contact compliance"), n: compliance + "%" },
@@ -2115,7 +2120,7 @@ export default function Operations({ module: initialModule }: { module: string }
             </div>
           ))}
         </div>
-        {panel(
+        {!coachesOnly && panel(
           t("Coordinator performance"),
           generic(
             staff

@@ -150,7 +150,7 @@ export function ControlCenter() {
     </div>
   );
 }
-export function ReportsPanel({ canExport = false }: { canExport?: boolean }) {
+export function ReportsPanel({ canExport = false, showStaff = true }: { canExport?: boolean; showStaff?: boolean }) {
   const t = useT();
   const [data, setData] = useState<any>(null),
     [from, setFrom] = useState(""),
@@ -254,7 +254,7 @@ export function ReportsPanel({ canExport = false }: { canExport?: boolean }) {
             <div className="report-grid">
               <div className="info-box"><strong>{t("Students by submitted links")}</strong>{data.service_links.students_by_link_count.map((row: any) => <span key={row.count}>{row.count} {t("links ·")}{" "}{row.students} {t("students")}</span>)}</div>
               <div className="info-box"><strong>{t("Platform distribution")}</strong>{Object.entries(data.service_links.platform_distribution).map(([platform, count]: any) => <span key={platform}>{platform} · {count}</span>)}</div>
-              <div className="info-box"><strong>{t("Reviewer activity")}</strong>{Object.entries(data.service_links.reviewer_workload).map(([reviewer, count]: any) => <span key={reviewer}>{reviewer} · {count}</span>)}</div>
+              {showStaff && <div className="info-box"><strong>{t("Reviewer activity")}</strong>{Object.entries(data.service_links.reviewer_workload).map(([reviewer, count]: any) => <span key={reviewer}>{reviewer} · {count}</span>)}</div>}
             </div>
             <h3>{t("Account capacity by platform")}</h3>
             {Object.entries(data.capacity).map(([platform, r]: any) => (

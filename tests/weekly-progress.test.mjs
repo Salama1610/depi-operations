@@ -131,6 +131,8 @@ test("Coach Operations sees the coaches and their sessions", () => {
   assert.match(html, /Coaches this week/);
   assert.match(html, /Mariam Coach/);
   assert.doesNotMatch(html, /Supervisors this week/, "the coaching tier is theirs, the supervisors are not");
+  assert.doesNotMatch(html, /Coordinators this week/, "coordinators are names on groups to Coach Operations, not rows of performance");
+  assert.doesNotMatch(html, /Every coordinator/, "no coordinator filter either");
 });
 
 test("a coordinator gets their own week and nobody else's performance", () => {
