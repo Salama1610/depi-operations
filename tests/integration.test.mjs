@@ -823,6 +823,61 @@ test("update-mode spreadsheets merge partial columns into existing records under
   current = { id: "owner", email: "owner@example.com" };
 });
 
+test("a quality reviewer sees and decides only the work assigned to them", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  await dbExec("DELETE FROM rate_limits");
+  const member = await dbRow("SELECT id, email FROM users WHERE id='staff-quality'");
+  const lead = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  const created = new Date().toISOString();
+
+  // A service that nobody holds yet: the member may not take it themselves.
+  const student = await dbRow("SELECT id FROM students WHERE group_id='G120' ORDER BY id LIMIT 1");
+  await dbExec(
+    "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,account_id,submitted_at,updated_at) VALUES(?,?,1,?,?,'Khamsat','Needs Review','{}',?,'Pending',NULL,NULL,NULL,1,NULL,?,?)",
+    "SLK-UNASSIGNED", student.id, "https://khamsat.com/x/9001-a", "https://khamsat.com/x/9001-a", created, created, created,
+  );
+  current = { id: member.id, email: member.email };
+  assert.match((await post("service_qc_review", { service_id: "SLK-UNASSIGNED", decision: "Lock" })).error, /not been assigned to you/);
+  let view = await (await api.GET()).json();
+  assert.ok(!view.students.some((s) => s.id === student.id), "an unassigned student is not in the reviewer's view");
+
+  // The Quality Lead assigns the student; now the member sees and decides it.
+  current = lead;
+  await check("service_qc_assign", { student_id: student.id, reviewer_id: member.id, request_id: "quality-hand-over-1" });
+  current = { id: member.id, email: member.email };
+  view = await (await api.GET()).json();
+  assert.ok(view.students.some((s) => s.id === student.id), "the assigned student appears");
+  await check("service_qc_review", { service_id: "SLK-UNASSIGNED", decision: "Lock" });
+
+  // Gig evidence works the same way, even for a student whose services sit elsewhere.
+  current = { id: "owner", email: "owner@example.com" };
+  const other = await dbRow("SELECT id FROM students WHERE group_id='G121' ORDER BY id LIMIT 1");
+  await dbExec("INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)", "QA-PROOF-1", other.id, "qa-proof-1", "qa.png", "image/png", 120, "qahash1", "owner", created);
+  await dbExec("INSERT INTO gigs(id,student_id,platform,title,value,currency,status,due,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+    "GIG-QA", other.id, "Upwork", "Assignment test", 15, "USD", "Paid", "2027-01-01T00:00:00Z", created);
+  await dbExec("INSERT INTO evidence(id,student_id,gig_id,proof_id,source,status,rejections,code,requirements,recorder,stage_at,created_at,policy_id) VALUES(?,?,?,?,?, 'Quality Review',0,NULL,NULL,'owner',?,?,?)",
+    "EV-QA", other.id, "GIG-QA", "QA-PROOF-1", "Platform", created, created, "R5-v1");
+  current = { id: member.id, email: member.email };
+  assert.match((await post("review", { id: "EV-QA", decision: "Escalate L3", notes: "Needs a second look" })).error, /not found within your assigned scope/);
+  current = lead;
+  await check("evidence_qc_assign", { item_id: "EV-QA", reviewer_id: member.id, request_id: "quality-hand-over-2" });
+  current = { id: member.id, email: member.email };
+  view = await (await api.GET()).json();
+  assert.ok(view.students.some((s) => s.id === other.id), "a student whose evidence is assigned appears");
+  await check("review", { id: "EV-QA", decision: "Escalate L3", notes: "Needs a second look" });
+  assert.equal((await dbRow("SELECT status FROM evidence WHERE id='EV-QA'")).status, "L3 Review");
+
+  // Evidence of the same student, assigned to someone else, stays out of reach.
+  current = { id: "owner", email: "owner@example.com" };
+  await dbExec("INSERT INTO gigs(id,student_id,platform,title,value,currency,status,due,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+    "GIG-QA2", other.id, "Upwork", "Held by another reviewer", 15, "USD", "Paid", "2027-01-01T00:00:00Z", created);
+  await dbExec("INSERT INTO evidence(id,student_id,gig_id,proof_id,source,status,rejections,code,requirements,recorder,stage_at,created_at,policy_id,qc_actor) VALUES(?,?,?,?,?, 'Quality Review',0,NULL,NULL,'owner',?,?,?,?)",
+    "EV-QA2", other.id, "GIG-QA2", "QA-PROOF-1", "Platform", created, created, "R5-v1", lead.id);
+  current = { id: member.id, email: member.email };
+  assert.match((await post("review", { id: "EV-QA2", decision: "Escalate L3", notes: "x" })).error, /assigned to another reviewer/);
+  current = { id: "owner", email: "owner@example.com" };
+});
+
 test("only leaders, supervisors and administrators download spreadsheets", async () => {
   await dbExec("DELETE FROM rate_limits");
   const download = () => programApi.GET(new Request("https://test.local/api/program?format=csv&dataset=lifecycle"));

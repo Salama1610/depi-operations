@@ -422,6 +422,10 @@ export default function Operations({ module: initialModule }: { module: string }
     "Operations Systems / Admin",
   ]);
   const isQualityLead = can(user.roles, ["Quality Lead", "Operations Systems / Admin"]);
+  // A reviewer whose only authority is quality review acts on what is assigned to them.
+  const assignedOnly =
+    can(user.roles, ["Quality Member"]) &&
+    !can(user.roles, ["Quality Lead", "Operations Systems / Admin", "Project Operations", "Operations Coordinator", "Team Supervisor", "Coach", "Coach Operations", "Higher Board"]);
   const canDecideServiceLinks = can(user.roles, ["Quality Member", "Quality Lead", "Operations Systems / Admin"]);
   const heldRoles = (s: Row) => {
     try { return (Array.isArray(s.roles) ? s.roles : JSON.parse(s.roles || "[]")) as string[]; } catch { return []; }
@@ -1798,7 +1802,7 @@ export default function Operations({ module: initialModule }: { module: string }
                       : <span>{owner(r.qc_actor) === "Unassigned" ? t("Waiting for a reviewer") : owner(r.qc_actor)}<small className="table-subline">{owner(r.coordinator)}</small></span> },
                   { key: "qc_status", label: t("Review state"), render: (r) => <span><Badge value={r.qc_status} /><small className="table-subline">{Math.round((Date.now() - Date.parse(r.updated_at)) / 3600000)}{t("h · revision")}{" "}{r.revision}</small></span> },
                 ],
-                (r) => <div className="detail-actions">{canDecideServiceLinks && (!r.qc_actor || r.qc_actor === user.id || isQualityLead) && <button className="small-btn" onClick={() => open("service_qc_review", { ...r, service_id: r.id, student_id: r.student_id, decision: r.qc_status === "Needs Correction" ? "Lock" : "" })}>{t("Review")}</button>}</div>,
+                (r) => <div className="detail-actions">{canDecideServiceLinks && (r.qc_actor === user.id || isQualityLead) && <button className="small-btn" onClick={() => open("service_qc_review", { ...r, service_id: r.id, student_id: r.student_id, decision: r.qc_status === "Needs Correction" ? "Lock" : "" })}>{t("Review")}</button>}</div>,
               )),
             )}
             {panel(t("Reviewer activity"), reviewerWorkload.length ? <div className="mini-stats">{reviewerWorkload.map(([reviewer, count]: any) => <span key={reviewer}><strong>{count}</strong>{reviewer}</span>)}</div> : <Empty title={t("No service-link reviews yet")} />)}
@@ -1861,11 +1865,12 @@ export default function Operations({ module: initialModule }: { module: string }
                 ),
               },
             ],
-            (r) => (
-              <button className="small-btn" onClick={() => open("review", r)}>
-                {t("Open review")}
-              </button>
-            ),
+            (r) =>
+              (!assignedOnly || r.qc_actor === user.id) && (
+                <button className="small-btn" onClick={() => open("review", r)}>
+                  {t("Open review")}
+                </button>
+              ),
           ),
         )}
       </>
@@ -2023,8 +2028,12 @@ export default function Operations({ module: initialModule }: { module: string }
                   key: "national_id",
                   label: t("Sign-in"),
                   render: (r) =>
-                    r.national_id ? (
+                    // Only a 14-digit ID can be a first password; anything
+                    // else is kept as recorded but cannot open a sign-in.
+                    /^[23]\d{13}$/.test(String(r.national_id || "")) ? (
                       <span>{t("Ready")}<small className="table-subline">{t("national ID on record")}</small></span>
+                    ) : r.national_id ? (
+                      <span className="badge amber">{t("ID cannot be used to sign in")}</span>
                     ) : (
                       <span className="badge muted">{t("No national ID")}</span>
                     ),
@@ -2836,14 +2845,15 @@ export default function Operations({ module: initialModule }: { module: string }
                           (e) => e.student_id === selectedStudent.id,
                         ),
                         [{ key: "id", label: t("Evidence") }, statusCol],
-                        (r) => (
-                          <button
-                            className="small-btn"
-                            onClick={() => open("review", r)}
-                          >
-                            {t("Review")}
-                          </button>
-                        ),
+                        (r) =>
+                          (!assignedOnly || r.qc_actor === user.id) && (
+                            <button
+                              className="small-btn"
+                              onClick={() => open("review", r)}
+                            >
+                              {t("Review")}
+                            </button>
+                          ),
                       )
                     ) : tab === "gigs" ? (
                       generic(

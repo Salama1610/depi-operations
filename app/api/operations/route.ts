@@ -1472,6 +1472,15 @@ export async function POST(req: Request) {
           next = "Quality Review";
         } else if (e.status === "Quality Review") {
           permit(u, [...reviewers, "Quality Member", "Quality Lead"]);
+          // A quality reviewer with no other review authority decides only the
+          // evidence assigned to them.
+          if (!can(u.roles, [...reviewers, "Quality Lead", "Operations Systems / Admin"]))
+            ensure(
+              e.qc_actor === u.id,
+              e.qc_actor
+                ? "This evidence is assigned to another reviewer."
+                : "This evidence has not been assigned to you yet. The Quality Lead assigns reviews.",
+            );
           ensure(
             ["Accept", "Reject", "Escalate L3"].includes(x.decision),
             "Choose a Quality decision.",
@@ -1999,9 +2008,13 @@ export async function POST(req: Request) {
         // cannot be locked by anyone: the student corrects it and submits
         // again. There is no override.
         ensure(link.qc_status !== "Locked", "This service link is already locked. The student submits a new link instead.");
+        // A reviewer decides only what was handed to them, automatically or by
+        // the Quality Lead; work nobody holds yet waits for the leader to assign.
         ensure(
-          !link.qc_actor || link.qc_actor === u.id || can(u.roles, ["Quality Lead"]),
-          "This student is assigned to another reviewer.",
+          link.qc_actor === u.id || can(u.roles, ["Quality Lead", "Operations Systems / Admin"]),
+          link.qc_actor
+            ? "This student is assigned to another reviewer."
+            : "This student has not been assigned to you yet. The Quality Lead assigns reviews.",
         );
         ensure(
           link.auto_status !== "Failed" || x.decision === "Needs Correction",

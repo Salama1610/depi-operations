@@ -221,13 +221,19 @@ export function scopeSql(u: any, alias = "g", studentAlias: string | null = "s")
     `(${alias}.coordinator=? OR ${alias}.supervisor=? OR ${alias}.coach=? OR ${alias}.account_manager=? OR EXISTS (SELECT 1 FROM group_coaches gc WHERE gc.group_id=${alias}.id AND gc.user_id=? AND gc.status='Active'))`,
   ];
   const args: string[] = [u.id, u.id, u.id, u.id, u.id];
+  // A quality reviewer sees the students whose work is assigned to them —
+  // their services or their gig evidence, handed out automatically or by the
+  // Quality Lead — and nobody else.
   if (can(u.roles, ["Quality Member"])) {
     clauses.push(
       studentAlias
         ? `EXISTS (SELECT 1 FROM service_links sl WHERE sl.student_id=${studentAlias}.id AND sl.qc_actor=?)`
         : `EXISTS (SELECT 1 FROM service_links sl JOIN students ss ON ss.id=sl.student_id WHERE ss.group_id=${alias}.id AND sl.qc_actor=?)`,
+      studentAlias
+        ? `EXISTS (SELECT 1 FROM evidence ev WHERE ev.student_id=${studentAlias}.id AND ev.qc_actor=?)`
+        : `EXISTS (SELECT 1 FROM evidence ev JOIN students se ON se.id=ev.student_id WHERE se.group_id=${alias}.id AND ev.qc_actor=?)`,
     );
-    args.push(u.id);
+    args.push(u.id, u.id);
   }
   return { sql: clauses.length > 1 ? `(${clauses.join(" OR ")})` : clauses[0], args };
 }

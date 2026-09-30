@@ -1126,6 +1126,7 @@ export const ar: Record<string, string> = {
   "no phone number": "لا يوجد رقم هاتف",
   "national ID on record": "الرقم القومي مسجّل",
   "No national ID": "لا يوجد رقم قومي",
+  "ID cannot be used to sign in": "لا يمكن استخدام الرقم لتسجيل الدخول",
   "A person signs in with the email listed here and their national ID as the first password. Whole teams are added from a sheet: the import workspace has a staff template with name, email and roles. Groups are then handed over by naming the person — their email or their name is enough, and the coordinator of a group reviews that group’s students.": "يسجّل الشخص الدخول بالبريد الإلكتروني المدرج هنا ورقمه القومي ككلمة مرور أولى. تُضاف الفرق كاملة من جدول: تحتوي مساحة الاستيراد على قالب للموظفين بالاسم والبريد والأدوار. ثم تُسلَّم المجموعات بذكر اسم الشخص أو بريده، ويراجع منسق المجموعة طلاب مجموعته.",
   "Review decision": "قرار المراجعة",
   "Comment / correction guidance": "تعليق / إرشادات التصحيح",
