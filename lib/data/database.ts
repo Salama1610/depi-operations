@@ -44,10 +44,6 @@ export function databaseBackend(): "supabase-rpc" | "supabase-postgres" | "d1" |
   return localFallbackAllowed() && env.DB ? "d1" : "none";
 }
 
-export function isSupabaseDatabaseConfigured() {
-  return databaseBackend().startsWith("supabase");
-}
-
 export function database(): D1Database | undefined {
   switch (databaseBackend()) {
     case "supabase-rpc": {

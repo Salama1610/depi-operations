@@ -279,27 +279,6 @@ export function auditStmt(
     now(),
   );
 }
-export async function recalc(sid: string) {
-  const s: any = await stmt(
-    "SELECT g.policy_id,p.config FROM students s JOIN groups g ON g.id=s.group_id JOIN policies p ON p.id=g.policy_id WHERE s.id=?",
-    sid,
-  ).first();
-  const e = await all(
-    "SELECT e.id,e.status,g.status gig_status,g.value,g.currency,x.usd_value FROM evidence e JOIN gigs g ON g.id=e.gig_id LEFT JOIN gig_fx_applications x ON x.gig_id=g.id WHERE e.student_id=?",
-    sid,
-  );
-  const result = graduation(e, JSON.parse(s.config));
-  await stmt(
-    "INSERT INTO graduation_ledger VALUES(?,?,?,?,?,?)",
-    uid("GR"),
-    sid,
-    s.policy_id,
-    result,
-    JSON.stringify(e.filter((x) => x.status === "Accepted").map((x) => x.id)),
-    now(),
-  ).run();
-  return result;
-}
 /** Where the last workspace load spent its time, for the Server-Timing header. */
 export const loadTimings: Record<string, number> = {};
 

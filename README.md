@@ -5,14 +5,14 @@ Operations system for Career180 and Freelance Yard, implementing the supplied Ro
 ## Run and validate
 
 - Node 22.13+; install with `npm run install:ci`.
-- `npm run dev` starts the local Vite development server on Windows, macOS or Linux.
-- `npm run build` emits a Cloudflare-compatible Worker and assets.
+- `npm run dev` starts the local Next.js development server on Windows, macOS or Linux.
+- `npm run build` runs `next build`, which is what Vercel deploys; `npm run build:cloudflare` still produces the earlier Worker build.
 - `node --experimental-strip-types --test tests/domain.test.mjs tests/integration.test.mjs` validates the actual service against SQLite plus domain rules.
 - `npx tsc --noEmit` validates TypeScript.
 - `npm run lint` checks source quality; after building, `npm run test:all` also checks generated HTML and UI components.
 - `npm run db:generate` generates additive migrations after schema changes. Do not change previously applied migrations.
 
-Production data lives in Supabase: PostgreSQL (`supabase/migrations/`, with integrity triggers, read-only scoped RLS and Auth identity binding), Supabase Auth, and a private evidence bucket. The deployed Worker reaches PostgreSQL over HTTPS through the server-only `public.depi_execute` function (`lib/data/rpc.ts`) when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are configured, because Cloudflare's runtime cannot validate the Supabase pooler's private CA over raw TCP; the wire-protocol client (`lib/data/postgres.ts`, `SUPABASE_DB_URL`) serves Node tooling and tests, and production fails closed without Supabase settings; the D1/R2 bindings are honoured only with `LOCAL_DATA_FALLBACK=1` for previews and tests. `docs/data-path-migration.md` is the rehearsed cut-over and rollback runbook (`npm run migrate:supabase`), and `npm run test:postgres` / `npm run test:postgres-rpc` run the full service suite against an embedded PostgreSQL with the real migrations through the wire client and the HTTPS transport respectively. Row restrictions and role authorization continue to be enforced by server services.
+Production data lives in Supabase: PostgreSQL (`supabase/migrations/`, with integrity triggers, read-only scoped RLS and Auth identity binding), Supabase Auth, and a private evidence bucket. The application is deployed on Vercel (`https://depi-r5.vercel.app`, see `docs/deployment-status.md`) and reaches PostgreSQL over HTTPS through the server-only `public.depi_execute` function (`lib/data/rpc.ts`) when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are configured; the wire-protocol client (`lib/data/postgres.ts`, `SUPABASE_DB_URL`) serves Node tooling and tests, and production fails closed without Supabase settings; the D1/R2 bindings are honoured only with `LOCAL_DATA_FALLBACK=1` for previews and tests. `docs/data-path-migration.md` is the rehearsed cut-over and rollback runbook (`npm run migrate:supabase`), and `npm run test:postgres` / `npm run test:postgres-rpc` run the full service suite against an embedded PostgreSQL with the real migrations through the wire client and the HTTPS transport respectively. Row restrictions and role authorization continue to be enforced by server services.
 
 ## Initial use
 
@@ -22,26 +22,38 @@ The initializing owner receives Project Operations and Operations Systems / Admi
 
 ## Supabase authentication setup
 
-Pre-provision the authorized staff and student users in Supabase Auth, then configure `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, the server-only `SUPABASE_SERVICE_ROLE_KEY` and `SUPABASE_EVIDENCE_BUCKET=depi-evidence` in the hosted Site environment. Apply `supabase/migrations/*.sql` to the project first (`node scripts/apply-supabase-migrations.mjs --db-url <session pooler URL>` records applied versions and is safe to rerun). Add `https://depi-coaching-operations.abdelrhman-shoman62.chatgpt.site/auth/callback` to the Supabase redirect allowlist for password recovery. Each Supabase user email must exactly match one active staff or student record; public self-registration is intentionally disabled. Two provisioning tools exist. `scripts/provision-student-logins.mjs` reads the students straight from the operational database and creates their accounts, either with a random secret they claim through password recovery or, for a supervised rollout, with the student's own 14-digit national ID or business ID as a first-login password; it is a dry run unless `--apply` is passed. `scripts/provision-supabase-users.py` does the same from a private SQLite roster build. Neither sends bulk email. A national ID or student ID is printed on the roster and is therefore a first-login credential, not a secret, so students must change it immediately.
+Pre-provision the authorized staff and student users in Supabase Auth, then configure `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, the server-only `SUPABASE_SERVICE_ROLE_KEY` and `SUPABASE_EVIDENCE_BUCKET=depi-evidence` in the Vercel project environment. Apply `supabase/migrations/*.sql` to the project first (`node scripts/apply-supabase-migrations.mjs --credentials <file> --management-api` records applied versions and is safe to rerun). Add `https://depi-r5.vercel.app/auth/callback` to the Supabase redirect allowlist for password recovery. Each Supabase user email must exactly match one active staff or student record; public self-registration is intentionally disabled. Two provisioning tools exist. `scripts/provision-student-logins.mjs` reads the students straight from the operational database and creates their accounts, either with a random secret they claim through password recovery or, for a supervised rollout, with the student's own 14-digit national ID or business ID as a first-login password; it is a dry run unless `--apply` is passed. `scripts/provision-supabase-users.py` does the same from a private SQLite roster build. Neither sends bulk email. A national ID or student ID is printed on the roster and is therefore a first-login credential, not a secret, so students must change it immediately.
 
 ## Interface language
 
 The interface is available in English and Arabic. The toggle in every header (sign-in, password reset, student portal, staff console) stores the choice in the `depi_lang` cookie and reloads, so the server renders the chosen language and text direction (`<html lang dir>`) from the first paint. English is the source text: `lib/i18n/ar.ts` maps each English string to Arabic and `t("…")` (from `useT()` in client components, `getT()` on the server) falls back to the English when no entry exists, which is how names, identifiers, URLs and codes pass through untouched. Status values, roles, filter options and table headings are translated where they are displayed, so the stored English values and the API contract do not change. `tests/i18n.test.mjs` fails when an interface string has no Arabic entry or a translation loses a `{placeholder}`.
 
+## Roles and access
+
+- **Leaders** — Project Operations and Coach Operations — see every student. Project Operations also assigns supervisors and coordinators to groups; Coach Operations assigns coaches.
+- **Team supervisors** see only the groups they supervise, and can hand those groups' coordinators over (Program flow → Bulk control).
+- **Coordinators** (titled Project Coordinator or Operations Coordinator; the title is display only, both hold the Operations Coordinator role) see only their own groups' students and their own schedule.
+- **Quality members** see and decide only the students whose services or gig evidence are assigned to them — automatically on arrival, the one holding the fewest, or by the Quality Lead. The **Quality Lead** sees everything, assigns and redistributes, and decides anything.
+- **Spreadsheet import and export** are for leaders, supervisors and administrators only (`dataTransferRoles` in `lib/domain/rules.ts`), and still only within what the person can see.
+- **Administrators** hold `Operations Systems / Admin` and may do anything; separation-of-duties rules still compare people, not roles.
+
+**Weekly progress** shows the programme week — Friday to Thursday, Cairo time — to supervisors, leaders and administrators, with one row per coordinator (contacts, sessions, attendance, service links, evidence, overdue actions, students at risk) and a drill-down to each student. Project Operations also sees the supervisors, Coach Operations the coaches, and a coordinator sees only their own students and schedule.
+
 ## Working features
 
-- Responsive operations overview, complete program flow, work queues, student directory/360, groups, sessions, accounts, gigs, evidence, Quality, cases, reports and administration.
+- Responsive operations overview, complete program flow, work queues, weekly progress, student directory/360, groups, sessions, accounts, gigs, Quality, cases, reports and administration.
 - Student service-link portal with Supabase email/password sign-in, server-validated cookie sessions, password reset, confirmed three-link submission, recoverable device drafts, strict Kafiil, Khamsat and Nafezly URL rules, per-link correction/locking, review history and timestamps.
 - Service-link QC filters, assignment, pagination, SLA reminders, Quality Lead overrides, Student 360 history, operational metrics, exports, roster-health reporting and backup/restore coverage.
+- The programme calendar: eight sessions per group loaded from the calendar sheet, each group's standing Teams/LMS link shown as a Join link on sessions, group cards and the weekly timetable.
 - Coach Operations session control with Regular (8) and Industry (5) delivery plans, policy-locked 180-minute duration, onboarded coach assignment, Cairo-day conflict prevention, coach confirmation, reasoned reschedule/cancellation, attendance completion, delivery notes and SLA/coverage dashboards.
 - Identity from Supabase Auth; backend staff role and assigned-group checks; students access `/student` through their registered email without self-registration.
 - Screenshot-backed contact logging, next actions, valid-contact compliance and risk recommendations.
 - Private image storage, byte-signature checks, 8 MB upload limit, hashes, authorized file delivery and upload audit.
 - Account request/allocation with database-enforced duplicate student/group use and concurrent eligibility protection.
-- Sequential gig events, performed-by versus recorder, paid-gig evidence intake, Coach/L1/Quality review, rejection corrections and L3 escalation cases.
+- A gig is recorded once it is paid, in one step, with its delivery and payment screenshots and the day the client paid; its evidence enters review at once. The Gigs page shows each gig with its review stage and proof. Review passes three different people — a first check (the group's coach, its supervisor, Project Operations or Coach Operations), a second check (the group's supervisor or Project Operations) and the QC team — and nobody who recorded the gig or acted on an earlier step may take the next one. A screenshot can prove only one gig. Rejections return for correction; a second rejection goes to L3.
 - Atomic graduation ledger entries based on accepted paid USD gigs and the group's policy.
 - Auditable attendance, student transfers, controlled group closure and cases with separate verification.
-- XLSX/CSV exports and imports for supported mutable operational modules; templates, validation preview, commit revalidation, reconciliation and error CSV.
+- XLSX/CSV exports and imports for supported mutable operational modules, for leaders, supervisors and administrators; templates, validation preview, commit revalidation, reconciliation and error CSV.
 - Editable draft policy versions, independent approval, effective-policy selection for new groups, protected approved contents and explicit access-change audit.
 - Immutable audit and review history; actor-bound idempotency keys for successful mutations.
 - A staff-triggered policy check creates contact/recovery tasks, supervisor interventions and review-SLA escalations in bounded, retry-safe batches.
@@ -77,7 +89,7 @@ The interface uses the Freelance Yard identity: the orange and navy palette from
 
 ## Source layout
 
-- `app/operations.tsx`: role-aware working surface and workflows.
+- `app/operations.tsx`: role-aware working surface and workflows; `app/weekly-progress.tsx`: the Friday-to-Thursday week.
 - `app/api`: authenticated service interfaces, uploads, spreadsheets.
 - `lib/domain/rules.ts`: business rules and baseline policy.
 - `lib/server.ts`: centralized database, identity, scope, audit and graduation helpers.
@@ -85,6 +97,7 @@ The interface uses the Freelance Yard identity: the orange and navy palette from
 - `db/schema.ts`, `drizzle/`: normalized schema, migrations and integrity triggers.
 - `supabase/migrations/`, `docs/supabase-backend.md`: PostgreSQL target, RLS, private storage and migration boundary.
 - `lib/data/`, `scripts/migrate-d1-to-supabase.mjs`, `docs/data-path-migration.md`: PostgreSQL/Storage adapters, the reconciled data migration and its runbook.
+- `lib/i18n/`: English source text and the Arabic dictionary.
 - `tests/`: executable domain, service integration, rendering and UI component tests.
 - `docs/`: setup, deployment, metric definitions and remaining release gates.
 

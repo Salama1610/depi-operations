@@ -129,7 +129,6 @@ const moduleAction: Row = {
   sessions: "session",
   accounts: "account_request",
   gigs: "gig",
-  evidence: "gig",
   cases: "case",
   work: "task",
   administration: "staff",
@@ -1746,7 +1745,7 @@ export default function Operations({ module: initialModule }: { module: string }
         ),
       ),
     );
-  } else if (module === "evidence" || module === "quality") {
+  } else if (module === "quality") {
     const rows = evidence
       .filter(qMatch)
       .filter((e) => filter === "All" || e.status === filter)
@@ -1948,9 +1947,7 @@ export default function Operations({ module: initialModule }: { module: string }
           </span>
         </div>
         {panel(
-          module === "quality"
-            ? t("Quality review queue · oldest first")
-            : t("Evidence pipeline"),
+          t("Quality review queue · oldest first"),
           generic(
             rows,
             [
@@ -2527,8 +2524,6 @@ export default function Operations({ module: initialModule }: { module: string }
                               accounts:
                                 "Controlled allocations with eligibility checks.",
                               gigs: "Track delivery, payment and the proof behind them.",
-                              evidence:
-                                "From external submission to verified outcome.",
                               quality:
                                 "Review the evidence. Protect the outcome.",
                               cases:
@@ -2579,7 +2574,6 @@ export default function Operations({ module: initialModule }: { module: string }
                               sessions: "Schedule session",
                               accounts: "Request account",
                               gigs: "Record gig",
-                              evidence: "Record gig",
                               cases: "Open case",
                               work: "Create action",
                               administration: "Add staff",

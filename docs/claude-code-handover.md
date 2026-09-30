@@ -2,18 +2,16 @@
 
 ## Product state
 
-This repository contains the DEPI Round 5 coaching/freelancing operations application and the student service-link portal. The hosted Site is:
+This repository contains the DEPI Round 5 coaching/freelancing operations application and the student service-link portal. It is deployed on Vercel at <https://depi-r5.vercel.app> against the production Supabase project, which holds the real Round 5 roster and staff (see `docs/deployment-status.md`). Treat it as production: never load the synthetic pilot there. Test fixtures use `example.invalid` identities and `DEMO-*` records.
 
-<https://depi-coaching-operations.abdelrhman-shoman62.chatgpt.site>
-
-The active workspace is intentionally populated with synthetic pilot data. Never treat `example.invalid` identities, `DEMO-*` records, the sample retention authority, or the sample Ministry mapping as production approvals.
+Every push to `main` deploys, and Preview deployments of other pushed branches use the production database too, so work that must not reach users stays unpushed.
 
 ## Stack and entry points
 
-- Next/Vinext application compiled to a Cloudflare Worker.
+- Next.js application built with `next build` and served by Vercel's Node runtime (`npm run build:cloudflare` keeps the earlier Worker build).
 - Supabase PostgreSQL operational database and the private `depi-evidence` Supabase Storage bucket. The D1 and R2 bindings remain only as a local preview/test fallback and as the rollback artifact.
 - Supabase Auth with server-validated cookie sessions; students are linked server-side by their registered email.
-- Schema and security model in `supabase/migrations/`, reached through the `lib/data/` adapters. The deployed Worker uses the HTTPS transport (`lib/data/rpc.ts` calling the server-only `public.depi_execute`) whenever `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set; Node tooling and tests use the wire client with `SUPABASE_DB_URL`. Production fails closed without Supabase settings, and `LOCAL_DATA_FALLBACK=1` re-enables the D1/R2 bindings for previews and tests. Cut-over and rollback: `docs/data-path-migration.md`.
+- Schema and security model in `supabase/migrations/`, reached through the `lib/data/` adapters. The deployed application uses the HTTPS transport (`lib/data/rpc.ts` calling the server-only `public.depi_execute`) whenever `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set; Node tooling and tests use the wire client with `SUPABASE_DB_URL`. Production fails closed without Supabase settings, and `LOCAL_DATA_FALLBACK=1` re-enables the D1/R2 bindings for previews and tests. Cut-over and rollback: `docs/data-path-migration.md`.
 - Main UI: `app/operations.tsx` and `app/program-flow.tsx`.
 - Operations API: `app/api/operations/route.ts`.
 - Program lifecycle API: `app/api/program/route.ts`.
