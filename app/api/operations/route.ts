@@ -331,6 +331,12 @@ export async function POST(req: Request) {
     let signIn: { email: string; nationalId: string; name: string; active: boolean; reset: boolean } | null = null;
     let auditValue: any = { ...x };
     delete auditValue.request_id;
+    // The person who records an action owns it. Nobody hands their follow-up
+    // to someone else by picking a name, so whatever the form sent is ignored.
+    if (["contact", "task", "case", "group_gate"].includes(x.action)) {
+      x.owner = u.id;
+      auditValue.owner = u.id;
+    }
     switch (x.action) {
       case "contact": {
         permit(u, ops);
@@ -681,8 +687,8 @@ export async function POST(req: Request) {
         ensure(["Outcome", "Support"].includes(x.pathway), "Invalid pathway.");
         const deliveryModel = x.delivery_model || "Regular";
         ensure(
-          ["Regular", "Industry"].includes(deliveryModel),
-          "Choose the Regular or Industry delivery model.",
+          deliveryModel === "Regular",
+          "New groups use the Regular delivery model.",
         );
         const approvedTrack: any = await stmt(
           "SELECT * FROM tracks WHERE name=? AND active=1",

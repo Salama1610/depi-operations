@@ -316,7 +316,7 @@ function validateUpdate(module: string, field: string, value: string, lookups: L
     }
     if (field === "track" && !lookups.tracks.has(value)) return "Not an active approved track";
     if (field === "pathway" && !["Outcome", "Support"].includes(value)) return "Pathway must be Outcome or Support";
-    if (field === "delivery_model" && !["Regular", "Industry"].includes(value)) return "Delivery model must be Regular or Industry";
+    if (field === "delivery_model" && value !== "Regular") return "Delivery model must be Regular";
     if (field === "start_date" && (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(value)))) return "Start date must be YYYY-MM-DD";
   }
   if (module === "accounts") {

@@ -207,6 +207,9 @@ export function permit(u: any, allowed: string[]) {
  * group, so a reviewer sees the groups their students are in.
  */
 export function scopeSql(u: any, alias = "g", studentAlias: string | null = "s") {
+  // Depi Industry was dropped from Round 5. Its groups stay in the database for
+  // the record, but nobody sees them; delete this line to bring them back.
+  const shown = `COALESCE(${alias}.delivery_model,'Regular')<>'Industry'`;
   if (
     can(u.roles, [
       "Project Operations",
@@ -216,7 +219,7 @@ export function scopeSql(u: any, alias = "g", studentAlias: string | null = "s")
       "Coach Operations",
     ])
   )
-    return { sql: "1=1", args: [] };
+    return { sql: shown, args: [] };
   const clauses = [
     `(${alias}.coordinator=? OR ${alias}.supervisor=? OR ${alias}.coach=? OR ${alias}.account_manager=? OR EXISTS (SELECT 1 FROM group_coaches gc WHERE gc.group_id=${alias}.id AND gc.user_id=? AND gc.status='Active'))`,
   ];
@@ -235,7 +238,7 @@ export function scopeSql(u: any, alias = "g", studentAlias: string | null = "s")
     );
     args.push(u.id, u.id);
   }
-  return { sql: clauses.length > 1 ? `(${clauses.join(" OR ")})` : clauses[0], args };
+  return { sql: `(${shown} AND ${clauses.length > 1 ? `(${clauses.join(" OR ")})` : clauses[0]})`, args };
 }
 export async function student(u: any, id: string) {
   const q = scopeSql(u);

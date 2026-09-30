@@ -1227,4 +1227,7 @@ export const ar: Record<string, string> = {
   "Day": "اليوم",
   "Time": "الوقت",
   "State": "الحالة",
+  "You ({v0})": "أنت ({v0})",
+  "Groups run 8 weekly sessions of 180 minutes.": "تعقد المجموعات 8 جلسات أسبوعية مدة كل منها 180 دقيقة.",
+  "{v0} pathway · Week {v1}": "مسار {v0} · الأسبوع {v1}",
 };

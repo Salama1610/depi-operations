@@ -287,6 +287,11 @@ test("full seeded backend workflow and permission gates", async () => {
     (await dbRow("SELECT activity_type FROM attachment_context WHERE attachment_id='PROOF-1'")).activity_type,
     "Student contact",
   );
+  // The recorder owns the action, whatever name the form sent.
+  const someoneElse = (await dbRow("SELECT id FROM users WHERE id<>'owner' AND active=1")).id;
+  await check("task", { student_id: "S10001", title: "Owned by the recorder", owner: someoneElse, due: "2027-01-01T00:00:00Z", request_id: "task-owner" });
+  assert.equal((await dbRow("SELECT owner FROM tasks WHERE title='Owned by the recorder'")).owner, "owner");
+  assert.equal((await dbRow("SELECT owner FROM tasks WHERE title='Next contact'")).owner, "owner");
   await check("account_request", {
     id: "REQ1",
     student_id: "S10001",
@@ -445,6 +450,25 @@ test("full seeded backend workflow and permission gates", async () => {
   await assert.rejects(dbExec("UPDATE audit_events SET action='tampered'"), /immutable/);
   await assert.rejects(dbExec("DELETE FROM evidence_reviews"), /immutable/);
 });
+test("Depi Industry groups and their students are hidden from everyone", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  const g = await dbRow("SELECT * FROM groups WHERE id='G101'");
+  await dbExec(
+    "INSERT INTO groups(id,name,track,provider,coordinator,supervisor,coach,pathway,delivery_model,start_date,status,policy_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+    "IND-HIDDEN", "IND-HIDDEN", g.track, g.provider, g.coordinator, g.supervisor, g.coach, g.pathway, "Industry", g.start_date, "Closed", g.policy_id,
+  );
+  const s = await dbRow("SELECT * FROM students LIMIT 1");
+  await dbExec("UPDATE students SET group_id='IND-HIDDEN' WHERE id=?", s.id);
+  try {
+    const data = await (await api.GET()).json();
+    assert.ok(data.groups.length > 0);
+    assert.ok(!data.groups.some((x) => x.id === "IND-HIDDEN"), "the group is not listed");
+    assert.ok(!data.students.some((x) => x.id === s.id), "nor are its students");
+  } finally {
+    await dbExec("UPDATE students SET group_id=? WHERE id=?", s.group_id, s.id);
+    await dbExec("DELETE FROM groups WHERE id='IND-HIDDEN'");
+  }
+});
 test("verified Supabase email recovers staff identity when the auth id changes", async () => {
   current = { id: "supabase-new-id", email: "owner@example.com" };
   const data = await (await api.GET()).json();
@@ -460,7 +484,7 @@ test("session delivery enforces model limits, coach coverage and lifecycle contr
     id: "SES-RULE-1",
     group_id: "G101",
     coach_id: "staff-coach",
-    title: "Industry coaching session 1",
+    title: "Coaching session 1",
     starts_at: startsAt,
     week: 1,
     duration_minutes: 180,
@@ -499,15 +523,15 @@ test("session delivery enforces model limits, coach coverage and lifecycle contr
     duration_minutes: 180,
   });
   r = await post("session", {
-    id: "SES-BAD-INDUSTRY-WEEK",
+    id: "SES-BAD-WEEK",
     group_id: "G101",
     coach_id: "staff-support-coach",
-    title: "Industry week outside policy",
+    title: "Week outside policy",
     starts_at: new Date(Date.now() + 94 * 86400000).toISOString(),
-    week: 6,
+    week: 9,
     duration_minutes: 180,
   });
-  assert.match(r.error, /weeks 1–5/);
+  assert.match(r.error, /weeks 1–8/);
   r = await post("session", {
     id: "SES-BAD-DURATION",
     group_id: "G103",

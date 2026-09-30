@@ -98,7 +98,7 @@ async function importMetadata(x: any) {
     const id = requiredText(group.id, "Group ID", 80);
     ensure(/^[A-Za-z0-9_-]+$/.test(id), "Group ID is invalid.");
     const delivery = requiredText(group.delivery_model, "Delivery model", 20);
-    ensure(["Regular", "Industry"].includes(delivery), "Group delivery model is invalid.");
+    ensure(delivery === "Regular", "Group delivery model must be Regular.");
     jobs.push(
       stmt(
         "INSERT INTO groups(id,name,track,provider,coordinator,supervisor,coach,pathway,delivery_model,start_date,status,policy_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,track=excluded.track,provider=excluded.provider,pathway=excluded.pathway,delivery_model=excluded.delivery_model,start_date=excluded.start_date,status=excluded.status",

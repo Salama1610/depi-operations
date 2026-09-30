@@ -655,7 +655,14 @@ export default function Operations({ module: initialModule }: { module: string }
       t("Student"),
       students.map((s) => ({ value: s.id, label: s.name + " · " + s.id })),
     );
-  const staffPick = (key = "owner", label = "Action owner") =>
+  // The action owner is whoever records it; the server enforces the same.
+  const ownerLine = () => (
+    <label className="field">
+      {t("Action owner")}
+      <input value={t("You ({v0})", { v0: user.name || user.email })} readOnly />
+    </label>
+  );
+  const staffPick = (key: string, label: string) =>
     choice(
       key,
       label,
@@ -1252,7 +1259,7 @@ export default function Operations({ module: initialModule }: { module: string }
               </small>
               <h2>{g.name}</h2>
               <p>
-                {t("{v0} pathway · {v1} delivery · Week {v2}", { v0: t(g.pathway), v1: t(g.delivery_model || "Regular"), v2: g.week })}
+                {t("{v0} pathway · Week {v1}", { v0: t(g.pathway), v1: g.week })}
               </p>
               <p className="footnote">{g.trajectory_reason}</p>
               <div className="group-metrics">
@@ -3086,7 +3093,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     </div>
                     {proofField()}
                     {field("next_action", t("Next action"))}
-                    {staffPick()}
+                    {ownerLine()}
                     {field("due", t("Action due date"), "datetime-local")}
                     {field("notes", t("Notes"), "text", false)}
                   </>
@@ -3096,7 +3103,7 @@ export default function Operations({ module: initialModule }: { module: string }
                   <>
                     {studentPick()}
                     {field("title", t("Next action"))}
-                    {staffPick()}
+                    {ownerLine()}
                     {field("due", t("Due date"), "datetime-local")}
                     {choice("category", t("Category"), [
                       "Follow-up",
@@ -3150,10 +3157,6 @@ export default function Operations({ module: initialModule }: { module: string }
                     {staffPick("supervisor", t("Supervisor"))}
                     {staffPick("coach", t("Coach"))}
                     {choice("pathway", t("Pathway"), ["Outcome", "Support"])}
-                    {choice("delivery_model", t("Delivery model"), [
-                      "Regular",
-                      "Industry",
-                    ])}
                     {field("start_date", t("Start date"), "date")}
                     {choice(
                       "policy_id",
@@ -3175,7 +3178,7 @@ export default function Operations({ module: initialModule }: { module: string }
                         .filter((g) => g.status === "Active")
                         .map((g) => ({
                           value: g.id,
-                          label: `${g.id} · ${g.delivery_model || "Regular"}`,
+                          label: `${g.id} · ${g.name}`,
                         })),
                     )}
                     {choice(
@@ -3201,7 +3204,7 @@ export default function Operations({ module: initialModule }: { module: string }
                       "number",
                     )}
                     <p className="footnote">
-                      {t("Regular delivery supports 8 weekly sessions; Industry delivery supports 5. The Round 5 duration is 180 minutes.")}
+                      {t("Groups run 8 weekly sessions of 180 minutes.")}
                     </p>
                   </>
                 );
@@ -3698,7 +3701,7 @@ export default function Operations({ module: initialModule }: { module: string }
                       "S3 Standard",
                       "S4 Low",
                     ])}
-                    {staffPick()}
+                    {ownerLine()}
                     {field("due", t("Due date"), "datetime-local")}
                   </>
                 );
@@ -3832,7 +3835,7 @@ export default function Operations({ module: initialModule }: { module: string }
                       "Complete",
                       "Exception",
                     ])}
-                    {staffPick()}
+                    {ownerLine()}
                     {field("due", t("Checkpoint due"), "datetime-local")}
                   </>
                 );
@@ -3856,7 +3859,7 @@ export default function Operations({ module: initialModule }: { module: string }
                   <>
                     {a === "policy" && field("name", t("Policy version name"))}
                     <div className="form-grid">
-                      {Object.entries(baselinePolicy).map(
+                      {Object.entries(baselinePolicy).filter(([key]) => key !== "industrySessionCount").map(
                         ([key, defaultValue]) => (
                           <label className="field" key={key}>
                             {t(

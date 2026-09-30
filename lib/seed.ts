@@ -309,7 +309,7 @@ export async function seed(
         "staff-nour",
         "staff-coach",
         i % 3 ? "Outcome" : "Support",
-        i % 4 === 0 ? "Industry" : "Regular",
+        "Regular",
         start,
         "Active",
         "R5-v1",
