@@ -1117,24 +1117,58 @@ export async function POST(req: Request) {
       }
       case "bulk_group_owner": {
         const groupIds = ids(x.group_ids, "Bulk ownership");
-        ensure(["Coordinator", "Supervisor"].includes(x.owner_type), "Choose coordinator or supervisor ownership.");
+        ensure(
+          ["Coordinator", "Supervisor", "Coach"].includes(x.owner_type),
+          "Choose coordinator, supervisor or coach ownership.",
+        );
+        // Who may hand a group to whom: Project Operations across the
+        // programme, a supervisor for the coordinators of their own groups,
+        // and Coach Operations for the coaches, which is their tier.
         if (x.owner_type === "Supervisor") permit(u, ["Project Operations"]);
+        else if (x.owner_type === "Coach") permit(u, ["Project Operations", "Coach Operations"]);
         else permit(u, ["Project Operations", "Team Supervisor"]);
-        const requiredRole = x.owner_type === "Coordinator" ? "Operations Coordinator" : "Team Supervisor";
+        const requiredRole =
+          x.owner_type === "Coordinator"
+            ? "Operations Coordinator"
+            : x.owner_type === "Coach"
+              ? "Coach"
+              : "Team Supervisor";
         const owner: any = await stmt("SELECT * FROM users WHERE id=? AND active=1", x.owner).first();
         ensure(owner && JSON.parse(owner.roles).includes(requiredRole), `Choose an active ${requiredRole}.`);
         ensure(x.reason?.trim(), "Record the bulk ownership reason.");
         const marks = groupIds.map(() => "?").join(",");
-        const scoped = can(u.roles, ["Project Operations"])
+        const scoped = can(u.roles, ["Project Operations", "Coach Operations"])
           ? await all(`SELECT id,status FROM groups WHERE id IN (${marks})`, ...groupIds)
           : await all(`SELECT id,status FROM groups WHERE id IN (${marks}) AND supervisor=?`, ...groupIds, u.id);
         ensure(scoped.length === groupIds.length, "One or more groups are missing, archived, or outside your scope.");
         ensure(scoped.every((g) => g.status !== "Archived"), "Archived groups are read-only.");
+        const column =
+          x.owner_type === "Coordinator" ? "coordinator" : x.owner_type === "Coach" ? "coach" : "supervisor";
         jobs.push(stmt(
-          `UPDATE groups SET ${x.owner_type === "Coordinator" ? "coordinator" : "supervisor"}=? WHERE id IN (${marks})`,
+          `UPDATE groups SET ${column}=? WHERE id IN (${marks})`,
           owner.id,
           ...groupIds,
         ));
+        // Naming the coach of a group is not the same as putting them to work:
+        // a session and the first evidence review both need an onboarded
+        // functional assignment, so the row is created here and the onboarding
+        // checklist is still completed through the coach assignment screen.
+        if (x.owner_type === "Coach")
+          for (const groupId of groupIds)
+            jobs.push(stmt(
+              `INSERT INTO group_coaches(id,group_id,user_id,coach_type,status,onboarding_status,checklist,assigned_by,assigned_at,onboarded_at)
+               VALUES(?,?,?,?,?,?,?,?,?,NULL)
+               ON CONFLICT(group_id,user_id,coach_type) DO UPDATE SET status='Active',assigned_by=excluded.assigned_by`,
+              uid("GC"),
+              groupId,
+              owner.id,
+              "Outcome Coach",
+              "Active",
+              "Pending",
+              "[]",
+              u.id,
+              t,
+            ));
         entity = groupIds.join(",");
         break;
       }

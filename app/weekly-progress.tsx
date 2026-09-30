@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useState } from "react";
 import { ChevronLeft, ChevronRight, CalendarRange } from "lucide-react";
 import { useLocale, useT } from "@/lib/i18n/context";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
@@ -40,14 +40,38 @@ const within = (value: string | null | undefined, from: string, to: string) => {
 };
 const pct = (n: number, d: number) => (d ? Math.round((n / d) * 100) + "%" : "—");
 const ATTENDED = ["Present", "Late"];
+const roleList = (person: Row): string[] => {
+  try {
+    return Array.isArray(person.roles) ? person.roles : JSON.parse(person.roles || "[]");
+  } catch {
+    return [];
+  }
+};
 
+/**
+ * One week of the programme, shown from where the reader sits.
+ *
+ * A coordinator gets their own students and their own timetable, and nobody
+ * else's — their week is a working list, not a league table. A supervisor gets
+ * the coordinators they are responsible for. Project Operations gets the
+ * supervisors above those coordinators, and Coach Operations gets the coaches.
+ * Everything is computed from what the server already decided this person may
+ * see, so the scope rules stay the single authority on that.
+ */
 export function WeeklyProgress({ data, onStudent }: { data: Row; onStudent: (id: string) => void }) {
   const t = useT();
   const locale = useLocale();
   const user = data.user || { roles: [] };
-  const leader = can(user.roles, ["Project Operations", "Coach Operations", "Operations Systems / Admin", "Higher Board"]);
+  const operations = can(user.roles, ["Project Operations", "Operations Systems / Admin", "Higher Board"]);
+  const coachOperations = can(user.roles, ["Coach Operations"]);
+  const supervises = can(user.roles, ["Team Supervisor"]);
+  const leader = operations || coachOperations;
+  // Anyone who is not above a team is reading their own week.
+  const ownWeek = !operations && !coachOperations && !supervises;
   const [offset, setOffset] = useState(0);
   const [supervisor, setSupervisor] = useState("All");
+  const [coordinator, setCoordinator] = useState("All");
+  const [track, setTrack] = useState("All");
   const [open, setOpen] = useState<string | null>(null);
 
   const today = cairoDay(new Date());
@@ -60,8 +84,17 @@ export function WeeklyProgress({ data, onStudent }: { data: Row; onStudent: (id:
       month: "short",
       timeZone: "UTC",
     });
+  const clock = (value: string) =>
+    new Date(value).toLocaleTimeString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "Africa/Cairo",
+    });
 
-  const view = useMemo(() => {
+  // Derived on render rather than memoised: the React compiler optimises this
+  // for us, and one pass over a few thousand rows costs less than the hooks it
+  // would take to cache it.
+  const view = (() => {
     const staff: Row[] = data.staff || [];
     const groups: Row[] = data.groups || [];
     const students: Row[] = (data.students || []).filter((s: Row) => s.lifecycle === "Active");
@@ -72,10 +105,15 @@ export function WeeklyProgress({ data, onStudent }: { data: Row; onStudent: (id:
     const links: Row[] = data.serviceLinks || [];
     const evidence: Row[] = (data.evidence || []).filter((e: Row) => within(e.created_at, from, to));
     const tasks: Row[] = data.tasks || [];
+    const coachRows: Row[] = data.groupCoaches || [];
     const now = new Date().toISOString();
 
     const inScopeGroups = groups.filter(
-      (g) => g.status === "Active" && (supervisor === "All" || g.supervisor === supervisor),
+      (g) =>
+        g.status === "Active" &&
+        (supervisor === "All" || g.supervisor === supervisor) &&
+        (coordinator === "All" || g.coordinator === coordinator) &&
+        (track === "All" || g.track === track),
     );
     const groupIds = new Set(inScopeGroups.map((g) => g.id));
     const scopedStudents = students.filter((s) => groupIds.has(s.group_id));
@@ -108,19 +146,69 @@ export function WeeklyProgress({ data, onStudent }: { data: Row; onStudent: (id:
       };
     };
 
-    const coordinators = staff
-      .filter((u) => inScopeGroups.some((g) => g.coordinator === u.id))
-      .map((u) => {
-        const gids = new Set(inScopeGroups.filter((g) => g.coordinator === u.id).map((g) => g.id));
-        const list = scopedStudents.filter((s) => gids.has(s.group_id));
-        return { id: u.id, name: u.name, title: u.title || "", groups: [...gids], list, ...measure(list, gids, [u.id]) };
-      })
-      .sort((a, b) => a.name.localeCompare(b.name));
+    /** One row per person, measured over the groups they are responsible for. */
+    const rollUp = (people: Row[], groupsOf: (person: Row) => Row[]) =>
+      people
+        .map((person) => {
+          const theirs = groupsOf(person);
+          const gids = new Set(theirs.map((g) => g.id));
+          const list = scopedStudents.filter((s) => gids.has(s.group_id));
+          return {
+            id: person.id,
+            name: person.name,
+            title: person.title || "",
+            groups: theirs.map((g) => g.id),
+            list,
+            ...measure(list, gids, [person.id]),
+          };
+        })
+        .sort((a, b) => a.name.localeCompare(b.name));
 
-    const supervisors = staff.filter((u) => groups.some((g) => g.status === "Active" && g.supervisor === u.id));
+    const coordinators = rollUp(
+      staff.filter((u) => inScopeGroups.some((g) => g.coordinator === u.id)),
+      (person) => inScopeGroups.filter((g) => g.coordinator === person.id),
+    );
+    const supervisors = rollUp(
+      staff.filter((u) => inScopeGroups.some((g) => g.supervisor === u.id)),
+      (person) => inScopeGroups.filter((g) => g.supervisor === person.id),
+    );
+    // A coach reaches a group either as its named coach or through a live
+    // functional assignment, and both count as their week.
+    const coachGroups = (person: Row) =>
+      inScopeGroups.filter(
+        (g) =>
+          g.coach === person.id ||
+          coachRows.some((c) => c.group_id === g.id && c.user_id === person.id && c.status === "Active"),
+      );
+    const coaches = rollUp(
+      staff.filter((u) => roleList(u).includes("Coach") && coachGroups(u).length > 0),
+      coachGroups,
+    ).map((coach) => ({
+      ...coach,
+      ownSessions: sessions.filter((s) => s.coach_id === coach.id || coach.groups.includes(s.group_id)),
+    }));
+
+    const schedule = sessions
+      .filter((s) => groupIds.has(s.group_id))
+      .sort((a, b) => String(a.starts_at).localeCompare(String(b.starts_at)));
+    const mine = scopedStudents.filter((s) => s.coordinator === user.id);
     const totals = measure(scopedStudents, groupIds, coordinators.map((c) => c.id));
-    return { coordinators, supervisors, totals, contactedBy, attendanceBy, linksBy, sessionsInWeek: sessions };
-  }, [data, from, to, supervisor]);
+    return {
+      coordinators,
+      supervisors,
+      coaches,
+      schedule,
+      mine,
+      totals,
+      contactedBy,
+      attendanceBy,
+      linksBy,
+      sessionsInWeek: sessions,
+      supervisorOptions: staff.filter((u) => groups.some((g) => g.status === "Active" && g.supervisor === u.id)),
+      coordinatorOptions: staff.filter((u) => groups.some((g) => g.status === "Active" && g.coordinator === u.id)),
+      trackOptions: [...new Set(groups.filter((g) => g.status === "Active").map((g) => g.track).filter(Boolean))].sort(),
+    };
+  })();
 
   const { totals } = view;
   const stats = [
@@ -130,6 +218,80 @@ export function WeeklyProgress({ data, onStudent }: { data: Row; onStudent: (id:
     { label: "Service links", value: String(totals.submitted), detail: t("{v0} links locked", { v0: totals.locked }) },
     { label: "Evidence submitted", value: String(totals.evidence), detail: t("{v0} overdue actions now", { v0: totals.overdue }) },
   ];
+  const filtered = supervisor !== "All" || coordinator !== "All" || track !== "All";
+
+  const peopleTable = (
+    heading: string,
+    first: string,
+    rows: Row[],
+    detail: (row: Row) => React.ReactNode,
+    empty: [string, string],
+  ) => (
+    <section className="panel" key={heading}>
+      <div className="panel-heading">
+        <h2>{t(heading)}</h2>
+        <span className="count">{rows.length}</span>
+      </div>
+      {rows.length ? (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              {[first, "Groups", "Students", "Contacted", "Sessions held", "Attendance", "Links submitted", "Links locked", "Evidence", "Overdue", "At risk"].map((h) => (
+                <TableHead key={h}>{t(h)}</TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((c) => (
+              <Fragment key={c.id}>
+                <TableRow className="weekly-row" onClick={() => setOpen(open === c.id ? null : c.id)} aria-expanded={open === c.id}>
+                  <TableCell>
+                    <span className="table-name">
+                      {c.name}
+                      {c.title && <small>{t(c.title)}</small>}
+                    </span>
+                  </TableCell>
+                  <TableCell>{c.groups.length}</TableCell>
+                  <TableCell>{c.students}</TableCell>
+                  <TableCell>
+                    {c.contacted} <small className="table-subline">{pct(c.contacted, c.students)}</small>
+                  </TableCell>
+                  <TableCell>{c.held} / {c.sessions}</TableCell>
+                  <TableCell>{c.attendance}</TableCell>
+                  <TableCell>{c.submitted}</TableCell>
+                  <TableCell>{c.locked}</TableCell>
+                  <TableCell>{c.evidence}</TableCell>
+                  <TableCell>{c.overdue ? <span className="badge red">{c.overdue}</span> : 0}</TableCell>
+                  <TableCell>{c.atRisk ? <span className="badge amber">{c.atRisk}</span> : 0}</TableCell>
+                </TableRow>
+                {open === c.id && (
+                  <TableRow className="weekly-detail">
+                    <TableCell colSpan={11}>{detail(c)}</TableCell>
+                  </TableRow>
+                )}
+              </Fragment>
+            ))}
+          </TableBody>
+        </Table>
+      ) : (
+        <div className="empty">
+          <h3>{t(empty[0])}</h3>
+          <p>{t(empty[1])}</p>
+        </div>
+      )}
+    </section>
+  );
+
+  const studentsOf = (rows: Row[]) => (
+    <StudentWeek
+      students={rows}
+      contactedBy={view.contactedBy}
+      attendanceBy={view.attendanceBy}
+      linksBy={view.linksBy}
+      sessions={view.sessionsInWeek}
+      onStudent={onStudent}
+    />
+  );
 
   return (
     <div className="weekly">
@@ -149,17 +311,49 @@ export function WeeklyProgress({ data, onStudent }: { data: Row; onStudent: (id:
           <button className="small-btn" onClick={() => setOffset(offset + 1)} aria-label={t("Next week")}>
             {t("Next week")} <ChevronRight size={16} className="flip-rtl" />
           </button>
-          {leader && view.supervisors.length > 0 && (
+          {leader && view.supervisorOptions.length > 0 && (
             <select className="weekly-filter" value={supervisor} onChange={(e) => setSupervisor(e.target.value)} aria-label={t("Supervisor")}>
               <option value="All">{t("All supervisors")}</option>
-              {view.supervisors.map((s: Row) => (
+              {view.supervisorOptions.map((s: Row) => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
           )}
+          {!ownWeek && view.coordinatorOptions.length > 1 && (
+            <select className="weekly-filter" value={coordinator} onChange={(e) => setCoordinator(e.target.value)} aria-label={t("Coordinator")}>
+              <option value="All">{t("Every coordinator")}</option>
+              {view.coordinatorOptions.map((s: Row) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          )}
+          {view.trackOptions.length > 1 && (
+            <select className="weekly-filter" value={track} onChange={(e) => setTrack(e.target.value)} aria-label={t("Track")}>
+              <option value="All">{t("Every track")}</option>
+              {view.trackOptions.map((name: string) => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+          )}
+          {filtered && (
+            <button
+              className="small-btn"
+              onClick={() => {
+                setSupervisor("All");
+                setCoordinator("All");
+                setTrack("All");
+              }}
+            >
+              {t("Clear filters")}
+            </button>
+          )}
         </div>
       </div>
-      <p className="footnote weekly-note">{t("The programme week runs Friday to Thursday, Cairo time. Figures cover active students in the groups you can see.")}</p>
+      <p className="footnote weekly-note">
+        {ownWeek
+          ? t("The programme week runs Friday to Thursday, Cairo time. This is your own week: your students and your sessions.")
+          : t("The programme week runs Friday to Thursday, Cairo time. Figures cover active students in the groups you can see.")}
+      </p>
 
       <div className="stats weekly-stats">
         {stats.map((s) => (
@@ -171,68 +365,107 @@ export function WeeklyProgress({ data, onStudent }: { data: Row; onStudent: (id:
         ))}
       </div>
 
-      <section className="panel">
-        <div className="panel-heading">
-          <h2>{t("Coordinators this week")}</h2>
-          <span className="count">{view.coordinators.length}</span>
-        </div>
-        {view.coordinators.length ? (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                {["Coordinator", "Groups", "Students", "Contacted", "Sessions held", "Attendance", "Links submitted", "Links locked", "Evidence", "Overdue", "At risk"].map((h) => (
-                  <TableHead key={h}>{t(h)}</TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {view.coordinators.map((c) => (
-                <Fragment key={c.id}>
-                  <TableRow className="weekly-row" onClick={() => setOpen(open === c.id ? null : c.id)} aria-expanded={open === c.id}>
-                    <TableCell>
-                      <span className="table-name">
-                        {c.name}
-                        {c.title && <small>{t(c.title)}</small>}
-                      </span>
-                    </TableCell>
-                    <TableCell>{c.groups.length}</TableCell>
-                    <TableCell>{c.students}</TableCell>
-                    <TableCell>
-                      {c.contacted} <small className="table-subline">{pct(c.contacted, c.students)}</small>
-                    </TableCell>
-                    <TableCell>{c.held} / {c.sessions}</TableCell>
-                    <TableCell>{c.attendance}</TableCell>
-                    <TableCell>{c.submitted}</TableCell>
-                    <TableCell>{c.locked}</TableCell>
-                    <TableCell>{c.evidence}</TableCell>
-                    <TableCell>{c.overdue ? <span className="badge red">{c.overdue}</span> : 0}</TableCell>
-                    <TableCell>{c.atRisk ? <span className="badge amber">{c.atRisk}</span> : 0}</TableCell>
-                  </TableRow>
-                  {open === c.id && (
-                    <TableRow className="weekly-detail">
-                      <TableCell colSpan={11}>
-                        <StudentWeek
-                          students={c.list}
-                          contactedBy={view.contactedBy}
-                          attendanceBy={view.attendanceBy}
-                          linksBy={view.linksBy}
-                          sessions={view.sessionsInWeek}
-                          onStudent={onStudent}
-                        />
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </Fragment>
-              ))}
-            </TableBody>
-          </Table>
-        ) : (
-          <div className="empty">
-            <h3>{t("No coordinators in this view")}</h3>
-            <p>{t("Coordinators appear here once they are assigned to groups you supervise.")}</p>
+      {operations &&
+        peopleTable("Supervisors this week", "Supervisor", view.supervisors, (s) => studentsOf(s.list), [
+          "No supervisors in this view",
+          "Supervisors appear here once they hold an active group.",
+        ])}
+
+      {!ownWeek &&
+        peopleTable("Coordinators this week", "Coordinator", view.coordinators, (c) => studentsOf(c.list), [
+          "No coordinators in this view",
+          "Coordinators appear here once they are assigned to groups you supervise.",
+        ])}
+
+      {(coachOperations || operations) &&
+        peopleTable("Coaches this week", "Coach", view.coaches, (c) => <SessionWeek sessions={c.ownSessions} clock={clock} label={label} />, [
+          "No coaches in this view",
+          "Coaches appear here once they are assigned to a group.",
+        ])}
+
+      {ownWeek && (
+        <section className="panel">
+          <div className="panel-heading">
+            <h2>{t("My students this week")}</h2>
+            <span className="count">{view.mine.length || view.totals.students}</span>
           </div>
-        )}
-      </section>
+          {view.totals.students ? (
+            studentsOf(view.mine.length ? view.mine : view.coordinators.flatMap((c: Row) => c.list))
+          ) : (
+            <div className="empty">
+              <h3>{t("No active students in this week")}</h3>
+              <p>{t("Students appear here once a group you coordinate is active.")}</p>
+            </div>
+          )}
+        </section>
+      )}
+
+      {(ownWeek || supervises) && (
+        <section className="panel">
+          <div className="panel-heading">
+            <h2>{t("My schedule this week")}</h2>
+            <span className="count">{view.schedule.length}</span>
+          </div>
+          {view.schedule.length ? (
+            <SessionWeek sessions={view.schedule} clock={clock} label={label} />
+          ) : (
+            <div className="empty">
+              <h3>{t("Nothing scheduled this week")}</h3>
+              <p>{t("Sessions appear here as soon as they are on the calendar for your groups.")}</p>
+            </div>
+          )}
+        </section>
+      )}
+    </div>
+  );
+}
+
+/** The week's timetable: what is on, for whom, and whether it happened. */
+function SessionWeek({
+  sessions,
+  clock,
+  label,
+}: {
+  sessions: Row[];
+  clock: (value: string) => string;
+  label: (day: string) => string;
+}) {
+  const t = useT();
+  return (
+    <div className="weekly-students">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            {["Day", "Time", "Group", "Session", "Week", "State"].map((h) => (
+              <TableHead key={h}>{t(h)}</TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {sessions.map((s) => (
+            <TableRow key={s.id}>
+              <TableCell>{label(s.session_day)}</TableCell>
+              <TableCell>{clock(s.starts_at)}</TableCell>
+              <TableCell>{s.group_id}</TableCell>
+              <TableCell>
+                {s.title}
+                <small className="table-subline">{t("{v0} minutes", { v0: s.duration_minutes })}</small>
+              </TableCell>
+              <TableCell>{t("Week {v0}", { v0: s.week })}</TableCell>
+              <TableCell>
+                <span
+                  className={
+                    "badge " +
+                    (s.status === "Completed" ? "green" : s.status === "Confirmed" ? "neutral" : "amber")
+                  }
+                >
+                  {t(s.status)}
+                </span>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
     </div>
   );
 }

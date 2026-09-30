@@ -453,7 +453,22 @@ export default function Operations({ module: initialModule }: { module: string }
       : m === "administration"
         ? can(user.roles, ["Operations Systems / Admin"])
         : m === "weekly"
-          ? can(user.roles, ["Team Supervisor", "Project Operations", "Coach Operations", "Operations Systems / Admin", "Higher Board"])
+          ? can(user.roles, [
+              "Operations Coordinator",
+              "Team Supervisor",
+              "Project Operations",
+              "Coach Operations",
+              "Operations Systems / Admin",
+              "Higher Board",
+            ])
+        : m === "reports"
+          ? can(user.roles, [
+              "Team Supervisor",
+              "Project Operations",
+              "Coach Operations",
+              "Operations Systems / Admin",
+              "Higher Board",
+            ])
         : m === "quality"
           ? canSeeServiceQueue || can(user.roles, ["Higher Board"])
           : m === "accounts"

@@ -45,10 +45,11 @@ function workspace(roles) {
       { id: "coord-2", name: "Bassem Coordinator", title: "Operations Coordinator", roles: '["Operations Coordinator"]' },
       { id: "sup-a", name: "Supervisor A", roles: '["Team Supervisor"]' },
       { id: "sup-b", name: "Supervisor B", roles: '["Team Supervisor"]' },
+      { id: "coach-1", name: "Mariam Coach", roles: '["Coach"]' },
     ],
     groups: [
-      { id: "G1", status: "Active", coordinator: "coord-1", supervisor: "sup-a" },
-      { id: "G2", status: "Active", coordinator: "coord-2", supervisor: "sup-b" },
+      { id: "G1", status: "Active", coordinator: "coord-1", supervisor: "sup-a", coach: "coach-1", track: "Web Development" },
+      { id: "G2", status: "Active", coordinator: "coord-2", supervisor: "sup-b", coach: "coach-1", track: "Digital Arts" },
     ],
     students: [
       { id: "S1", name: "Student One", group_id: "G1", lifecycle: "Active", risk: { status: "On Track" } },
@@ -56,7 +57,11 @@ function workspace(roles) {
       { id: "S3", name: "Student Three", group_id: "G1", lifecycle: "Withdrawn", risk: { status: "On Track" } },
       { id: "S4", name: "Student Four", group_id: "G2", lifecycle: "Active", risk: { status: "On Track" } },
     ],
-    sessions: [{ id: "SES1", group_id: "G1", session_day: start, status: "Completed" }],
+    sessions: [
+      { id: "SES1", group_id: "G1", session_day: start, starts_at: inWeek, status: "Completed", title: "Week 1 coaching", week: 1, duration_minutes: 180, coach_id: "coach-1" },
+      { id: "SES2", group_id: "G2", session_day: start, starts_at: inWeek, status: "Scheduled", title: "Week 1 coaching", week: 1, duration_minutes: 180, coach_id: "coach-1" },
+    ],
+    groupCoaches: [{ group_id: "G1", user_id: "coach-1", status: "Active", coach_type: "Outcome Coach" }],
     attendance: [{ session_id: "SES1", student_id: "S1", status: "Present" }],
     // S1 contacted this week; S2 only last week, so not counted.
     contacts: [
@@ -102,4 +107,50 @@ test("the weekly view reads in Arabic", () => {
   assert.match(html, /هذا الأسبوع/);
   assert.match(html, /المنسقون هذا الأسبوع/);
   assert.match(html, /منسق مشروع/);
+});
+
+test("Project Operations also sees the supervisors above the coordinators", () => {
+  const html = render(workspace(["Project Operations"]));
+  assert.match(html, /Supervisors this week/);
+  assert.match(html, /Supervisor A/);
+  assert.match(html, /Supervisor B/, "both supervisors are measured, not only the reader's own");
+  assert.match(html, /Coordinators this week/, "the coordinator roll-up stays");
+});
+
+test("a supervisor is not shown anybody else's tier", () => {
+  const data = workspace(["Team Supervisor"]);
+  data.groups = data.groups.filter((g) => g.supervisor === "sup-a");
+  const html = render(data);
+  assert.doesNotMatch(html, /Supervisors this week/, "supervisors are not ranked against each other");
+  assert.match(html, /Coordinators this week/);
+  assert.match(html, /My schedule this week/, "their own timetable is theirs to see");
+});
+
+test("Coach Operations sees the coaches and their sessions", () => {
+  const html = render(workspace(["Coach Operations"]));
+  assert.match(html, /Coaches this week/);
+  assert.match(html, /Mariam Coach/);
+  assert.doesNotMatch(html, /Supervisors this week/, "the coaching tier is theirs, the supervisors are not");
+});
+
+test("a coordinator gets their own week and nobody else's performance", () => {
+  const data = workspace(["Operations Coordinator"]);
+  data.user = { id: "coord-1", roles: ["Operations Coordinator"] };
+  data.groups = data.groups.filter((g) => g.coordinator === "coord-1");
+  data.students = data.students.filter((s) => s.group_id === "G1");
+  const html = render(data);
+  assert.match(html, /My students this week/);
+  assert.match(html, /My schedule this week/);
+  assert.match(html, /Student One/, "their own students are listed");
+  assert.doesNotMatch(html, /Coordinators this week/, "no table of coordinators");
+  assert.doesNotMatch(html, /Supervisors this week/);
+  assert.doesNotMatch(html, /Coaches this week/);
+  assert.doesNotMatch(html, /All supervisors/, "and no filter over other people's teams");
+  assert.doesNotMatch(html, /Every coordinator/);
+});
+
+test("the coordinator filter narrows a leader's view to one team", () => {
+  const html = render(workspace(["Project Operations"]));
+  assert.match(html, /Every coordinator/, "a leader can narrow to one coordinator");
+  assert.match(html, /Every track/);
 });

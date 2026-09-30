@@ -124,7 +124,12 @@ export function ProgramFlow() {
           : action === "bulk_classification"
             ? "At Risk"
             : "",
-      owner_type: action === "bulk_group_owner" ? "Coordinator" : row.owner_type,
+      owner_type:
+        action === "bulk_group_owner"
+          ? allowed(["Project Operations", "Operations Systems / Admin", "Team Supervisor"])
+            ? "Coordinator"
+            : "Coach"
+          : row.owner_type,
       max_score: 100,
       pass_score: 60,
       submitted_at: new Date().toISOString().slice(0, 16),
@@ -731,7 +736,7 @@ export function ProgramFlow() {
                 {t("Apply one validated change to up to 100 authorized records. Every batch is atomic and written to the audit history.")}
               </p>
               <div className="detail-actions">
-                {allowed(["Project Operations", "Team Supervisor"]) && (
+                {allowed(["Project Operations", "Team Supervisor", "Coach Operations"]) && (
                   <button className="small-btn" onClick={() => open("bulk_group_owner")}>
                     {t("Assign group owners")}
                   </button>
@@ -1162,14 +1167,24 @@ export function ProgramFlow() {
                   "owner_type",
                   "Ownership field",
                   allowed(["Project Operations"])
-                    ? ["Coordinator", "Supervisor"]
-                    : ["Coordinator"],
+                    ? ["Coordinator", "Supervisor", "Coach"]
+                    : allowed(["Coach Operations"])
+                      ? ["Coach"]
+                      : ["Coordinator"],
                 )}
                 {select(
                   "owner",
                   "New owner",
                   staff
-                    .filter((s) => JSON.parse(s.roles).includes(form.owner_type === "Supervisor" ? "Team Supervisor" : "Operations Coordinator"))
+                    .filter((s) =>
+                      JSON.parse(s.roles).includes(
+                        form.owner_type === "Supervisor"
+                          ? "Team Supervisor"
+                          : form.owner_type === "Coach"
+                            ? "Coach"
+                            : "Operations Coordinator",
+                      ),
+                    )
                     .map((s) => ({ value: s.id, label: s.name })),
                 )}
                 {field("reason", t("Bulk ownership reason"))}

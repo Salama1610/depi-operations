@@ -1511,6 +1511,38 @@ test("safe bulk controls are atomic and dangerous approvals stay individual", as
     (await dbRow("SELECT count(*) n FROM groups WHERE id IN ('G101','G102') AND coordinator='staff-sara'")).n,
     2,
   );
+  // Coach Operations own the coaching tier: they may hand groups to a coach,
+  // and doing so creates the functional assignment a session needs, so the
+  // coach is not merely named on the record.
+  current = { id: "staff-coach-ops", email: "staff-coach-ops@example.invalid" };
+  assert.match(
+    (await programPost("bulk_group_owner", { group_ids: ["G103"], owner_type: "Coordinator", owner: "staff-sara", reason: "Not their tier" })).error,
+    /role/,
+    "coaching operations do not reassign coordinators",
+  );
+  await programCheck("bulk_group_owner", {
+    group_ids: ["G103", "G104"],
+    owner_type: "Coach",
+    owner: "staff-coach",
+    reason: "Coaching cover for the term",
+  });
+  assert.equal(
+    (await dbRow("SELECT count(*) n FROM groups WHERE id IN ('G103','G104') AND coach='staff-coach'")).n,
+    2,
+  );
+  assert.equal(
+    (await dbRow(
+      "SELECT count(*) n FROM group_coaches WHERE group_id IN ('G103','G104') AND user_id='staff-coach' AND status='Active'",
+    )).n,
+    2,
+    "the functional assignment is created with it",
+  );
+  assert.match(
+    (await programPost("bulk_group_owner", { group_ids: ["G103"], owner_type: "Coach", owner: "staff-sara", reason: "Wrong role" })).error,
+    /active Coach/,
+  );
+  current = { id: "owner", email: "owner@example.com" };
+
   const rejected = await programPost("bulk_classification", {
     student_ids: ["S10002", "missing-student"],
     status: "Critical",
