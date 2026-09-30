@@ -115,7 +115,7 @@ const nav = [
   ["groups", "Groups", Layers],
   ["sessions", "Sessions", CalendarDays],
   ["accounts", "Accounts", WalletCards],
-  ["gigs", "Gigs & services", BriefcaseBusiness],
+  ["gigs", "Gigs", BriefcaseBusiness],
   ["evidence", "Evidence", Files],
   ["quality", "Quality review", ShieldCheck],
   ["cases", "Cases", Flag],

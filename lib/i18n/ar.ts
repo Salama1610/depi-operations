@@ -14,7 +14,7 @@ export const ar: Record<string, string> = {
   "Groups": "المجموعات",
   "Sessions": "الجلسات",
   "Accounts": "الحسابات",
-  "Gigs & services": "الأعمال والخدمات",
+  "Gigs": "الأعمال",
   "Evidence": "الأدلة",
   "Quality review": "مراجعة الجودة",
   "Quality Review": "مراجعة الجودة",
