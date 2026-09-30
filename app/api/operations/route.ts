@@ -12,6 +12,7 @@ import {
   student,
   proof,
   permit,
+  scopeSql,
   auditStmt,
   loadData,
   graduationStmt,
@@ -620,6 +621,14 @@ export async function POST(req: Request) {
           x.group_id,
         ).first();
         ensure(destination, "Choose an active group.");
+        // A student joins one of the groups this person runs.
+        if (!can(u.roles, ["Project Operations", ...admin])) {
+          const scope = scopeSql(u, "g", null);
+          ensure(
+            await stmt(`SELECT g.id FROM groups g WHERE g.id=? AND ${scope.sql}`, x.group_id, ...scope.args).first(),
+            "Choose one of your own groups.",
+          );
+        }
         const trackCapacity: any = await stmt(
           "SELECT capacity FROM tracks WHERE name=? AND active=1",
           destination.track,

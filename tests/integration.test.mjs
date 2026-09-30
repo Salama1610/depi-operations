@@ -2420,3 +2420,38 @@ test("migration script loads a full export into Supabase PostgreSQL and reconcil
     await target.stop();
   }
 });
+
+test("a supervisor assigns coordinators only within their own team", async () => {
+  const base = await dbRow("SELECT * FROM groups WHERE id='G101'");
+  await dbExec("INSERT INTO users(id,email,name,roles,scopes,active) VALUES(?,?,?,?,?,?)", "sup-two", "sup-two@example.invalid", "Second Supervisor", JSON.stringify(["Team Supervisor"]), "[]", 1);
+  await dbExec("INSERT INTO users(id,email,name,roles,scopes,active) VALUES(?,?,?,?,?,?)", "coord-two", "coord-two@example.invalid", "Other Team Coordinator", JSON.stringify(["Operations Coordinator"]), "[]", 1);
+  await dbExec(
+    "INSERT INTO groups(id,name,track,provider,coordinator,supervisor,coach,pathway,delivery_model,start_date,status,policy_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+    "G-TEAM2", "Other team group", base.track, base.provider, "coord-two", "sup-two", base.coach, base.pathway, "Regular", base.start_date, "Active", base.policy_id,
+  );
+  const mine = await dbRow("SELECT id,coordinator FROM groups WHERE supervisor='staff-nour' AND status='Active' LIMIT 1");
+  current = { id: "supervisor-login", email: "staff-nour@example.invalid" };
+  const data = await (await api.GET()).json();
+  assert.ok(Array.isArray(data.teamCoordinators), "a supervisor is given their team");
+  assert.ok(!data.teamCoordinators.includes("coord-two"), "another supervisor's coordinator is not on it");
+  assert.match(
+    (await programPost("bulk_group_owner", { group_ids: [mine.id], owner_type: "Coordinator", owner: "coord-two", reason: "Borrow a coordinator" })).error,
+    /your own team/,
+  );
+  assert.match(
+    (await programPost("bulk_group_owner", { group_ids: ["G-TEAM2"], owner_type: "Coordinator", owner: "staff-omar", reason: "Take their group" })).error,
+    /outside your scope/,
+  );
+  const teammate = data.teamCoordinators.find((id) => id !== mine.coordinator);
+  await programCheck("bulk_group_owner", { group_ids: [mine.id], owner_type: "Coordinator", owner: teammate, reason: "Rebalance inside the team" });
+  assert.equal((await dbRow("SELECT coordinator FROM groups WHERE id=?", mine.id)).coordinator, teammate);
+  // Project Operations still assigns across teams.
+  current = { id: "owner", email: "owner@example.com" };
+  assert.equal((await (await api.GET()).json()).teamCoordinators, null);
+  // A coordinator adds students only to their own groups.
+  current = { id: teammate, email: (await dbRow("SELECT email FROM users WHERE id=?", teammate)).email };
+  assert.match((await post("student", { id: "S-TEAM-1", name: "Out of scope", group_id: "G-TEAM2" })).error, /your own groups/);
+  current = { id: "owner", email: "owner@example.com" };
+  await programCheck("bulk_group_owner", { group_ids: [mine.id], owner_type: "Coordinator", owner: mine.coordinator, reason: "Restore" });
+  await dbExec("DELETE FROM groups WHERE id='G-TEAM2'");
+});

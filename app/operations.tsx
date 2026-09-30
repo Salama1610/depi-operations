@@ -3453,7 +3453,9 @@ export default function Operations({ module: initialModule }: { module: string }
                       staff
                         .filter((u: Row) => {
                           const held = Array.isArray(u.roles) ? u.roles : JSON.parse(u.roles || "[]");
-                          return u.active !== false && u.active !== 0 && held.includes("Operations Coordinator");
+                          // A supervisor chooses within their own team.
+                          const team: string[] | null = d.teamCoordinators ?? null;
+                          return u.active !== false && u.active !== 0 && held.includes("Operations Coordinator") && (!team || team.includes(u.id));
                         })
                         .map((u: Row) => ({ value: u.id, label: u.name + (u.title ? " · " + t(u.title) : "") })),
                     )}

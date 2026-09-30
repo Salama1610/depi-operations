@@ -285,6 +285,28 @@ export function auditStmt(
 /** Where the last workspace load spent its time, for the Server-Timing header. */
 export const loadTimings: Record<string, number> = {};
 
+/**
+ * The coordinators a supervisor may hand groups to: their own team. A
+ * coordinator belongs to the team when every active group they run sits under
+ * this supervisor; one without a group yet has no team and may be taken on.
+ * Programme leaders and administrators assign anyone, so they get null.
+ */
+export async function teamCoordinators(u: any): Promise<string[] | null> {
+  if (can(u.roles, ["Project Operations", "Operations Systems / Admin"])) return null;
+  if (!can(u.roles, ["Team Supervisor"])) return [];
+  const [people, groups] = await Promise.all([
+    all("SELECT id,roles FROM users WHERE active=1"),
+    all("SELECT coordinator,supervisor FROM groups WHERE status<>'Archived'"),
+  ]);
+  const elsewhere = new Set(groups.filter((g) => g.supervisor !== u.id).map((g) => g.coordinator));
+  return people
+    .filter((p) => {
+      const held = typeof p.roles === "string" ? JSON.parse(p.roles || "[]") : p.roles || [];
+      return held.includes("Operations Coordinator") && !elsewhere.has(p.id);
+    })
+    .map((p) => p.id);
+}
+
 export async function loadData(u: any) {
   const q = scopeSql(u);
   // The same rule for queries that carry no students of their own.
@@ -654,6 +676,8 @@ export async function loadData(u: any) {
     serviceSubmissionStatus,
     accounts,
     staff,
+    // Who this person may make a group's coordinator; null means anyone.
+    teamCoordinators: await teamCoordinators(u),
     policies: p,
     audit: logs,
     roles,

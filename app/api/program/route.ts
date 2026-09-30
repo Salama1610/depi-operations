@@ -9,6 +9,7 @@ import {
   scopeSql,
   stmt,
   student,
+  teamCoordinators,
   uid,
 } from "@/lib/server";
 import { can, dataTransferRefusal, dataTransferRoles, ensure } from "@/lib/domain/rules";
@@ -1140,8 +1141,17 @@ export async function POST(req: Request) {
         const owner: any = await stmt("SELECT * FROM users WHERE id=? AND active=1", x.owner).first();
         ensure(owner && JSON.parse(owner.roles).includes(requiredRole), `Choose an active ${requiredRole}.`);
         ensure(x.reason?.trim(), "Record the bulk ownership reason.");
+        // A supervisor hands groups only within their own team.
+        if (x.owner_type === "Coordinator") {
+          const team = await teamCoordinators(u);
+          ensure(!team || team.includes(owner.id), "Choose a coordinator from your own team.");
+        }
         const marks = groupIds.map(() => "?").join(",");
-        const scoped = can(u.roles, ["Project Operations", "Coach Operations"])
+        const global =
+          x.owner_type === "Coordinator"
+            ? can(u.roles, ["Project Operations", "Operations Systems / Admin"])
+            : can(u.roles, ["Project Operations", "Coach Operations", "Operations Systems / Admin"]);
+        const scoped = global
           ? await all(`SELECT id,status FROM groups WHERE id IN (${marks})`, ...groupIds)
           : await all(`SELECT id,status FROM groups WHERE id IN (${marks}) AND supervisor=?`, ...groupIds, u.id);
         ensure(scoped.length === groupIds.length, "One or more groups are missing, archived, or outside your scope.");
