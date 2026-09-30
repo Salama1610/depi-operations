@@ -134,7 +134,8 @@
     "order_ref": "text",
     "status": "text",
     "due": "timestamptz",
-    "created_at": "timestamptz"
+    "created_at": "timestamptz",
+    "paid_on": "date"
   },
   "gig_events": {
     "id": "text",

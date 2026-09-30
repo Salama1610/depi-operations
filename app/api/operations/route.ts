@@ -5,6 +5,7 @@ import {
   actor,
   identity,
   stmt,
+  all,
   db,
   now,
   uid,
@@ -33,9 +34,9 @@ import { isNationalId, nationalIdProblem, normalizeNationalId, normalizePhone } 
 import { seed } from "@/lib/seed";
 export const dynamic = "force-dynamic";
 const ops = ["Project Operations", "Operations Coordinator"];
-// Gig evidence is reviewed inside the operations chain, coach then
-// coordinator, with the supervisor above them able to cover.
-const reviewers = [...ops, "Team Supervisor"];
+// Gig evidence passes three different people: a first check (the group's coach,
+// its supervisor, Project Operations or Coach Operations), a second check (the
+// group's supervisor or Project Operations), then the QC team's decision.
 // Published student services are reviewed by the quality team: a member holds
 // the student, and the team leader hands the work out.
 const quality = ["Quality Member", "Quality Lead"];
@@ -56,6 +57,46 @@ function programDay(value: string) {
       .map((part) => [part.type, part.value]),
   );
   return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+/**
+ * A screenshot proves one gig. The same image, judged by its content so a
+ * second upload of the same file counts, may not back a different evidence
+ * record, and the delivery and payment screenshots may not be one image.
+ */
+async function ensureUnusedProof(attachmentIds: string[], ownEvidence: string | null) {
+  const hashes: string[] = [];
+  for (const attachmentId of attachmentIds) {
+    const a: any = await stmt("SELECT hash FROM attachments WHERE id=?", attachmentId).first();
+    ensure(a, "Upload the screenshot first.");
+    hashes.push(a.hash);
+  }
+  ensure(new Set(hashes).size === hashes.length, "The delivery and payment screenshots are the same image.");
+  for (const hash of hashes) {
+    const used: any = await stmt(
+      `SELECT e.id FROM evidence e WHERE e.id<>? AND (
+         EXISTS (SELECT 1 FROM attachments a WHERE a.id=e.proof_id AND a.hash=?)
+         OR EXISTS (SELECT 1 FROM evidence_packages p JOIN evidence_package_items i ON i.package_id=p.id JOIN attachments a ON a.id=i.attachment_id WHERE p.evidence_id=e.id AND a.hash=?))`,
+      ownEvidence || "",
+      hash,
+      hash,
+    ).first();
+    ensure(!used, "This screenshot is already proof for another gig. Upload the screenshot for this gig.");
+  }
+}
+
+/** The active Quality Member holding the fewest gig reviews; the lead carries none. */
+async function leastLoadedEvidenceReviewer(): Promise<string | null> {
+  const members = (await all(
+    "SELECT id FROM users WHERE active=1 AND roles LIKE '%Quality Member%' AND roles NOT LIKE '%Quality Lead%' ORDER BY id",
+  )) as any[];
+  let best: { id: string; n: number } | null = null;
+  for (const m of members) {
+    const load: any = await stmt("SELECT count(*) n FROM evidence WHERE qc_actor=? AND status='Quality Review'", m.id).first();
+    const n = Number(load?.n || 0);
+    if (!best || n < best.n) best = { id: m.id, n };
+  }
+  return best?.id || null;
 }
 
 /**
@@ -1197,6 +1238,15 @@ export async function POST(req: Request) {
         ensure(x.payment_proof_id !== x.proof_id, "Delivery and payment proof must be separate uploaded records.");
         await proof(u, x.proof_id, sid);
         await proof(u, x.payment_proof_id, sid);
+        await ensureUnusedProof([x.proof_id, x.payment_proof_id], null);
+        // When the client paid: a real day, not in the future, and not before
+        // the group began, so work from before the round does not count.
+        const paidOn = String(x.paid_on || "").slice(0, 10);
+        ensure(/^\d{4}-\d{2}-\d{2}$/.test(paidOn) && !Number.isNaN(Date.parse(paidOn)), "Enter the date the client paid.");
+        ensure(paidOn <= programDay(t), "The payment date cannot be in the future.");
+        const groupStart: any = await stmt("SELECT start_date FROM groups WHERE id=?", s.group_id).first();
+        const started = String(groupStart?.start_date || "").slice(0, 10);
+        ensure(!started || paidOn >= started, `The payment date must be on or after the day the group started (${started}).`);
         const orderRef = String(x.order_ref).trim();
         ensure(
           !(await stmt("SELECT id FROM gigs WHERE platform=? AND trim(order_ref)=?", x.platform, orderRef).first()),
@@ -1205,7 +1255,7 @@ export async function POST(req: Request) {
         const gig = { id, student_id: sid, account_id: null, platform: x.platform };
         jobs.push(
           stmt(
-            "INSERT INTO gigs(id,student_id,platform,title,value,currency,order_ref,status,due,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO gigs(id,student_id,platform,title,value,currency,order_ref,status,due,created_at,paid_on) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             id,
             sid,
             x.platform,
@@ -1214,8 +1264,9 @@ export async function POST(req: Request) {
             x.currency || "USD",
             orderRef,
             "Paid",
-            x.due && Date.parse(x.due) ? x.due : t,
+            paidOn,
             t,
+            paidOn,
           ),
           stmt(
             "INSERT INTO gig_events VALUES(?,?,?,?,?,?,?,?)",
@@ -1225,7 +1276,7 @@ export async function POST(req: Request) {
             x.payment_proof_id,
             "STUDENT",
             u.id,
-            t,
+            paidOn,
             t,
           ),
           ...evidenceIntake(u, gig, s.policy_id, x, t, uid("EV")),
@@ -1432,6 +1483,7 @@ export async function POST(req: Request) {
         const st = await student(u, g.student_id);
         await proof(u, x.proof_id, g.student_id);
         await proof(u, x.payment_proof_id, g.student_id);
+        await ensureUnusedProof([x.proof_id, x.payment_proof_id], null);
         ensure(x.source, "External source is required.");
         ensure(
           x.payment_proof_id !== x.proof_id,
@@ -1453,8 +1505,24 @@ export async function POST(req: Request) {
         ).first();
         auditPrevious = e;
         let next = "";
+        // Each decision is a different person's: not the one who recorded the
+        // gig, and not anyone who already acted on this package. A correction
+        // starts a new cycle, so the reviewer who asked for it may judge it.
+        if (["Coach Review", "Coordinator L1", "Quality Review", "L3 Review"].includes(e.status)) {
+          ensure(e.recorder !== u.id, "You recorded this gig, so another person must review it.");
+          const cycle = (await all(
+            "SELECT actor, decision FROM evidence_reviews WHERE evidence_id=? ORDER BY created_at, id",
+            id,
+          )) as any[];
+          const since = cycle.map((r) => r.decision).lastIndexOf("Rejected");
+          ensure(
+            !cycle.slice(since + 1).some((r) => r.actor === u.id),
+            "You already acted on an earlier step of this evidence, so another person must take this one.",
+          );
+        }
         if (e.status === "Coach Review") {
-          permit(u, ["Coach"]);
+          // The first check: an onboarded coach of the group, the group's
+          // supervisor, Project Operations or Coach Operations.
           const configured: any = await stmt(
             "SELECT count(*) n FROM group_coaches WHERE group_id=? AND status='Active'",
             st.group_id,
@@ -1465,18 +1533,26 @@ export async function POST(req: Request) {
             u.id,
           ).first();
           ensure(
-            assigned || (!configured?.n && st.coach === u.id),
-            "Only an onboarded coach assigned to this group can complete first evidence review.",
+            assigned ||
+              (!configured?.n && st.coach === u.id) ||
+              st.supervisor === u.id ||
+              can(u.roles, ["Project Operations", "Coach Operations", "Operations Systems / Admin"]),
+            "The first check is done by the group's coach, its supervisor, Project Operations or Coach Operations.",
           );
           next = "Coordinator L1";
         } else if (e.status === "Coordinator L1") {
-          permit(u, ops);
+          // The second check: the group's supervisor, Project Operations, or a
+          // coordinator who did not record it.
+          ensure(
+            st.supervisor === u.id || can(u.roles, [...ops, "Operations Systems / Admin"]),
+            "The second check is done by the group's supervisor or Project Operations.",
+          );
           next = "Quality Review";
         } else if (e.status === "Quality Review") {
-          permit(u, [...reviewers, "Quality Member", "Quality Lead"]);
-          // A quality reviewer with no other review authority decides only the
-          // evidence assigned to them.
-          if (!can(u.roles, [...reviewers, "Quality Lead", "Operations Systems / Admin"]))
+          // The Quality decision belongs to the QC team: a member decides what
+          // is assigned to them; the Quality Lead decides anything.
+          permit(u, ["Quality Member", "Quality Lead"]);
+          if (!can(u.roles, ["Quality Lead", "Operations Systems / Admin"]))
             ensure(
               e.qc_actor === u.id,
               e.qc_actor
@@ -1517,6 +1593,7 @@ export async function POST(req: Request) {
             x.payment_proof_id !== x.proof_id,
             "Delivery and payment proof must be separate uploaded records.",
           );
+          await ensureUnusedProof([x.proof_id, x.payment_proof_id], id);
           next =
             e.rejections >= 2 || ["EV06", "EV09"].includes(e.code)
               ? "L3 Review"
@@ -1665,6 +1742,14 @@ export async function POST(req: Request) {
             t,
             id,
           ),
+          // Arriving at the QC team, the evidence goes to the member holding
+          // the fewest; a correction stays with the reviewer who asked for it.
+          ...(next === "Quality Review" && !e.qc_actor
+            ? await (async () => {
+                const reviewer = await leastLoadedEvidenceReviewer();
+                return reviewer ? [stmt("UPDATE evidence SET qc_actor=? WHERE id=?", reviewer, id)] : [];
+              })()
+            : []),
           stmt(
             "INSERT INTO evidence_reviews VALUES(?,?,?,?,?,?,?)",
             uid("REV"),
@@ -2091,13 +2176,11 @@ export async function POST(req: Request) {
         permit(u, ["Quality Lead"]);
         const services = x.action === "service_qc_assign";
         const table = services ? "service_links" : "evidence";
-        const openFilter = services ? "qc_status<>'Locked'" : "status IN ('Quality','Coach','L1')";
+        const openFilter = services ? "qc_status<>'Locked'" : "status='Quality Review'";
         // The team leader does not carry a share of the reviewing, so the pool
         // for service work is the members. Gig evidence keeps its wider pool.
         const reviewers = (await (await stmt(
-          services
-            ? "SELECT id FROM users WHERE active=1 AND roles LIKE '%Quality Member%' AND roles NOT LIKE '%Quality Lead%' ORDER BY id"
-            : "SELECT id FROM users WHERE active=1 AND (roles LIKE '%Quality Member%' OR roles LIKE '%Quality Lead%') ORDER BY id",
+          "SELECT id FROM users WHERE active=1 AND roles LIKE '%Quality Member%' AND roles NOT LIKE '%Quality Lead%' ORDER BY id",
         ).all()).results) as any[];
         ensure(reviewers.length, "Add an active Quality Member before assigning reviews.");
         if (x.reviewer_id) {

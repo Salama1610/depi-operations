@@ -1651,6 +1651,9 @@ export default function Operations({ module: initialModule }: { module: string }
                   {fx && (
                     <small className="block">{t("Approved USD")}{" "}{fx.usd_value}</small>
                   )}
+                  {r.paid_on && (
+                    <small className="block">{t("Paid {v0}", { v0: fmt(r.paid_on) })}</small>
+                  )}
                 </>
               );
             },
@@ -3394,6 +3397,7 @@ export default function Operations({ module: initialModule }: { module: string }
                         "GBP",
                       ])}
                     </div>
+                    {field("paid_on", t("Paid on"), "date")}
                     {proofField("proof_id", t("Delivery proof"))}
                     {proofField("payment_proof_id", t("Payment proof"))}
                   </>

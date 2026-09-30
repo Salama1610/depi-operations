@@ -1179,6 +1179,8 @@ export const ar: Record<string, string> = {
   "Add proof": "إضافة إثبات",
   "Join": "انضمام",
   "Session link": "رابط الجلسة",
+  "Paid on": "تاريخ الدفع",
+  "Paid {v0}": "دُفع في {v0}",
 
   // ---- Validation messages from domain rules ------------------------------------------
   "Choose a valid contact outcome.": "اختر نتيجة تواصل صالحة.",

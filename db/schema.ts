@@ -233,6 +233,8 @@ export const gigs = sqliteTable(
     status: text("status").notNull(),
     due: text("due").notNull(),
     createdAt: text("created_at").notNull(),
+    // The day the client paid; appended so positional inserts keep working.
+    paidOn: text("paid_on"),
   },
   (t) => [uniqueIndex("unique_platform_order").on(t.platform, t.orderRef)],
 );

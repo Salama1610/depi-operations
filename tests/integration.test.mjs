@@ -364,16 +364,23 @@ test("full seeded backend workflow and permission gates", async () => {
     payment_proof_id: "PROOF-2",
     source: "WhatsApp",
   });
-  current = opsOnly;
+  // Whoever recorded the gig reviews none of it; a quality reviewer cannot
+  // take the first check.
   r = await post("review", { id: "EV1", notes: "Looks complete" });
-  assert.match(r.error, /role/);
+  assert.match(r.error, /You recorded this gig/);
+  current = { id: "quality-login", email: "staff-quality@example.invalid" };
+  r = await post("review", { id: "EV1", notes: "Looks complete" });
+  assert.ok(r.error, "a quality reviewer does not take the first check");
   current = { id: "coach-login", email: "staff-coach@example.invalid" };
   await check("review", { id: "EV1", notes: "Coach confirms delivery" });
-  current = { id: "owner", email: "owner@example.com" };
+  // The coach who took the first check cannot take the second.
+  r = await post("review", { id: "EV1", notes: "Completeness checked" });
+  assert.ok(r.error, "one person, one step");
+  current = { id: "supervisor-login", email: "staff-nour@example.invalid" };
   await check("review", { id: "EV1", notes: "Completeness checked" });
   current = { id: "coach-login", email: "staff-coach@example.invalid" };
   r = await post("review", { id: "EV1", decision: "Accept", notes: "Approve" });
-  assert.match(r.error, /role/, "a coach cannot take the quality stage");
+  assert.ok(r.error, "a coach cannot take the quality stage");
   current = opsOnly;
   // Quality members see only the students whose services they were assigned,
   // so the evidence chain's quality stage is taken by the team leader here.
@@ -1763,15 +1770,26 @@ test("a gig is recorded once, paid, with its delivery and payment proof going st
   await dbExec("DELETE FROM rate_limits");
   const created = new Date().toISOString();
   const [mine, theirs] = await dbRows("SELECT id FROM students WHERE group_id='G122' ORDER BY id LIMIT 2");
-  for (const [id, student] of [["GIG-DELIVERY", mine.id], ["GIG-PAYMENT", mine.id], ["GIG-OTHER", theirs.id]])
+  for (const [id, student] of [["GIG-DELIVERY", mine.id], ["GIG-PAYMENT", mine.id], ["GIG-OTHER", theirs.id], ["GIG-DELIVERY-2", mine.id], ["GIG-PAYMENT-2", mine.id], ["GIG-DELIVERY-3", mine.id], ["GIG-PAYMENT-3", mine.id]])
     await dbExec("INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)", id, student, id.toLowerCase(), id + ".png", "image/png", 120, id + "-hash", "owner", created);
-  const gig = { student_id: mine.id, title: "Logo design", platform: "Khamsat", value: 25, currency: "USD", order_ref: "KH-84211" };
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo" }).format(new Date());
+  const gig = { student_id: mine.id, title: "Logo design", platform: "Khamsat", value: 25, currency: "USD", order_ref: "KH-84211", paid_on: today };
 
   assert.match((await post("gig", { ...gig, id: "GIG-1" })).error, /Upload the delivery proof and the payment proof/);
   assert.match((await post("gig", { ...gig, id: "GIG-1", proof_id: "GIG-DELIVERY", payment_proof_id: "GIG-DELIVERY" })).error, /separate/);
   assert.ok((await post("gig", { ...gig, id: "GIG-1", proof_id: "GIG-DELIVERY", payment_proof_id: "GIG-OTHER" })).error, "another student's screenshot is refused");
 
-  await check("gig", { ...gig, id: "GIG-1", proof_id: "GIG-DELIVERY", payment_proof_id: "GIG-PAYMENT" });
+  // When the client paid: required, not in the future, not before the group started.
+  const proofs = { proof_id: "GIG-DELIVERY", payment_proof_id: "GIG-PAYMENT" };
+  assert.match((await post("gig", { ...gig, ...proofs, id: "GIG-1", paid_on: "" })).error, /date the client paid/);
+  assert.match((await post("gig", { ...gig, ...proofs, id: "GIG-1", paid_on: "2999-01-01" })).error, /cannot be in the future/);
+  const group = await dbRow("SELECT g.start_date FROM groups g JOIN students s ON s.group_id=g.id WHERE s.id=?", mine.id);
+  await dbExec("UPDATE groups SET start_date=? WHERE id=(SELECT group_id FROM students WHERE id=?)", today, mine.id);
+  assert.match((await post("gig", { ...gig, ...proofs, id: "GIG-1", paid_on: "2020-01-01" })).error, /on or after the day the group started/);
+  await dbExec("UPDATE groups SET start_date=? WHERE id=(SELECT group_id FROM students WHERE id=?)", group.start_date, mine.id);
+
+  await check("gig", { ...gig, ...proofs, id: "GIG-1" });
+  assert.equal((await dbRow("SELECT paid_on FROM gigs WHERE id='GIG-1'")).paid_on.slice(0, 10), today);
   assert.equal((await dbRow("SELECT status FROM gigs WHERE id='GIG-1'")).status, "Paid");
   const evidence = await dbRow("SELECT * FROM evidence WHERE gig_id='GIG-1'");
   assert.equal(evidence.status, "Coach Review", "the proof enters review at once");
@@ -1783,10 +1801,39 @@ test("a gig is recorded once, paid, with its delivery and payment proof going st
   assert.deepEqual(items.map((i) => [i.item_type, i.attachment_id]), [["Delivery", "GIG-DELIVERY"], ["Payment", "GIG-PAYMENT"]]);
   assert.equal((await dbRow("SELECT status FROM gig_events WHERE gig_id='GIG-1'")).status, "Paid");
 
+  // A screenshot proves one gig: reusing it, even as a fresh upload of the same image, is refused.
+  assert.match((await post("gig", { ...gig, id: "GIG-2", order_ref: "KH-99999", proof_id: "GIG-DELIVERY", payment_proof_id: "GIG-PAYMENT-2" })).error, /already proof for another gig/);
+  await dbExec("UPDATE attachments SET hash=(SELECT hash FROM attachments WHERE id='GIG-PAYMENT') WHERE id='GIG-PAYMENT-3'");
+  assert.match((await post("gig", { ...gig, id: "GIG-2", order_ref: "KH-99999", proof_id: "GIG-DELIVERY-3", payment_proof_id: "GIG-PAYMENT-3" })).error, /already proof for another gig/);
   // The same order on the same platform is the same gig.
-  assert.match((await post("gig", { ...gig, id: "GIG-2", proof_id: "GIG-DELIVERY", payment_proof_id: "GIG-PAYMENT" })).error, /already recorded/);
+  assert.match((await post("gig", { ...gig, id: "GIG-2", proof_id: "GIG-DELIVERY-2", payment_proof_id: "GIG-PAYMENT-2" })).error, /already recorded/);
   // Its evidence is already in review; a second submission is refused.
   assert.match((await post("evidence", { gig_id: "GIG-1", source: "Form", proof_id: "GIG-DELIVERY", payment_proof_id: "GIG-PAYMENT" })).error, /already has its evidence/);
+
+  // The chain: three different people, the last of them from the QC team.
+  const evidenceId = evidence.id;
+  current = { id: "coordinator-login", email: "staff-sara@example.invalid" };
+  assert.ok((await post("review", { id: evidenceId, notes: "Delivered" })).error, "a coordinator does not take the first check");
+  current = { id: "coach-ops-login", email: "staff-coach-ops@example.invalid" };
+  await check("review", { id: evidenceId, notes: "Delivery confirmed" });
+  assert.match((await post("review", { id: evidenceId, notes: "Complete" })).error, /already acted on an earlier step/);
+  current = { id: "supervisor-login", email: "staff-nour@example.invalid" };
+  await check("review", { id: evidenceId, notes: "Complete and consistent" });
+  const atQuality = await dbRow("SELECT status, qc_actor FROM evidence WHERE id=?", evidenceId);
+  assert.equal(atQuality.status, "Quality Review");
+  const reviewer = await dbRow("SELECT id, email, roles FROM users WHERE id=?", atQuality.qc_actor);
+  assert.ok(reviewer && reviewer.roles.includes("Quality Member") && !reviewer.roles.includes("Quality Lead"), "assigned to a QC member on arrival");
+  current = { id: "ops-only-login", email: "ops-only@example.com" };
+  assert.match((await post("review", { id: evidenceId, decision: "Accept", notes: "x" })).error, /role/, "the Quality step is the QC team's");
+  current = { id: reviewer.id, email: reviewer.email };
+  await check("review", {
+    id: evidenceId,
+    decision: "Accept",
+    notes: "All seven checks passed",
+    checklist: ["Completeness", "Identity", "Delivery", "Payment/value", "Authenticity", "Source consistency", "Duplicate checks"],
+  });
+  assert.equal((await dbRow("SELECT status FROM evidence WHERE id=?", evidenceId)).status, "Accepted");
+  current = { id: "owner", email: "owner@example.com" };
 });
 
 test("controlled platforms and separately approved FX applications are enforced", async () => {
