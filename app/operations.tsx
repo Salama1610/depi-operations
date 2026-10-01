@@ -1946,7 +1946,7 @@ export default function Operations({ module: initialModule }: { module: string }
           ? "Needs student correction"
           : Number(r.links_pending) > 0
             ? "Awaiting QC"
-            : Number(r.links_submitted) >= 3 && Number(r.links_kafiil) > 0 && Number(r.links_nafezly) > 0
+            : Number(r.links_submitted) >= 3 && Number(r.links_kafiil) + Number(r.links_nafezly) >= 2
               ? "Complete"
               : "Incomplete";
     const submissionRows = serviceSubmissionStatus

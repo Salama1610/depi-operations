@@ -146,8 +146,12 @@ export function verifyServiceLink(raw: unknown, options: { open?: boolean } = {}
 
 /** A student's services are complete at this many links... */
 export const minServiceLinks = 3;
-/** ...as long as these marketplaces are among them. */
+/**
+ * ...as long as at least this many of them are on these marketplaces: one on
+ * each, or two on either. Any two Kafiil or Nafezly services satisfy it.
+ */
 export const requiredServicePlatforms = ["Kafiil", "Nafezly"] as const;
+export const minRequiredPlatformLinks = 2;
 /** No more than this many on any one of the accepted marketplaces. */
 export const maxLinksPerPlatform = 3;
 /** And never more than this many links in all. */
@@ -178,20 +182,21 @@ export function linksPerPlatform(values: string[]) {
 }
 
 /**
- * Where a student stands: links submitted against the minimum, and whether a
- * Kafiil and a Nafezly service are among them. `platforms` is one entry per
- * link the student holds.
+ * Where a student stands: links submitted against the minimum, and how many
+ * are on Kafiil or Nafezly against the two required there (one on each, or two
+ * on either). `platforms` is one entry per link the student holds.
  */
 export function serviceProgress(platforms: string[]) {
-  const has = (p: string) => platforms.includes(p);
-  const missing = requiredServicePlatforms.filter((p) => !has(p));
+  const required = platforms.filter((p) => (requiredServicePlatforms as readonly string[]).includes(p)).length;
+  const needed = Math.max(0, minRequiredPlatformLinks - required);
   return {
     count: platforms.length,
     minimum: minServiceLinks,
-    hasKafiil: has("Kafiil"),
-    hasNafezly: has("Nafezly"),
-    missing,
-    met: platforms.length >= minServiceLinks && missing.length === 0,
+    kafiilOrNafezly: required,
+    requiredMinimum: minRequiredPlatformLinks,
+    /** Kafiil or Nafezly services still to add. */
+    needed,
+    met: platforms.length >= minServiceLinks && needed === 0,
   };
 }
 
@@ -211,9 +216,9 @@ export function normalizeServiceSlots(input: unknown) {
     if (counts[platform] > maxLinksPerPlatform)
       throw new Error(`At most ${maxLinksPerPlatform} ${platform} links can be submitted; this has ${counts[platform]}.`);
   const platforms = values.map((value) => verifyServiceLink(value, { open: true }).platform);
-  const missing = serviceProgress(platforms).missing;
-  if (values.length + missing.length > maxServiceLinks)
-    throw new Error(`Keep room for your ${missing.join(" and ")} service: ${maxServiceLinks} links at most, and one must be on each.`);
+  const needed = serviceProgress(platforms).needed;
+  if (values.length + needed > maxServiceLinks)
+    throw new Error(`Keep room for ${needed} more Kafiil or Nafezly service${needed === 1 ? "" : "s"}: ${maxServiceLinks} links at most.`);
   const identity = values.map((value) => {
     const check = verifyServiceLink(value, { open: true });
     return serviceKey(check) || value.toLowerCase();

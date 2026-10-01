@@ -2547,7 +2547,7 @@ test("a client account is requested for any student's gig, three at most", async
   assert.match((await ask(4)).error, /three client-account requests/);
 });
 
-test("a student submits services one at a time until three, with a Kafiil and a Nafezly among them", async () => {
+test("a student submits services one at a time until three, two of them on Kafiil or Nafezly", async () => {
   await dbExec("DELETE FROM rate_limits");
   const servicesApi = await route("student-services");
   const send = (body) =>
@@ -2565,14 +2565,14 @@ test("a student submits services one at a time until three, with a Kafiil and a 
   let view = await r.json();
   assert.equal(view.services.length, 1);
   assert.equal(view.progress.count, 1);
-  assert.deepEqual(view.progress.missing, ["Nafezly"]);
+  assert.equal(view.progress.needed, 1);
   assert.equal(view.submission.status, "Pending QC");
   // An open link on any other site counts toward the three.
   r = await one("https://www.behance.net/gallery/7702/brand-work");
   assert.equal(r.status, 200, await r.clone().text());
   view = await r.json();
   assert.equal(view.services[1].platform, "External service");
-  assert.equal(view.progress.met, false, "still no Nafezly service");
+  assert.equal(view.progress.met, false, "one Kafiil or Nafezly service so far");
   assert.equal(
     (await (await one("http://insecure.example.com/portfolio")).json()).error === undefined
       ? (await dbRow("SELECT qc_status FROM service_links WHERE student_id=? AND slot=3", first.id)).qc_status

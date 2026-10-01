@@ -1300,4 +1300,7 @@ export const ar: Record<string, string> = {
   "Submit this service?": "إرسال هذه الخدمة؟",
   "It goes to your coordinator for review and cannot be changed until they respond.": "ستذهب إلى منسقك للمراجعة ولا يمكن تغييرها حتى يرد.",
   "Incomplete": "غير مكتمل",
+  "Keep room for a Kafiil or Nafezly service.": "اترك مكانًا لخدمة على كفيل أو نفذلي.",
+  "2 on Kafiil or Nafezly ({v0}/2)": "خدمتان على كفيل أو نفذلي ({v0}/2)",
+  "Submit your services one at a time. You need at least three, with two of them on Kafiil or Nafezly: one on each, or two on either. The rest can be on any site. Each link is checked automatically, then reviewed by your coordinator.": "أرسل خدماتك واحدة تلو الأخرى. تحتاج إلى ثلاث على الأقل، منها اثنتان على كفيل أو نفذلي: واحدة على كل منهما أو اثنتان على أي منهما. والباقي على أي موقع. يتم فحص كل رابط تلقائيًا ثم يراجعه منسقك.",
 };

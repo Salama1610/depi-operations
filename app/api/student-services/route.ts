@@ -78,16 +78,15 @@ async function studentView(studentId: string) {
 
 /**
  * A submission's state, read from its links. It is Complete only when every
- * link is approved, there are three at least, and a Kafiil and a Nafezly
- * service are among them. Approved links short of that are In Progress: the
+ * link is approved, there are three at least, and two of them are on Kafiil
+ * or Nafezly (one on each, or two on either). Approved links short of that are In Progress: the
  * student has more to add.
  */
 function submissionStatus(studentId: string, t: string, completedAt: "now" | "latest") {
   const done = `(NOT EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status<>'Locked')
     AND (SELECT count(*) FROM service_links WHERE student_id=?)>=3
-    AND EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND platform='Kafiil')
-    AND EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND platform='Nafezly'))`;
-  const doneArgs = [studentId, studentId, studentId, studentId];
+    AND (SELECT count(*) FROM service_links WHERE student_id=? AND platform IN ('Kafiil','Nafezly'))>=2)`;
+  const doneArgs = [studentId, studentId, studentId];
   return stmt(
     `UPDATE service_submissions SET status=CASE
        WHEN ${done} THEN 'Complete'

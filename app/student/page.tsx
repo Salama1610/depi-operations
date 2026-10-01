@@ -111,9 +111,10 @@ export default function StudentServicesPage() {
     if (check.status === "Failed") return check.message;
     if (check.platform !== openLinkPlatform && (counts[check.platform] || 0) >= maxLinksPerPlatform)
       return t("You already have {v0} {v1} services, the most allowed.", { v0: maxLinksPerPlatform, v1: check.platform });
-    const stillMissing = progress.missing.filter((p) => p !== check.platform);
-    if (services.length + 1 + stillMissing.length > maxServiceLinks)
-      return t("Keep room for your {v0} service.", { v0: stillMissing.join(", ") });
+    const onRequired = check.platform === "Kafiil" || check.platform === "Nafezly";
+    const stillNeeded = Math.max(0, progress.needed - (onRequired ? 1 : 0));
+    if (services.length + 1 + stillNeeded > maxServiceLinks)
+      return t("Keep room for a Kafiil or Nafezly service.");
     return "";
   }
 
@@ -180,7 +181,7 @@ export default function StudentServicesPage() {
             <div>
               <span className="student-kicker">{t("SERVICE LINKS / ROUND 5")}</span>
               <h1>{student?.name ? t("Hi {v0}, submit your services.", { v0: student.name.split(" ")[0] }) : t("Submit your services.")}</h1>
-              <p>{t("Submit your services one at a time. You need at least three: one on Kafiil, one on Nafezly, and the rest on any site. Each link is checked automatically, then reviewed by your coordinator.")}</p>
+              <p>{t("Submit your services one at a time. You need at least three, with two of them on Kafiil or Nafezly: one on each, or two on either. The rest can be on any site. Each link is checked automatically, then reviewed by your coordinator.")}</p>
             </div>
             <div className="student-progress"><strong>{Math.min(services.length, minServiceLinks)}/{minServiceLinks}</strong><span>{t("uploaded")}</span></div>
           </section>
@@ -194,8 +195,7 @@ export default function StudentServicesPage() {
               <span style={{ width: `${Math.min(100, (services.length / minServiceLinks) * 100)}%` }} />
             </div>
             <ul className="student-requirements">
-              <li className={progress.hasKafiil ? "is-done" : ""}>{progress.hasKafiil ? <Check size={15} /> : null}{t("A Kafiil service")}</li>
-              <li className={progress.hasNafezly ? "is-done" : ""}>{progress.hasNafezly ? <Check size={15} /> : null}{t("A Nafezly service")}</li>
+              <li className={progress.needed === 0 ? "is-done" : ""}>{progress.needed === 0 ? <Check size={15} /> : null}{t("2 on Kafiil or Nafezly ({v0}/2)", { v0: Math.min(progress.kafiilOrNafezly, 2) })}</li>
               <li className={services.length >= minServiceLinks ? "is-done" : ""}>{services.length >= minServiceLinks ? <Check size={15} /> : null}{t("{v0} services at least", { v0: minServiceLinks })}</li>
             </ul>
             {submission && (
