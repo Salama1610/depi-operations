@@ -1244,7 +1244,6 @@ export const ar: Record<string, string> = {
   "Logo design order": "طلب تصميم شعار",
   "{v0} service": "خدمة {v0}",
   "Your {v0} service link": "رابط خدمتك على {v0}",
-  "This slot takes a {v0} service link only.": "هذه الخانة تقبل رابط خدمة على {v0} فقط.",
   "Attending": "سأحضر",
   "Unavailable": "غير متاح",
   "Responses": "الردود",
