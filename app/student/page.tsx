@@ -209,9 +209,9 @@ export default function StudentServicesPage() {
                   const correction = service.qc_status === "Needs Correction";
                   return (
                     <article className={`student-service-row ${locked ? "is-locked" : correction ? "is-correction" : ""}`} key={service.slot}>
-                      <div className="student-slot"><span>0{service.slot}</span><strong>{t("{v0} service", { v0: slotPlatform(service.slot) })}</strong></div>
+                      <div className="student-slot"><span>0{service.slot}</span><strong>{t("Service")}{" "}{service.slot}</strong></div>
                       <div className="student-url-field">
-                        <label htmlFor={`service-${service.slot}`}>{t("Your {v0} service link", { v0: slotPlatform(service.slot) })}</label>
+                        <label htmlFor={`service-${service.slot}`}>{t("Public service URL")}</label>
                         <div className="student-url-wrap">
                           <input id={`service-${service.slot}`} type="url" required value={service.url} disabled={locked || busy} placeholder={slotExample[slotPlatform(service.slot)]} onChange={(e) => update(service.slot, e.target.value)} />
                           {service.url && <a href={service.url} target="_blank" rel="noreferrer" aria-label={t("Open service {v0}", { v0: service.slot })}><ExternalLink size={17} /></a>}
