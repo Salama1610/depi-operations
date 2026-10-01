@@ -765,3 +765,16 @@ input:focus-visible {
 .student-platform-count .student-secondary{display:inline-flex;align-items:center;gap:6px}
 .student-remove{display:flex;align-items:center;justify-content:center;border:1px solid #e3e9f2;background:#fff;color:#8a98ad;border-radius:8px;padding:9px;min-height:40px}
 .student-remove:hover{border-color:#f2d0ca;color:#a9554c}
+
+/* Student services, one at a time: progress toward three, what is still needed. */
+.student-progress-bar{height:10px;border-radius:99px;background:#edf1f7;overflow:hidden;margin:18px 0 14px}
+.student-progress-bar>span{display:block;height:100%;background:#315ce8;border-radius:99px;transition:width .3s}
+.student-requirements{display:flex;flex-wrap:wrap;gap:8px;list-style:none;padding:0;margin:0 0 6px}
+.student-requirements li{display:inline-flex;align-items:center;gap:5px;border:1px solid #e0e7f1;border-radius:99px;padding:5px 11px;font-size:13px;color:#7a8aa3}
+.student-requirements li.is-done{background:#e7f6f0;border-color:#cdeee2;color:#32856f}
+.student-add{padding-top:18px}
+.student-add .student-url-wrap .student-primary{min-height:46px}
+.student-url-text{display:inline-flex;align-items:center;gap:6px;color:#315ce8;font-size:14px;word-break:break-all}
+.student-fix{margin-top:10px}
+.student-fix .student-secondary{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.student-confirm-url{word-break:break-all;background:#f6f8fb;border-radius:8px;padding:10px 12px;font-size:14px;color:#314969}

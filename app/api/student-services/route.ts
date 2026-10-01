@@ -11,7 +11,7 @@ import {
   permit,
   student,
 } from "@/lib/server";
-import { minServiceLinks, normalizeServiceSlots, serviceKey, verifyServiceLink } from "@/lib/domain/service-links";
+import { normalizeServiceSlots, serviceKey, serviceProgress, verifyServiceLink } from "@/lib/domain/service-links";
 import { distributeEvenly } from "@/lib/domain/qc-assignment";
 export const dynamic = "force-dynamic";
 
@@ -67,19 +67,43 @@ async function studentView(studentId: string) {
           qc_completed_at: submission.qc_completed_at,
         }
       : null,
-    // The links in the order they were added, with empty places up to the
-    // minimum so a first submission starts with three fields.
-    services: [
-      ...rows.map((row) => bySlot.get(row.slot)),
-      ...Array.from({ length: Math.max(0, minServiceLinks - rows.length) }, (_, i) => ({
-        slot: rows.length + i + 1,
-        url: "",
-        can_edit: true,
-      })),
-    ],
+    // The links in the order they were added, and where the student stands:
+    // three at least, with a Kafiil and a Nafezly service among them.
+    services: rows.map((row) => bySlot.get(row.slot)),
+    progress: serviceProgress(rows.map((row) => row.platform)),
     reviews,
     last_reviewed_at: reviews[0]?.reviewed_at || null,
   };
+}
+
+/**
+ * A submission's state, read from its links. It is Complete only when every
+ * link is approved, there are three at least, and a Kafiil and a Nafezly
+ * service are among them. Approved links short of that are In Progress: the
+ * student has more to add.
+ */
+function submissionStatus(studentId: string, t: string, completedAt: "now" | "latest") {
+  const done = `(NOT EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status<>'Locked')
+    AND (SELECT count(*) FROM service_links WHERE student_id=?)>=3
+    AND EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND platform='Kafiil')
+    AND EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND platform='Nafezly'))`;
+  const doneArgs = [studentId, studentId, studentId, studentId];
+  return stmt(
+    `UPDATE service_submissions SET status=CASE
+       WHEN ${done} THEN 'Complete'
+       WHEN EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status='Needs Correction') THEN 'Needs Correction'
+       WHEN EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status='Pending') THEN 'Pending QC'
+       ELSE 'In Progress' END,
+       qc_completed_at=CASE WHEN ${done} THEN ${completedAt === "now" ? "?" : "(SELECT max(qc_at) FROM service_links WHERE student_id=?)"} ELSE NULL END,
+       updated_at=? WHERE student_id=?`,
+    ...doneArgs,
+    studentId,
+    studentId,
+    ...doneArgs,
+    completedAt === "now" ? t : studentId,
+    t,
+    studentId,
+  );
 }
 
 export async function GET() {
@@ -102,20 +126,38 @@ export async function POST(req: Request) {
     }
     const x = await req.json();
     if (x.action === "qc_review") return await qcReview(x);
-    if (x.action !== "submit_services") throw new Error("Choose a service-link action.");
+    if (x.action !== "submit_services" && x.action !== "submit_service")
+      throw new Error("Choose a service-link action.");
     const s = await currentStudent();
     await rateLimit("student-services:" + s.id, 30, 60);
-    const values = normalizeServiceSlots(x.services);
     const existing = await all(
       "SELECT * FROM service_links WHERE student_id=? ORDER BY slot",
       s.id,
     );
     const bySlot = new Map(existing.map((row) => [Number(row.slot), row]));
-    // Links already submitted stay in the list, in their places: an approved or
-    // waiting link cannot change, and one returned for correction is replaced,
-    // not removed. New links are added after them.
-    if (values.length < existing.length)
-      throw new Error("Keep every link you already submitted. Replace a link that needs correction instead of removing it.");
+    // A student submits one service at a time: a new link is added after the
+    // others, and a link returned for correction is replaced in its place.
+    // The whole list can still be sent at once. Either way, links already
+    // submitted stay: an approved or waiting link cannot change.
+    let values: string[];
+    let writing: Set<number>;
+    if (x.action === "submit_service") {
+      const url = typeof x.url === "string" ? x.url.trim() : "";
+      if (!url) throw new Error("Paste the link to your service.");
+      const slot = x.slot == null || x.slot === "" ? existing.length + 1 : Number(x.slot);
+      const prior: any = bySlot.get(slot);
+      if (slot !== existing.length + 1 && prior?.qc_status !== "Needs Correction")
+        throw new Error("Only a link returned for correction can be replaced.");
+      values = existing.map((row) => row.url);
+      values[slot - 1] = url;
+      writing = new Set([slot]);
+    } else {
+      values = Array.isArray(x.services) ? x.services : [];
+      if (values.length < existing.length)
+        throw new Error("Keep every link you already submitted. Replace a link that needs correction instead of removing it.");
+      writing = new Set(values.map((_, i) => i + 1));
+    }
+    values = normalizeServiceSlots(values);
     // A service is the student's own listing. It is never tied to one of the
     // programme's client accounts, which only order gigs, so account_id stays
     // empty.
@@ -124,6 +166,16 @@ export async function POST(req: Request) {
     // marketplace and service ID so a renamed slug is still caught, is refused
     // when another student has already submitted it.
     const takenElsewhere = async (check: any) => {
+      // An open link has no service ID: the same address is the same service.
+      if (!check.serviceId)
+        return Boolean(
+          check.normalizedUrl &&
+            (await stmt(
+              "SELECT id FROM service_links WHERE student_id<>? AND normalized_url=?",
+              s.id,
+              check.normalizedUrl,
+            ).first()),
+        );
       const key = serviceKey(check);
       if (!key) return false;
       const candidates = await all(
@@ -151,11 +203,13 @@ export async function POST(req: Request) {
     for (let index = 0; index < values.length; index += 1) {
       const slot = index + 1;
       const value = values[index];
-      const check = verifyServiceLink(value);
+      const check = verifyServiceLink(value, { open: true });
       // When the gate raised an http marketplace address to https, the secure
       // form is what gets stored and opened; both screens link to this column.
       const stored = check.upgraded ? check.normalizedUrl : value;
       const prior: any = bySlot.get(slot);
+      // A link not being submitted now is left exactly as it is.
+      if (!writing.has(slot)) continue;
       if (prior && prior.qc_status !== "Needs Correction") {
         if (prior.normalized_url !== check.normalizedUrl)
           throw new Error(
@@ -224,15 +278,7 @@ export async function POST(req: Request) {
           s.id,
         ),
       );
-    jobs.push(stmt(
-      `UPDATE service_submissions SET status=CASE
-         WHEN NOT EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status<>'Locked') THEN 'Complete'
-         WHEN EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status='Needs Correction') THEN 'Needs Correction'
-         ELSE 'Pending QC' END,
-         qc_completed_at=CASE WHEN NOT EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status<>'Locked')
-           THEN (SELECT max(qc_at) FROM service_links WHERE student_id=?) ELSE NULL END
-       WHERE student_id=?`, s.id, s.id, s.id, s.id, s.id,
-    ));
+    jobs.push(submissionStatus(s.id, t, "latest"));
     const notificationSeed = uid("NTF");
     jobs.push(stmt(
       `INSERT OR IGNORE INTO notifications(id,recipient,title,entity_type,entity_id,severity,source,created_at,read_at)
@@ -249,7 +295,7 @@ export async function POST(req: Request) {
       reviewer,
       s.id,
     ));
-    jobs.push(auditStmt(s, "Student service links submitted", s.id, { slots: 3 }, null, uid("REQ")));
+    jobs.push(auditStmt(s, "Student service links submitted", s.id, { slots: [...writing] }, null, uid("REQ")));
     await db().batch(jobs);
     return Response.json({ ok: true, ...(await studentView(s.id)) });
   } catch (e: any) {
@@ -305,20 +351,7 @@ async function qcReview(x: any) {
       u.id,
       t,
     ),
-    stmt(
-      `UPDATE service_submissions SET status=CASE
-         WHEN NOT EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status<>'Locked') THEN 'Complete'
-         WHEN EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status='Needs Correction') THEN 'Needs Correction'
-         ELSE 'Pending QC' END,
-         qc_completed_at=CASE WHEN NOT EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status<>'Locked') THEN ? ELSE NULL END,
-         updated_at=? WHERE student_id=?`,
-      link.student_id,
-      link.student_id,
-      link.student_id,
-      t,
-      t,
-      link.student_id,
-    ),
+    submissionStatus(link.student_id, t, "now"),
     auditStmt(u, "Service link review", link.id, { decision: next, student_id: link.student_id, comment }),
   ];
   await db().batch(jobs);

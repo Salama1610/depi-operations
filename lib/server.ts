@@ -433,7 +433,9 @@ export async function loadData(u: any) {
                   ifnull(agg.locked,0) links_locked,
                   ifnull(agg.needs_correction,0) links_need_correction,
                   ifnull(agg.pending,0) links_pending,
-                  ifnull(agg.failed,0) links_failed
+                  ifnull(agg.failed,0) links_failed,
+                  ifnull(agg.kafiil,0) links_kafiil,
+                  ifnull(agg.nafezly,0) links_nafezly
            FROM students s
            JOIN groups g ON g.id=s.group_id
            LEFT JOIN service_submissions ss ON ss.student_id=s.id
@@ -441,7 +443,9 @@ export async function loadData(u: any) {
                              sum(CASE WHEN qc_status='Locked' THEN 1 ELSE 0 END) locked,
                              sum(CASE WHEN qc_status='Needs Correction' THEN 1 ELSE 0 END) needs_correction,
                              sum(CASE WHEN qc_status='Pending' THEN 1 ELSE 0 END) pending,
-                             sum(CASE WHEN auto_status='Failed' THEN 1 ELSE 0 END) failed
+                             sum(CASE WHEN auto_status='Failed' THEN 1 ELSE 0 END) failed,
+                             sum(CASE WHEN platform='Kafiil' THEN 1 ELSE 0 END) kafiil,
+                             sum(CASE WHEN platform='Nafezly' THEN 1 ELSE 0 END) nafezly
                       FROM service_links GROUP BY student_id) agg ON agg.student_id=s.id
            WHERE ${q.sql}`,
           ...q.args,

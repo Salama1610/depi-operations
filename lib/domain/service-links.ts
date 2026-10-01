@@ -71,7 +71,7 @@ function failed(message: string, checks: string[] = [message]): ServiceLinkVerif
  * stores them over https. QC remains responsible for page availability,
  * ownership, category and track fit.
  */
-export function verifyServiceLink(raw: unknown): ServiceLinkVerification {
+export function verifyServiceLink(raw: unknown, options: { open?: boolean } = {}): ServiceLinkVerification {
   const value = typeof raw === "string" ? raw.trim() : "";
   if (!value) return failed("Add a public service link.");
   if (value.length > 2048)
@@ -104,6 +104,28 @@ export function verifyServiceLink(raw: unknown): ServiceLinkVerification {
         ? `Numeric service ID ${path.serviceId} and slug detected`
         : "Use the complete service URL with its numeric ID and Arabic or English slug",
     ];
+    // An open link is any secure, direct page on another site. It has no
+    // marketplace shape to check; QC confirms it is the student's service.
+    if (options.open && !platformOk) {
+      const openFailed = parsed.protocol !== "https:" || !directOk || !/\./.test(parsed.hostname);
+      const openChecks = [
+        parsed.protocol === "https:" ? "Secure HTTPS link" : "The service link must use HTTPS",
+        directOk ? "Direct public URL" : "Ports and embedded credentials are not allowed",
+        "Open link on another site",
+      ];
+      return {
+        status: openFailed ? "Failed" : "Needs Review",
+        normalizedUrl: parsed.toString(),
+        upgraded: false,
+        platform,
+        serviceId: null,
+        checks: openChecks,
+        message: openFailed
+          ? openChecks.find((check) => /must|not allowed/.test(check)) || "Fix the link before QC review."
+          : "Open link accepted. QC confirms the page is your service.",
+        verificationVersion: serviceLinkVerificationVersion,
+      };
+    }
     const isFailed = !protocolOk || !directOk || !platformOk || !path.valid;
     return {
       status: isFailed ? "Failed" : "Needs Review",
@@ -122,54 +144,79 @@ export function verifyServiceLink(raw: unknown): ServiceLinkVerification {
   }
 }
 
-/** A student submits at least this many service links. */
+/** A student's services are complete at this many links... */
 export const minServiceLinks = 3;
-/** And at most this many on any one marketplace. */
+/** ...as long as these marketplaces are among them. */
+export const requiredServicePlatforms = ["Kafiil", "Nafezly"] as const;
+/** No more than this many on any one of the accepted marketplaces. */
 export const maxLinksPerPlatform = 3;
-/** So never more than this many in all. */
-export const maxServiceLinks = acceptedServicePlatforms.length * maxLinksPerPlatform;
+/** And never more than this many links in all. */
+export const maxServiceLinks = 9;
+/** The platform recorded for a link on any other site. */
+export const openLinkPlatform = "External service";
 
 /**
  * What makes two links the same service: the marketplace and its numeric
- * service ID. The slug is the seller's wording and can change, so a renamed
- * service is still the same one.
+ * service ID, so a renamed slug is still the same one. An open link has no
+ * service ID and is compared by its address.
  */
-export function serviceKey(check: Pick<ServiceLinkVerification, "platform" | "serviceId">) {
-  return check.serviceId ? `${check.platform}:${check.serviceId}` : null;
+export function serviceKey(check: Pick<ServiceLinkVerification, "platform" | "serviceId"> & { normalizedUrl?: string }) {
+  if (check.serviceId) return `${check.platform}:${check.serviceId}`;
+  return check.normalizedUrl ? `url:${check.normalizedUrl}` : null;
 }
 
-/** How many of these links are on each accepted marketplace. */
+/** How many links are on each accepted marketplace, and how many are open links. */
 export function linksPerPlatform(values: string[]) {
-  const counts: Record<string, number> = Object.fromEntries(acceptedServicePlatforms.map((p) => [p, 0]));
+  const counts: Record<string, number> = Object.fromEntries(
+    [...acceptedServicePlatforms, openLinkPlatform].map((p) => [p, 0]),
+  );
   for (const value of values) {
-    const platform = verifyServiceLink(value).platform;
+    const platform = verifyServiceLink(value, { open: true }).platform;
     if (platform in counts) counts[platform] += 1;
   }
   return counts;
 }
 
 /**
- * The links a student submits, in order. Any mix of Nafezly, Kafiil and Khamsat
- * is accepted: three on one marketplace, two and one, one of each, or more,
- * as long as there are at least three in all and no more than three on any one
- * marketplace. A link on another site is refused outright.
+ * Where a student stands: links submitted against the minimum, and whether a
+ * Kafiil and a Nafezly service are among them. `platforms` is one entry per
+ * link the student holds.
+ */
+export function serviceProgress(platforms: string[]) {
+  const has = (p: string) => platforms.includes(p);
+  const missing = requiredServicePlatforms.filter((p) => !has(p));
+  return {
+    count: platforms.length,
+    minimum: minServiceLinks,
+    hasKafiil: has("Kafiil"),
+    hasNafezly: has("Nafezly"),
+    missing,
+    met: platforms.length >= minServiceLinks && missing.length === 0,
+  };
+}
+
+/**
+ * The links a student holds once a submission is applied, in slot order. They
+ * are checked as a set: at most three on each marketplace, nine in all, room
+ * left for a required Kafiil and Nafezly service, and no service twice.
+ * Fewer than three is allowed; services are submitted one at a time.
  */
 export function normalizeServiceSlots(input: unknown) {
-  if (!Array.isArray(input) || input.length < minServiceLinks)
-    throw new Error(`Submit at least ${minServiceLinks} service links.`);
-  if (input.length > maxServiceLinks)
-    throw new Error(`Submit at most ${maxServiceLinks} service links, ${maxLinksPerPlatform} per marketplace.`);
+  if (!Array.isArray(input) || input.length === 0) throw new Error("Add a service link.");
+  if (input.length > maxServiceLinks) throw new Error(`Submit at most ${maxServiceLinks} service links.`);
   const values = input.map((value) => (typeof value === "string" ? value.trim() : ""));
   if (values.some((value) => !value)) throw new Error("Fill in every service link you added, or remove it.");
-  for (const [index, value] of values.entries())
-    if (verifyServiceLink(value).platform === "External service")
-      throw new Error(`Link ${index + 1} is not on ${acceptedPlatformList()}. Only those marketplaces are accepted.`);
-  for (const [platform, count] of Object.entries(linksPerPlatform(values)))
-    if (count > maxLinksPerPlatform)
-      throw new Error(`At most ${maxLinksPerPlatform} ${platform} links can be submitted; this has ${count}.`);
+  const counts = linksPerPlatform(values);
+  for (const platform of acceptedServicePlatforms)
+    if (counts[platform] > maxLinksPerPlatform)
+      throw new Error(`At most ${maxLinksPerPlatform} ${platform} links can be submitted; this has ${counts[platform]}.`);
+  const platforms = values.map((value) => verifyServiceLink(value, { open: true }).platform);
+  const missing = serviceProgress(platforms).missing;
+  if (values.length + missing.length > maxServiceLinks)
+    throw new Error(`Keep room for your ${missing.join(" and ")} service: ${maxServiceLinks} links at most, and one must be on each.`);
   const identity = values.map((value) => {
-    const check = verifyServiceLink(value);
-    return serviceKey(check) || check.normalizedUrl || value.toLowerCase();
+    const check = verifyServiceLink(value, { open: true });
+    return serviceKey(check) || value.toLowerCase();
   });
   if (new Set(identity).size !== values.length) throw new Error("Each service link must be different.");
   return values;

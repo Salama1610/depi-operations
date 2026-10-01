@@ -987,6 +987,9 @@ export default function Operations({ module: initialModule }: { module: string }
     ) : (
       <span>… {t("Waiting")}</span>
     );
+  // A service link named by where it lives; an open link is any other site.
+  const serviceLabel = (platform?: string) =>
+    !platform ? t("Service") : platform === "External service" ? t("Open link") : t("{v0} service", { v0: platform });
   const statusCol = {
     key: "status",
     label: t("Status"),
@@ -1941,9 +1944,11 @@ export default function Operations({ module: initialModule }: { module: string }
         ? "Not submitted"
         : Number(r.links_need_correction) > 0
           ? "Needs student correction"
-          : Number(r.links_submitted) >= 3 && Number(r.links_locked) === Number(r.links_submitted)
-            ? "Complete"
-            : "Awaiting QC";
+          : Number(r.links_pending) > 0
+            ? "Awaiting QC"
+            : Number(r.links_submitted) >= 3 && Number(r.links_kafiil) > 0 && Number(r.links_nafezly) > 0
+              ? "Complete"
+              : "Incomplete";
     const submissionRows = serviceSubmissionStatus
       .map((r): Row => ({ ...r, follow_up: submissionState(r) }))
       .filter(qMatch)
@@ -1953,8 +1958,8 @@ export default function Operations({ module: initialModule }: { module: string }
       .filter((r) => submissionFilters.coordinator === "All" || r.coordinator === submissionFilters.coordinator)
       .sort(
         (a, b) =>
-          ["Not submitted", "Needs student correction", "Awaiting QC", "Complete"].indexOf(a.follow_up) -
-            ["Not submitted", "Needs student correction", "Awaiting QC", "Complete"].indexOf(b.follow_up) ||
+          ["Not submitted", "Incomplete", "Needs student correction", "Awaiting QC", "Complete"].indexOf(a.follow_up) -
+            ["Not submitted", "Incomplete", "Needs student correction", "Awaiting QC", "Complete"].indexOf(b.follow_up) ||
           String(a.student_name).localeCompare(String(b.student_name)),
       );
     const submissionCount = (state: string) =>
@@ -1965,10 +1970,11 @@ export default function Operations({ module: initialModule }: { module: string }
           <span><strong>{submissionCount("Not submitted")}</strong>{t("Not submitted")}</span>
           <span><strong>{submissionCount("Awaiting QC")}</strong>{t("Awaiting QC")}</span>
           <span><strong>{submissionCount("Needs student correction")}</strong>{t("Needs student correction")}</span>
+          <span><strong>{submissionCount("Incomplete")}</strong>{t("Incomplete")}</span>
           <span><strong>{submissionCount("Complete")}</strong>{t("Complete")}</span>
         </div>
         <div className="filter-row service-qc-filters">
-          <Pick label={t("Follow-up")} value={submissionFilters.state} onChange={(state) => setSubmissionFilters({ ...submissionFilters, state })} options={["All", "Not submitted", "Needs student correction", "Awaiting QC", "Complete"]} />
+          <Pick label={t("Follow-up")} value={submissionFilters.state} onChange={(state) => setSubmissionFilters({ ...submissionFilters, state })} options={["All", "Not submitted", "Incomplete", "Needs student correction", "Awaiting QC", "Complete"]} />
           <Pick label={t("Track")} value={submissionFilters.track} onChange={(track) => setSubmissionFilters({ ...submissionFilters, track })} options={["All", ...Array.from(new Set(serviceSubmissionStatus.map((r) => r.track).filter(Boolean)))]} />
           <Pick label={t("Group")} value={submissionFilters.group} onChange={(group) => setSubmissionFilters({ ...submissionFilters, group })} options={["All", ...Array.from(new Set(serviceSubmissionStatus.map((r) => r.group_id).filter(Boolean)))]} />
           <Pick label={t("Coordinator")} value={submissionFilters.coordinator} onChange={(coordinator) => setSubmissionFilters({ ...submissionFilters, coordinator })} options={[{ value: "All", label: t("All coordinators") }, ...Array.from(new Set(serviceSubmissionStatus.map((r) => r.coordinator).filter(Boolean))).map((id) => ({ value: id, label: owner(id) }))]} />
@@ -2042,7 +2048,7 @@ export default function Operations({ module: initialModule }: { module: string }
                 pageRows,
                 [
                   { key: "student_name", label: t("Student"), render: (r) => { const own = serviceLinks.filter((l) => l.student_id === r.student_id); const decided = own.filter((l) => l.qc_status !== "Pending").length; return <span><strong>{r.student_name}</strong><small className="table-subline">{r.student_id} · {decided}/{own.length} {t("reviewed")}</small></span>; } },
-                  { key: "slot", label: t("Slot"), render: (r) => t("{v0} service", { v0: r.platform || t("Service") }) },
+                  { key: "slot", label: t("Slot"), render: (r) => serviceLabel(r.platform) },
                   { key: "url", label: t("Link"), render: (r) => <a className="text-link" href={r.url} target="_blank" rel="noreferrer">{r.platform} <ExternalLink size={14} /></a> },
                   { key: "auto_status", label: t("Automatic check"), render: (r) => <Badge value={r.auto_status} /> },
                   { key: "reviewer_name", label: t("Reviewer"), render: (r) => isQualityLead && r.qc_status !== "Locked"
@@ -3073,7 +3079,7 @@ export default function Operations({ module: initialModule }: { module: string }
                           <Empty title={t("No service links submitted")} text={t("The student has not submitted service links yet.")} />
                         ) : serviceLinks.filter((link) => link.student_id === selectedStudent.id).map((link) => (
                           <article key={link.id}>
-                            <div className="detail-actions"><Badge value={t("{v0} service", { v0: link.platform || t("Service") })} /><Badge value={link.qc_status} /><Badge value={link.auto_status} /></div>
+                            <div className="detail-actions"><Badge value={serviceLabel(link.platform)} /><Badge value={link.qc_status} /><Badge value={link.auto_status} /></div>
                             <h3><a className="text-link" href={link.url} target="_blank" rel="noreferrer">{link.platform} <ExternalLink size={14} /></a></h3>
                             <p>{(() => { try { return JSON.parse(link.auto_result || "{}").message; } catch { return t("Automatic details unavailable."); } })()}</p>
                             <small>{t("Revision")}{" "}{link.revision} {t("· submitted")}{" "}{new Date(link.submitted_at).toLocaleString()}{link.qc_at ? t(" · reviewed {v0} by {v1}", { v0: new Date(link.qc_at).toLocaleString(), v1: link.reviewer_name || owner(link.qc_actor) }) : ""}</small>
@@ -3797,7 +3803,7 @@ export default function Operations({ module: initialModule }: { module: string }
                   <>
                     <div className="info-box">
                       <strong>{modal!.student_name || name(modal!.student_id)}</strong>
-                      <Badge value={t("{v0} service", { v0: modal!.platform || t("Service") })} />
+                      <Badge value={serviceLabel(modal!.platform)} />
                       <a className="text-link" href={modal!.url} target="_blank" rel="noreferrer">
                         {t("Open submitted service")}{" "}<ExternalLink size={16} />
                       </a>
