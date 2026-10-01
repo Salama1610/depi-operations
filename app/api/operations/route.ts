@@ -774,7 +774,9 @@ export async function POST(req: Request) {
         break;
       }
       case "session": {
-        permit(u, [...sessionLeaders, "Operations Coordinator"]);
+        // The schedule is the leaders' to set: Project Operations and Coach
+        // Operations. Coordinators and coaches confirm and record attendance.
+        permit(u, sessionLeaders);
         const group = await sessionGroup(u, x.group_id);
         const session = await validateSessionSlot(x);
         jobs.push(
@@ -943,7 +945,7 @@ export async function POST(req: Request) {
         break;
       }
       case "session_cancel": {
-        permit(u, [...sessionLeaders, "Operations Coordinator"]);
+        permit(u, sessionLeaders);
         const current: any = await stmt(
           "SELECT * FROM sessions WHERE id=?",
           id,

@@ -642,6 +642,40 @@ export async function loadData(u: any) {
           : `At the Week ${g.week} expected milestone`;
   }
   loadTimings.enrich = Date.now() - loadStarted - loadTimings.db;
+  // Coordinators, coaches and quality reviewers know themselves and the people
+  // their own work brings them into contact with: the staff of their groups,
+  // and whoever owns, records or reviews something about their students. The
+  // leaders, supervisors, the Quality Lead and administrators keep the whole
+  // directory, which they need to hand work out.
+  const frontline = !can(u.roles, [
+    "Project Operations",
+    "Coach Operations",
+    "Operations Systems / Admin",
+    "Higher Board",
+    "Team Supervisor",
+    "Quality Lead",
+  ]);
+  let visibleStaff = staff;
+  if (frontline) {
+    const known = new Set<string>([u.id]);
+    const add = (...ids: unknown[]) => ids.forEach((v) => v && known.add(String(v)));
+    for (const g of groups) add(g.coordinator, g.supervisor, g.coach, g.account_manager);
+    for (const c of groupCoaches) add(c.user_id);
+    for (const t of tasks) add(t.owner);
+    for (const c of cases) add(c.owner);
+    for (const c of contacts) add(c.owner, c.recorder);
+    for (const e of evidence) add(e.qc_actor, e.recorder);
+    for (const l of serviceLinks) add(l.qc_actor);
+    for (const r of serviceLinkReviews) add(r.reviewed_by);
+    for (const s of sessions) add(s.coach_id);
+    const reviewer = can(u.roles, ["Quality Member"]);
+    visibleStaff = staff.filter((person: any) => {
+      if (known.has(person.id)) return true;
+      if (!reviewer) return false;
+      const held = Array.isArray(person.roles) ? person.roles : JSON.parse(person.roles || "[]");
+      return held.includes("Quality Lead");
+    });
+  }
   return {
     user: u,
     workspaceMode,
@@ -675,7 +709,7 @@ export async function loadData(u: any) {
     serviceLinkReviews,
     serviceSubmissionStatus,
     accounts,
-    staff,
+    staff: visibleStaff,
     // Who this person may make a group's coordinator; null means anyone.
     teamCoordinators: await teamCoordinators(u),
     policies: p,

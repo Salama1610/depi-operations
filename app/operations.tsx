@@ -934,13 +934,13 @@ export default function Operations({ module: initialModule }: { module: string }
   // add that kind of record: supervisors add no students, sessions or groups.
   const createRoles: Record<string, string[]> = {
     students: ["Project Operations", "Operations Coordinator", "Operations Systems / Admin"],
-    sessions: ["Coach Operations", "Project Operations", "Operations Coordinator", "Operations Systems / Admin"],
+    sessions: ["Coach Operations", "Project Operations", "Operations Systems / Admin"],
     groups: ["Operations Systems / Admin"],
   };
   const canCreate = (m: string) => !createRoles[m] || can(user.roles, createRoles[m]);
-  const plansSession = (r: Row) =>
-    can(user.roles, ["Coach Operations", "Project Operations", "Operations Systems / Admin"]) ||
-    (can(user.roles, ["Operations Coordinator"]) && sessionGroupOf(r)?.coordinator === user.id);
+  // Only the leaders set the schedule; the row argument is kept for callers.
+  const plansSession = (_r: Row) =>
+    can(user.roles, ["Coach Operations", "Project Operations", "Operations Systems / Admin"]);
   // The two people who answer for a session: its coach and the group's coordinator.
   const answersAsCoach = (r: Row) =>
     can(user.roles, ["Coach"]) &&

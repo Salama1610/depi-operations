@@ -469,17 +469,20 @@ test("Depi Industry groups and their students are hidden from everyone", async (
     await dbExec("DELETE FROM groups WHERE id='IND-HIDDEN'");
   }
 });
-test("a coordinator schedules their own group's session and the group's coach confirms it", async () => {
+test("a leader schedules a group's session; its coordinator and coach confirm it", async () => {
   const group = await dbRow("SELECT g.id,u.id uid,u.email FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.status='Active' AND g.id NOT IN (SELECT group_id FROM sessions WHERE week=7) LIMIT 1");
-  const other = await dbRow("SELECT id FROM groups WHERE status='Active' AND coordinator<>? LIMIT 1", group.uid);
-  current = { id: group.uid, email: group.email };
   const slot = { title: "Week 7 coaching", starts_at: new Date(Date.now() + 120 * 86400000).toISOString(), week: 7, duration_minutes: 180 };
-  assert.match((await post("session", { ...slot, id: "SES-COORD-OTHER", group_id: other.id })).error, /only for your own groups/);
+  // The schedule is the leaders': the group's own coordinator may not set or cancel it.
+  current = { id: group.uid, email: group.email };
+  assert.match((await post("session", { ...slot, id: "SES-COORD-1", group_id: group.id })).error, /role/);
+  current = { id: "coach-ops-login", email: "staff-coach-ops@example.invalid" };
   await check("session", { ...slot, id: "SES-COORD-1", group_id: group.id });
   const created = await dbRow("SELECT * FROM sessions WHERE id='SES-COORD-1'");
   assert.equal(created.coach_id, null, "the coach can be named later");
   const kase = await dbRow("SELECT * FROM cases WHERE source='session-SES-COORD-1'");
-  assert.equal(kase.owner, group.uid, "the case belongs to whoever scheduled it");
+  assert.equal(kase.owner, "staff-coach-ops", "the case belongs to whoever scheduled it");
+  current = { id: group.uid, email: group.email };
+  assert.match((await post("session_cancel", { id: "SES-COORD-1", reason: "Coordinator cancel" })).error, /role/);
   assert.equal(kase.type, "Session");
   // Another coordinator does not see this group's session case.
   const outsider = await dbRow("SELECT id,email FROM users WHERE roles LIKE '%Operations Coordinator%' AND id<>?", group.uid);
@@ -1041,6 +1044,46 @@ test("coaches and backup coaches are assigned by Coach Operations, who assign no
   assert.equal(assigned.error, undefined, assigned.error);
   // But hands no group to a coordinator.
   assert.match((await programPost("bulk_group_owner", { group_ids: ["G101"], owner_type: "Coordinator", owner: "staff-omar", reason: "Swap" })).error, /role/);
+  current = { id: "owner", email: "owner@example.com" };
+});
+
+test("coordinators, coaches and reviewers know only themselves and the people around their work", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  const everyone = Number((await dbRow("SELECT count(*) n FROM users")).n);
+  const peopleIn = (view) => {
+    const ids = new Set([view.user.id]);
+    const add = (...v) => v.forEach((x) => x && ids.add(String(x)));
+    for (const g of view.groups) add(g.coordinator, g.supervisor, g.coach, g.account_manager);
+    for (const c of view.groupCoaches) add(c.user_id);
+    for (const t of view.tasks) add(t.owner);
+    for (const c of view.cases) add(c.owner);
+    for (const c of view.contacts) add(c.owner, c.recorder);
+    for (const e of view.evidence) add(e.qc_actor, e.recorder);
+    for (const l of view.serviceLinks) add(l.qc_actor);
+    for (const r of view.serviceLinkReviews) add(r.reviewed_by);
+    for (const x of view.sessions) add(x.coach_id);
+    return ids;
+  };
+  for (const who of [
+    { id: "coordinator-login", email: "staff-sara@example.invalid" },
+    { id: "coach-login", email: "staff-coach@example.invalid" },
+  ]) {
+    current = who;
+    const view = await (await api.GET()).json();
+    const allowed = peopleIn(view);
+    assert.ok(view.staff.length < everyone, who.email + " receives the whole staff directory");
+    assert.ok(view.staff.every((p) => allowed.has(p.id)), who.email + " sees someone their work does not involve");
+    assert.ok(view.staff.some((p) => p.id === view.user.id), "they still see themselves");
+    assert.ok(view.staff.every((p) => !("national_id" in p)), "no national IDs");
+  }
+  // A quality reviewer also knows their leader.
+  current = { id: "quality-login", email: "staff-quality@example.invalid" };
+  const reviewer = await (await api.GET()).json();
+  assert.ok(reviewer.staff.some((p) => p.id === "staff-quality-lead"));
+  // A supervisor keeps the directory they hand work out from.
+  current = { id: "supervisor-login", email: "staff-nour@example.invalid" };
+  const supervisor = await (await api.GET()).json();
+  assert.equal(supervisor.staff.length, everyone);
   current = { id: "owner", email: "owner@example.com" };
 });
 
