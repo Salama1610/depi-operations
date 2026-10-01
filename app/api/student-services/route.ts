@@ -11,7 +11,7 @@ import {
   permit,
   student,
 } from "@/lib/server";
-import { normalizeServiceSlots, serviceKey, verifyServiceLink, verifyServiceSlot } from "@/lib/domain/service-links";
+import { minServiceLinks, normalizeServiceSlots, serviceKey, verifyServiceLink } from "@/lib/domain/service-links";
 import { distributeEvenly } from "@/lib/domain/qc-assignment";
 export const dynamic = "force-dynamic";
 
@@ -67,7 +67,16 @@ async function studentView(studentId: string) {
           qc_completed_at: submission.qc_completed_at,
         }
       : null,
-    services: [1, 2, 3].map((slot) => bySlot.get(slot) || { slot, url: "", can_edit: true }),
+    // The links in the order they were added, with empty places up to the
+    // minimum so a first submission starts with three fields.
+    services: [
+      ...rows.map((row) => bySlot.get(row.slot)),
+      ...Array.from({ length: Math.max(0, minServiceLinks - rows.length) }, (_, i) => ({
+        slot: rows.length + i + 1,
+        url: "",
+        can_edit: true,
+      })),
+    ],
     reviews,
     last_reviewed_at: reviews[0]?.reviewed_at || null,
   };
@@ -102,6 +111,11 @@ export async function POST(req: Request) {
       s.id,
     );
     const bySlot = new Map(existing.map((row) => [Number(row.slot), row]));
+    // Links already submitted stay in the list, in their places: an approved or
+    // waiting link cannot change, and one returned for correction is replaced,
+    // not removed. New links are added after them.
+    if (values.length < existing.length)
+      throw new Error("Keep every link you already submitted. Replace a link that needs correction instead of removing it.");
     // A service is the student's own listing. It is never tied to one of the
     // programme's client accounts, which only order gigs, so account_id stays
     // empty.
@@ -151,12 +165,9 @@ export async function POST(req: Request) {
           );
         continue;
       }
-      // A link being written must be on its slot's marketplace; one already
-      // accepted and resubmitted unchanged was settled above.
-      verifyServiceSlot(slot, value);
       if (await takenElsewhere(check))
         throw new Error(
-          `Service ${slot} is already submitted by another student. Each student submits their own services.`,
+          `Link ${slot} is already submitted by another student. Each student submits their own services.`,
         );
       const revision = prior ? Number(prior.revision || 1) + 1 : 1;
       const qcStatus = check.status === "Failed" ? "Needs Correction" : "Pending";
@@ -215,10 +226,10 @@ export async function POST(req: Request) {
       );
     jobs.push(stmt(
       `UPDATE service_submissions SET status=CASE
-         WHEN (SELECT count(*) FROM service_links WHERE student_id=? AND qc_status='Locked')=3 THEN 'Complete'
+         WHEN NOT EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status<>'Locked') THEN 'Complete'
          WHEN EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status='Needs Correction') THEN 'Needs Correction'
          ELSE 'Pending QC' END,
-         qc_completed_at=CASE WHEN (SELECT count(*) FROM service_links WHERE student_id=? AND qc_status='Locked')=3
+         qc_completed_at=CASE WHEN NOT EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status<>'Locked')
            THEN (SELECT max(qc_at) FROM service_links WHERE student_id=?) ELSE NULL END
        WHERE student_id=?`, s.id, s.id, s.id, s.id, s.id,
     ));
@@ -296,10 +307,10 @@ async function qcReview(x: any) {
     ),
     stmt(
       `UPDATE service_submissions SET status=CASE
-         WHEN (SELECT count(*) FROM service_links WHERE student_id=? AND qc_status='Locked')=3 THEN 'Complete'
+         WHEN NOT EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status<>'Locked') THEN 'Complete'
          WHEN EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status='Needs Correction') THEN 'Needs Correction'
          ELSE 'Pending QC' END,
-         qc_completed_at=CASE WHEN (SELECT count(*) FROM service_links WHERE student_id=? AND qc_status='Locked')=3 THEN ? ELSE NULL END,
+         qc_completed_at=CASE WHEN NOT EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status<>'Locked') THEN ? ELSE NULL END,
          updated_at=? WHERE student_id=?`,
       link.student_id,
       link.student_id,

@@ -2,22 +2,20 @@
 import { LanguageToggle, useT } from "@/lib/i18n/context";
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, ExternalLink, LockKeyhole, RefreshCw, Send, ShieldCheck } from "lucide-react";
+import { Check, ExternalLink, LockKeyhole, Plus, RefreshCw, Send, ShieldCheck, X } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { slotPlatform, verifyServiceLink } from "@/lib/domain/service-links";
+import {
+  acceptedServicePlatforms,
+  linksPerPlatform,
+  maxLinksPerPlatform,
+  maxServiceLinks,
+  minServiceLinks,
+  verifyServiceLink,
+} from "@/lib/domain/service-links";
 
-/** An example address for each slot's marketplace, shown as the placeholder. */
-const slotExample: Record<string, string> = {
-  Nafezly: "https://nafezly.com/service/…",
-  Kafiil: "https://kafiil.com/service/…",
-  Khamsat: "https://khamsat.com/…",
-};
-/** True when a link typed into a slot is clearly on another marketplace. */
-const wrongMarketplace = (service: Service) => {
-  if (!service.url.trim() || service.qc_status === "Locked") return false;
-  const platform = verifyServiceLink(service.url).platform;
-  return platform !== "Unknown" && platform !== slotPlatform(service.slot);
-};
+/** True when a typed link is on a site other than the three marketplaces. */
+const offMarketplace = (service: Service) =>
+  Boolean(service.url.trim()) && verifyServiceLink(service.url).platform === "External service";
 
 type Service = {
   id?: string;
@@ -33,7 +31,8 @@ type Service = {
   qc_at?: string | null;
 };
 
-const empty = (): Service[] => [1, 2, 3].map((slot) => ({ slot, url: "", can_edit: true }));
+const empty = (): Service[] =>
+  Array.from({ length: minServiceLinks }, (_, i) => ({ slot: i + 1, url: "", can_edit: true }));
 
 /** The stored review states, in the words the student understands. */
 const reviewLabel: Record<string, string> = {
@@ -102,11 +101,34 @@ export default function StudentServicesPage() {
   }, []);
 
   const editable = services.filter((service) => service.can_edit !== false);
+  // Any mix of the three marketplaces, at least three links, three per marketplace at most.
+  const perPlatform = linksPerPlatform(services.map((service) => service.url).filter((url) => url.trim()));
+  const overLimit = Object.entries(perPlatform).filter(([, n]) => n > maxLinksPerPlatform).map(([p]) => p);
   const ready = useMemo(
-    () => services.length === 3 && services.every((service) => service.url.trim().length > 0),
+    () => services.length >= minServiceLinks && services.every((service) => service.url.trim().length > 0),
     [services],
   );
+  const savedCount = services.filter((service) => service.id).length;
   const lockedCount = services.filter((service) => service.qc_status === "Locked").length;
+
+  function addLink() {
+    setSaved(false);
+    setServices((current) =>
+      current.length >= maxServiceLinks
+        ? current
+        : [...current, { slot: Math.max(0, ...current.map((s) => s.slot)) + 1, url: "", can_edit: true }],
+    );
+  }
+
+  // Only a link not yet submitted can be taken off the list, and never below three.
+  function removeLink(slot: number) {
+    setSaved(false);
+    setServices((current) =>
+      current
+        .filter((service) => service.slot !== slot)
+        .map((service, index) => (service.id ? service : { ...service, slot: index + 1 })),
+    );
+  }
 
   function update(slot: number, url: string) {
     setSaved(false);
@@ -186,14 +208,14 @@ export default function StudentServicesPage() {
             <div>
               <span className="student-kicker">{t("SERVICE LINKS / ROUND 5")}</span>
               <h1>{student?.name ? t("Hi {v0}, submit your services.", { v0: student.name.split(" ")[0] }) : t("Submit your services.")}</h1>
-              <p>{t("Add exactly three public links to services you provide. Each link is checked automatically, then reviewed by your coordinator.")}</p>
+              <p>{t("Add at least three public links to services you provide on Nafezly, Kafiil or Khamsat, in any mix, with up to three on each. Each link is checked automatically, then reviewed by your coordinator.")}</p>
             </div>
-            <div className="student-progress"><strong>{lockedCount}/3</strong><span>{t("approved")}</span></div>
+            <div className="student-progress"><strong>{lockedCount}/{Math.max(savedCount, minServiceLinks)}</strong><span>{t("approved")}</span></div>
           </section>
 
           <section className="student-card">
             <div className="student-card-heading">
-              <div><h2>{t("Your three service links")}</h2><p>{t("Approved links cannot be changed. Links needing correction stay editable with your coordinator’s comment.")}</p></div>
+              <div><h2>{t("Your service links")}</h2><p>{t("Approved links cannot be changed. Links needing correction stay editable with your coordinator’s comment.")}</p></div>
               {submission && <span className={statusTone(submission.status)}>{t(label(submission.status))}</span>}
             </div>
             {submission && (
@@ -213,8 +235,11 @@ export default function StudentServicesPage() {
                       <div className="student-url-field">
                         <label htmlFor={`service-${service.slot}`}>{t("Public service URL")}</label>
                         <div className="student-url-wrap">
-                          <input id={`service-${service.slot}`} type="url" required value={service.url} disabled={locked || busy} placeholder={slotExample[slotPlatform(service.slot)]} onChange={(e) => update(service.slot, e.target.value)} />
+                          <input id={`service-${service.slot}`} type="url" required value={service.url} disabled={locked || busy} placeholder={t("https://…")} onChange={(e) => update(service.slot, e.target.value)} />
                           {service.url && <a href={service.url} target="_blank" rel="noreferrer" aria-label={t("Open service {v0}", { v0: service.slot })}><ExternalLink size={17} /></a>}
+                          {!service.id && services.length > minServiceLinks && (
+                            <button type="button" className="student-remove" disabled={busy} onClick={() => removeLink(service.slot)} aria-label={t("Remove this link")}><X size={16} /></button>
+                          )}
                         </div>
                         <div className="student-meta">
                           {service.platform && <span>{service.platform}</span>}
@@ -226,7 +251,7 @@ export default function StudentServicesPage() {
                             {service.auto_result.checks.map((check) => <li key={check}>{check}</li>)}
                           </ul>
                         ) : null}
-                        {wrongMarketplace(service) && <div className="student-qc-note">{t("This slot takes a {v0} service link only.", { v0: slotPlatform(service.slot) })}</div>}
+                        {offMarketplace(service) && <div className="student-qc-note">{t("Only Nafezly, Kafiil and Khamsat service links are accepted.")}</div>}
                         {correction && <div className="student-qc-note"><strong>{t("Correction needed:")}</strong> {service.qc_comment}</div>}
                         {locked && <div className="student-locked-note"><LockKeyhole size={15} /> {t("Approved by your coordinator")}{service.qc_comment ? ` · ${service.qc_comment}` : ""}</div>}
                       </div>
@@ -234,19 +259,32 @@ export default function StudentServicesPage() {
                   );
                 })}
               </div>
+              <div className="student-platform-count">
+                <span>
+                  {acceptedServicePlatforms.map((platform) => `${platform} ${perPlatform[platform] || 0}/${maxLinksPerPlatform}`).join(" · ")}
+                </span>
+                {services.length < maxServiceLinks && (
+                  <button type="button" className="student-secondary" disabled={busy} onClick={addLink}><Plus size={16} />{t("Add another link")}</button>
+                )}
+              </div>
+              {overLimit.length > 0 && (
+                <p className="student-form-error" role="alert">
+                  {t("At most three links per marketplace. Remove a {v0} link.", { v0: overLimit.join(", ") })}
+                </p>
+              )}
               {error && <p className="student-form-error" role="alert">{error}</p>}
               {saved && <p className="student-saved"><Check size={17} /> {t("Saved. Your coordinator can now review your links.")}</p>}
               <div className="student-form-footer">
                 <span>
                   {!submission
-                    ? t("Add all three links, then submit them together.")
+                    ? t("Add at least three links, then submit them together.")
                     : editable.length > 0
                       ? t("{v0} link{v1} can be updated.", { v0: editable.length, v1: editable.length === 1 ? "" : "s" })
-                      : lockedCount === 3
-                        ? t("All three links are approved. Nothing more is needed.")
+                      : savedCount >= minServiceLinks && lockedCount === savedCount
+                        ? t("All your links are approved. Nothing more is needed.")
                         : t("Your links are with your coordinator. Nothing can be changed until they respond.")}
                 </span>
-                <button className="student-primary" disabled={!ready || busy || services.some(wrongMarketplace) || (Boolean(submission) && editable.length === 0)} type="submit"><Send size={16} />{busy ? t("Submitting…") : submission ? t("Resubmit editable links") : t("Submit 3 links")}</button>
+                <button className="student-primary" disabled={!ready || busy || services.some(offMarketplace) || overLimit.length > 0 || (Boolean(submission) && editable.length === 0)} type="submit"><Send size={16} />{busy ? t("Submitting…") : submission ? t("Resubmit editable links") : t("Submit {v0} links", { v0: services.length })}</button>
               </div>
             </form>
           </section>
@@ -269,7 +307,7 @@ export default function StudentServicesPage() {
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{t("Submit these three service links?")}</DialogTitle>
+            <DialogTitle>{t("Submit these service links?")}</DialogTitle>
             <DialogDescription>{t("Pending links become read-only until your coordinator reviews them. You can edit only links returned for correction.")}</DialogDescription>
           </DialogHeader>
           <ol className="student-confirm-list">

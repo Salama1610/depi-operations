@@ -759,3 +759,9 @@ input:focus-visible {
 .checklist-stage h4 { font-weight: 600; font-size: 0.85rem; margin-bottom: 0.4rem; color: var(--muted-foreground, #64748b); }
 .checklist-row { display: flex; align-items: flex-start; gap: 0.6rem; padding: 0.35rem 0; }
 .checklist-row button[role="checkbox"] { margin-top: 0.15rem; }
+
+/* Student services: a running count per marketplace, adding and removing links. */
+.student-platform-count{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-top:16px;color:#6d7f9a;font-size:13px}
+.student-platform-count .student-secondary{display:inline-flex;align-items:center;gap:6px}
+.student-remove{display:flex;align-items:center;justify-content:center;border:1px solid #e3e9f2;background:#fff;color:#8a98ad;border-radius:8px;padding:9px;min-height:40px}
+.student-remove:hover{border-color:#f2d0ca;color:#a9554c}

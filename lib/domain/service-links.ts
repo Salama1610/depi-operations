@@ -122,28 +122,12 @@ export function verifyServiceLink(raw: unknown): ServiceLinkVerification {
   }
 }
 
-/**
- * Each of a student's three services is on its own marketplace, in this order:
- * service 1 on Nafezly, service 2 on Kafiil, service 3 on Khamsat.
- */
-export const serviceSlotPlatforms = ["Nafezly", "Kafiil", "Khamsat"] as const;
-
-/** The marketplace a slot (1–3) is for. */
-export function slotPlatform(slot: number) {
-  return serviceSlotPlatforms[slot - 1];
-}
-
-/**
- * The link checked for its slot. A link on another marketplace is refused
- * outright rather than recorded, so a slot only ever holds its own platform.
- */
-export function verifyServiceSlot(slot: number, raw: unknown): ServiceLinkVerification {
-  const check = verifyServiceLink(raw);
-  const expected = slotPlatform(slot);
-  if (expected && check.platform !== expected && check.platform !== "Unknown")
-    throw new Error(`Service ${slot} is for ${expected}. Paste a ${expected} service link there.`);
-  return check;
-}
+/** A student submits at least this many service links. */
+export const minServiceLinks = 3;
+/** And at most this many on any one marketplace. */
+export const maxLinksPerPlatform = 3;
+/** So never more than this many in all. */
+export const maxServiceLinks = acceptedServicePlatforms.length * maxLinksPerPlatform;
 
 /**
  * What makes two links the same service: the marketplace and its numeric
@@ -154,18 +138,39 @@ export function serviceKey(check: Pick<ServiceLinkVerification, "platform" | "se
   return check.serviceId ? `${check.platform}:${check.serviceId}` : null;
 }
 
+/** How many of these links are on each accepted marketplace. */
+export function linksPerPlatform(values: string[]) {
+  const counts: Record<string, number> = Object.fromEntries(acceptedServicePlatforms.map((p) => [p, 0]));
+  for (const value of values) {
+    const platform = verifyServiceLink(value).platform;
+    if (platform in counts) counts[platform] += 1;
+  }
+  return counts;
+}
+
+/**
+ * The links a student submits, in order. Any mix of Nafezly, Kafiil and Khamsat
+ * is accepted: three on one marketplace, two and one, one of each, or more,
+ * as long as there are at least three in all and no more than three on any one
+ * marketplace. A link on another site is refused outright.
+ */
 export function normalizeServiceSlots(input: unknown) {
-  if (!Array.isArray(input) || input.length !== 3)
-    throw new Error("Submit exactly 3 service links.");
-  const values = input.map((value) =>
-    typeof value === "string" ? value.trim() : "",
-  );
-  if (values.some((value) => !value))
-    throw new Error("All 3 service links are required.");
-  const normalized = values.map((value) =>
-    verifyServiceLink(value).normalizedUrl || value.toLowerCase(),
-  );
-  if (new Set(normalized).size !== 3)
-    throw new Error("Each service link must be different.");
+  if (!Array.isArray(input) || input.length < minServiceLinks)
+    throw new Error(`Submit at least ${minServiceLinks} service links.`);
+  if (input.length > maxServiceLinks)
+    throw new Error(`Submit at most ${maxServiceLinks} service links, ${maxLinksPerPlatform} per marketplace.`);
+  const values = input.map((value) => (typeof value === "string" ? value.trim() : ""));
+  if (values.some((value) => !value)) throw new Error("Fill in every service link you added, or remove it.");
+  for (const [index, value] of values.entries())
+    if (verifyServiceLink(value).platform === "External service")
+      throw new Error(`Link ${index + 1} is not on ${acceptedPlatformList()}. Only those marketplaces are accepted.`);
+  for (const [platform, count] of Object.entries(linksPerPlatform(values)))
+    if (count > maxLinksPerPlatform)
+      throw new Error(`At most ${maxLinksPerPlatform} ${platform} links can be submitted; this has ${count}.`);
+  const identity = values.map((value) => {
+    const check = verifyServiceLink(value);
+    return serviceKey(check) || check.normalizedUrl || value.toLowerCase();
+  });
+  if (new Set(identity).size !== values.length) throw new Error("Each service link must be different.");
   return values;
 }

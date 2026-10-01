@@ -2547,7 +2547,7 @@ test("a client account is requested for any student's gig, three at most", async
   assert.match((await ask(4)).error, /three client-account requests/);
 });
 
-test("each service slot takes its own marketplace, and a service belongs to one student", async () => {
+test("a student submits three or more links in any mix of marketplaces, and a service belongs to one student", async () => {
   await dbExec("DELETE FROM rate_limits");
   const servicesApi = await route("student-services");
   const submit = (services) =>
@@ -2555,28 +2555,40 @@ test("each service slot takes its own marketplace, and a service belongs to one 
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "submit_services", services }),
     }));
+  const kafiil = (id) => `https://kafiil.com/service/${id}-service`;
+  const nafezly = (id) => `https://nafezly.com/service/${id}-service`;
   const [one, two] = await dbRows("SELECT id,email FROM students WHERE id NOT IN (SELECT student_id FROM service_links) AND lifecycle='Active' ORDER BY id LIMIT 2");
   current = { id: one.id, email: one.email };
-  let r = await submit([slotLink(2, 7701), slotLink(2, 7702), slotLink(3, 7703)]);
-  assert.equal(r.status, 400);
-  assert.match((await r.json()).error, /Service 1 is for Nafezly/);
-  r = await submit([slotLink(1, 7701), slotLink(2, 7702), "https://upwork.com/services/product/7703"]);
-  assert.match((await r.json()).error, /Service 3 is for Khamsat/, "a link off the three marketplaces is refused too");
+  let r = await submit([kafiil(7701), kafiil(7702), kafiil(7703), kafiil(7704)]);
+  assert.match((await r.json()).error, /At most 3 Kafiil/);
+  r = await submit([kafiil(7701), kafiil(7702), "https://upwork.com/services/product/7703"]);
+  assert.match((await r.json()).error, /Link 3 is not on/);
   assert.equal((await dbRow("SELECT count(*) n FROM service_links WHERE student_id=?", one.id)).n, 0, "nothing is saved from a refused submission");
-  r = await submit([slotLink(1, 7701), slotLink(2, 7702), slotLink(3, 7703)]);
+  // Three on one marketplace is fine.
+  r = await submit([kafiil(7701), kafiil(7702), kafiil(7703)]);
   assert.equal(r.status, 200, await r.clone().text());
-  const saved = await dbRows("SELECT slot,platform,account_id FROM service_links WHERE student_id=? ORDER BY slot", one.id);
-  assert.deepEqual(saved.map((x) => x.platform), ["Nafezly", "Kafiil", "Khamsat"]);
+  let saved = await dbRows("SELECT slot,platform,account_id FROM service_links WHERE student_id=? ORDER BY slot", one.id);
+  assert.deepEqual(saved.map((x) => x.platform), ["Kafiil", "Kafiil", "Kafiil"]);
   assert.ok(saved.every((x) => x.account_id === null), "a service is the student's own, not a client account's");
+  // More can be added later, on any marketplace, keeping what was submitted.
+  r = await submit([kafiil(7701), kafiil(7702), kafiil(7703), nafezly(7704), nafezly(7705)]);
+  assert.equal(r.status, 200, await r.clone().text());
+  const view = await r.json();
+  assert.equal(view.services.length, 5);
+  saved = await dbRows("SELECT slot,platform FROM service_links WHERE student_id=? ORDER BY slot", one.id);
+  assert.deepEqual(saved.map((x) => x.slot), [1, 2, 3, 4, 5]);
+  assert.equal((await dbRow("SELECT status FROM service_submissions WHERE student_id=?", one.id)).status, "Pending QC");
+  assert.match((await (await submit([kafiil(7701), kafiil(7702), kafiil(7703), nafezly(7704)])).json()).error, /Keep every link/);
   // Another student cannot submit the same listing, even with the slug reworded.
   current = { id: two.id, email: two.email };
-  r = await submit(["https://nafezly.com/service/7701-renamed-service", slotLink(2, 7712), slotLink(3, 7713)]);
+  r = await submit(["https://kafiil.com/service/7701-renamed-service", nafezly(7712), nafezly(7713)]);
   assert.equal(r.status, 400);
-  assert.match((await r.json()).error, /Service 1 is already submitted by another student/);
-  r = await submit([slotLink(1, 7711), slotLink(2, 7712), slotLink(3, 7713)]);
+  assert.match((await r.json()).error, /Link 1 is already submitted by another student/);
+  r = await submit([nafezly(7711), nafezly(7712), "https://khamsat.com/design/logo/7713-logo"]);
   assert.equal(r.status, 200, await r.clone().text());
   current = { id: "owner", email: "owner@example.com" };
 });
+
 
 test("the coordinator and coach answer attending or unavailable, and the leaders hear about an absence", async () => {
   current = { id: "owner", email: "owner@example.com" };
