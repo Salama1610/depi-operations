@@ -11,6 +11,7 @@ import {
 import { ProgramFlow } from "./program-flow";
 import { WeeklyProgress } from "./weekly-progress";
 import { acceptedServicePlatforms, slotPlatform } from "@/lib/domain/service-links";
+import { checklistState, sessionChecklist, type ChecklistItem } from "@/lib/domain/session-checklist";
 import { useState, useEffect } from "react";
 import {
   Home,
@@ -364,7 +365,8 @@ export default function Operations({ module: initialModule }: { module: string }
     [importId, setImportId] = useState(""),
     [serviceFilters, setServiceFilters] = useState<Row>({ platform: "All", track: "All", group: "All", coordinator: "All", reviewer: "All", age: "All", automatic: "All", corrections: "All" }),
     [submissionFilters, setSubmissionFilters] = useState<Row>({ state: "All", track: "All", group: "All", coordinator: "All" }),
-    [saved, setSaved] = useState<string[]>([]);
+    [saved, setSaved] = useState<string[]>([]),
+    [checklistFor, setChecklistFor] = useState<string | null>(null);
   async function refresh() {
     try {
       setError("");
@@ -951,6 +953,26 @@ export default function Operations({ module: initialModule }: { module: string }
         ));
   const answersAsCoordinator = (r: Row) =>
     can(user.roles, ["Operations Coordinator"]) && sessionGroupOf(r)?.coordinator === user.id;
+  // The per-session checklist: the coordinator's steps, the coach's step, and
+  // the ones the app works out from confirmations and the attendance register.
+  const checklistOf = (r: Row) => {
+    const active = (d.students || [])
+      .filter((s: Row) => s.group_id === r.group_id && s.lifecycle === "Active")
+      .map((s: Row) => s.id);
+    const marked = new Set<string>(
+      (d.attendance || []).filter((a: Row) => a.session_id === r.id).map((a: Row) => a.student_id),
+    );
+    return checklistState(
+      r,
+      (d.sessionChecks || []).filter((c: Row) => c.session_id === r.id),
+      active,
+      marked,
+    );
+  };
+  const ticksStep = (r: Row, item: ChecklistItem) =>
+    r.status !== "Cancelled" &&
+    item.owner !== "auto" &&
+    (plansSession(r) || (item.owner === "coordinator" ? answersAsCoordinator(r) : answersAsCoach(r)));
   const canAttend = (r: Row) =>
     r.status === "Scheduled" &&
     ((answersAsCoach(r) && !r.coach_confirmed_at) || (answersAsCoordinator(r) && !r.coordinator_confirmed_at));
@@ -1509,6 +1531,21 @@ export default function Operations({ module: initialModule }: { module: string }
                   </small>
                 </span>
               ),
+          },
+          {
+            key: "checklist",
+            label: t("Checklist"),
+            render: (r) => {
+              if (r.status === "Cancelled") return "—";
+              const steps = Object.values(checklistOf(r));
+              const done = steps.filter((x) => x.done).length;
+              return (
+                <button className="text-link" onClick={() => setChecklistFor(r.id)}>
+                  {steps.some((x) => x.flagged) ? "⚠ " : ""}
+                  {done} / {steps.length}
+                </button>
+              );
+            },
           },
           {
             key: "link",
@@ -3125,6 +3162,58 @@ export default function Operations({ module: initialModule }: { module: string }
           )}
         </SheetContent>
       </Sheet>
+      {(() => {
+        const r = checklistFor ? (d.sessions || []).find((x: Row) => x.id === checklistFor) : null;
+        const state = r ? checklistOf(r) : {};
+        return (
+          <Dialog open={!!r} onOpenChange={(v) => !v && setChecklistFor(null)}>
+            <DialogContent className="action-dialog sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>{t("Session checklist")}</DialogTitle>
+                <DialogDescription>
+                  {r ? `${r.group_id} · ${t("Week {v0}", { v0: r.week })} · ${new Date(r.starts_at).toLocaleString(locale === "ar" ? "ar-EG" : "en-GB", { timeZone: "Africa/Cairo", weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""}
+                </DialogDescription>
+              </DialogHeader>
+              {r &&
+                (["Before", "During", "After"] as const).map((stage) => (
+                  <div key={stage} className="checklist-stage">
+                    <h4>{stage === "Before" ? t("Before the session") : stage === "During" ? t("During the session") : t("After the session")}</h4>
+                    {sessionChecklist
+                      .filter((item) => item.stage === stage && state[item.key])
+                      .map((item) => {
+                        const st = state[item.key];
+                        const editable = ticksStep(r, item);
+                        return (
+                          <label key={item.key} className="checklist-row">
+                            <Checkbox
+                              checked={st.done}
+                              disabled={!editable || busy}
+                              onCheckedChange={(v) => quick("session_check", { id: r.id, item: item.key, done: v === true })}
+                            />
+                            <span>
+                              {t(item.label)}
+                              {item.fromWeek ? <small className="table-subline">{t("From the second session")}</small> : null}
+                              {item.owner === "auto" ? (
+                                <small className="table-subline">
+                                  {st.flagged ? `⚠ ${t("Unavailable")}: ${st.flagged}` : t("Filled in automatically")}
+                                </small>
+                              ) : st.done ? (
+                                <small className="table-subline">
+                                  {owner(st.by || "")} · {st.at ? new Date(st.at).toLocaleString(locale === "ar" ? "ar-EG" : "en-GB", { timeZone: "Africa/Cairo", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}
+                                </small>
+                              ) : (
+                                <small className="table-subline">{item.owner === "coach" ? t("Coach") : t("Coordinator")}</small>
+                              )}
+                            </span>
+                          </label>
+                        );
+                      })}
+                  </div>
+                ))}
+            </DialogContent>
+          </Dialog>
+        );
+      })()}
       <Dialog open={!!modal} onOpenChange={(v) => !v && setModal(null)}>
         <DialogContent className="action-dialog sm:max-w-[620px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>

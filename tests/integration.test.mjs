@@ -2626,3 +2626,39 @@ test("the coordinator and coach answer attending or unavailable, and the leaders
   assert.equal(row.coordinator_confirmed_at, null);
   await dbExec("DELETE FROM group_coaches WHERE id='GC-ANSWER-1'");
 });
+
+test("the session checklist: the coordinator and coach tick their own steps, the app fills the rest", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  const group = await dbRow("SELECT g.id,u.id uid,u.email FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.status='Active' AND g.id NOT IN (SELECT group_id FROM sessions WHERE week=7) LIMIT 1");
+  await check("session", { id: "SES-CHECK-1", group_id: group.id, title: "Week 7 coaching", starts_at: new Date(Date.now() + 140 * 86400000).toISOString(), week: 7, duration_minutes: 180, coach_id: "staff-coach" });
+  const ticks = async () => (await dbRows("SELECT item,done_by FROM session_checks WHERE session_id='SES-CHECK-1' ORDER BY item")).map((r) => r.item);
+  // The group's coordinator ticks the day-before steps.
+  current = { id: group.uid, email: group.email };
+  await check("session_check", { id: "SES-CHECK-1", item: "trainer_notified" });
+  await check("session_check", { id: "SES-CHECK-1", item: "whatsapp_confirmed" });
+  await check("session_check", { id: "SES-CHECK-1", item: "technical_confirmed" });
+  assert.deepEqual(await ticks(), ["technical_confirmed", "trainer_notified", "whatsapp_confirmed"]);
+  // Ticking twice changes nothing; unticking removes it.
+  await check("session_check", { id: "SES-CHECK-1", item: "trainer_notified" });
+  await check("session_check", { id: "SES-CHECK-1", item: "whatsapp_confirmed", done: false });
+  assert.deepEqual(await ticks(), ["technical_confirmed", "trainer_notified"]);
+  // The coach's step is the coach's, and the app's steps are nobody's.
+  assert.match((await post("session_check", { id: "SES-CHECK-1", item: "trainer_joined" })).error, /session's coach/);
+  assert.match((await post("session_check", { id: "SES-CHECK-1", item: "attendance_recorded" })).error, /filled in by the app/);
+  assert.match((await post("session_check", { id: "SES-CHECK-1", item: "nonsense" })).error, /Unknown checklist step/);
+  current = { id: "coach-login", email: "staff-coach@example.invalid" };
+  await check("session_check", { id: "SES-CHECK-1", item: "trainer_joined" });
+  assert.match((await post("session_check", { id: "SES-CHECK-1", item: "assignment_sent" })).error, /group's coordinator/);
+  // A coordinator of another group cannot tick it.
+  const other = await dbRow("SELECT u.id,u.email FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.coordinator<>? LIMIT 1", group.uid);
+  if (other) {
+    current = { id: other.id, email: other.email };
+    assert.ok((await post("session_check", { id: "SES-CHECK-1", item: "assignment_sent" })).error);
+  }
+  // Moving the session clears the day-before steps but keeps the rest.
+  current = { id: "owner", email: "owner@example.com" };
+  await check("session_reschedule", { id: "SES-CHECK-1", starts_at: new Date(Date.now() + 141 * 86400000).toISOString(), reason: "Trainer moved the slot" });
+  assert.deepEqual(await ticks(), ["trainer_joined"]);
+  const audit = await dbRow("SELECT action FROM audit_events WHERE action='session_check' LIMIT 1");
+  assert.ok(audit, "every tick is audited");
+});

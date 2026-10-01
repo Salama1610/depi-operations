@@ -165,3 +165,19 @@ test("a coordinator's schedule carries the group's meeting link", () => {
   assert.match(html, /href="https:\/\/teams\.microsoft\.com\/l\/meetup-join\/g1"/);
   assert.match(html, />Join</);
 });
+
+test("the checklist works out the automatic steps", async () => {
+  const { checklistState } = await vite.ssrLoadModule("/lib/domain/session-checklist.ts");
+  const ticks = ["trainer_notified", "whatsapp_confirmed", "technical_confirmed"].map((item) => ({ item }));
+  let state = checklistState({ week: 1, coach_confirmed_at: "2026-10-10T10:00:00Z" }, ticks, ["S1", "S2"], new Set(["S1"]));
+  assert.equal(state.trainer_confirmed.done, true);
+  assert.equal(state.all_confirmations.done, true);
+  assert.equal(state.attendance_recorded.done, false, "one student is still unmarked");
+  assert.equal(state.assignment_collected, undefined, "collecting the assignment starts from the second session");
+  state = checklistState({ week: 2, coach_unavailable: "Ill" }, ticks, ["S1"], new Set(["S1"]));
+  assert.equal(state.trainer_confirmed.done, false);
+  assert.equal(state.trainer_confirmed.flagged, "Ill");
+  assert.equal(state.all_confirmations.done, false);
+  assert.equal(state.attendance_recorded.done, true);
+  assert.ok(state.assignment_collected);
+});

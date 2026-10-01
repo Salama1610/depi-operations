@@ -33,6 +33,7 @@ import {
 } from "@/lib/domain/rules";
 import { isNationalId, nationalIdProblem, normalizeNationalId, normalizePhone } from "@/lib/domain/sheet-mapping";
 import { seed } from "@/lib/seed";
+import { appliesTo, beforeSessionKeys, checklistItem } from "@/lib/domain/session-checklist";
 export const dynamic = "force-dynamic";
 const ops = ["Project Operations", "Operations Coordinator"];
 // Gig evidence passes three different people: a first check (the group's coach,
@@ -936,6 +937,12 @@ export async function POST(req: Request) {
             t,
             id,
           ),
+          // The day-before steps were done for the old time.
+          stmt(
+            `DELETE FROM session_checks WHERE session_id=? AND item IN (${beforeSessionKeys.map(() => "?").join(",")})`,
+            id,
+            ...beforeSessionKeys,
+          ),
           // A new time needs both confirmations again.
           ...(await sessionCase(
             { ...current, starts_at: session.startsAt },
@@ -976,6 +983,63 @@ export async function POST(req: Request) {
           ),
           ...(await sessionCase(current, group, "Closed", "Session cancelled: " + x.reason.trim(), u.id, t)),
         );
+        break;
+      }
+      case "session_check": {
+        // One step of the per-session checklist, ticked or unticked. The
+        // coordinator's steps belong to the group's coordinator, the trainer
+        // joining to the session's coach; the leaders can tick either. Steps
+        // the app works out for itself are not ticked by hand.
+        permit(u, ["Coach", "Operations Coordinator", ...sessionLeaders]);
+        const item = checklistItem(String(x.item || ""));
+        ensure(item, "Unknown checklist step.");
+        ensure(item!.owner !== "auto", "This step is filled in by the app.");
+        const session: any = await stmt("SELECT * FROM sessions WHERE id=?", id).first();
+        ensure(session, "Session not found.");
+        ensure(session.status !== "Cancelled", "A cancelled session has no checklist.");
+        ensure(appliesTo(item!, session), "This step starts from the second session.");
+        const group: any = await stmt("SELECT * FROM groups WHERE id=?", session.group_id).first();
+        if (!can(u.roles, sessionLeaders)) {
+          if (item!.owner === "coordinator")
+            ensure(
+              can(u.roles, ["Operations Coordinator"]) && group?.coordinator === u.id,
+              "Only the group's coordinator ticks this step.",
+            );
+          else
+            ensure(
+              can(u.roles, ["Coach"]) &&
+                (session.coach_id
+                  ? session.coach_id === u.id
+                  : Boolean(
+                      await stmt(
+                        "SELECT id FROM group_coaches WHERE group_id=? AND user_id=? AND status='Active'",
+                        session.group_id,
+                        u.id,
+                      ).first(),
+                    )),
+              "Only the session's coach ticks this step.",
+            );
+        }
+        const existing: any = await stmt(
+          "SELECT * FROM session_checks WHERE session_id=? AND item=?",
+          id,
+          item!.key,
+        ).first();
+        const done = x.done !== false;
+        auditPrevious = existing;
+        if (done && !existing)
+          jobs.push(
+            stmt(
+              "INSERT INTO session_checks(id,session_id,item,done_by,done_at) VALUES(?,?,?,?,?)",
+              uid("SCK"),
+              id,
+              item!.key,
+              u.id,
+              t,
+            ),
+          );
+        else if (!done && existing)
+          jobs.push(stmt("DELETE FROM session_checks WHERE id=?", existing.id));
         break;
       }
       case "attendance": {

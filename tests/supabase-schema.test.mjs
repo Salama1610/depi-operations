@@ -33,7 +33,7 @@ test("the Supabase migrations cover every D1 schema table", () => {
   // Every migration, not only the core file: later ones add tables too.
   const postgresTables = effectiveTables();
 
-  assert.equal(sqliteTables.size, 61);
+  assert.equal(sqliteTables.size, 62);
   assert.deepEqual([...postgresTables].sort(), [...sqliteTables].sort());
 });
 

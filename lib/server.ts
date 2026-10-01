@@ -366,6 +366,7 @@ export async function loadData(u: any) {
     evidencePackageItems,
     accounts,
     staff,
+    sessionChecks,
   ] = await Promise.all([
     all(
       `SELECT g.*,c.name coordinator_name,s.name supervisor_name,h.name coach_name,m.name account_manager_name FROM groups g JOIN users c ON c.id=g.coordinator JOIN users s ON s.id=g.supervisor JOIN users h ON h.id=g.coach LEFT JOIN users m ON m.id=g.account_manager WHERE ${qg.sql}`,
@@ -512,6 +513,10 @@ export async function loadData(u: any) {
       can(u.roles, ["Operations Systems / Admin"])
         ? "SELECT id,name,email,roles,scopes,active,title,phone,national_id FROM users"
         : "SELECT id,name,email,roles,scopes,active,title,phone FROM users",
+    ),
+    all(
+      `SELECT c.* FROM session_checks c JOIN sessions t ON t.id=c.session_id JOIN groups g ON g.id=t.group_id WHERE ${qg.sql}`,
+      ...qg.args,
     ),
   ]);
   loadTimings.db = Date.now() - loadStarted;
@@ -668,6 +673,7 @@ export async function loadData(u: any) {
     for (const l of serviceLinks) add(l.qc_actor);
     for (const r of serviceLinkReviews) add(r.reviewed_by);
     for (const s of sessions) add(s.coach_id);
+    for (const c of sessionChecks) add(c.done_by);
     const reviewer = can(u.roles, ["Quality Member"]);
     visibleStaff = staff.filter((person: any) => {
       if (known.has(person.id)) return true;
@@ -693,6 +699,7 @@ export async function loadData(u: any) {
     attendance,
     reviews,
     sessions,
+    sessionChecks,
     groupCoaches,
     taskBank,
     savedViews,

@@ -1071,3 +1071,21 @@ export const importMappings = sqliteTable(
     index("import_mappings_module_idx").on(t.module, t.name),
   ],
 );
+export const sessionChecks = sqliteTable(
+  "session_checks",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id),
+    item: text("item").notNull(),
+    doneBy: text("done_by")
+      .notNull()
+      .references(() => users.id),
+    doneAt: text("done_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("session_check_item").on(t.sessionId, t.item),
+    index("session_checks_session_idx").on(t.sessionId),
+  ],
+);

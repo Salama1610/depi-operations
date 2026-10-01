@@ -639,5 +639,12 @@
     "created_by": "text",
     "created_at": "timestamptz",
     "updated_at": "timestamptz"
+  },
+  "session_checks": {
+    "id": "text",
+    "session_id": "text",
+    "item": "text",
+    "done_by": "text",
+    "done_at": "timestamptz"
   }
 }
