@@ -10,7 +10,7 @@ import {
 } from "./control-center";
 import { ProgramFlow } from "./program-flow";
 import { WeeklyProgress } from "./weekly-progress";
-import { acceptedServicePlatforms } from "@/lib/domain/service-links";
+import { acceptedServicePlatforms, slotPlatform } from "@/lib/domain/service-links";
 import { useState, useEffect } from "react";
 import {
   Home,
@@ -1982,7 +1982,7 @@ export default function Operations({ module: initialModule }: { module: string }
                 pageRows,
                 [
                   { key: "student_name", label: t("Student"), render: (r) => { const own = serviceLinks.filter((l) => l.student_id === r.student_id); const decided = own.filter((l) => l.qc_status !== "Pending").length; return <span><strong>{r.student_name}</strong><small className="table-subline">{r.student_id} · {decided}/{own.length} {t("reviewed")}</small></span>; } },
-                  { key: "slot", label: t("Slot"), render: (r) => `Service ${r.slot}` },
+                  { key: "slot", label: t("Slot"), render: (r) => t("{v0} service", { v0: slotPlatform(Number(r.slot)) }) },
                   { key: "url", label: t("Link"), render: (r) => <a className="text-link" href={r.url} target="_blank" rel="noreferrer">{r.platform} <ExternalLink size={14} /></a> },
                   { key: "auto_status", label: t("Automatic check"), render: (r) => <Badge value={r.auto_status} /> },
                   { key: "reviewer_name", label: t("Reviewer"), render: (r) => isQualityLead && r.qc_status !== "Locked"
@@ -3013,7 +3013,7 @@ export default function Operations({ module: initialModule }: { module: string }
                           <Empty title={t("No service links submitted")} text={t("The student has not submitted service links yet.")} />
                         ) : serviceLinks.filter((link) => link.student_id === selectedStudent.id).map((link) => (
                           <article key={link.id}>
-                            <div className="detail-actions"><Badge value={t("Service {v0}", { v0: link.slot })} /><Badge value={link.qc_status} /><Badge value={link.auto_status} /></div>
+                            <div className="detail-actions"><Badge value={t("{v0} service", { v0: slotPlatform(Number(link.slot)) })} /><Badge value={link.qc_status} /><Badge value={link.auto_status} /></div>
                             <h3><a className="text-link" href={link.url} target="_blank" rel="noreferrer">{link.platform} <ExternalLink size={14} /></a></h3>
                             <p>{(() => { try { return JSON.parse(link.auto_result || "{}").message; } catch { return t("Automatic details unavailable."); } })()}</p>
                             <small>{t("Revision")}{" "}{link.revision} {t("· submitted")}{" "}{new Date(link.submitted_at).toLocaleString()}{link.qc_at ? t(" · reviewed {v0} by {v1}", { v0: new Date(link.qc_at).toLocaleString(), v1: link.reviewer_name || owner(link.qc_actor) }) : ""}</small>
@@ -3676,7 +3676,7 @@ export default function Operations({ module: initialModule }: { module: string }
                   <>
                     <div className="info-box">
                       <strong>{modal!.student_name || name(modal!.student_id)}</strong>
-                      <Badge value={t("Service {v0}", { v0: modal!.slot })} />
+                      <Badge value={t("{v0} service", { v0: slotPlatform(Number(modal!.slot)) })} />
                       <a className="text-link" href={modal!.url} target="_blank" rel="noreferrer">
                         {t("Open submitted service")}{" "}<ExternalLink size={16} />
                       </a>

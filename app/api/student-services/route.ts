@@ -11,7 +11,7 @@ import {
   permit,
   student,
 } from "@/lib/server";
-import { normalizeServiceSlots, verifyServiceLink } from "@/lib/domain/service-links";
+import { normalizeServiceSlots, serviceKey, verifyServiceLink, verifyServiceSlot } from "@/lib/domain/service-links";
 import { distributeEvenly } from "@/lib/domain/qc-assignment";
 export const dynamic = "force-dynamic";
 
@@ -102,22 +102,23 @@ export async function POST(req: Request) {
       s.id,
     );
     const bySlot = new Map(existing.map((row) => [Number(row.slot), row]));
-    // The controlled account a service was published from. The student never
-    // types it: the programme assigned them an account per marketplace, so it
-    // is resolved from that assignment. The gate's platform names differ from
-    // the account platform names (Kafiil is the Kafeel marketplace), so the
-    // mapping is explicit. Left null when the student holds no assignment, or
-    // more than one, on that marketplace.
-    const accountPlatform: Record<string, string> = { Kafiil: "Kafeel", Khamsat: "Khamsat", Nafezly: "Nafezly" };
-    const assignments = await all(
-      `SELECT a.platform,a.id FROM account_assignments n JOIN accounts a ON a.id=n.account_id WHERE n.student_id=?`,
-      s.id,
-    );
-    const accountFor = (platform: string) => {
-      const wanted = accountPlatform[platform];
-      if (!wanted) return null;
-      const matches = assignments.filter((row: any) => row.platform === wanted);
-      return matches.length === 1 ? String(matches[0].id) : null;
+    // A service is the student's own listing. It is never tied to one of the
+    // programme's client accounts, which only order gigs, so account_id stays
+    // empty.
+    //
+    // Each service belongs to one student. The same listing, matched by its
+    // marketplace and service ID so a renamed slug is still caught, is refused
+    // when another student has already submitted it.
+    const takenElsewhere = async (check: any) => {
+      const key = serviceKey(check);
+      if (!key) return false;
+      const candidates = await all(
+        "SELECT normalized_url,platform FROM service_links WHERE platform=? AND student_id<>? AND normalized_url LIKE ?",
+        check.platform,
+        s.id,
+        `%/${check.serviceId}-%`,
+      );
+      return candidates.some((row: any) => serviceKey(verifyServiceLink(row.normalized_url)) === key);
     };
     const t = now();
     const jobs: any[] = [
@@ -150,6 +151,13 @@ export async function POST(req: Request) {
           );
         continue;
       }
+      // A link being written must be on its slot's marketplace; one already
+      // accepted and resubmitted unchanged was settled above.
+      verifyServiceSlot(slot, value);
+      if (await takenElsewhere(check))
+        throw new Error(
+          `Service ${slot} is already submitted by another student. Each student submits their own services.`,
+        );
       const revision = prior ? Number(prior.revision || 1) + 1 : 1;
       const qcStatus = check.status === "Failed" ? "Needs Correction" : "Pending";
       if (prior) {
@@ -164,7 +172,7 @@ export async function POST(req: Request) {
             t,
             qcStatus,
             revision,
-            accountFor(check.platform),
+            null,
             t,
             t,
             prior.id,
@@ -186,7 +194,7 @@ export async function POST(req: Request) {
             t,
             qcStatus,
             revision,
-            accountFor(check.platform),
+            null,
             t,
             t,
           ),

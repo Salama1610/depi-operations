@@ -1242,4 +1242,7 @@ export const ar: Record<string, string> = {
   "Credit needed (USD)": "الرصيد المطلوب (دولار)",
   "The programme's client account on this marketplace orders the student's gig. Up to three requests per student.": "يطلب حساب العميل التابع للبرنامج على هذه المنصة خدمة الطالب. بحد أقصى ثلاثة طلبات لكل طالب.",
   "Logo design order": "طلب تصميم شعار",
+  "{v0} service": "خدمة {v0}",
+  "Your {v0} service link": "رابط خدمتك على {v0}",
+  "This slot takes a {v0} service link only.": "هذه الخانة تقبل رابط خدمة على {v0} فقط.",
 };

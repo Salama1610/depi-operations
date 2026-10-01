@@ -1152,6 +1152,13 @@ test("a sheet from another source links on the national ID through a saved mappi
   );
 });
 
+// A service link for a slot: 1 is Nafezly, 2 Kafiil, 3 Khamsat.
+const slotLink = (slot, id) =>
+  slot === 1
+    ? `https://nafezly.com/service/${id}-service-${slot}`
+    : slot === 2
+      ? `https://kafiil.com/service/${id}-service-${slot}`
+      : `https://khamsat.com/marketing/social-media/${id}-service-${slot}`;
 test("a student's services go to one quality reviewer, spread evenly, and the leader can move them", async () => {
   current = { id: "owner", email: "owner@example.com" };
   await dbExec("DELETE FROM rate_limits");
@@ -1187,7 +1194,7 @@ test("a student's services go to one quality reviewer, spread evenly, and the le
   for (const [index, student] of students.entries()) {
     current = { id: student.id, email: student.email };
     const response = await submit(
-      [1, 2, 3].map((slot) => `https://khamsat.com/marketing/social-media/${8100 + index * 10 + slot}-service-${slot}`),
+      [1, 2, 3].map((slot) => slotLink(slot, 8100 + index * 10 + slot)),
     );
     assert.equal(response.status, 200, await response.clone().text());
   }
@@ -1244,8 +1251,8 @@ test("a student's services go to one quality reviewer, spread evenly, and the le
   const again = await submit(
     [1, 2, 3].map((slot) =>
       slot === Number(firstLink.slot)
-        ? "https://kafiil.com/service/8199-corrected-service"
-        : `https://khamsat.com/marketing/social-media/${8100 + slot}-service-${slot}`,
+        ? slotLink(slot, 8199)
+        : slotLink(slot, 8100 + slot),
     ),
   );
   assert.equal(again.status, 200, await again.clone().text());
@@ -2495,4 +2502,35 @@ test("a client account is requested for any student's gig, three at most", async
   assert.equal(saved.task_bank_id, null);
   assert.equal(saved.gig_number, 3);
   assert.match((await ask(4)).error, /three client-account requests/);
+});
+
+test("each service slot takes its own marketplace, and a service belongs to one student", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  const servicesApi = await route("student-services");
+  const submit = (services) =>
+    servicesApi.POST(new Request("https://test.local/api/student-services", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "submit_services", services }),
+    }));
+  const [one, two] = await dbRows("SELECT id,email FROM students WHERE id NOT IN (SELECT student_id FROM service_links) AND lifecycle='Active' ORDER BY id LIMIT 2");
+  current = { id: one.id, email: one.email };
+  let r = await submit([slotLink(2, 7701), slotLink(2, 7702), slotLink(3, 7703)]);
+  assert.equal(r.status, 400);
+  assert.match((await r.json()).error, /Service 1 is for Nafezly/);
+  r = await submit([slotLink(1, 7701), slotLink(2, 7702), "https://upwork.com/services/product/7703"]);
+  assert.match((await r.json()).error, /Service 3 is for Khamsat/, "a link off the three marketplaces is refused too");
+  assert.equal((await dbRow("SELECT count(*) n FROM service_links WHERE student_id=?", one.id)).n, 0, "nothing is saved from a refused submission");
+  r = await submit([slotLink(1, 7701), slotLink(2, 7702), slotLink(3, 7703)]);
+  assert.equal(r.status, 200, await r.clone().text());
+  const saved = await dbRows("SELECT slot,platform,account_id FROM service_links WHERE student_id=? ORDER BY slot", one.id);
+  assert.deepEqual(saved.map((x) => x.platform), ["Nafezly", "Kafiil", "Khamsat"]);
+  assert.ok(saved.every((x) => x.account_id === null), "a service is the student's own, not a client account's");
+  // Another student cannot submit the same listing, even with the slug reworded.
+  current = { id: two.id, email: two.email };
+  r = await submit(["https://nafezly.com/service/7701-renamed-service", slotLink(2, 7712), slotLink(3, 7713)]);
+  assert.equal(r.status, 400);
+  assert.match((await r.json()).error, /Service 1 is already submitted by another student/);
+  r = await submit([slotLink(1, 7711), slotLink(2, 7712), slotLink(3, 7713)]);
+  assert.equal(r.status, 200, await r.clone().text());
+  current = { id: "owner", email: "owner@example.com" };
 });

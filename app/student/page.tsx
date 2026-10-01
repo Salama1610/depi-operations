@@ -4,6 +4,20 @@ import { LanguageToggle, useT } from "@/lib/i18n/context";
 import { useEffect, useMemo, useState } from "react";
 import { Check, ExternalLink, LockKeyhole, RefreshCw, Send, ShieldCheck } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { slotPlatform, verifyServiceLink } from "@/lib/domain/service-links";
+
+/** An example address for each slot's marketplace, shown as the placeholder. */
+const slotExample: Record<string, string> = {
+  Nafezly: "https://nafezly.com/service/…",
+  Kafiil: "https://kafiil.com/service/…",
+  Khamsat: "https://khamsat.com/…",
+};
+/** True when a link typed into a slot is clearly on another marketplace. */
+const wrongMarketplace = (service: Service) => {
+  if (!service.url.trim() || service.qc_status === "Locked") return false;
+  const platform = verifyServiceLink(service.url).platform;
+  return platform !== "Unknown" && platform !== slotPlatform(service.slot);
+};
 
 type Service = {
   id?: string;
@@ -195,11 +209,11 @@ export default function StudentServicesPage() {
                   const correction = service.qc_status === "Needs Correction";
                   return (
                     <article className={`student-service-row ${locked ? "is-locked" : correction ? "is-correction" : ""}`} key={service.slot}>
-                      <div className="student-slot"><span>0{service.slot}</span><strong>{t("Service")}{" "}{service.slot}</strong></div>
+                      <div className="student-slot"><span>0{service.slot}</span><strong>{t("{v0} service", { v0: slotPlatform(service.slot) })}</strong></div>
                       <div className="student-url-field">
-                        <label htmlFor={`service-${service.slot}`}>{t("Public service URL")}</label>
+                        <label htmlFor={`service-${service.slot}`}>{t("Your {v0} service link", { v0: slotPlatform(service.slot) })}</label>
                         <div className="student-url-wrap">
-                          <input id={`service-${service.slot}`} type="url" required value={service.url} disabled={locked || busy} placeholder={t("https://…")} onChange={(e) => update(service.slot, e.target.value)} />
+                          <input id={`service-${service.slot}`} type="url" required value={service.url} disabled={locked || busy} placeholder={slotExample[slotPlatform(service.slot)]} onChange={(e) => update(service.slot, e.target.value)} />
                           {service.url && <a href={service.url} target="_blank" rel="noreferrer" aria-label={t("Open service {v0}", { v0: service.slot })}><ExternalLink size={17} /></a>}
                         </div>
                         <div className="student-meta">
@@ -212,6 +226,7 @@ export default function StudentServicesPage() {
                             {service.auto_result.checks.map((check) => <li key={check}>{check}</li>)}
                           </ul>
                         ) : null}
+                        {wrongMarketplace(service) && <div className="student-qc-note">{t("This slot takes a {v0} service link only.", { v0: slotPlatform(service.slot) })}</div>}
                         {correction && <div className="student-qc-note"><strong>{t("Correction needed:")}</strong> {service.qc_comment}</div>}
                         {locked && <div className="student-locked-note"><LockKeyhole size={15} /> {t("Approved by your coordinator")}{service.qc_comment ? ` · ${service.qc_comment}` : ""}</div>}
                       </div>
@@ -231,7 +246,7 @@ export default function StudentServicesPage() {
                         ? t("All three links are approved. Nothing more is needed.")
                         : t("Your links are with your coordinator. Nothing can be changed until they respond.")}
                 </span>
-                <button className="student-primary" disabled={!ready || busy || (Boolean(submission) && editable.length === 0)} type="submit"><Send size={16} />{busy ? t("Submitting…") : submission ? t("Resubmit editable links") : t("Submit 3 links")}</button>
+                <button className="student-primary" disabled={!ready || busy || services.some(wrongMarketplace) || (Boolean(submission) && editable.length === 0)} type="submit"><Send size={16} />{busy ? t("Submitting…") : submission ? t("Resubmit editable links") : t("Submit 3 links")}</button>
               </div>
             </form>
           </section>

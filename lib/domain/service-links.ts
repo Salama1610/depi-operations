@@ -122,6 +122,38 @@ export function verifyServiceLink(raw: unknown): ServiceLinkVerification {
   }
 }
 
+/**
+ * Each of a student's three services is on its own marketplace, in this order:
+ * service 1 on Nafezly, service 2 on Kafiil, service 3 on Khamsat.
+ */
+export const serviceSlotPlatforms = ["Nafezly", "Kafiil", "Khamsat"] as const;
+
+/** The marketplace a slot (1–3) is for. */
+export function slotPlatform(slot: number) {
+  return serviceSlotPlatforms[slot - 1];
+}
+
+/**
+ * The link checked for its slot. A link on another marketplace is refused
+ * outright rather than recorded, so a slot only ever holds its own platform.
+ */
+export function verifyServiceSlot(slot: number, raw: unknown): ServiceLinkVerification {
+  const check = verifyServiceLink(raw);
+  const expected = slotPlatform(slot);
+  if (expected && check.platform !== expected && check.platform !== "Unknown")
+    throw new Error(`Service ${slot} is for ${expected}. Paste a ${expected} service link there.`);
+  return check;
+}
+
+/**
+ * What makes two links the same service: the marketplace and its numeric
+ * service ID. The slug is the seller's wording and can change, so a renamed
+ * service is still the same one.
+ */
+export function serviceKey(check: Pick<ServiceLinkVerification, "platform" | "serviceId">) {
+  return check.serviceId ? `${check.platform}:${check.serviceId}` : null;
+}
+
 export function normalizeServiceSlots(input: unknown) {
   if (!Array.isArray(input) || input.length !== 3)
     throw new Error("Submit exactly 3 service links.");
