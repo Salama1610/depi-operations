@@ -987,9 +987,9 @@ export default function Operations({ module: initialModule }: { module: string }
     ) : (
       <span>… {t("Waiting")}</span>
     );
-  // A service link named by where it lives; an open link is any other site.
+  // A service link named by the marketplace it is on.
   const serviceLabel = (platform?: string) =>
-    !platform ? t("Service") : platform === "External service" ? t("Open link") : t("{v0} service", { v0: platform });
+    !platform ? t("Service") : platform === "External service" ? t("Not an accepted marketplace") : t("{v0} service", { v0: platform });
   const statusCol = {
     key: "status",
     label: t("Status"),
@@ -1946,7 +1946,7 @@ export default function Operations({ module: initialModule }: { module: string }
           ? "Needs student correction"
           : Number(r.links_pending) > 0
             ? "Awaiting QC"
-            : Number(r.links_submitted) >= 3 && Number(r.links_kafiil) + Number(r.links_nafezly) >= 2
+            : Number(r.links_kafiil) > 0 && Number(r.links_nafezly) > 0 && Number(r.links_khamsat) > 0
               ? "Complete"
               : "Incomplete";
     const submissionRows = serviceSubmissionStatus

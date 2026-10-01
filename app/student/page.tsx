@@ -6,16 +6,16 @@ import { Check, ExternalLink, LockKeyhole, RefreshCw, Send, ShieldCheck } from "
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   linksPerPlatform,
+  requiredServicePlatforms,
   maxLinksPerPlatform,
   maxServiceLinks,
   minServiceLinks,
-  openLinkPlatform,
   serviceProgress,
   verifyServiceLink,
 } from "@/lib/domain/service-links";
 
-/** A link's marketplace in the student's words: an open link is any other site. */
-const platformName = (platform?: string) => (platform === openLinkPlatform ? "Open link" : platform || "");
+/** A link's marketplace as the student reads it. */
+const platformName = (platform?: string) => (platform === "External service" ? "Not an accepted marketplace" : platform || "");
 
 type Service = {
   id?: string;
@@ -107,14 +107,10 @@ export default function StudentServicesPage() {
   /** Why a link cannot be added, before it is sent; empty when it can. */
   function problem(url: string) {
     if (!url.trim()) return "";
-    const check = verifyServiceLink(url, { open: true });
+    const check = verifyServiceLink(url);
     if (check.status === "Failed") return check.message;
-    if (check.platform !== openLinkPlatform && (counts[check.platform] || 0) >= maxLinksPerPlatform)
+    if ((counts[check.platform] || 0) >= maxLinksPerPlatform)
       return t("You already have {v0} {v1} services, the most allowed.", { v0: maxLinksPerPlatform, v1: check.platform });
-    const onRequired = check.platform === "Kafiil" || check.platform === "Nafezly";
-    const stillNeeded = Math.max(0, progress.needed - (onRequired ? 1 : 0));
-    if (services.length + 1 + stillNeeded > maxServiceLinks)
-      return t("Keep room for a Kafiil or Nafezly service.");
     return "";
   }
 
@@ -181,7 +177,7 @@ export default function StudentServicesPage() {
             <div>
               <span className="student-kicker">{t("SERVICE LINKS / ROUND 5")}</span>
               <h1>{student?.name ? t("Hi {v0}, submit your services.", { v0: student.name.split(" ")[0] }) : t("Submit your services.")}</h1>
-              <p>{t("Submit your services one at a time. You need at least three, with two of them on Kafiil or Nafezly: one on each, or two on either. The rest can be on any site. Each link is checked automatically, then reviewed by your coordinator.")}</p>
+              <p>{t("Submit your services one at a time. You need at least one on each of Kafiil, Nafezly and Khamsat, and you can add up to three on each. Each link is checked automatically, then reviewed by your coordinator.")}</p>
             </div>
             <div className="student-progress"><strong>{Math.min(services.length, minServiceLinks)}/{minServiceLinks}</strong><span>{t("uploaded")}</span></div>
           </section>
@@ -195,7 +191,15 @@ export default function StudentServicesPage() {
               <span style={{ width: `${Math.min(100, (services.length / minServiceLinks) * 100)}%` }} />
             </div>
             <ul className="student-requirements">
-              <li className={progress.needed === 0 ? "is-done" : ""}>{progress.needed === 0 ? <Check size={15} /> : null}{t("2 on Kafiil or Nafezly ({v0}/2)", { v0: Math.min(progress.kafiilOrNafezly, 2) })}</li>
+              {requiredServicePlatforms.map((platform) => {
+                const n = progress.perPlatform[platform] || 0;
+                return (
+                  <li key={platform} className={n > 0 ? "is-done" : ""}>
+                    {n > 0 ? <Check size={15} /> : null}
+                    {platform} {n}/{maxLinksPerPlatform}
+                  </li>
+                );
+              })}
               <li className={services.length >= minServiceLinks ? "is-done" : ""}>{services.length >= minServiceLinks ? <Check size={15} /> : null}{t("{v0} services at least", { v0: minServiceLinks })}</li>
             </ul>
             {submission && (
@@ -208,7 +212,7 @@ export default function StudentServicesPage() {
 
           <section className="student-card">
             <div className="student-card-heading">
-              <div><h2>{t("Add a service")}</h2><p>{t("Kafiil, Nafezly, Khamsat or any other site. Up to {v0} on each marketplace, {v1} in all.", { v0: maxLinksPerPlatform, v1: maxServiceLinks })}</p></div>
+              <div><h2>{t("Add a service")}</h2><p>{t("Kafiil, Nafezly or Khamsat. Up to {v0} on each, {v1} in all.", { v0: maxLinksPerPlatform, v1: maxServiceLinks })}</p></div>
             </div>
             {full ? (
               <p className="student-check-note">{t("You have submitted the most links allowed.")}</p>
@@ -228,7 +232,7 @@ export default function StudentServicesPage() {
                   </div>
                   {draft.trim() && (
                     <div className="student-meta">
-                      <span>{t(platformName(verifyServiceLink(draft, { open: true }).platform))}</span>
+                      <span>{t(platformName(verifyServiceLink(draft).platform))}</span>
                     </div>
                   )}
                   {problem(draft) && <div className="student-qc-note">{problem(draft)}</div>}

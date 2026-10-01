@@ -2547,7 +2547,7 @@ test("a client account is requested for any student's gig, three at most", async
   assert.match((await ask(4)).error, /three client-account requests/);
 });
 
-test("a student submits services one at a time until three, two of them on Kafiil or Nafezly", async () => {
+test("a student submits services one at a time, one on each of Kafiil, Nafezly and Khamsat at least", async () => {
   await dbExec("DELETE FROM rate_limits");
   const servicesApi = await route("student-services");
   const send = (body) =>
@@ -2557,6 +2557,7 @@ test("a student submits services one at a time until three, two of them on Kafii
   const one = (url, slot) => send({ action: "submit_service", url, slot });
   const kafiil = (id) => `https://kafiil.com/service/${id}-service`;
   const nafezly = (id) => `https://nafezly.com/service/${id}-service`;
+  const khamsat = (id) => `https://khamsat.com/design/logo/${id}-service`;
   const [first, second] = await dbRows("SELECT id,email FROM students WHERE id NOT IN (SELECT student_id FROM service_links) AND lifecycle='Active' ORDER BY id LIMIT 2");
   current = { id: first.id, email: first.email };
   // One service is a submission of its own.
@@ -2564,52 +2565,42 @@ test("a student submits services one at a time until three, two of them on Kafii
   assert.equal(r.status, 200, await r.clone().text());
   let view = await r.json();
   assert.equal(view.services.length, 1);
-  assert.equal(view.progress.count, 1);
-  assert.equal(view.progress.needed, 1);
+  assert.deepEqual(view.progress.missing, ["Nafezly", "Khamsat"]);
   assert.equal(view.submission.status, "Pending QC");
-  // An open link on any other site counts toward the three.
-  r = await one("https://www.behance.net/gallery/7702/brand-work");
+  // Another site is refused outright.
+  assert.match((await (await one("https://www.behance.net/gallery/7702/brand-work")).json()).error, /not on Kafiil, Khamsat and Nafezly/);
+  assert.equal((await dbRow("SELECT count(*) n FROM service_links WHERE student_id=?", first.id)).n, 1);
+  // A marketplace link in the wrong shape is recorded for correction, then replaced in its place.
+  assert.equal((await one("https://nafezly.com/about")).status, 200);
+  assert.equal((await dbRow("SELECT qc_status FROM service_links WHERE student_id=? AND slot=2", first.id)).qc_status, "Needs Correction");
+  r = await one(nafezly(7703), 2);
   assert.equal(r.status, 200, await r.clone().text());
   view = await r.json();
-  assert.equal(view.services[1].platform, "External service");
-  assert.equal(view.progress.met, false, "one Kafiil or Nafezly service so far");
-  assert.equal(
-    (await (await one("http://insecure.example.com/portfolio")).json()).error === undefined
-      ? (await dbRow("SELECT qc_status FROM service_links WHERE student_id=? AND slot=3", first.id)).qc_status
-      : "refused",
-    "Needs Correction",
-    "an insecure open link is recorded for correction, like any failed gate",
-  );
-  // That one comes back for correction and is replaced in its place.
-  r = await one(nafezly(7703), 3);
-  assert.equal(r.status, 200, await r.clone().text());
-  view = await r.json();
-  assert.equal(view.services.length, 3);
-  assert.equal(view.services[2].platform, "Nafezly");
-  assert.equal(view.progress.met, true);
+  assert.equal(view.services[1].platform, "Nafezly");
+  assert.deepEqual(view.progress.missing, ["Khamsat"]);
+  assert.equal(view.progress.met, false, "two links, still no Khamsat");
   assert.match((await (await one(kafiil(7799), 1)).json()).error, /Only a link returned for correction/);
-  for (const url of [kafiil(7704), kafiil(7705)]) assert.equal((await one(url)).status, 200);
-  assert.match((await (await one(kafiil(7706))).json()).error, /At most 3 Kafiil/);
+  r = await one(khamsat(7704));
+  view = await r.json();
+  assert.equal(view.progress.met, true);
+  for (const url of [kafiil(7705), kafiil(7706)]) assert.equal((await one(url)).status, 200);
+  assert.match((await (await one(kafiil(7707))).json()).error, /At most 3 Kafiil/);
   const saved = await dbRows("SELECT slot,platform,account_id FROM service_links WHERE student_id=? ORDER BY slot", first.id);
-  assert.deepEqual(saved.map((x) => x.platform), ["Kafiil", "External service", "Nafezly", "Kafiil", "Kafiil"]);
+  assert.deepEqual(saved.map((x) => x.platform), ["Kafiil", "Nafezly", "Khamsat", "Kafiil", "Kafiil"]);
   assert.ok(saved.every((x) => x.account_id === null), "a service is the student's own, not a client account's");
-  // Another student cannot submit the same listing or the same open link.
+  // Another student cannot submit the same listing.
   current = { id: second.id, email: second.email };
   assert.match((await (await one("https://kafiil.com/service/7701-renamed-service")).json()).error, /already submitted by another student/);
-  assert.match((await (await one("https://behance.net/gallery/7702/brand-work")).json()).error, /already submitted by another student/);
-  // Approving everything completes only a student who meets the requirement.
-  current = { id: "owner", email: "owner@example.com" };
-  await dbExec("UPDATE service_links SET qc_status='Locked',qc_at=? WHERE student_id=?", new Date().toISOString(), first.id);
-  current = { id: first.id, email: first.email };
-  assert.equal((await one("https://dribbble.com/shots/7707-work")).status, 200);
-  current = { id: "owner", email: "owner@example.com" };
-  const link = await dbRow("SELECT id FROM service_links WHERE student_id=? AND slot=6", first.id);
+  // Approving everything completes a student with one on each marketplace.
+  await dbExec("UPDATE service_links SET qc_status='Locked',qc_at=? WHERE student_id=? AND slot<5", new Date().toISOString(), first.id);
+  const last = await dbRow("SELECT id FROM service_links WHERE student_id=? AND slot=5", first.id);
   current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
-  r = await send({ action: "qc_review", service_id: link.id, decision: "Lock", comment: "Verified" });
+  r = await send({ action: "qc_review", service_id: last.id, decision: "Lock", comment: "Verified" });
   assert.equal(r.status, 200, await r.clone().text());
   assert.equal((await dbRow("SELECT status FROM service_submissions WHERE student_id=?", first.id)).status, "Complete");
   current = { id: "owner", email: "owner@example.com" };
 });
+
 
 
 

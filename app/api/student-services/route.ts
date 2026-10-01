@@ -78,15 +78,14 @@ async function studentView(studentId: string) {
 
 /**
  * A submission's state, read from its links. It is Complete only when every
- * link is approved, there are three at least, and two of them are on Kafiil
- * or Nafezly (one on each, or two on either). Approved links short of that are In Progress: the
+ * link is approved and there is at least one on each of Kafiil, Nafezly and
+ * Khamsat. Approved links short of that are In Progress: the
  * student has more to add.
  */
 function submissionStatus(studentId: string, t: string, completedAt: "now" | "latest") {
   const done = `(NOT EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status<>'Locked')
-    AND (SELECT count(*) FROM service_links WHERE student_id=?)>=3
-    AND (SELECT count(*) FROM service_links WHERE student_id=? AND platform IN ('Kafiil','Nafezly'))>=2)`;
-  const doneArgs = [studentId, studentId, studentId];
+    AND (SELECT count(DISTINCT platform) FROM service_links WHERE student_id=? AND platform IN ('Kafiil','Nafezly','Khamsat'))=3)`;
+  const doneArgs = [studentId, studentId];
   return stmt(
     `UPDATE service_submissions SET status=CASE
        WHEN ${done} THEN 'Complete'
@@ -202,7 +201,7 @@ export async function POST(req: Request) {
     for (let index = 0; index < values.length; index += 1) {
       const slot = index + 1;
       const value = values[index];
-      const check = verifyServiceLink(value, { open: true });
+      const check = verifyServiceLink(value);
       // When the gate raised an http marketplace address to https, the secure
       // form is what gets stored and opened; both screens link to this column.
       const stored = check.upgraded ? check.normalizedUrl : value;
