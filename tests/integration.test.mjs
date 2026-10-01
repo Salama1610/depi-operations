@@ -1195,13 +1195,12 @@ test("a sheet from another source links on the national ID through a saved mappi
   );
 });
 
-// A service link for a slot: 1 is Nafezly, 2 Kafiil, 3 Khamsat.
+// A service link for a slot: 1 is Nafezly, 2 and 3 Kafiil, which together meet
+// the three Kafiil or Nafezly links a submission needs.
 const slotLink = (slot, id) =>
   slot === 1
     ? `https://nafezly.com/service/${id}-service-${slot}`
-    : slot === 2
-      ? `https://kafiil.com/service/${id}-service-${slot}`
-      : `https://khamsat.com/marketing/social-media/${id}-service-${slot}`;
+    : `https://kafiil.com/service/${id}-service-${slot}`;
 test("a student's services go to one quality reviewer, spread evenly, and the leader can move them", async () => {
   current = { id: "owner", email: "owner@example.com" };
   await dbExec("DELETE FROM rate_limits");
@@ -2547,59 +2546,61 @@ test("a client account is requested for any student's gig, three at most", async
   assert.match((await ask(4)).error, /three client-account requests/);
 });
 
-test("a student submits services one at a time, one on each of Kafiil, Nafezly and Khamsat at least", async () => {
+test("a student submits at least three Kafiil or Nafezly links together, with other sites optional", async () => {
   await dbExec("DELETE FROM rate_limits");
   const servicesApi = await route("student-services");
   const send = (body) =>
     servicesApi.POST(new Request("https://test.local/api/student-services", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     }));
-  const one = (url, slot) => send({ action: "submit_service", url, slot });
+  const submit = (services) => send({ action: "submit_services", services });
   const kafiil = (id) => `https://kafiil.com/service/${id}-service`;
   const nafezly = (id) => `https://nafezly.com/service/${id}-service`;
-  const khamsat = (id) => `https://khamsat.com/design/logo/${id}-service`;
+  const other = "https://www.behance.net/gallery/7709/brand-work";
   const [first, second] = await dbRows("SELECT id,email FROM students WHERE id NOT IN (SELECT student_id FROM service_links) AND lifecycle='Active' ORDER BY id LIMIT 2");
   current = { id: first.id, email: first.email };
-  // One service is a submission of its own.
-  let r = await one(kafiil(7701));
+  // Fewer than three Kafiil or Nafezly links is refused, whatever else is added.
+  let r = await submit([kafiil(7701), nafezly(7702), other]);
+  assert.equal(r.status, 400);
+  assert.match((await r.json()).error, /at least 3 Kafiil or Nafezly/);
+  r = await submit([nafezly(7701), kafiil(7702), "https://khamsat.com/design/logo/7703-logo"]);
+  assert.match((await r.json()).error, /at least 3 Kafiil or Nafezly/, "Khamsat counts as Other");
+  assert.equal((await dbRow("SELECT count(*) n FROM service_links WHERE student_id=?", first.id)).n, 0, "nothing is saved from a refused submission");
+  assert.equal((await submit(["x"])).status, 400, "the old one-at-a-time action is gone");
+  assert.match((await (await send({ action: "submit_service", url: kafiil(7701) })).json()).error, /Choose a service-link action/);
+  // Two Nafezly and one Kafiil, with an optional link elsewhere.
+  r = await submit([nafezly(7701), nafezly(7702), kafiil(7703), other]);
   assert.equal(r.status, 200, await r.clone().text());
   let view = await r.json();
-  assert.equal(view.services.length, 1);
-  assert.deepEqual(view.progress.missing, ["Nafezly", "Khamsat"]);
+  assert.equal(view.services.length, 4);
+  assert.equal(view.progress.required, 3);
+  assert.equal(view.progress.perCategory.Other, 1);
   assert.equal(view.submission.status, "Pending QC");
-  // Another site is refused outright.
-  assert.match((await (await one("https://www.behance.net/gallery/7702/brand-work")).json()).error, /not on Kafiil, Khamsat and Nafezly/);
-  assert.equal((await dbRow("SELECT count(*) n FROM service_links WHERE student_id=?", first.id)).n, 1);
-  // A marketplace link in the wrong shape is recorded for correction, then replaced in its place.
-  assert.equal((await one("https://nafezly.com/about")).status, 200);
-  assert.equal((await dbRow("SELECT qc_status FROM service_links WHERE student_id=? AND slot=2", first.id)).qc_status, "Needs Correction");
-  r = await one(nafezly(7703), 2);
-  assert.equal(r.status, 200, await r.clone().text());
-  view = await r.json();
-  assert.equal(view.services[1].platform, "Nafezly");
-  assert.deepEqual(view.progress.missing, ["Khamsat"]);
-  assert.equal(view.progress.met, false, "two links, still no Khamsat");
-  assert.match((await (await one(kafiil(7799), 1)).json()).error, /Only a link returned for correction/);
-  r = await one(khamsat(7704));
-  view = await r.json();
-  assert.equal(view.progress.met, true);
-  for (const url of [kafiil(7705), kafiil(7706)]) assert.equal((await one(url)).status, 200);
-  assert.match((await (await one(kafiil(7707))).json()).error, /At most 3 Kafiil/);
   const saved = await dbRows("SELECT slot,platform,account_id FROM service_links WHERE student_id=? ORDER BY slot", first.id);
-  assert.deepEqual(saved.map((x) => x.platform), ["Kafiil", "Nafezly", "Khamsat", "Kafiil", "Kafiil"]);
+  assert.deepEqual(saved.map((x) => x.platform), ["Nafezly", "Nafezly", "Kafiil", "External service"]);
   assert.ok(saved.every((x) => x.account_id === null), "a service is the student's own, not a client account's");
-  // Another student cannot submit the same listing.
+  // A link sent back for correction is replaced; the others are sent unchanged and stay as they are.
+  await dbExec("UPDATE service_links SET qc_status='Needs Correction',qc_comment='Wrong page' WHERE student_id=? AND slot=2", first.id);
+  r = await submit([nafezly(7701), nafezly(7712), kafiil(7703), other]);
+  assert.equal(r.status, 200, await r.clone().text());
+  const fixed = await dbRows("SELECT slot,revision,qc_status FROM service_links WHERE student_id=? ORDER BY slot", first.id);
+  assert.deepEqual(fixed.map((x) => x.revision), [1, 2, 1, 1], "only the corrected link is a new revision");
+  assert.match((await (await submit([nafezly(7799), nafezly(7712), kafiil(7703), other])).json()).error, /awaiting QC/);
+  // Another student cannot submit the same listing or the same other link.
   current = { id: second.id, email: second.email };
-  assert.match((await (await one("https://kafiil.com/service/7701-renamed-service")).json()).error, /already submitted by another student/);
-  // Approving everything completes a student with one on each marketplace.
-  await dbExec("UPDATE service_links SET qc_status='Locked',qc_at=? WHERE student_id=? AND slot<5", new Date().toISOString(), first.id);
-  const last = await dbRow("SELECT id FROM service_links WHERE student_id=? AND slot=5", first.id);
+  assert.match((await (await submit(["https://nafezly.com/service/7701-renamed", kafiil(7721), kafiil(7722)])).json()).error, /already submitted by another student/);
+  assert.match((await (await submit([kafiil(7723), kafiil(7724), kafiil(7725), "https://behance.net/gallery/7709/brand-work"])).json()).error, /already submitted by another student/);
+  // Three approved Kafiil or Nafezly links complete it; the other link is not needed.
+  await dbExec("UPDATE service_links SET qc_status='Locked',qc_at=? WHERE student_id=? AND slot IN (1,3)", new Date().toISOString(), first.id);
+  await dbExec("UPDATE service_links SET qc_status='Needs Correction' WHERE student_id=? AND slot=4", first.id);
+  const last = await dbRow("SELECT id FROM service_links WHERE student_id=? AND slot=2", first.id);
   current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
   r = await send({ action: "qc_review", service_id: last.id, decision: "Lock", comment: "Verified" });
   assert.equal(r.status, 200, await r.clone().text());
   assert.equal((await dbRow("SELECT status FROM service_submissions WHERE student_id=?", first.id)).status, "Complete");
   current = { id: "owner", email: "owner@example.com" };
 });
+
 
 
 

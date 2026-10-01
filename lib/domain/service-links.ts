@@ -71,7 +71,7 @@ function failed(message: string, checks: string[] = [message]): ServiceLinkVerif
  * stores them over https. QC remains responsible for page availability,
  * ownership, category and track fit.
  */
-export function verifyServiceLink(raw: unknown): ServiceLinkVerification {
+export function verifyServiceLink(raw: unknown, options: { open?: boolean } = {}): ServiceLinkVerification {
   const value = typeof raw === "string" ? raw.trim() : "";
   if (!value) return failed("Add a public service link.");
   if (value.length > 2048)
@@ -104,6 +104,29 @@ export function verifyServiceLink(raw: unknown): ServiceLinkVerification {
         ? `Numeric service ID ${path.serviceId} and slug detected`
         : "Use the complete service URL with its numeric ID and Arabic or English slug",
     ];
+    // An open link is any secure, direct page on another site, for the
+    // optional "Other" section. It has no marketplace shape to check; QC
+    // confirms it is the student's service.
+    if (options.open && !platformOk) {
+      const openFailed = parsed.protocol !== "https:" || !directOk || !/\./.test(parsed.hostname);
+      const openChecks = [
+        parsed.protocol === "https:" ? "Secure HTTPS link" : "The service link must use HTTPS",
+        directOk ? "Direct public URL" : "Ports and embedded credentials are not allowed",
+        "Link on another site",
+      ];
+      return {
+        status: openFailed ? "Failed" : "Needs Review",
+        normalizedUrl: parsed.toString(),
+        upgraded: false,
+        platform,
+        serviceId: null,
+        checks: openChecks,
+        message: openFailed
+          ? openChecks.find((check) => /must|not allowed/.test(check)) || "Fix the link before QC review."
+          : "Link accepted. QC confirms the page is your service.",
+        verificationVersion: serviceLinkVerificationVersion,
+      };
+    }
     const isFailed = !protocolOk || !directOk || !platformOk || !path.valid;
     return {
       status: isFailed ? "Failed" : "Needs Review",
@@ -123,75 +146,80 @@ export function verifyServiceLink(raw: unknown): ServiceLinkVerification {
 }
 
 /**
- * A student's services: at least one on each of Kafiil, Nafezly and Khamsat,
- * then more as they like, up to three on each marketplace and so nine in all.
+ * A student's services come in three sections. Kafiil and Nafezly are the
+ * required ones: at least three links between them, in any mix (three on one,
+ * or two and one). "Other" holds links on any other site, Khamsat included;
+ * it is optional and does not count toward the three.
  */
-export const requiredServicePlatforms = ["Kafiil", "Nafezly", "Khamsat"] as const;
-/** The minimum: one on each required marketplace. */
-export const minServiceLinks = requiredServicePlatforms.length;
-/** No more than this many on any one marketplace. */
+export const requiredServicePlatforms = ["Kafiil", "Nafezly"] as const;
+export const serviceCategories = ["Nafezly", "Kafiil", "Other"] as const;
+export type ServiceCategory = (typeof serviceCategories)[number];
+/** Kafiil and Nafezly links needed, between them, to submit. */
+export const minServiceLinks = 3;
+/** No more than this many links in any one section. */
 export const maxLinksPerPlatform = 3;
 /** And so never more than this many links in all. */
-export const maxServiceLinks = acceptedServicePlatforms.length * maxLinksPerPlatform;
+export const maxServiceLinks = serviceCategories.length * maxLinksPerPlatform;
+/** The platform recorded for a link on a site that is not a marketplace. */
+export const openLinkPlatform = "External service";
+
+/** The section a link belongs to, from the platform its address is on. */
+export function serviceCategory(platform: string): ServiceCategory {
+  return platform === "Kafiil" || platform === "Nafezly" ? platform : "Other";
+}
 
 /**
  * What makes two links the same service: the marketplace and its numeric
- * service ID, so a renamed slug is still the same one.
+ * service ID, so a renamed slug is still the same one. A link without a
+ * service ID is compared by its address.
  */
 export function serviceKey(check: Pick<ServiceLinkVerification, "platform" | "serviceId"> & { normalizedUrl?: string }) {
   if (check.serviceId) return `${check.platform}:${check.serviceId}`;
   return check.normalizedUrl ? `url:${check.normalizedUrl}` : null;
 }
 
-/** How many links are on each accepted marketplace. */
-export function linksPerPlatform(values: string[]) {
-  const counts: Record<string, number> = Object.fromEntries(acceptedServicePlatforms.map((p) => [p, 0]));
-  for (const value of values) {
-    const platform = verifyServiceLink(value).platform;
-    if (platform in counts) counts[platform] += 1;
-  }
+/** How many links are in each section. */
+export function linksPerCategory(values: string[]) {
+  const counts = Object.fromEntries(serviceCategories.map((c) => [c, 0])) as Record<ServiceCategory, number>;
+  for (const value of values) counts[serviceCategory(verifyServiceLink(value, { open: true }).platform)] += 1;
   return counts;
 }
 
 /**
- * Where a student stands: links submitted against the minimum, and which of
- * Kafiil, Nafezly and Khamsat they still need one service on. `platforms` is
- * one entry per link the student holds.
+ * Where a student stands: Kafiil and Nafezly links against the three needed,
+ * and how many are in each section. `platforms` is one entry per link.
  */
 export function serviceProgress(platforms: string[]) {
-  const missing = requiredServicePlatforms.filter((p) => !platforms.includes(p));
+  const perCategory = Object.fromEntries(serviceCategories.map((c) => [c, 0])) as Record<ServiceCategory, number>;
+  for (const platform of platforms) perCategory[serviceCategory(platform)] += 1;
+  const required = perCategory.Kafiil + perCategory.Nafezly;
   return {
     count: platforms.length,
+    required,
     minimum: minServiceLinks,
-    perPlatform: Object.fromEntries(
-      requiredServicePlatforms.map((p) => [p, platforms.filter((x) => x === p).length]),
-    ) as Record<string, number>,
-    /** Marketplaces with no service yet. */
-    missing,
-    met: missing.length === 0,
+    perCategory,
+    met: required >= minServiceLinks,
   };
 }
 
 /**
- * The links a student holds once a submission is applied, in slot order. They
- * are checked as a set: only Kafiil, Nafezly and Khamsat, at most three on
- * each, and no service twice. Fewer than three is allowed; services are
- * submitted one at a time.
+ * The links a student holds once a submission is applied, in slot order,
+ * checked as a set: at least three on Kafiil and Nafezly between them, at most
+ * three in each section, and no service twice.
  */
 export function normalizeServiceSlots(input: unknown) {
-  if (!Array.isArray(input) || input.length === 0) throw new Error("Add a service link.");
+  if (!Array.isArray(input) || input.length === 0) throw new Error("Add your service links.");
   if (input.length > maxServiceLinks) throw new Error(`Submit at most ${maxServiceLinks} service links.`);
   const values = input.map((value) => (typeof value === "string" ? value.trim() : ""));
   if (values.some((value) => !value)) throw new Error("Fill in every service link you added, or remove it.");
-  for (const [index, value] of values.entries())
-    if (verifyServiceLink(value).platform === "External service")
-      throw new Error(`Link ${index + 1} is not on ${acceptedPlatformList()}. Only those marketplaces are accepted.`);
-  const counts = linksPerPlatform(values);
-  for (const platform of acceptedServicePlatforms)
-    if (counts[platform] > maxLinksPerPlatform)
-      throw new Error(`At most ${maxLinksPerPlatform} ${platform} links can be submitted; this has ${counts[platform]}.`);
+  const counts = linksPerCategory(values);
+  for (const category of serviceCategories)
+    if (counts[category] > maxLinksPerPlatform)
+      throw new Error(`At most ${maxLinksPerPlatform} ${category} links can be submitted; this has ${counts[category]}.`);
+  if (counts.Kafiil + counts.Nafezly < minServiceLinks)
+    throw new Error(`Add at least ${minServiceLinks} Kafiil or Nafezly links, in any mix. Links on other sites do not count toward them.`);
   const identity = values.map((value) => {
-    const check = verifyServiceLink(value);
+    const check = verifyServiceLink(value, { open: true });
     return serviceKey(check) || value.toLowerCase();
   });
   if (new Set(identity).size !== values.length) throw new Error("Each service link must be different.");

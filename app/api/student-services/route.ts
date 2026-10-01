@@ -77,14 +77,14 @@ async function studentView(studentId: string) {
 }
 
 /**
- * A submission's state, read from its links. It is Complete only when every
- * link is approved and there is at least one on each of Kafiil, Nafezly and
- * Khamsat. Approved links short of that are In Progress: the
+ * A submission's state, read from its links. It is Complete when at least
+ * three Kafiil or Nafezly links are approved and nothing is waiting for QC;
+ * links in "Other" are reviewed but are not needed for it. Approved links short of that are In Progress: the
  * student has more to add.
  */
 function submissionStatus(studentId: string, t: string, completedAt: "now" | "latest") {
-  const done = `(NOT EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status<>'Locked')
-    AND (SELECT count(DISTINCT platform) FROM service_links WHERE student_id=? AND platform IN ('Kafiil','Nafezly','Khamsat'))=3)`;
+  const done = `(NOT EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status='Pending')
+    AND (SELECT count(*) FROM service_links WHERE student_id=? AND platform IN ('Kafiil','Nafezly') AND qc_status='Locked')>=3)`;
   const doneArgs = [studentId, studentId];
   return stmt(
     `UPDATE service_submissions SET status=CASE
@@ -124,8 +124,7 @@ export async function POST(req: Request) {
     }
     const x = await req.json();
     if (x.action === "qc_review") return await qcReview(x);
-    if (x.action !== "submit_services" && x.action !== "submit_service")
-      throw new Error("Choose a service-link action.");
+    if (x.action !== "submit_services") throw new Error("Choose a service-link action.");
     const s = await currentStudent();
     await rateLimit("student-services:" + s.id, 30, 60);
     const existing = await all(
@@ -133,28 +132,12 @@ export async function POST(req: Request) {
       s.id,
     );
     const bySlot = new Map(existing.map((row) => [Number(row.slot), row]));
-    // A student submits one service at a time: a new link is added after the
-    // others, and a link returned for correction is replaced in its place.
-    // The whole list can still be sent at once. Either way, links already
-    // submitted stay: an approved or waiting link cannot change.
-    let values: string[];
-    let writing: Set<number>;
-    if (x.action === "submit_service") {
-      const url = typeof x.url === "string" ? x.url.trim() : "";
-      if (!url) throw new Error("Paste the link to your service.");
-      const slot = x.slot == null || x.slot === "" ? existing.length + 1 : Number(x.slot);
-      const prior: any = bySlot.get(slot);
-      if (slot !== existing.length + 1 && prior?.qc_status !== "Needs Correction")
-        throw new Error("Only a link returned for correction can be replaced.");
-      values = existing.map((row) => row.url);
-      values[slot - 1] = url;
-      writing = new Set([slot]);
-    } else {
-      values = Array.isArray(x.services) ? x.services : [];
-      if (values.length < existing.length)
-        throw new Error("Keep every link you already submitted. Replace a link that needs correction instead of removing it.");
-      writing = new Set(values.map((_, i) => i + 1));
-    }
+    // The student sends the whole form: the links already submitted, in their
+    // places, with corrections, then any new ones. An approved or waiting link
+    // cannot change, and a link is never dropped.
+    let values: string[] = Array.isArray(x.services) ? x.services : [];
+    if (values.length < existing.length)
+      throw new Error("Keep every link you already submitted. Replace a link that needs correction instead of removing it.");
     values = normalizeServiceSlots(values);
     // A service is the student's own listing. It is never tied to one of the
     // programme's client accounts, which only order gigs, so account_id stays
@@ -201,13 +184,13 @@ export async function POST(req: Request) {
     for (let index = 0; index < values.length; index += 1) {
       const slot = index + 1;
       const value = values[index];
-      const check = verifyServiceLink(value);
+      const check = verifyServiceLink(value, { open: true });
       // When the gate raised an http marketplace address to https, the secure
       // form is what gets stored and opened; both screens link to this column.
       const stored = check.upgraded ? check.normalizedUrl : value;
       const prior: any = bySlot.get(slot);
-      // A link not being submitted now is left exactly as it is.
-      if (!writing.has(slot)) continue;
+      // A link sent back unchanged is left exactly as it is, a correction included.
+      if (prior && prior.normalized_url === check.normalizedUrl) continue;
       if (prior && prior.qc_status !== "Needs Correction") {
         if (prior.normalized_url !== check.normalizedUrl)
           throw new Error(
@@ -293,7 +276,7 @@ export async function POST(req: Request) {
       reviewer,
       s.id,
     ));
-    jobs.push(auditStmt(s, "Student service links submitted", s.id, { slots: [...writing] }, null, uid("REQ")));
+    jobs.push(auditStmt(s, "Student service links submitted", s.id, { links: values.length }, null, uid("REQ")));
     await db().batch(jobs);
     return Response.json({ ok: true, ...(await studentView(s.id)) });
   } catch (e: any) {

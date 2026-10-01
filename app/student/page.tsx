@@ -2,20 +2,23 @@
 import { LanguageToggle, useT } from "@/lib/i18n/context";
 
 import { useEffect, useState } from "react";
-import { Check, ExternalLink, LockKeyhole, RefreshCw, Send, ShieldCheck } from "lucide-react";
+import { Check, ExternalLink, LockKeyhole, Plus, RefreshCw, Send, ShieldCheck, X } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
-  linksPerPlatform,
-  requiredServicePlatforms,
   maxLinksPerPlatform,
-  maxServiceLinks,
   minServiceLinks,
+  serviceCategory,
   serviceProgress,
   verifyServiceLink,
+  type ServiceCategory,
 } from "@/lib/domain/service-links";
 
-/** A link's marketplace as the student reads it. */
-const platformName = (platform?: string) => (platform === "External service" ? "Not an accepted marketplace" : platform || "");
+/** The three sections of the form, in the order they are shown. */
+const sections: { category: ServiceCategory; title: string; hint: string; example: string }[] = [
+  { category: "Nafezly", title: "Nafezly", hint: "Your services on Nafezly.", example: "https://nafezly.com/service/…" },
+  { category: "Kafiil", title: "Kafiil", hint: "Your services on Kafiil.", example: "https://kafiil.com/service/…" },
+  { category: "Other", title: "Other", hint: "Optional. Services on any other site, Khamsat included. These do not count toward the three.", example: "https://…" },
+];
 
 type Service = {
   id?: string;
@@ -37,7 +40,7 @@ const empty = (): Service[] => [];
 const reviewLabel: Record<string, string> = {
   Locked: "Approved",
   "Pending QC": "With your coordinator",
-  "In Progress": "Add more services",
+  "In Progress": "Add more links",
   Pending: "With your coordinator",
 };
 const label = (status?: string) => (status ? reviewLabel[status] || status : "");
@@ -69,10 +72,11 @@ export default function StudentServicesPage() {
   const [saved, setSaved] = useState(false);
   const [reviews, setReviews] = useState<any[]>([]);
   const [lastReviewedAt, setLastReviewedAt] = useState<string | null>(null);
-  // The link being added, the corrections being typed, and which one is being confirmed.
-  const [draft, setDraft] = useState("");
+  // New links typed into each section, corrections to links sent back, and
+  // whether the student is confirming the submission.
+  const [drafts, setDrafts] = useState<Record<ServiceCategory, string[]>>({ Nafezly: [""], Kafiil: [""], Other: [] });
   const [fixes, setFixes] = useState<Record<number, string>>({});
-  const [pending, setPending] = useState<{ slot?: number; url: string } | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   async function refresh() {
     setLoading(true);
@@ -97,27 +101,50 @@ export default function StudentServicesPage() {
     refresh();
   }, []);
 
-  // Where the student stands: three services at least, a Kafiil and a Nafezly among them.
-  const progress = serviceProgress(services.map((service) => service.platform || ""));
-  const lockedCount = services.filter((service) => service.qc_status === "Locked").length;
-  const complete = progress.met && lockedCount === services.length;
-  const counts = linksPerPlatform(services.map((service) => service.url));
-  const full = services.length >= maxServiceLinks;
+  // Where the student stands: Kafiil and Nafezly links toward the three needed.
+  const platformOf = (url: string) => verifyServiceLink(url, { open: true }).platform;
+  const filled = (category: ServiceCategory) => drafts[category].map((url) => url.trim()).filter(Boolean);
+  const newLinks = [...filled("Nafezly"), ...filled("Kafiil"), ...filled("Other")];
+  const corrected = services.map((service) => (fixes[service.slot]?.trim() ? fixes[service.slot].trim() : service.url));
+  const progress = serviceProgress([...corrected, ...newLinks].map(platformOf));
+  const savedProgress = serviceProgress(services.map((service) => service.platform || ""));
+  const lockedRequired = services.filter((service) => service.qc_status === "Locked" && serviceCategory(service.platform || "") !== "Other").length;
+  const complete = submission?.status === "Complete" || lockedRequired >= minServiceLinks;
+  const inSection = (category: ServiceCategory) =>
+    services.filter((service) => serviceCategory(service.platform || "") === category);
 
-  /** Why a link cannot be added, before it is sent; empty when it can. */
-  function problem(url: string) {
+  /** Why a link typed into a section cannot go there; empty when it can. */
+  function problem(category: ServiceCategory, url: string) {
     if (!url.trim()) return "";
-    const check = verifyServiceLink(url);
+    const check = verifyServiceLink(url, { open: true });
     if (check.status === "Failed") return check.message;
-    if ((counts[check.platform] || 0) >= maxLinksPerPlatform)
-      return t("You already have {v0} {v1} services, the most allowed.", { v0: maxLinksPerPlatform, v1: check.platform });
+    const belongs = serviceCategory(check.platform);
+    if (belongs !== category)
+      return category === "Other"
+        ? t("This is a {v0} link. Add it in the {v0} section.", { v0: belongs })
+        : t("This section takes {v0} links only.", { v0: category });
     return "";
+  }
+  const problems = [
+    ...sections.flatMap(({ category }) => drafts[category].map((url) => problem(category, url))),
+    ...services.map((service) => (fixes[service.slot]?.trim() ? problem(serviceCategory(platformOf(fixes[service.slot])), fixes[service.slot]) : "")),
+  ].filter(Boolean);
+  const changed = newLinks.length > 0 || services.some((service) => fixes[service.slot]?.trim());
+  const canSubmit = progress.met && problems.length === 0 && changed && !busy;
+
+  function setDraft(category: ServiceCategory, index: number, url: string) {
+    setSaved(false);
+    setDrafts((current) => ({ ...current, [category]: current[category].map((u, i) => (i === index ? url : u)) }));
+  }
+  function addField(category: ServiceCategory) {
+    setDrafts((current) => ({ ...current, [category]: [...current[category], ""] }));
+  }
+  function removeField(category: ServiceCategory, index: number) {
+    setDrafts((current) => ({ ...current, [category]: current[category].filter((_, i) => i !== index) }));
   }
 
   async function submit() {
-    if (!pending) return;
-    const entry = pending;
-    setPending(null);
+    setConfirmOpen(false);
     setBusy(true);
     setSaved(false);
     setError("");
@@ -125,7 +152,7 @@ export default function StudentServicesPage() {
       const response = await fetch("/api/student-services", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "submit_service", url: entry.url, slot: entry.slot }),
+        body: JSON.stringify({ action: "submit_services", services: [...corrected, ...newLinks] }),
       });
       const value = await response.json();
       if (!response.ok || value.error) throw new Error(value.error || t("Unable to submit your links."));
@@ -133,8 +160,8 @@ export default function StudentServicesPage() {
       setSubmission(value.submission);
       setReviews(value.reviews || []);
       setLastReviewedAt(value.last_reviewed_at || null);
-      if (entry.slot) setFixes((current) => ({ ...current, [entry.slot!]: "" }));
-      else setDraft("");
+      setDrafts({ Nafezly: [], Kafiil: [], Other: [] });
+      setFixes({});
       setSaved(true);
     } catch (e: any) {
       setError(e.message);
@@ -177,117 +204,95 @@ export default function StudentServicesPage() {
             <div>
               <span className="student-kicker">{t("SERVICE LINKS / ROUND 5")}</span>
               <h1>{student?.name ? t("Hi {v0}, submit your services.", { v0: student.name.split(" ")[0] }) : t("Submit your services.")}</h1>
-              <p>{t("Submit your services one at a time. You need at least one on each of Kafiil, Nafezly and Khamsat, and you can add up to three on each. Each link is checked automatically, then reviewed by your coordinator.")}</p>
+              <p>{t("Add at least three links on Kafiil and Nafezly, in any mix: three on one, or two and one. Links on other sites are optional. Each link is checked automatically, then reviewed by your coordinator.")}</p>
             </div>
-            <div className="student-progress"><strong>{Math.min(services.length, minServiceLinks)}/{minServiceLinks}</strong><span>{t("uploaded")}</span></div>
+            <div className="student-progress"><strong>{Math.min(progress.required, minServiceLinks)}/{minServiceLinks}</strong><span>{t("Kafiil + Nafezly")}</span></div>
           </section>
 
           <section className="student-card">
             <div className="student-card-heading">
-              <div><h2>{t("Your progress")}</h2><p>{complete ? t("All your services are approved. Nothing more is needed.") : progress.met ? t("You have the services you need. Your coordinator is reviewing them.") : t("{v0} of {v1} services uploaded.", { v0: services.length, v1: minServiceLinks })}</p></div>
+              <div>
+                <h2>{t("Your services")}</h2>
+                <p>{complete ? t("Your services are approved. Nothing more is needed.") : savedProgress.met ? t("You have the links you need. Your coordinator is reviewing them.") : t("{v0} of {v1} Kafiil or Nafezly links.", { v0: Math.min(progress.required, minServiceLinks), v1: minServiceLinks })}</p>
+              </div>
               {submission && <span className={statusTone(submission.status)}>{t(label(submission.status))}</span>}
             </div>
-            <div className="student-progress-bar" role="progressbar" aria-valuemin={0} aria-valuemax={minServiceLinks} aria-valuenow={Math.min(services.length, minServiceLinks)}>
-              <span style={{ width: `${Math.min(100, (services.length / minServiceLinks) * 100)}%` }} />
+            <div className="student-progress-bar" role="progressbar" aria-valuemin={0} aria-valuemax={minServiceLinks} aria-valuenow={Math.min(progress.required, minServiceLinks)}>
+              <span style={{ width: `${Math.min(100, (progress.required / minServiceLinks) * 100)}%` }} />
             </div>
-            <ul className="student-requirements">
-              {requiredServicePlatforms.map((platform) => {
-                const n = progress.perPlatform[platform] || 0;
-                return (
-                  <li key={platform} className={n > 0 ? "is-done" : ""}>
-                    {n > 0 ? <Check size={15} /> : null}
-                    {platform} {n}/{maxLinksPerPlatform}
-                  </li>
-                );
-              })}
-              <li className={services.length >= minServiceLinks ? "is-done" : ""}>{services.length >= minServiceLinks ? <Check size={15} /> : null}{t("{v0} services at least", { v0: minServiceLinks })}</li>
-            </ul>
             {submission && (
               <div className="student-meta student-submission-meta">
                 <span>{t("Submitted")}{" "}{new Date(submission.submitted_at).toLocaleString()}</span>
                 <span>{t("Last reviewed")}{" "}{lastReviewedAt ? new Date(lastReviewedAt).toLocaleString() : t("Not reviewed yet")}</span>
               </div>
             )}
-          </section>
 
-          <section className="student-card">
-            <div className="student-card-heading">
-              <div><h2>{t("Add a service")}</h2><p>{t("Kafiil, Nafezly or Khamsat. Up to {v0} on each, {v1} in all.", { v0: maxLinksPerPlatform, v1: maxServiceLinks })}</p></div>
-            </div>
-            {full ? (
-              <p className="student-check-note">{t("You have submitted the most links allowed.")}</p>
-            ) : (
-              <form
-                className="student-add"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (!problem(draft)) setPending({ url: draft.trim() });
-                }}
-              >
-                <div className="student-url-field">
-                  <label htmlFor="service-new">{t("Service {v0}", { v0: services.length + 1 })} · {t("Public service URL")}</label>
-                  <div className="student-url-wrap">
-                    <input id="service-new" type="url" required value={draft} disabled={busy} placeholder={t("https://…")} onChange={(e) => { setSaved(false); setDraft(e.target.value); }} />
-                    <button className="student-primary" disabled={busy || !draft.trim() || Boolean(problem(draft))} type="submit"><Send size={16} />{busy ? t("Submitting…") : t("Submit")}</button>
-                  </div>
-                  {draft.trim() && (
-                    <div className="student-meta">
-                      <span>{t(platformName(verifyServiceLink(draft).platform))}</span>
+            <form onSubmit={(e) => { e.preventDefault(); if (canSubmit) setConfirmOpen(true); }}>
+              {sections.map(({ category, title, hint, example }) => {
+                const existing = inSection(category);
+                const room = maxLinksPerPlatform - existing.length - drafts[category].length;
+                return (
+                  <div className="student-section" key={category}>
+                    <div className="student-section-heading">
+                      <h3>{t(title)} <small>{existing.length + filled(category).length}/{maxLinksPerPlatform}</small></h3>
+                      <p>{t(hint)}</p>
                     </div>
-                  )}
-                  {problem(draft) && <div className="student-qc-note">{problem(draft)}</div>}
-                </div>
-              </form>
-            )}
-            {error && <p className="student-form-error" role="alert">{error}</p>}
-            {saved && <p className="student-saved"><Check size={17} /> {t("Saved. Your coordinator can now review your links.")}</p>}
-          </section>
-
-          {services.length > 0 && (
-            <section className="student-card">
-              <div className="student-card-heading">
-                <div><h2>{t("Your service links")}</h2><p>{t("Approved links cannot be changed. Links needing correction stay editable with your coordinator’s comment.")}</p></div>
-              </div>
-              <div className="student-service-list">
-                {services.map((service) => {
-                  const locked = service.qc_status === "Locked";
-                  const correction = service.qc_status === "Needs Correction";
-                  const fix = fixes[service.slot] ?? "";
-                  return (
-                    <article className={`student-service-row ${locked ? "is-locked" : correction ? "is-correction" : ""}`} key={service.slot}>
-                      <div className="student-slot"><span>0{service.slot}</span><strong>{t("Service")}{" "}{service.slot}</strong></div>
-                      <div className="student-url-field">
+                    {existing.map((service) => {
+                      const locked = service.qc_status === "Locked";
+                      const correction = service.qc_status === "Needs Correction";
+                      const fix = fixes[service.slot] ?? "";
+                      return (
+                        <article className={`student-service-row ${locked ? "is-locked" : correction ? "is-correction" : ""}`} key={service.slot}>
+                          <div className="student-url-field">
+                            <a className="student-url-text" href={service.url} target="_blank" rel="noreferrer">{service.url} <ExternalLink size={14} /></a>
+                            <div className="student-meta">
+                              {service.qc_status && <span className={statusTone(service.qc_status)}>{t(label(service.qc_status))}</span>}
+                            </div>
+                            {correction && (
+                              <>
+                                <div className="student-qc-note"><strong>{t("Correction needed:")}</strong> {service.qc_comment}</div>
+                                <div className="student-url-wrap student-fix">
+                                  <input type="url" value={fix} disabled={busy} placeholder={t("Corrected link")} onChange={(e) => { setSaved(false); setFixes((current) => ({ ...current, [service.slot]: e.target.value })); }} />
+                                </div>
+                                {fix.trim() && problem(serviceCategory(platformOf(fix)), fix) && <div className="student-qc-note">{problem(serviceCategory(platformOf(fix)), fix)}</div>}
+                              </>
+                            )}
+                            {locked && <div className="student-locked-note"><LockKeyhole size={15} /> {t("Approved by your coordinator")}{service.qc_comment ? ` · ${service.qc_comment}` : ""}</div>}
+                          </div>
+                        </article>
+                      );
+                    })}
+                    {drafts[category].map((url, index) => (
+                      <div className="student-url-field student-new-link" key={`${category}-${index}`}>
                         <div className="student-url-wrap">
-                          <a className="student-url-text" href={service.url} target="_blank" rel="noreferrer">{service.url} <ExternalLink size={14} /></a>
+                          <input type="url" value={url} disabled={busy} placeholder={example} aria-label={t("{v0} link", { v0: t(title) })} onChange={(e) => setDraft(category, index, e.target.value)} />
+                          <button type="button" className="student-remove" disabled={busy} onClick={() => removeField(category, index)} aria-label={t("Remove this link")}><X size={16} /></button>
                         </div>
-                        <div className="student-meta">
-                          {service.platform && <span>{t(platformName(service.platform))}</span>}
-                          {service.qc_status && <span className={statusTone(service.qc_status)}>{t(label(service.qc_status))}</span>}
-                        </div>
-                        {service.auto_result?.message && <p className="student-check-note">{service.auto_result.message}</p>}
-                        {correction && (
-                          <>
-                            <div className="student-qc-note"><strong>{t("Correction needed:")}</strong> {service.qc_comment}</div>
-                            <form
-                              className="student-url-wrap student-fix"
-                              onSubmit={(e) => {
-                                e.preventDefault();
-                                if (fix.trim()) setPending({ slot: service.slot, url: fix.trim() });
-                              }}
-                            >
-                              <input type="url" required value={fix} disabled={busy} placeholder={t("Corrected link")} onChange={(e) => setFixes((current) => ({ ...current, [service.slot]: e.target.value }))} />
-                              <button className="student-secondary" disabled={busy || !fix.trim()} type="submit"><RefreshCw size={15} />{t("Resubmit")}</button>
-                            </form>
-                          </>
-                        )}
-                        {locked && <div className="student-locked-note"><LockKeyhole size={15} /> {t("Approved by your coordinator")}{service.qc_comment ? ` · ${service.qc_comment}` : ""}</div>}
+                        {problem(category, url) && <div className="student-qc-note">{problem(category, url)}</div>}
                       </div>
-                    </article>
-                  );
-                })}
+                    ))}
+                    {room > 0 && (
+                      <button type="button" className="student-add-link" disabled={busy} onClick={() => addField(category)}>
+                        <Plus size={15} /> {t("Add a {v0} link", { v0: t(title) })}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              {error && <p className="student-form-error" role="alert">{error}</p>}
+              {saved && <p className="student-saved"><Check size={17} /> {t("Saved. Your coordinator can now review your links.")}</p>}
+              <div className="student-form-footer">
+                <span>
+                  {progress.met
+                    ? t("Ready to submit.")
+                    : minServiceLinks - progress.required === 1
+                      ? t("Add 1 more Kafiil or Nafezly link to submit.")
+                      : t("Add {v0} more Kafiil or Nafezly links to submit.", { v0: minServiceLinks - progress.required })}
+                </span>
+                <button className="student-primary" disabled={!canSubmit} type="submit"><Send size={16} />{busy ? t("Submitting…") : t("Submit")}</button>
               </div>
-            </section>
-          )}
+            </form>
+          </section>
           {reviews.length > 0 && (
             <section className="student-card" aria-labelledby="review-history-title">
               <div className="student-card-heading"><div><h2 id="review-history-title">{t("Review updates")}</h2><p>{t("Your approval and correction history.")}</p></div></div>
@@ -304,15 +309,19 @@ export default function StudentServicesPage() {
           <p className="student-footnote"><ShieldCheck size={15} /> {t("Your links are visible to the DEPI operations team only for verification.")}</p>
         </>
       )}
-      <Dialog open={Boolean(pending)} onOpenChange={(open) => { if (!open) setPending(null); }}>
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{pending?.slot ? t("Resubmit this service?") : t("Submit this service?")}</DialogTitle>
-            <DialogDescription>{t("It goes to your coordinator for review and cannot be changed until they respond.")}</DialogDescription>
+            <DialogTitle>{t("Submit your service links?")}</DialogTitle>
+            <DialogDescription>{t("They go to your coordinator for review and cannot be changed until they respond.")}</DialogDescription>
           </DialogHeader>
-          <p className="student-confirm-url">{pending?.url}</p>
+          <ol className="student-confirm-list">
+            {[...services.filter((service) => fixes[service.slot]?.trim()).map((service) => fixes[service.slot].trim()), ...newLinks].map((url) => (
+              <li key={url}><strong>{t(serviceCategory(platformOf(url)))}</strong><span>{url}</span></li>
+            ))}
+          </ol>
           <div className="student-actions">
-            <button type="button" className="student-secondary" onClick={() => setPending(null)}>{t("Review links")}</button>
+            <button type="button" className="student-secondary" onClick={() => setConfirmOpen(false)}>{t("Review links")}</button>
             <button type="button" className="student-primary" disabled={busy} onClick={submit}>{t("Confirm submission")}</button>
           </div>
         </DialogContent>

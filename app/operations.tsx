@@ -989,7 +989,7 @@ export default function Operations({ module: initialModule }: { module: string }
     );
   // A service link named by the marketplace it is on.
   const serviceLabel = (platform?: string) =>
-    !platform ? t("Service") : platform === "External service" ? t("Not an accepted marketplace") : t("{v0} service", { v0: platform });
+    !platform ? t("Service") : platform === "External service" ? t("Other site") : t("{v0} service", { v0: platform });
   const statusCol = {
     key: "status",
     label: t("Status"),
@@ -1946,7 +1946,7 @@ export default function Operations({ module: initialModule }: { module: string }
           ? "Needs student correction"
           : Number(r.links_pending) > 0
             ? "Awaiting QC"
-            : Number(r.links_kafiil) > 0 && Number(r.links_nafezly) > 0 && Number(r.links_khamsat) > 0
+            : Number(r.links_kafiil) + Number(r.links_nafezly) >= 3
               ? "Complete"
               : "Incomplete";
     const submissionRows = serviceSubmissionStatus
