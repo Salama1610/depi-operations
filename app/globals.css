@@ -788,3 +788,7 @@ input:focus-visible {
 .student-new-link{margin:8px 0}
 .student-add-link{display:inline-flex;align-items:center;gap:6px;border:1px dashed #b9c8ee;background:#f7f9ff;color:#315ce8;border-radius:8px;padding:8px 12px;font-size:13px;margin:6px 0 10px}
 .student-add-link:hover{background:#edf2ff}
+
+/* QC queue: the service opens from its row, with its address shown. */
+.service-open{display:inline-flex;flex-direction:column;align-items:flex-start;gap:2px;max-width:340px}
+.service-open .service-url{word-break:break-all;max-width:340px}

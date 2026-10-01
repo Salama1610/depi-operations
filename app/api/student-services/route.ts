@@ -168,6 +168,8 @@ export async function POST(req: Request) {
       return candidates.some((row: any) => serviceKey(verifyServiceLink(row.normalized_url)) === key);
     };
     const t = now();
+    // Whether this submission replaces a link QC sent back.
+    let corrected = false;
     const jobs: any[] = [
       stmt(
         `INSERT INTO service_submissions(id,student_id,status,submitted_at,updated_at,qc_completed_at)
@@ -205,6 +207,7 @@ export async function POST(req: Request) {
           `Link ${slot} is already submitted by another student. Each student submits their own services.`,
         );
       const revision = prior ? Number(prior.revision || 1) + 1 : 1;
+      if (prior) corrected = true;
       const qcStatus = check.status === "Failed" ? "Needs Correction" : "Pending";
       if (prior) {
         jobs.push(
@@ -269,7 +272,9 @@ export async function POST(req: Request) {
          UNION SELECT coordinator FROM groups WHERE id=(SELECT group_id FROM students WHERE id=?)
        )`,
       notificationSeed,
-      priorSubmissionTitle(Boolean(existing.length)),
+      corrected
+        ? "A student corrected a service link: review it again"
+        : priorSubmissionTitle(Boolean(existing.length)),
       s.id,
       `service-links:${s.id}:${t}`,
       t,

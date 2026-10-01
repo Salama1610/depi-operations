@@ -363,7 +363,7 @@ export default function Operations({ module: initialModule }: { module: string }
     [importRows, setImportRows] = useState<Row[]>([]),
     [preview, setPreview] = useState<Row | null>(null),
     [importId, setImportId] = useState(""),
-    [serviceFilters, setServiceFilters] = useState<Row>({ platform: "All", track: "All", group: "All", coordinator: "All", reviewer: "All", age: "All", automatic: "All", corrections: "All" }),
+    [serviceFilters, setServiceFilters] = useState<Row>({ state: "Pending", platform: "All", track: "All", group: "All", coordinator: "All", reviewer: "All", age: "All", automatic: "All", corrections: "All" }),
     [submissionFilters, setSubmissionFilters] = useState<Row>({ state: "All", track: "All", group: "All", coordinator: "All" }),
     [saved, setSaved] = useState<string[]>([]),
     [checklistFor, setChecklistFor] = useState<string | null>(null);
@@ -1894,6 +1894,7 @@ export default function Operations({ module: initialModule }: { module: string }
       .sort((a, b) => a.stage_at.localeCompare(b.stage_at));
     const serviceQueue = serviceLinks
       .filter((r) => r.qc_status !== "Locked")
+      .filter((r) => serviceFilters.state === "All" || r.qc_status === serviceFilters.state)
       .filter(qMatch)
       .filter((r) => serviceFilters.platform === "All" || r.platform === serviceFilters.platform)
       .filter((r) => serviceFilters.track === "All" || r.track === serviceFilters.track)
@@ -1917,8 +1918,12 @@ export default function Operations({ module: initialModule }: { module: string }
       out[r.student_id] = !current || r.updated_at < current ? r.updated_at : current;
       return out;
     }, {} as Row);
+    // A link the student corrected is new work for its reviewer, so it comes first.
+    const resubmitted = (r: Row) => r.qc_status === "Pending" && Number(r.revision) > 1;
+    const studentResubmitted = new Set(serviceQueue.filter(resubmitted).map((r) => r.student_id));
     serviceQueue.sort(
       (a, b) =>
+        Number(studentResubmitted.has(b.student_id)) - Number(studentResubmitted.has(a.student_id)) ||
         String(waitingSince[a.student_id]).localeCompare(String(waitingSince[b.student_id])) ||
         String(a.student_id).localeCompare(String(b.student_id)) ||
         Number(a.slot) - Number(b.slot),
@@ -2008,7 +2013,17 @@ export default function Operations({ module: initialModule }: { module: string }
               <span><strong>{serviceLinks.filter((r) => r.qc_status === "Pending" && Date.now() - Date.parse(r.updated_at) > 48 * 3600000).length}</strong>{t("Past 48-hour SLA")}</span>
             </div>
             <div className="filter-row service-qc-filters">
-              <Pick label={t("Platform")} value={serviceFilters.platform} onChange={(platform) => setServiceFilters({ ...serviceFilters, platform })} options={["All", ...acceptedServicePlatforms]} />
+              <Pick
+                label={t("Showing")}
+                value={serviceFilters.state}
+                onChange={(state) => setServiceFilters({ ...serviceFilters, state })}
+                options={[
+                  { value: "Pending", label: t("Waiting for review") },
+                  { value: "Needs Correction", label: t("Waiting on the student") },
+                  { value: "All", label: t("Both") },
+                ]}
+              />
+              <Pick label={t("Platform")} value={serviceFilters.platform} onChange={(platform) => setServiceFilters({ ...serviceFilters, platform })} options={["All", ...acceptedServicePlatforms, "External service"]} />
               <Pick label={t("Track")} value={serviceFilters.track} onChange={(track) => setServiceFilters({ ...serviceFilters, track })} options={["All", ...Array.from(new Set(serviceLinks.map((r) => r.track).filter(Boolean)))]} />
               <Pick label={t("Group")} value={serviceFilters.group} onChange={(group) => setServiceFilters({ ...serviceFilters, group })} options={["All", ...Array.from(new Set(serviceLinks.map((r) => r.group_id).filter(Boolean)))]} />
               {canDecideServiceLinks && (
@@ -2048,8 +2063,12 @@ export default function Operations({ module: initialModule }: { module: string }
                 pageRows,
                 [
                   { key: "student_name", label: t("Student"), render: (r) => { const own = serviceLinks.filter((l) => l.student_id === r.student_id); const decided = own.filter((l) => l.qc_status !== "Pending").length; return <span><strong>{r.student_name}</strong><small className="table-subline">{r.student_id} · {decided}/{own.length} {t("reviewed")}</small></span>; } },
-                  { key: "slot", label: t("Slot"), render: (r) => serviceLabel(r.platform) },
-                  { key: "url", label: t("Link"), render: (r) => <a className="text-link" href={r.url} target="_blank" rel="noreferrer">{r.platform} <ExternalLink size={14} /></a> },
+                  { key: "slot", label: t("Service"), render: (r) => (
+                      <a className="text-link service-open" href={r.url} target="_blank" rel="noreferrer" title={t("Open the student's service")}>
+                        <strong>{serviceLabel(r.platform)}</strong> <ExternalLink size={14} />
+                        <small className="table-subline service-url">{r.url}</small>
+                      </a>
+                    ) },
                   { key: "auto_status", label: t("Automatic check"), render: (r) => <Badge value={r.auto_status} /> },
                   { key: "reviewer_name", label: t("Reviewer"), render: (r) => isQualityLead && r.qc_status !== "Locked"
                       ? <select className="pick-inline" aria-label={t("Assign this student to a reviewer")} value={r.qc_actor || ""} disabled={busy} onChange={(e) => e.target.value && quick("service_qc_assign", { student_id: r.student_id, reviewer_id: e.target.value })}>
@@ -2057,7 +2076,7 @@ export default function Operations({ module: initialModule }: { module: string }
                           {qualityReviewers.map((q) => <option key={q.id} value={q.id}>{q.name} ({reviewerStudents.get(q.id) || 0})</option>)}
                         </select>
                       : <span>{owner(r.qc_actor) === "Unassigned" ? t("Waiting for a reviewer") : owner(r.qc_actor)}<small className="table-subline">{owner(r.coordinator)}</small></span> },
-                  { key: "qc_status", label: t("Review state"), render: (r) => <span><Badge value={r.qc_status} /><small className="table-subline">{Math.round((Date.now() - Date.parse(r.updated_at)) / 3600000)}{t("h · revision")}{" "}{r.revision}</small></span> },
+                  { key: "qc_status", label: t("Review state"), render: (r) => <span><Badge value={r.qc_status} />{resubmitted(r) && <Badge value={t("Resubmitted")} />}<small className="table-subline">{Math.round((Date.now() - Date.parse(r.updated_at)) / 3600000)}{t("h · revision")}{" "}{r.revision}</small></span> },
                 ],
                 (r) => <div className="detail-actions">{canDecideServiceLinks && (r.qc_actor === user.id || isQualityLead) && <button className="small-btn" onClick={() => open("service_qc_review", { ...r, service_id: r.id, student_id: r.student_id, decision: r.qc_status === "Needs Correction" ? "Lock" : "" })}>{t("Review")}</button>}</div>,
               )),

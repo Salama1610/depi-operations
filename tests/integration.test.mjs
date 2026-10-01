@@ -2585,6 +2585,13 @@ test("a student submits at least three Kafiil or Nafezly links together, with ot
   assert.equal(r.status, 200, await r.clone().text());
   const fixed = await dbRows("SELECT slot,revision,qc_status FROM service_links WHERE student_id=? ORDER BY slot", first.id);
   assert.deepEqual(fixed.map((x) => x.revision), [1, 2, 1, 1], "only the corrected link is a new revision");
+  assert.equal(fixed[1].qc_status, "Pending", "the corrected link is back with QC as new work");
+  const reviewer = (await dbRow("SELECT qc_actor FROM service_links WHERE student_id=? AND slot=2", first.id)).qc_actor;
+  assert.ok(reviewer, "and it has a reviewer");
+  assert.ok(
+    await dbRow("SELECT id FROM notifications WHERE recipient=? AND entity_id=? AND title LIKE 'A student corrected a service link%'", reviewer, first.id),
+    "who is told it came back",
+  );
   assert.match((await (await submit([nafezly(7799), nafezly(7712), kafiil(7703), other])).json()).error, /awaiting QC/);
   // Another student cannot submit the same listing or the same other link.
   current = { id: second.id, email: second.email };

@@ -1319,4 +1319,10 @@ export const ar: Record<string, string> = {
   "Other site": "موقع آخر",
   "Add 1 more Kafiil or Nafezly link to submit.": "أضف رابطًا واحدًا آخر على كفيل أو نفذلي للإرسال.",
   "Add {v0} more Kafiil or Nafezly links to submit.": "أضف {v0} روابط أخرى على كفيل أو نفذلي للإرسال.",
+  "Showing": "المعروض",
+  "Waiting for review": "بانتظار المراجعة",
+  "Waiting on the student": "بانتظار الطالب",
+  "Both": "الكل",
+  "Open the student's service": "افتح خدمة الطالب",
+  "Resubmitted": "أعيد إرسالها",
 };
