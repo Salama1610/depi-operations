@@ -2534,3 +2534,52 @@ test("each service slot takes its own marketplace, and a service belongs to one 
   assert.equal(r.status, 200, await r.clone().text());
   current = { id: "owner", email: "owner@example.com" };
 });
+
+test("the coordinator and coach answer attending or unavailable, and the leaders hear about an absence", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  const group = await dbRow("SELECT g.id,g.supervisor,u.id uid,u.email FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.status='Active' AND g.id NOT IN (SELECT group_id FROM sessions WHERE week=6) LIMIT 1");
+  await check("session", { id: "SES-ANSWER-1", group_id: group.id, title: "Week 6 coaching", starts_at: new Date(Date.now() + 130 * 86400000).toISOString(), week: 6, duration_minutes: 180 });
+  await dbExec(
+    "INSERT OR IGNORE INTO group_coaches(id,group_id,user_id,coach_type,status,onboarding_status,assigned_by,assigned_at) VALUES(?,?,?,?,?,?,?,?)",
+    "GC-ANSWER-1", group.id, "staff-coach", "Outcome Coach", "Active", "Pending", "owner", new Date().toISOString(),
+  );
+  current = { id: group.uid, email: group.email };
+  assert.match((await post("session_unavailable", { id: "SES-ANSWER-1", reason: "" })).error, /why you cannot attend/i);
+  await check("session_unavailable", { id: "SES-ANSWER-1", reason: "Ministry visit that day" });
+  let row = await dbRow("SELECT * FROM sessions WHERE id='SES-ANSWER-1'");
+  assert.equal(row.coordinator_unavailable, "Ministry visit that day");
+  assert.equal(row.status, "Scheduled");
+  const kase = await dbRow("SELECT * FROM cases WHERE source='session-SES-ANSWER-1'");
+  assert.equal(kase.status, "Waiting");
+  assert.equal(kase.severity, "S2 High");
+  const told = (await dbRows("SELECT recipient,title FROM notifications WHERE entity_id='SES-ANSWER-1'"));
+  const recipients = new Set(told.map((n) => n.recipient));
+  assert.ok(recipients.has(group.supervisor), "the group's supervisor is told");
+  assert.ok(recipients.has("staff-coach-ops"), "Coach Operations is told");
+  assert.ok(recipients.has("owner"), "Project Operations is told");
+  assert.ok(!recipients.has(group.uid), "not the person who said it");
+  assert.match(told[0].title, /cannot attend .* Week 6 .*Ministry visit/);
+  // Plans change: the coordinator can attend after all, and the coach confirms.
+  await check("session_confirm", { id: "SES-ANSWER-1" });
+  current = { id: "coach-login", email: "staff-coach@example.invalid" };
+  await check("session_confirm", { id: "SES-ANSWER-1" });
+  row = await dbRow("SELECT * FROM sessions WHERE id='SES-ANSWER-1'");
+  assert.equal(row.coordinator_unavailable, null);
+  assert.equal(row.status, "Confirmed");
+  // The coach dropping out afterwards reopens it.
+  await check("session_unavailable", { id: "SES-ANSWER-1", reason: "Family emergency" });
+  row = await dbRow("SELECT * FROM sessions WHERE id='SES-ANSWER-1'");
+  assert.equal(row.status, "Scheduled");
+  assert.equal(row.coach_confirmed_at, null);
+  assert.equal(row.coach_unavailable, "Family emergency");
+  // Someone outside the session cannot answer for it.
+  current = { id: "support-coach-login", email: "staff-support-coach@example.invalid" };
+  assert.match((await post("session_unavailable", { id: "SES-ANSWER-1", reason: "Not my session" })).error, /coordinator or the session's coach/);
+  // A reschedule asks both again.
+  current = { id: "owner", email: "owner@example.com" };
+  await check("session_reschedule", { id: "SES-ANSWER-1", starts_at: new Date(Date.now() + 131 * 86400000).toISOString(), reason: "Coach unavailable that day" });
+  row = await dbRow("SELECT * FROM sessions WHERE id='SES-ANSWER-1'");
+  assert.equal(row.coach_unavailable, null);
+  assert.equal(row.coordinator_confirmed_at, null);
+  await dbExec("DELETE FROM group_coaches WHERE id='GC-ANSWER-1'");
+});

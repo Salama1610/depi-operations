@@ -1245,4 +1245,10 @@ export const ar: Record<string, string> = {
   "{v0} service": "خدمة {v0}",
   "Your {v0} service link": "رابط خدمتك على {v0}",
   "This slot takes a {v0} service link only.": "هذه الخانة تقبل رابط خدمة على {v0} فقط.",
+  "Attending": "سأحضر",
+  "Unavailable": "غير متاح",
+  "Responses": "الردود",
+  "I can't attend this session": "لا أستطيع حضور هذه الجلسة",
+  "Project Operations, Coach Operations and the group's supervisor are notified at once so the session can be covered or moved.": "يتم إخطار عمليات المشروع وعمليات المدربين ومشرف المجموعة فورًا لتغطية الجلسة أو نقلها.",
+  "Why you can't attend": "سبب عدم قدرتك على الحضور",
 };

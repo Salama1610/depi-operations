@@ -1,4 +1,4 @@
-import { policyChecks } from "@/lib/automation";
+import { notify, policyChecks } from "@/lib/automation";
 import { distributeEvenly, spread } from "@/lib/domain/qc-assignment";
 import {
   loadTimings,
@@ -798,18 +798,22 @@ export async function POST(req: Request) {
         );
         break;
       }
-      case "session_confirm": {
-        // Two people confirm a session: the group's coordinator and its coach.
-        // It reads Confirmed only once both have.
+      case "session_confirm":
+      case "session_unavailable": {
+        // The group's coordinator and the coach each answer for a session:
+        // attending, or unavailable with a reason. It reads Confirmed only once
+        // both attend. Someone unavailable puts it back to Scheduled and the
+        // leaders are told, so they can cover or reschedule it.
         permit(u, ["Coach", "Operations Coordinator"]);
+        const attending = x.action === "session_confirm";
         const session: any = await stmt(
           "SELECT * FROM sessions WHERE id=?",
           id,
         ).first();
         ensure(session, "Session not found.");
         ensure(
-          session.status === "Scheduled",
-          "Only a scheduled session can be confirmed.",
+          attending ? session.status === "Scheduled" : ["Scheduled", "Confirmed"].includes(session.status),
+          attending ? "Only a scheduled session can be confirmed." : "Only an upcoming session can be answered.",
         );
         const group: any = await stmt("SELECT * FROM groups WHERE id=?", session.group_id).first();
         const asCoach =
@@ -826,38 +830,70 @@ export async function POST(req: Request) {
         const asCoordinator = group?.coordinator === u.id && can(u.roles, ["Operations Coordinator"]);
         ensure(
           asCoach || asCoordinator,
-          "Only the group's coordinator or the session's coach can confirm it.",
+          "Only the group's coordinator or the session's coach can answer for it.",
         );
-        const coachAt = session.coach_confirmed_at || (asCoach ? t : null);
-        const coordinatorAt = session.coordinator_confirmed_at || (asCoordinator ? t : null);
-        ensure(
-          coachAt !== session.coach_confirmed_at || coordinatorAt !== session.coordinator_confirmed_at,
-          "You have already confirmed this session.",
-        );
+        const reason = String(x.reason || "").trim();
+        if (!attending) ensure(reason.length >= 5, "Say why you cannot attend.");
+        // Each side's answer: a confirmation time when attending, a reason when not.
+        const coachAt = asCoach ? (attending ? session.coach_confirmed_at || t : null) : session.coach_confirmed_at;
+        const coordinatorAt = asCoordinator ? (attending ? session.coordinator_confirmed_at || t : null) : session.coordinator_confirmed_at;
+        const coachAway = asCoach ? (attending ? null : reason) : session.coach_unavailable;
+        const coordinatorAway = asCoordinator ? (attending ? null : reason) : session.coordinator_unavailable;
+        if (attending)
+          ensure(
+            coachAt !== session.coach_confirmed_at || coordinatorAt !== session.coordinator_confirmed_at,
+            "You have already confirmed this session.",
+          );
         const both = Boolean(coachAt && coordinatorAt);
+        const who = asCoach && asCoordinator ? "The coordinator and coach" : asCoach ? "The coach" : "The coordinator";
         auditPrevious = session;
         jobs.push(
           stmt(
-            "UPDATE sessions SET coach_id=?,coach_confirmed_at=?,coordinator_confirmed_at=?,status=?,confirmed_at=?,updated_at=? WHERE id=?",
+            "UPDATE sessions SET coach_id=?,coach_confirmed_at=?,coordinator_confirmed_at=?,coach_unavailable=?,coordinator_unavailable=?,status=?,confirmed_at=?,updated_at=? WHERE id=?",
             session.coach_id || (asCoach ? u.id : null),
             coachAt,
             coordinatorAt,
+            coachAway,
+            coordinatorAway,
             both ? "Confirmed" : "Scheduled",
-            both ? t : null,
+            both ? session.confirmed_at || t : null,
             t,
             id,
           ),
           ...(await sessionCase(
             session, group,
-            both ? "Resolved" : "In Progress",
-            both
-              ? "Confirmed by the coordinator and the coach."
-              : asCoach
-                ? "The coach confirmed. Waiting for the coordinator."
-                : "The coordinator confirmed. Waiting for the coach.",
+            !attending ? "Waiting" : both ? "Resolved" : "In Progress",
+            !attending
+              ? `${who} cannot attend: ${reason}`
+              : both
+                ? "Confirmed by the coordinator and the coach."
+                : asCoach
+                  ? "The coach confirmed. Waiting for the coordinator."
+                  : "The coordinator confirmed. Waiting for the coach.",
             u.id, t,
           )),
         );
+        if (!attending) {
+          jobs.push(stmt("UPDATE cases SET severity='S2 High' WHERE source=?", "session-" + session.id));
+          // The leaders, and the group's own supervisor, hear about it at once.
+          const people = await all("SELECT id,roles FROM users WHERE active=1");
+          const leaders = new Set<string>(
+            people
+              .filter((p: any) => {
+                const held = typeof p.roles === "string" ? JSON.parse(p.roles || "[]") : p.roles || [];
+                return held.includes("Project Operations") || held.includes("Coach Operations");
+              })
+              .map((p: any) => p.id),
+          );
+          if (group?.supervisor) leaders.add(group.supervisor);
+          leaders.delete(u.id);
+          const when = new Date(session.starts_at).toLocaleString("en-GB", {
+            timeZone: "Africa/Cairo", weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+          });
+          const title = `${u.name || who} cannot attend ${group?.id || session.group_id} Week ${session.week} (${when}): ${reason}`;
+          for (const recipient of leaders)
+            jobs.push(notify(recipient, title, "session", session.id, "Urgent", `session-unavailable:${session.id}:${u.id}:${t}:${recipient}`));
+        }
         break;
       }
       case "session_reschedule": {
@@ -891,7 +927,7 @@ export async function POST(req: Request) {
         auditPrevious = current;
         jobs.push(
           stmt(
-            "UPDATE sessions SET coach_id=?,starts_at=?,session_day=?,status='Scheduled',confirmed_at=NULL,coach_confirmed_at=NULL,coordinator_confirmed_at=NULL,cancel_reason=NULL,updated_at=? WHERE id=?",
+            "UPDATE sessions SET coach_id=?,starts_at=?,session_day=?,status='Scheduled',confirmed_at=NULL,coach_confirmed_at=NULL,coordinator_confirmed_at=NULL,coach_unavailable=NULL,coordinator_unavailable=NULL,cancel_reason=NULL,updated_at=? WHERE id=?",
             x.coach_id || current.coach_id,
             session.startsAt,
             session.day,

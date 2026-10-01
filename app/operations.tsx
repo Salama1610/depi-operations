@@ -141,6 +141,7 @@ const titles: Row = {
   session: "Schedule session",
   session_reschedule: "Reschedule session",
   session_cancel: "Cancel session",
+  session_unavailable: "I can't attend this session",
   account_request: "Request a client account",
   account: "Add client account",
   reserve_account: "Reserve eligible account",
@@ -186,6 +187,8 @@ const actionCopy: Row = {
     "Changing the date or coach requires a reason and resets coach confirmation.",
   session_cancel:
     "Cancelled sessions remain in the operational history and require a reason.",
+  session_unavailable:
+    "Project Operations, Coach Operations and the group's supervisor are notified at once so the session can be covered or moved.",
   service_qc_review:
     "One link at a time. Lock a correct link, or leave a clear correction comment for the student.",
   bulk_group_owner:
@@ -938,18 +941,30 @@ export default function Operations({ module: initialModule }: { module: string }
   const plansSession = (r: Row) =>
     can(user.roles, ["Coach Operations", "Project Operations", "Operations Systems / Admin"]) ||
     (can(user.roles, ["Operations Coordinator"]) && sessionGroupOf(r)?.coordinator === user.id);
-  const confirmsAsCoach = (r: Row) =>
+  // The two people who answer for a session: its coach and the group's coordinator.
+  const answersAsCoach = (r: Row) =>
     can(user.roles, ["Coach"]) &&
-    !r.coach_confirmed_at &&
     (r.coach_id
       ? r.coach_id === user.id
       : (d.groupCoaches || []).some(
           (c: Row) => c.group_id === r.group_id && c.user_id === user.id && c.status === "Active",
         ));
-  const confirmsAsCoordinator = (r: Row) =>
-    can(user.roles, ["Operations Coordinator"]) &&
-    !r.coordinator_confirmed_at &&
-    sessionGroupOf(r)?.coordinator === user.id;
+  const answersAsCoordinator = (r: Row) =>
+    can(user.roles, ["Operations Coordinator"]) && sessionGroupOf(r)?.coordinator === user.id;
+  const canAttend = (r: Row) =>
+    r.status === "Scheduled" &&
+    ((answersAsCoach(r) && !r.coach_confirmed_at) || (answersAsCoordinator(r) && !r.coordinator_confirmed_at));
+  const canDecline = (r: Row) =>
+    ["Scheduled", "Confirmed"].includes(r.status) &&
+    ((answersAsCoach(r) && !r.coach_unavailable) || (answersAsCoordinator(r) && !r.coordinator_unavailable));
+  const answer = (confirmedAt: any, away: any) =>
+    confirmedAt ? (
+      <span>✓ {t("Attending")}</span>
+    ) : away ? (
+      <span title={away}>✗ {t("Unavailable")}: {away}</span>
+    ) : (
+      <span>… {t("Waiting")}</span>
+    );
   const statusCol = {
     key: "status",
     label: t("Status"),
@@ -1482,15 +1497,15 @@ export default function Operations({ module: initialModule }: { module: string }
           statusCol,
           {
             key: "confirmations",
-            label: t("Confirmed by"),
+            label: t("Responses"),
             render: (r) =>
               r.status === "Cancelled" ? (
                 "—"
               ) : (
                 <span>
-                  {t("Coordinator")} {r.coordinator_confirmed_at ? "✓" : "…"}
+                  {t("Coordinator")}: {answer(r.coordinator_confirmed_at, r.coordinator_unavailable)}
                   <small className="table-subline">
-                    {t("Coach")} {r.coach_confirmed_at ? "✓" : "…"}
+                    {t("Coach")}: {answer(r.coach_confirmed_at, r.coach_unavailable)}
                   </small>
                 </span>
               ),
@@ -1512,16 +1527,24 @@ export default function Operations({ module: initialModule }: { module: string }
         ],
             (r) => (
           <div className="detail-actions">
-            {r.status === "Scheduled" &&
-              (confirmsAsCoach(r) || confirmsAsCoordinator(r)) && (
-                <button
-                  className="small-btn"
-                  disabled={busy}
-                  onClick={() => quick("session_confirm", { id: r.id })}
-                >
-                  {t("Confirm")}
-                </button>
-              )}
+            {canAttend(r) && (
+              <button
+                className="small-btn"
+                disabled={busy}
+                onClick={() => quick("session_confirm", { id: r.id })}
+              >
+                {t("Attending")}
+              </button>
+            )}
+            {canDecline(r) && (
+              <button
+                className="small-btn"
+                disabled={busy}
+                onClick={() => open("session_unavailable", r)}
+              >
+                {t("Unavailable")}
+              </button>
+            )}
             {["Scheduled", "Confirmed"].includes(r.status) &&
               plansSession(r) && (
                 <>
@@ -3280,6 +3303,15 @@ export default function Operations({ module: initialModule }: { module: string }
                     )}
                     {field("starts_at", t("New date & time"), "datetime-local")}
                     {field("reason", t("Reason for rescheduling"))}
+                  </>
+                );
+              if (a === "session_unavailable")
+                return (
+                  <>
+                    <div className="info-box">
+                      <strong>{modal!.title}</strong> · {modal!.group_id} · {fmt(modal!.starts_at)}
+                    </div>
+                    {field("reason", t("Why you can't attend"))}
                   </>
                 );
               if (a === "session_cancel")

@@ -203,7 +203,9 @@
     "cancel_reason": "text",
     "updated_at": "timestamptz",
     "coordinator_confirmed_at": "timestamptz",
-    "coach_confirmed_at": "timestamptz"
+    "coach_confirmed_at": "timestamptz",
+    "coordinator_unavailable": "text",
+    "coach_unavailable": "text"
   },
   "attendance": {
     "id": "text",
