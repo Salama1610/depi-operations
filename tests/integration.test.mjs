@@ -2713,3 +2713,27 @@ test("attendance is taken from the session itself, each student attended or abse
   current = { id: "owner", email: "owner@example.com" };
 });
 
+
+test("rescheduling a session moves the group from it on, and only Coach Operations does it", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  const group = await dbRow("SELECT id FROM groups WHERE status='Active' AND id NOT IN (SELECT group_id FROM sessions WHERE week IN (2,3,4)) LIMIT 1");
+  const day = (n) => new Date(Date.UTC(2027, 2, 7 + n * 7, 15, 0, 0)).toISOString(); // Sundays 5pm Cairo
+  for (const week of [2, 3, 4])
+    await check("session", { id: `SES-MOVE-${week}`, group_id: group.id, title: `Week ${week} coaching`, starts_at: day(week), week, duration_minutes: 180 });
+  const sevenPm = new Date(Date.parse(day(3)) + 2 * 3600000).toISOString();
+  // Project Operations no longer moves sessions; Coach Operations does.
+  const opsOnly = await dbRow("SELECT id,email FROM users WHERE roles LIKE '%Project Operations%' AND roles NOT LIKE '%Admin%' LIMIT 1");
+  if (opsOnly) {
+    current = { id: opsOnly.id, email: opsOnly.email };
+    assert.match((await post("session_reschedule", { id: "SES-MOVE-3", starts_at: sevenPm, reason: "Group asked for 7pm" })).error, /role/);
+  }
+  current = { id: "staff-coach-ops", email: "staff-coach-ops@example.invalid" };
+  await check("session_reschedule", { id: "SES-MOVE-3", starts_at: sevenPm, reason: "Group asked for 7pm" });
+  const at = async (week) => (await dbRow(`SELECT starts_at FROM sessions WHERE id='SES-MOVE-${week}'`)).starts_at;
+  assert.equal(new Date(await at(2)).toISOString(), day(2), "the earlier session stays as it was");
+  assert.equal(new Date(await at(3)).toISOString(), sevenPm);
+  assert.equal(new Date(await at(4)).toISOString(), new Date(Date.parse(day(4)) + 2 * 3600000).toISOString(), "the later session moves to 7pm too");
+  const audit = await dbRow("SELECT value FROM audit_events WHERE action='session_reschedule' AND entity_id='SES-MOVE-3' ORDER BY created_at DESC LIMIT 1");
+  assert.equal(JSON.parse(audit.value).moved.length, 2);
+  current = { id: "owner", email: "owner@example.com" };
+});

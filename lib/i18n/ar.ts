@@ -1343,4 +1343,6 @@ export const ar: Record<string, string> = {
   "Instructor confirmed": "تأكيد المدرب",
   "Instructor entered the session": "دخل المدرب الجلسة",
   "Attendance taken": "تم تسجيل الحضور",
+  "This moves the group: this session and the {v0} later ones shift by the same amount. Earlier sessions stay as they were.": "هذا ينقل المجموعة: هذه الجلسة و{v0} من الجلسات التالية تتحرك بنفس المقدار. الجلسات السابقة تبقى كما هي.",
+  "Rescheduling moves the whole group from this session on. It needs a reason, and the coordinator and coach confirm the new times again.": "إعادة الجدولة تنقل المجموعة بالكامل بدءًا من هذه الجلسة. تحتاج إلى سبب، ويؤكد المنسق والمدرب المواعيد الجديدة مرة أخرى.",
 };

@@ -900,9 +900,11 @@ export async function POST(req: Request) {
         break;
       }
       case "session_reschedule": {
-        // Moving a session is the leaders' decision: Project Operations and
-        // Coach Operations. Coordinators schedule and cancel, but do not move.
-        permit(u, sessionLeaders);
+        // Rescheduling moves the group, not one date: the session chosen and
+        // every later scheduled session of the group shift by the same amount
+        // (5pm to 7pm moves them all to 7pm), and sessions before it stay as
+        // they were. It is Coach Operations' decision.
+        permit(u, ["Coach Operations"]);
         const current: any = await stmt(
           "SELECT * FROM sessions WHERE id=?",
           id,
@@ -916,39 +918,73 @@ export async function POST(req: Request) {
           x.reason?.trim().length >= 5,
           "Record a rescheduling reason.",
         );
+        // The chosen session is checked as before: its group, its slot, and a
+        // new coach if one is named. The coach already on it stays as assigned.
         const session = await validateSessionSlot(
           {
             ...x,
             group_id: current.group_id,
             title: current.title,
-            coach_id: x.coach_id || current.coach_id,
+            coach_id: x.coach_id || null,
             week: current.week,
             duration_minutes: current.duration_minutes,
           },
           id,
         );
-        auditPrevious = current;
-        jobs.push(
-          stmt(
-            "UPDATE sessions SET coach_id=?,starts_at=?,session_day=?,status='Scheduled',confirmed_at=NULL,coach_confirmed_at=NULL,coordinator_confirmed_at=NULL,coach_unavailable=NULL,coordinator_unavailable=NULL,cancel_reason=NULL,updated_at=? WHERE id=?",
-            x.coach_id || current.coach_id,
-            session.startsAt,
-            session.day,
-            t,
-            id,
-          ),
-          // The day-before steps were done for the old time.
-          stmt(
-            `DELETE FROM session_checks WHERE session_id=? AND item IN (${beforeSessionKeys.map(() => "?").join(",")})`,
-            id,
-            ...beforeSessionKeys,
-          ),
-          // A new time needs both confirmations again.
-          ...(await sessionCase(
-            { ...current, starts_at: session.startsAt },
-            group, "Open", "Rescheduled: " + x.reason.trim() + ". Both confirm again.", u.id, t,
-          )),
+        const shift = Date.parse(session.startsAt) - Date.parse(current.starts_at);
+        const moving: any[] = await all(
+          "SELECT * FROM sessions WHERE group_id=? AND starts_at>=? AND status IN ('Scheduled','Confirmed') ORDER BY starts_at",
+          current.group_id,
+          current.starts_at,
         );
+        const movingIds = new Set(moving.map((m) => m.id));
+        const plan = moving.map((m) => {
+          const startsAt = new Date(Date.parse(m.starts_at) + shift).toISOString();
+          return { row: m, startsAt, day: programDay(startsAt), coach: x.coach_id || m.coach_id };
+        });
+        // No coach may end up with two sessions on one day.
+        for (const step of plan) {
+          if (!step.coach) continue;
+          const clash: any = await stmt(
+            "SELECT id,group_id FROM sessions WHERE coach_id=? AND session_day=? AND status<>'Cancelled'",
+            step.coach,
+            step.day,
+          ).first();
+          ensure(
+            !clash || movingIds.has(clash.id),
+            `Week ${step.row.week} would move to ${step.day}, when its coach already has a session (${clash?.group_id}). Choose another time.`,
+          );
+        }
+        auditPrevious = current;
+        auditValue = { ...auditValue, moved: plan.map((p) => ({ id: p.row.id, from: p.row.starts_at, to: p.startsAt })) };
+        // Later sessions first when moving forward, earlier first when moving
+        // back, so no two of the group's sessions share a coach and a day mid-way.
+        const ordered = shift >= 0 ? [...plan].reverse() : plan;
+        for (const step of ordered)
+          jobs.push(
+            stmt(
+              "UPDATE sessions SET coach_id=?,starts_at=?,session_day=?,status='Scheduled',confirmed_at=NULL,coach_confirmed_at=NULL,coordinator_confirmed_at=NULL,coach_unavailable=NULL,coordinator_unavailable=NULL,cancel_reason=NULL,updated_at=? WHERE id=?",
+              step.coach || null,
+              step.startsAt,
+              step.day,
+              t,
+              step.row.id,
+            ),
+          );
+        for (const step of plan)
+          jobs.push(
+            // The before-session steps were done for the old time.
+            stmt(
+              `DELETE FROM session_checks WHERE session_id=? AND item IN (${beforeSessionKeys.map(() => "?").join(",")})`,
+              step.row.id,
+              ...beforeSessionKeys,
+            ),
+            // A new time needs both confirmations again.
+            ...(await sessionCase(
+              { ...step.row, starts_at: step.startsAt },
+              group, "Open", "Rescheduled with the group: " + x.reason.trim() + ". Both confirm again.", u.id, t,
+            )),
+          );
         break;
       }
       case "session_cancel": {

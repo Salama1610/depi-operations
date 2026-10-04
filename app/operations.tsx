@@ -186,7 +186,7 @@ const actionCopy: Row = {
   session:
     "Sessions follow the group delivery model, approved duration and coach-assignment controls.",
   session_reschedule:
-    "Changing the date or coach requires a reason and resets coach confirmation.",
+    "Rescheduling moves the whole group from this session on. It needs a reason, and the coordinator and coach confirm the new times again.",
   session_cancel:
     "Cancelled sessions remain in the operational history and require a reason.",
   session_unavailable:
@@ -1642,7 +1642,7 @@ export default function Operations({ module: initialModule }: { module: string }
             {["Scheduled", "Confirmed"].includes(r.status) &&
               plansSession(r) && (
                 <>
-                  {can(user.roles, ["Coach Operations", "Project Operations", "Operations Systems / Admin"]) && (
+                  {can(user.roles, ["Coach Operations", "Operations Systems / Admin"]) && (
                     <button
                       className="small-btn"
                       onClick={() => open("session_reschedule", r)}
@@ -3464,9 +3464,20 @@ export default function Operations({ module: initialModule }: { module: string }
                           value: coach.user_id,
                           label: `${coach.coach_name} · ${coach.coach_type}`,
                         })),
+                      false,
                     )}
                     {field("starts_at", t("New date & time"), "datetime-local")}
                     {field("reason", t("Reason for rescheduling"))}
+                    {(() => {
+                      const later = sessions.filter(
+                        (s) => s.group_id === modal!.group_id && s.starts_at >= modal!.starts_at && ["Scheduled", "Confirmed"].includes(s.status),
+                      ).length;
+                      return (
+                        <p className="footnote">
+                          {t("This moves the group: this session and the {v0} later ones shift by the same amount. Earlier sessions stay as they were.", { v0: Math.max(0, later - 1) })}
+                        </p>
+                      );
+                    })()}
                   </>
                 );
               if (a === "session_unavailable")
