@@ -11,6 +11,7 @@ import {
 import { ProgramFlow } from "./program-flow";
 import { WeeklyProgress } from "./weekly-progress";
 import { acceptedServicePlatforms } from "@/lib/domain/service-links";
+import { PortalView } from "./portal-view";
 import { checklistState, sessionChecklist, type ChecklistItem } from "@/lib/domain/session-checklist";
 import { useState, useEffect } from "react";
 import {
@@ -118,6 +119,7 @@ const nav = [
   ["sessions", "Sessions", CalendarDays],
   ["accounts", "Accounts", WalletCards],
   ["gigs", "Services", BriefcaseBusiness],
+  ["portal", "Gigs portal view", Files],
   ["quality", "Quality review", ShieldCheck],
   ["cases", "Cases", Flag],
   ["reports", "Reports", ChartNoAxesCombined],
@@ -509,6 +511,16 @@ export default function Operations({ module: initialModule }: { module: string }
       ? m === "quality"
       : m === "administration"
         ? can(user.roles, ["Operations Systems / Admin"])
+        : m === "portal"
+          ? can(user.roles, [
+              "Team Supervisor",
+              "Project Operations",
+              "Coach Operations",
+              "Quality Lead",
+              "Higher Board",
+              "Operations Systems / Admin",
+              "Operations Coordinator",
+            ])
         : m === "program"
           ? can(user.roles, ["Project Operations", "Coach Operations", "Operations Systems / Admin"])
         : m === "weekly"
@@ -1783,6 +1795,8 @@ export default function Operations({ module: initialModule }: { module: string }
         )}
       </>
     );
+  } else if (module === "portal") {
+    content = <PortalView staffName={owner} />;
   } else if (module === "accounts") {
     const accounts: Row[] = d.accounts || [];
     const requests: Row[] = d.requests || [];
@@ -4084,7 +4098,7 @@ export default function Operations({ module: initialModule }: { module: string }
                 return (
                   <>
                     {studentPick()}
-                    {field("title", t("Service title"))}
+                    {field("paid_by_account", t("Account used to pay"))}
                     <div className="form-grid">
                       {choice("platform", t("Platform"), gigPlatforms)}
                       {field("order_ref", t("Order number"))}

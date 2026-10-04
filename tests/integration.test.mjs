@@ -2865,3 +2865,60 @@ test("session join logins are encrypted and shown only to the group's own people
   assert.ok(audit.length >= 4, "every look is recorded");
   assert.ok(!JSON.stringify(audit).includes("pass-1"), "and the password never reaches the audit log");
 });
+
+test("leaders upload the portal's students and gigs sheets, which replace the last upload and link to our students", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const portal = await route("portal");
+  const post = (body) => portal.POST(new Request("https://test.local/api/portal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
+  const get = async (query = "") => (await portal.GET(new Request("https://test.local/api/portal" + query))).json();
+  const ours = await dbRow("SELECT s.id,s.email,g.coordinator FROM students s JOIN groups g ON g.id=s.group_id WHERE s.email IS NOT NULL AND s.lifecycle='Active' LIMIT 1");
+  const coordinator = await dbRow("SELECT id,email FROM users WHERE id=?", ours.coordinator);
+  const studentsMapping = { ID: "portal_id", Email: "email", "Full Name": "full_name", "Final Status": "final_status", "Total Gigs": "total_gigs" };
+  const send = async (sheet, mapping, rows) => {
+    const begun = await (await post({ action: "begin", sheet, mapping, total: rows.length, file_name: sheet + ".xlsx" })).json();
+    assert.ok(begun.batch, JSON.stringify(begun));
+    for (let i = 0; i < rows.length; i += 2) assert.equal((await post({ action: "chunk", batch: begun.batch, rows: rows.slice(i, i + 2) })).status, 200);
+    return (await post({ action: "commit", batch: begun.batch })).json();
+  };
+  // A mapping without the key is refused.
+  assert.match((await (await post({ action: "begin", sheet: "gigs", mapping: { Title: "title" }, total: 1 })).json()).error, /Map these columns first/);
+  let done = await send("students", studentsMapping, [
+    { portal_id: "P-1", email: ours.email.toUpperCase(), full_name: "Linked student", final_status: "Graduated", total_gigs: "3" },
+    { portal_id: "P-2", email: "someone-else@example.org", full_name: "Portal only", final_status: "Started", total_gigs: "1" },
+    { portal_id: "P-3", email: "third@example.org", full_name: "Third", final_status: "Not Started", total_gigs: "0" },
+  ]);
+  assert.equal(done.rows, 3);
+  assert.equal(done.linked, 1, "linked by email, whatever its case");
+  done = await send("gigs", { ID: "portal_gig_id", "Student ID": "portal_student_id", Title: "title", Price: "price", Status: "status", "Auditor Status": "auditor_status", "Created On": "created_on" }, [
+    { portal_gig_id: "G-1", portal_student_id: "P-1", title: "Logo", price: "5", status: "Approved", auditor_status: "Approved", created_on: "46050" },
+    { portal_gig_id: "G-2", portal_student_id: "P-1", title: "Banner", price: "5", status: "Rejected", auditor_status: "Pending", created_on: "2026-05-01" },
+    { portal_gig_id: "G-3", portal_student_id: "P-2", title: "Deck", price: "10", status: "Approved", auditor_status: "Approved", created_on: "" },
+  ]);
+  assert.equal(done.rows, 3);
+  let view = await get();
+  assert.equal(view.students.length, 3);
+  const linked = view.students.find((s) => s.portal_id === "P-1");
+  assert.equal(linked.student_id, ours.id);
+  assert.deepEqual(
+    (({ total, approved, rejected, audit_pending }) => ({ total: Number(total), approved: Number(approved), rejected: Number(rejected), audit_pending: Number(audit_pending) }))(view.gigCounts.find((g) => g.portal_student_id === "P-1")),
+    { total: 2, approved: 1, rejected: 1, audit_pending: 1 },
+  );
+  assert.ok(view.mappings.students, "the mapping is remembered");
+  const gigs = (await get("?student=P-1")).gigs;
+  assert.equal(gigs.length, 2);
+  assert.ok(gigs.find((g) => g.portal_gig_id === "G-1").created_on.startsWith("2026-01-28"), "an Excel day number is read as a date");
+  // A new upload replaces the last one.
+  await send("students", studentsMapping, [{ portal_id: "P-1", email: ours.email, full_name: "Linked student", final_status: "Graduated", total_gigs: "4" }]);
+  view = await get();
+  assert.equal(view.students.length, 1);
+  assert.equal((await dbRow("SELECT count(*) n FROM portal_students")).n, 1, "the replaced rows are gone");
+  assert.equal(view.active.students.status, "Active");
+  // A coordinator sees only their own linked students, and cannot upload.
+  current = { id: coordinator.id, email: coordinator.email };
+  view = await get();
+  assert.ok(view.students.every((s) => s.student_id === ours.id));
+  assert.equal(view.canUpload, false);
+  assert.match((await (await post({ action: "begin", sheet: "students", mapping: studentsMapping, total: 1 })).json()).error, /uploaded by supervisors/);
+  current = { id: "owner", email: "owner@example.com" };
+});

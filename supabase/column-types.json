@@ -135,7 +135,8 @@
     "status": "text",
     "due": "timestamptz",
     "created_at": "timestamptz",
-    "paid_on": "date"
+    "paid_on": "date",
+    "paid_by_account": "text"
   },
   "gig_events": {
     "id": "text",
@@ -669,5 +670,63 @@
     "iv": "text",
     "updated_by": "text",
     "updated_at": "timestamptz"
+  },
+  "portal_uploads": {
+    "id": "text",
+    "sheet": "text",
+    "batch_id": "text",
+    "status": "text",
+    "file_name": "text",
+    "rows_total": "integer",
+    "rows_linked": "integer",
+    "mapping": "jsonb",
+    "uploaded_by": "text",
+    "created_at": "timestamptz",
+    "committed_at": "timestamptz"
+  },
+  "portal_students": {
+    "id": "text",
+    "batch_id": "text",
+    "student_id": "text",
+    "portal_id": "text",
+    "email": "text",
+    "full_name": "text",
+    "phone": "text",
+    "round_code": "text",
+    "city": "text",
+    "provider": "text",
+    "track": "text",
+    "profile": "text",
+    "status": "text",
+    "final_status": "text",
+    "graduate_type": "text",
+    "total_gigs": "numeric(10,2)",
+    "approved_gigs": "numeric(10,2)",
+    "rejected_gigs": "numeric(10,2)",
+    "total_revenue": "numeric(14,2)",
+    "proof_links": "jsonb"
+  },
+  "portal_gigs": {
+    "id": "text",
+    "batch_id": "text",
+    "portal_gig_id": "text",
+    "portal_student_id": "text",
+    "student_email": "text",
+    "student_name": "text",
+    "title": "text",
+    "url": "text",
+    "category": "text",
+    "task": "text",
+    "organization": "text",
+    "client_name": "text",
+    "price": "numeric(14,2)",
+    "created_on": "timestamptz",
+    "updated_on": "timestamptz",
+    "status": "text",
+    "provider_status": "text",
+    "auditor_status": "text",
+    "comment": "text",
+    "action_by": "text",
+    "proof_url": "text"
   }
 }

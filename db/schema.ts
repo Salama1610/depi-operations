@@ -235,6 +235,8 @@ export const gigs = sqliteTable(
     createdAt: text("created_at").notNull(),
     // The day the client paid; appended so positional inserts keep working.
     paidOn: text("paid_on"),
+    // The account the coordinator says paid for the service.
+    paidByAccount: text("paid_by_account"),
   },
   (t) => [uniqueIndex("unique_platform_order").on(t.platform, t.orderRef)],
 );
@@ -1125,3 +1127,77 @@ export const joinAccounts = sqliteTable("join_accounts", {
     .references(() => users.id),
   updatedAt: text("updated_at").notNull(),
 });
+// The DEPI portal's two exports, uploaded by the leaders. See
+// lib/domain/portal-sheets.ts and migration 202610040021.
+export const portalUploads = sqliteTable(
+  "portal_uploads",
+  {
+    id: text("id").primaryKey(),
+    sheet: text("sheet").notNull(),
+    batchId: text("batch_id").notNull(),
+    status: text("status").notNull(),
+    fileName: text("file_name"),
+    rowsTotal: integer("rows_total").notNull().default(0),
+    rowsLinked: integer("rows_linked").notNull().default(0),
+    mapping: text("mapping").notNull().default("{}"),
+    uploadedBy: text("uploaded_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: text("created_at").notNull(),
+    committedAt: text("committed_at"),
+  },
+  (t) => [uniqueIndex("portal_uploads_batch").on(t.batchId), index("portal_uploads_sheet_idx").on(t.sheet, t.status)],
+);
+export const portalStudents = sqliteTable(
+  "portal_students",
+  {
+    id: text("id").primaryKey(),
+    batchId: text("batch_id").notNull(),
+    studentId: text("student_id"),
+    portalId: text("portal_id"),
+    email: text("email"),
+    fullName: text("full_name"),
+    phone: text("phone"),
+    roundCode: text("round_code"),
+    city: text("city"),
+    provider: text("provider"),
+    track: text("track"),
+    profile: text("profile"),
+    status: text("status"),
+    finalStatus: text("final_status"),
+    graduateType: text("graduate_type"),
+    totalGigs: real("total_gigs"),
+    approvedGigs: real("approved_gigs"),
+    rejectedGigs: real("rejected_gigs"),
+    totalRevenue: real("total_revenue"),
+    proofLinks: text("proof_links").notNull().default("[]"),
+  },
+  (t) => [index("portal_students_batch_idx").on(t.batchId, t.portalId), index("portal_students_student_idx").on(t.studentId)],
+);
+export const portalGigs = sqliteTable(
+  "portal_gigs",
+  {
+    id: text("id").primaryKey(),
+    batchId: text("batch_id").notNull(),
+    portalGigId: text("portal_gig_id"),
+    portalStudentId: text("portal_student_id"),
+    studentEmail: text("student_email"),
+    studentName: text("student_name"),
+    title: text("title"),
+    url: text("url"),
+    category: text("category"),
+    task: text("task"),
+    organization: text("organization"),
+    clientName: text("client_name"),
+    price: real("price"),
+    createdOn: text("created_on"),
+    updatedOn: text("updated_on"),
+    status: text("status"),
+    providerStatus: text("provider_status"),
+    auditorStatus: text("auditor_status"),
+    comment: text("comment"),
+    actionBy: text("action_by"),
+    proofUrl: text("proof_url"),
+  },
+  (t) => [index("portal_gigs_batch_idx").on(t.batchId, t.portalStudentId)],
+);

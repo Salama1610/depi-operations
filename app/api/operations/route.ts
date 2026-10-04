@@ -1547,9 +1547,11 @@ export async function POST(req: Request) {
         // delivery screenshot and the payment screenshot. It enters review at
         // once, so there is no separate evidence step to forget.
         permit(u, ops);
+        // The account the client paid from stands in for the gig's name.
+        const paidBy = String(x.paid_by_account ?? x.title ?? "").trim().slice(0, 200);
         ensure(
-          s && x.title?.trim() && x.platform && Number(x.value) > 0 && x.order_ref?.trim(),
-          "Student, title, platform, order number and value are required.",
+          s && paidBy && x.platform && Number(x.value) > 0 && x.order_ref?.trim(),
+          "Student, the account used to pay, platform, order number and value are required.",
         );
         // Services are recorded by the coordinators of the Service Team's
         // groups; Project Operations and administrators can record any.
@@ -1581,11 +1583,11 @@ export async function POST(req: Request) {
         const gig = { id, student_id: sid, account_id: null, platform: x.platform };
         jobs.push(
           stmt(
-            "INSERT INTO gigs(id,student_id,platform,title,value,currency,order_ref,status,due,created_at,paid_on) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO gigs(id,student_id,platform,title,value,currency,order_ref,status,due,created_at,paid_on,paid_by_account) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
             id,
             sid,
             x.platform,
-            x.title.trim(),
+            paidBy,
             Number(x.value),
             x.currency || "USD",
             orderRef,
@@ -1593,6 +1595,7 @@ export async function POST(req: Request) {
             paidOn,
             t,
             paidOn,
+            paidBy,
           ),
           stmt(
             "INSERT INTO gig_events VALUES(?,?,?,?,?,?,?,?)",
