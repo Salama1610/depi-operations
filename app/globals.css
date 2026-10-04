@@ -819,3 +819,45 @@ input:focus-visible {
 .feedback-text textarea{border:1px solid #d9e2ef;border-radius:8px;padding:10px 12px;font:inherit;font-weight:400;color:#314969}
 .feedback-comments{display:flex;flex-direction:column;gap:8px;margin-top:12px}
 .feedback-comments .info-box{flex-direction:column;align-items:flex-start;gap:4px}
+
+
+/* Session checklist: a three-step tracker in the table and a stepper in its dialog. */
+.checklist-track{display:inline-flex;flex-direction:column;align-items:flex-start;gap:4px;background:none;border:0;padding:0;cursor:pointer;text-align:start}
+.checklist-track small{font-size:12px;color:#6d7f9a}
+.checklist-dots{display:inline-flex;gap:4px}
+.checklist-dots i{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;border:1.5px solid #c9d4e4;color:#fff;font-style:normal;font-size:11px;font-weight:700}
+.checklist-dots i.is-done{background:#32856f;border-color:#32856f}
+.checklist-dots i.is-flagged{background:#e4a15d;border-color:#e4a15d}
+.checklist-summary{display:flex;justify-content:space-between;gap:12px;font-size:13px;color:#5d7292;margin-top:4px}
+.checklist-progress{margin:8px 0 14px}
+.checklist-stepper{list-style:none;padding:0;margin:0;display:flex;flex-direction:column}
+.checklist-stepper li{display:grid;grid-template-columns:32px minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px 0;border-bottom:1px solid #edf1f7;position:relative}
+.checklist-stepper li:last-child{border-bottom:0}
+.checklist-marker{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;border:2px solid #c9d4e4;color:#7a8aa3;font-weight:700;font-size:13px;background:#fff}
+.checklist-stepper li.is-done .checklist-marker{background:#32856f;border-color:#32856f;color:#fff}
+.checklist-stepper li.is-flagged .checklist-marker{background:#e4a15d;border-color:#e4a15d;color:#fff}
+.checklist-body{display:flex;flex-direction:column;gap:2px;min-width:0}
+.checklist-stage-name{font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:#8a98ad}
+.checklist-action .primary.small,.account-stats+* .primary.small{padding:7px 12px;font-size:13px}
+
+/* Accounts: capacity per marketplace, readable credit, a request's progress. */
+.mini-stats span.is-warning strong{color:#b26054}
+.account-capacity{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin:12px 0 16px}
+.capacity-card{display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:start;border:1px solid #e0e7f1;border-radius:12px;background:#fff;padding:12px 14px;cursor:pointer}
+.capacity-card strong{font-size:15px;color:#263d60}
+.capacity-card span{font-size:12px;color:#6d7f9a}
+.capacity-card.is-selected{border-color:#315ce8;box-shadow:0 0 0 2px #dfe8ff}
+.capacity-card.is-short{border-color:#f2d0ca;background:#fffaf8}
+.credit-empty{color:#b26054}
+.request-flow{display:inline-flex;flex-wrap:wrap;align-items:center;gap:4px}
+.request-flow i{font-style:normal;font-size:11px;padding:3px 8px;border-radius:99px;background:#f1f4f9;color:#8a98ad}
+.request-flow i.is-past{background:#e7f6f0;color:#32856f}
+.request-flow i.is-now{background:#315ce8;color:#fff;font-weight:600}
+.request-flow small{flex-basis:100%}
+.account-summary{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:12px;align-items:center;border:1px solid #e0e7f1;border-radius:12px;padding:12px 14px;margin-bottom:12px}
+.account-summary>div{display:flex;flex-direction:column}
+.account-summary small{color:#8a98ad;font-size:12px}
+.account-credit{display:flex;flex-direction:column;align-items:flex-end;font-weight:700;font-size:18px;color:#263d60}
+.account-credentials{margin-top:12px;border-top:1px solid #edf1f7;padding-top:10px}
+.account-credentials summary{cursor:pointer;font-size:13px;color:#5d7292;font-weight:600}
+@media (max-width:640px){.account-summary{grid-template-columns:1fr}.account-credit{align-items:flex-start}.checklist-stepper li{grid-template-columns:28px minmax(0,1fr)}.checklist-action{grid-column:2}}

@@ -46,6 +46,7 @@ import {
   GraduationCap,
   CalendarRange,
   LockKeyhole,
+  Check,
 } from "lucide-react";
 import {
   SidebarProvider,
@@ -234,9 +235,9 @@ function Badge({ value }: { value: any }) {
     <span
       className={
         "badge " +
-        (/Critical|Rejected|Overdue|Blocked|S1|S2|Unresponsive/.test(value)
+        (/Critical|Rejected|Overdue|Blocked|S1|S2|Unresponsive|Access Issue/.test(value)
           ? "red"
-          : /Risk|Pending|Submitted|Review|Waiting|Delayed|Funding/.test(value)
+          : /Risk|Pending|Submitted|Review|Waiting|Delayed|Funding|Cooldown|Reserved/.test(value)
             ? "amber"
             : /Accepted|Graduat|Complete|Available|Present|On Track/.test(value)
               ? "green"
@@ -369,6 +370,7 @@ export default function Operations({ module: initialModule }: { module: string }
     [saved, setSaved] = useState<string[]>([]),
     [checklistFor, setChecklistFor] = useState<string | null>(null),
     [feedbackFor, setFeedbackFor] = useState<string | null>(null),
+    [accountFilters, setAccountFilters] = useState<Row>({ platform: "All", status: "All", request: "Open" }),
     [sessionFilters, setSessionFilters] = useState<Row>({ day: "All", time: "All" });
   async function refresh() {
     try {
@@ -1609,12 +1611,21 @@ export default function Operations({ module: initialModule }: { module: string }
             label: t("Checklist"),
             render: (r) => {
               if (r.status === "Cancelled") return "—";
-              const steps = Object.values(checklistOf(r));
-              const done = steps.filter((x) => x.done).length;
+              const state = checklistOf(r);
+              const next = sessionChecklist.find((item) => state[item.key] && !state[item.key].done);
               return (
-                <button className="text-link" onClick={() => setChecklistFor(r.id)}>
-                  {steps.some((x) => x.flagged) ? "⚠ " : ""}
-                  {done} / {steps.length}
+                <button className="checklist-track" onClick={() => setChecklistFor(r.id)} title={t("Open the checklist")}>
+                  <span className="checklist-dots">
+                    {sessionChecklist.filter((item) => state[item.key]).map((item) => {
+                      const st = state[item.key];
+                      return (
+                        <i key={item.key} className={st.flagged ? "is-flagged" : st.done ? "is-done" : ""} title={`${t(item.stage === "Before" ? "Before" : item.stage === "During" ? "During" : "After")} · ${t(item.label)}`}>
+                          {st.flagged ? "!" : st.done ? <Check size={11} /> : null}
+                        </i>
+                      );
+                    })}
+                  </span>
+                  <small>{next ? t(next.label) : t("All done")}</small>
                 </button>
               );
             },
@@ -1699,133 +1710,222 @@ export default function Operations({ module: initialModule }: { module: string }
       </>
     );
   } else if (module === "accounts") {
+    const accounts: Row[] = d.accounts || [];
+    const requests: Row[] = d.requests || [];
+    const money = (v: any) => "$" + Number(v || 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
+    const attention = ["Blocked", "Access Issue", "Funding Block", "Under Review"];
+    const activeReservation = (requestId: string) =>
+      (d.reservations || []).find(
+        (z: Row) => z.request_id === requestId && z.status === "Active" && z.expires_at > new Date().toISOString(),
+      );
+    const requestStage = (r: Row) => (r.status === "Submitted" && activeReservation(r.id) ? "Reserved" : r.status);
+    const managesAccounts = can(user.roles, ["Higher Board", "Operations Systems / Admin"]);
+    const pool = accounts
+      .filter(qMatch)
+      .filter((r) => accountFilters.platform === "All" || r.platform === accountFilters.platform)
+      .filter((r) =>
+        accountFilters.status === "All"
+          ? true
+          : accountFilters.status === "Attention"
+            ? attention.includes(r.status)
+            : r.status === accountFilters.status,
+      )
+      .sort((x, y) => String(x.platform).localeCompare(String(y.platform)) || Number(y.credits) - Number(x.credits));
+    const requestRows = requests
+      .filter(qMatch)
+      .filter((r) => accountFilters.platform === "All" || r.platform === accountFilters.platform)
+      .filter((r) =>
+        accountFilters.request === "All"
+          ? true
+          : accountFilters.request === "Open"
+            ? r.status === "Submitted"
+            : requestStage(r) === accountFilters.request,
+      );
+    const openRequests = requests.filter((r) => r.status === "Submitted");
     content = (
-      <Tabs defaultValue="pool">
-        <TabsList>
-          <TabsTrigger value="pool">
-            {t("Account pool")}{" "}
-            <span className="count">{(d.accounts || []).length}</span>
-          </TabsTrigger>
-          <TabsTrigger value="requests">
-            {t("Requests")}{" "}<span className="count">{(d.requests || []).length}</span>
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="pool">
-          {panel(
-            t("Controlled client accounts"),
-            generic(
-              (d.accounts || []).filter(qMatch),
-              [
-                {
-                  key: "label",
-                  label: t("Account"),
-                  render: (r) => (
-                    <>
-                      <strong>{r.label}</strong>
-                      <small className="block">{r.id}</small>
-                    </>
-                  ),
-                },
-                { key: "platform", label: t("Platform") },
-                statusCol,
-                {
-                  key: "credits",
-                  label: t("Available credit"),
-                  render: (r) => "$" + r.credits,
-                },
-              ],
-              (r) => (
-                <button
-                  className="small-btn"
-                  onClick={() => open("account_status", r)}
-                >
-                  {t("Manage")}
-                </button>
+      <>
+        <div className="mini-stats account-stats">
+          <span><strong>{accounts.filter((a) => a.status === "Available").length}</strong>{t("Available accounts")}</span>
+          <span><strong>{money(accounts.filter((a) => a.status === "Available").reduce((n, a) => n + Number(a.credits || 0), 0))}</strong>{t("Credit available")}</span>
+          <span><strong>{accounts.filter((a) => a.status === "Assigned").length}</strong>{t("Assigned to students")}</span>
+          <span className={accounts.some((a) => attention.includes(a.status)) ? "is-warning" : ""}><strong>{accounts.filter((a) => attention.includes(a.status)).length}</strong>{t("Need attention")}</span>
+          <span><strong>{openRequests.length}</strong>{t("Requests waiting")}</span>
+        </div>
+        <div className="account-capacity">
+          {controlledPlatforms.map((platform) => {
+            const mine = accounts.filter((a) => a.platform === platform);
+            const ready = mine.filter((a) => a.status === "Available");
+            const credit = ready.reduce((n, a) => n + Number(a.credits || 0), 0);
+            const waiting = openRequests.filter((r) => r.platform === platform);
+            const needed = waiting.reduce((n, r) => n + Number(r.value || 0), 0);
+            return (
+              <button
+                key={platform}
+                className={"capacity-card" + (accountFilters.platform === platform ? " is-selected" : "") + (needed > credit ? " is-short" : "")}
+                onClick={() => setAccountFilters({ ...accountFilters, platform: accountFilters.platform === platform ? "All" : platform })}
+              >
+                <strong>{platform}</strong>
+                <span>{t("{v0} of {v1} accounts ready", { v0: ready.length, v1: mine.length })}</span>
+                <span>{t("{v0} credit · {v1} needed by {v2} requests", { v0: money(credit), v1: money(needed), v2: waiting.length })}</span>
+              </button>
+            );
+          })}
+        </div>
+        <Tabs defaultValue={openRequests.length ? "requests" : "pool"}>
+          <TabsList>
+            <TabsTrigger value="pool">
+              {t("Account pool")}{" "}<span className="count">{accounts.length}</span>
+            </TabsTrigger>
+            <TabsTrigger value="requests">
+              {t("Requests")}{" "}<span className="count">{openRequests.length}</span>
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="pool">
+            <div className="filter-row">
+              <Pick label={t("Marketplace")} value={accountFilters.platform} onChange={(platform) => setAccountFilters({ ...accountFilters, platform })} options={["All", ...controlledPlatforms]} />
+              <Pick
+                label={t("State")}
+                value={accountFilters.status}
+                onChange={(status) => setAccountFilters({ ...accountFilters, status })}
+                options={[
+                  { value: "All", label: t("Every state") },
+                  { value: "Available", label: t("Available") },
+                  { value: "Assigned", label: t("Assigned") },
+                  { value: "Attention", label: t("Need attention") },
+                  { value: "Cooldown", label: t("Cooldown") },
+                  { value: "Retired", label: t("Retired") },
+                ]}
+              />
+            </div>
+            {panel(
+              t("Controlled client accounts"),
+              pool.length ? (
+                generic(
+                  pool,
+                  [
+                    {
+                      key: "label",
+                      label: t("Account"),
+                      render: (r) => (
+                        <span><strong>{r.label}</strong><small className="table-subline">{r.id}</small></span>
+                      ),
+                    },
+                    { key: "platform", label: t("Marketplace") },
+                    { key: "status", label: t("State"), render: (r) => <Badge value={r.status} /> },
+                    {
+                      key: "credits",
+                      label: t("Available credit"),
+                      render: (r) => <strong className={Number(r.credits) <= 0 ? "credit-empty" : ""}>{money(r.credits)}</strong>,
+                    },
+                    {
+                      key: "active_assignment",
+                      label: t("With"),
+                      render: (r) => {
+                        const request = r.active_assignment ? requests.find((q) => q.status === "Assigned" && (d.reservations || []).some((z: Row) => z.account_id === r.id && z.request_id === q.id)) : null;
+                        return request ? <span>{name(request.student_id)}<small className="table-subline">{request.task}</small></span> : "—";
+                      },
+                    },
+                  ],
+                  (r) =>
+                    managesAccounts && r.status !== "Retired" ? (
+                      <button className="small-btn" onClick={() => open("account_status", r)}>{t("Manage")}</button>
+                    ) : null,
+                )
+              ) : (
+                <Empty title={accounts.length ? t("No account matches these filters") : t("No client accounts yet")} />
               ),
-            ),
-            <div className="detail-actions">
-              {can(user.roles, ["Higher Board"]) && (
-                <button className="small-btn" onClick={() => open("account")}>
-                  {t("Add account")}
-                </button>
-              )}
-              {can(user.roles, [
-                "Project Operations",
-                "Operations Systems / Admin",
-              ]) && (
-                <button className="small-btn" onClick={() => open("task_bank")}>
-                  {t("Add approved task")}
-                </button>
-              )}
-            </div>,
-          )}
-        </TabsContent>
-        <TabsContent value="requests">
-          {panel(
-            t("Account requests"),
-            generic(
-              (d.requests || []).filter(qMatch),
-              [
-                studentCol,
-                { key: "task", label: t("Service") },
-                { key: "platform", label: t("Marketplace") },
-                { key: "value", label: t("Credit needed") },
-                {
-                  key: "status",
-                  label: t("Status"),
-                  render: (r) => {
-                    const reservation = (d.reservations || []).find(
-                      (z: Row) =>
-                        z.request_id === r.id &&
-                        z.status === "Active" &&
-                        z.expires_at > new Date().toISOString(),
-                    );
-                    return (
-                      <Badge value={reservation ? "Reserved" : r.status} />
+              <div className="detail-actions">
+                {can(user.roles, ["Higher Board"]) && (
+                  <button className="primary small" onClick={() => open("account")}>
+                    <Plus size={15} /> {t("Add account")}
+                  </button>
+                )}
+                {can(user.roles, ["Project Operations", "Operations Systems / Admin"]) && (
+                  <button className="small-btn" onClick={() => open("task_bank")}>{t("Add approved task")}</button>
+                )}
+              </div>,
+            )}
+          </TabsContent>
+          <TabsContent value="requests">
+            <div className="filter-row">
+              <Pick label={t("Marketplace")} value={accountFilters.platform} onChange={(platform) => setAccountFilters({ ...accountFilters, platform })} options={["All", ...controlledPlatforms]} />
+              <Pick
+                label={t("Showing")}
+                value={accountFilters.request}
+                onChange={(request) => setAccountFilters({ ...accountFilters, request })}
+                options={[
+                  { value: "Open", label: t("Waiting for an account") },
+                  { value: "Reserved", label: t("Reserved") },
+                  { value: "Assigned", label: t("Assigned") },
+                  { value: "All", label: t("Every request") },
+                ]}
+              />
+            </div>
+            {panel(
+              t("Account requests"),
+              requestRows.length ? (
+                generic(
+                  requestRows,
+                  [
+                    studentCol,
+                    {
+                      key: "task",
+                      label: t("Service"),
+                      render: (r) => <span><strong>{r.task}</strong><small className="table-subline">{r.created_at ? new Date(r.created_at).toLocaleDateString() : ""}</small></span>,
+                    },
+                    { key: "platform", label: t("Marketplace") },
+                    { key: "value", label: t("Credit needed"), render: (r) => money(r.value) },
+                    {
+                      key: "status",
+                      label: t("Progress"),
+                      render: (r) => {
+                        const stage = requestStage(r);
+                        const steps = ["Submitted", "Reserved", "Assigned"];
+                        const at = steps.indexOf(stage);
+                        const hold = activeReservation(r.id);
+                        return (
+                          <span className="request-flow">
+                            {at < 0 ? (
+                              <Badge value={stage} />
+                            ) : (
+                              steps.map((step, i) => (
+                                <i key={step} className={i < at ? "is-past" : i === at ? "is-now" : ""}>{t(step)}</i>
+                              ))
+                            )}
+                            {hold && stage === "Reserved" && (
+                              <small className="table-subline">
+                                {t("Held until {v0}", { v0: new Date(hold.expires_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" }) })}
+                              </small>
+                            )}
+                          </span>
+                        );
+                      },
+                    },
+                  ],
+                  (r) => {
+                    if (r.status !== "Submitted" || !can(user.roles, ["Higher Board"])) return null;
+                    const reservation = activeReservation(r.id);
+                    return reservation ? (
+                      <button
+                        className="primary small"
+                        onClick={() => open("allocate", { request: r.id, student_id: r.student_id, reservation_id: reservation.id, account: reservation.account_id })}
+                      >
+                        {t("Approve allocation")}
+                      </button>
+                    ) : (
+                      <button className="small-btn" onClick={() => open("reserve_account", { request: r.id, student_id: r.student_id })}>
+                        {t("Reserve account")}
+                      </button>
                     );
                   },
-                },
-              ],
-              (r) => {
-                if (r.status !== "Submitted") return null;
-                const reservation = (d.reservations || []).find(
-                  (z: Row) =>
-                    z.request_id === r.id &&
-                    z.status === "Active" &&
-                    z.expires_at > new Date().toISOString(),
-                );
-                return reservation ? (
-                  <button
-                    className="small-btn"
-                    onClick={() =>
-                      open("allocate", {
-                        request: r.id,
-                        student_id: r.student_id,
-                        reservation_id: reservation.id,
-                        account: reservation.account_id,
-                      })
-                    }
-                  >
-                    {t("Approve allocation")}
-                  </button>
-                ) : (
-                  <button
-                    className="small-btn"
-                    onClick={() =>
-                      open("reserve_account", {
-                        request: r.id,
-                        student_id: r.student_id,
-                      })
-                    }
-                  >
-                    {t("Reserve account")}
-                  </button>
-                );
-              },
-            ),
-          )}
-        </TabsContent>
-      </Tabs>
+                )
+              ) : (
+                <Empty title={requests.length ? t("No request matches these filters") : t("No account requests yet")} />
+              ),
+            )}
+          </TabsContent>
+        </Tabs>
+      </>
     );
   } else if (module === "gigs") {
     // One row per gig: the paid job and the review of its proof together.
@@ -3278,42 +3378,64 @@ export default function Operations({ module: initialModule }: { module: string }
                   {r ? `${r.group_id} · ${t("Week {v0}", { v0: r.week })} · ${new Date(r.starts_at).toLocaleString(locale === "ar" ? "ar-EG" : "en-GB", { timeZone: "Africa/Cairo", weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""}
                 </DialogDescription>
               </DialogHeader>
-              {r &&
-                (["Before", "During", "After"] as const).map((stage) => (
-                  <div key={stage} className="checklist-stage">
-                    <h4>{stage === "Before" ? t("Before the session") : stage === "During" ? t("During the session") : t("After the session")}</h4>
-                    {sessionChecklist
-                      .filter((item) => item.stage === stage && state[item.key])
-                      .map((item) => {
+              {r && (() => {
+                const steps = sessionChecklist.filter((item) => state[item.key]);
+                const done = steps.filter((item) => state[item.key].done).length;
+                const when = (at?: string | null) =>
+                  at ? new Date(at).toLocaleString(locale === "ar" ? "ar-EG" : "en-GB", { timeZone: "Africa/Cairo", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
+                return (
+                  <>
+                    <div className="checklist-summary">
+                      <span><strong>{done}/{steps.length}</strong> {t("steps done")}</span>
+                      <span>{t("Coach")}: {owner(r.coach_id)}</span>
+                    </div>
+                    <div className="student-progress-bar checklist-progress"><span style={{ width: `${steps.length ? (100 * done) / steps.length : 0}%` }} /></div>
+                    <ol className="checklist-stepper">
+                      {steps.map((item, index) => {
                         const st = state[item.key];
                         const editable = ticksStep(r, item);
+                        const stage = item.stage === "Before" ? t("Before the session") : item.stage === "During" ? t("During the session") : t("After the session");
                         return (
-                          <label key={item.key} className="checklist-row">
-                            <Checkbox
-                              checked={st.done}
-                              disabled={!editable || busy}
-                              onCheckedChange={(v) => quick("session_check", { id: r.id, item: item.key, done: v === true })}
-                            />
-                            <span>
-                              {t(item.label)}
-                              {item.fromWeek ? <small className="table-subline">{t("From the second session")}</small> : null}
-                              {st.flagged ? (
-                                <small className="table-subline">⚠ {t("Unavailable")}: {st.flagged}</small>
-                              ) : item.owner === "auto" ? (
-                                <small className="table-subline">{t("Filled in automatically")}</small>
-                              ) : st.done ? (
-                                <small className="table-subline">
-                                  {st.by ? owner(st.by) : t("The coach confirmed")} · {st.at ? new Date(st.at).toLocaleString(locale === "ar" ? "ar-EG" : "en-GB", { timeZone: "Africa/Cairo", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}
-                                </small>
-                              ) : (
-                                <small className="table-subline">{item.owner === "coach" ? t("Coach") : t("Coordinator")}</small>
-                              )}
-                            </span>
-                          </label>
+                          <li key={item.key} className={st.flagged ? "is-flagged" : st.done ? "is-done" : ""}>
+                            <span className="checklist-marker">{st.flagged ? "!" : st.done ? <Check size={14} /> : index + 1}</span>
+                            <div className="checklist-body">
+                              <small className="checklist-stage-name">{stage}</small>
+                              <strong>{t(item.label)}</strong>
+                              <small className="table-subline">
+                                {st.flagged
+                                  ? `⚠ ${t("Unavailable")}: ${st.flagged}`
+                                  : st.done
+                                    ? item.owner === "auto"
+                                      ? t("Done automatically from the register")
+                                      : `${st.by ? owner(st.by) : t("The coach confirmed")}${st.at ? " · " + when(st.at) : ""}`
+                                    : item.owner === "auto"
+                                      ? t("Ticks itself once every student is marked")
+                                      : t("The group's coordinator ticks this")}
+                              </small>
+                            </div>
+                            <div className="checklist-action">
+                              {item.owner === "auto" ? (
+                                takesAttendance(r) && !st.done ? (
+                                  <button type="button" className="small-btn" onClick={() => { setChecklistFor(null); openAttendance(r); }}>{t("Take attendance")}</button>
+                                ) : null
+                              ) : editable ? (
+                                <button
+                                  type="button"
+                                  className={st.done ? "small-btn" : "primary small"}
+                                  disabled={busy}
+                                  onClick={() => quick("session_check", { id: r.id, item: item.key, done: !st.done })}
+                                >
+                                  {st.done ? t("Undo") : t("Mark done")}
+                                </button>
+                              ) : null}
+                            </div>
+                          </li>
                         );
                       })}
-                  </div>
-                ))}
+                    </ol>
+                  </>
+                );
+              })()}
             </DialogContent>
           </Dialog>
         );
@@ -3684,21 +3806,34 @@ export default function Operations({ module: initialModule }: { module: string }
                           label: name(r.student_id) + " · " + r.task,
                         })),
                     )}
-                    {choice(
-                      "account",
-                      t("Controlled account"),
-                      (d.accounts || []).map((c: Row) => ({
-                        value: c.id,
-                        label:
-                          c.label +
-                          " · " +
-                          c.platform +
-                          " · " +
-                          c.status +
-                          " · $" +
-                          c.credits,
-                      })),
-                    )}
+                    {(() => {
+                      const request = (d.requests || []).find((r: Row) => r.id === form.request);
+                      const fits = (d.accounts || []).filter(
+                        (c: Row) =>
+                          c.status === "Available" &&
+                          !c.active_assignment &&
+                          (!request || (c.platform === request.platform && Number(c.credits) >= Number(request.value))),
+                      );
+                      return (
+                        <>
+                          {request && (
+                            <div className="info-box">
+                              <strong>{name(request.student_id)}</strong>
+                              <small>{request.task} · {request.platform} · {t("needs")} ${request.value}</small>
+                            </div>
+                          )}
+                          {fits.length ? (
+                            choice(
+                              "account",
+                              t("Account that fits"),
+                              fits.map((c: Row) => ({ value: c.id, label: `${c.label} · $${c.credits}` })),
+                            )
+                          ) : (
+                            <div className="form-error">{t("No available account on this marketplace has enough credit. Add or top up an account first.")}</div>
+                          )}
+                        </>
+                      );
+                    })()}
                     <p className="footnote">
                       {t("Reservations hold one eligible account for 15 minutes and prevent a concurrent allocation from using it.")}
                     </p>
@@ -3708,8 +3843,11 @@ export default function Operations({ module: initialModule }: { module: string }
                 return (
                   <>
                     <div className="info-box">
-                      <strong>{t("Reserved account")}{" "}{form.account}</strong>
-                      <span>{t("Request")}{" "}{form.request}</span>
+                      <strong>{name(form.student_id)}</strong>
+                      <span>
+                        {(d.requests || []).find((r: Row) => r.id === form.request)?.task} ·{" "}
+                        {(d.accounts || []).find((c: Row) => c.id === form.account)?.label || form.account}
+                      </span>
                       <small>
                         {t("Complete the independent fit check before the reservation expires.")}
                       </small>
@@ -4297,22 +4435,43 @@ export default function Operations({ module: initialModule }: { module: string }
                     {field("reason", t("Decision reason"))}
                   </>
                 );
-              if (a === "account_status")
+              if (a === "account_status") {
+                // The same moves the server allows from each state.
+                const flow: Record<string, string[]> = {
+                  Available: ["Blocked", "Access Issue", "Funding Block", "Under Review", "Retired"],
+                  Assigned: ["Cooldown", "Blocked", "Access Issue", "Under Review"],
+                  Cooldown: ["Available", "Blocked", "Retired"],
+                  Blocked: ["Under Review", "Retired"],
+                  "Access Issue": ["Under Review", "Retired"],
+                  "Funding Block": ["Under Review", "Retired"],
+                  "Under Review": ["Available", "Blocked", "Retired"],
+                };
+                const moves = flow[modal!.status] || [];
                 return (
                   <>
-                    <CredentialPanel account={modal!.id} />
-                    {choice("status", t("Next account state"), [
-                      "Available",
-                      "Cooldown",
-                      "Blocked",
-                      "Access Issue",
-                      "Funding Block",
-                      "Under Review",
-                      "Retired",
-                    ])}
-                    {field("reason", t("Reason"))}
+                    <div className="account-summary">
+                      <div>
+                        <strong>{modal!.label}</strong>
+                        <small>{modal!.id} · {modal!.platform}</small>
+                      </div>
+                      <Badge value={modal!.status} />
+                      <span className="account-credit">{"$" + Number(modal!.credits || 0).toLocaleString("en-US", { maximumFractionDigits: 2 })}<small>{t("available credit")}</small></span>
+                    </div>
+                    {moves.length ? (
+                      <>
+                        {choice("status", t("Move the account to"), moves.map((m) => ({ value: m, label: t(m) })))}
+                        {field("reason", t("Reason"))}
+                      </>
+                    ) : (
+                      <p className="footnote">{t("This account cannot change state.")}</p>
+                    )}
+                    <details className="account-credentials">
+                      <summary>{t("Sign-in details")}</summary>
+                      <CredentialPanel account={modal!.id} />
+                    </details>
                   </>
                 );
+              }
               return field("reason", t("Reason"));
             })()}
             {formError && (
