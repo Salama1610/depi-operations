@@ -223,7 +223,7 @@ export function WeeklyProgress({ data, onStudent }: { data: Row; onStudent: (id:
     { label: "Sessions this week", value: `${totals.held} / ${totals.sessions}`, detail: t("held of scheduled") },
     { label: "Attendance", value: totals.attendance, detail: t("of recorded attendance") },
     { label: "Service links", value: String(totals.submitted), detail: t("{v0} links locked", { v0: totals.locked }) },
-    { label: "Gigs recorded", value: String(totals.evidence), detail: t("{v0} overdue actions now", { v0: totals.overdue }) },
+    { label: "Services recorded", value: String(totals.evidence), detail: t("{v0} overdue actions now", { v0: totals.overdue }) },
   ];
   const filtered = supervisor !== "All" || coordinator !== "All" || track !== "All";
 
@@ -243,7 +243,7 @@ export function WeeklyProgress({ data, onStudent }: { data: Row; onStudent: (id:
         <Table>
           <TableHeader>
             <TableRow>
-              {[first, "Groups", "Students", "Contacted", "Sessions held", "Attendance", "Links submitted", "Links locked", "Gigs", "Overdue", "At risk"].map((h) => (
+              {[first, "Groups", "Students", "Contacted", "Sessions held", "Attendance", "Links submitted", "Links locked", "Services", "Overdue", "At risk"].map((h) => (
                 <TableHead key={h}>{t(h)}</TableHead>
               ))}
             </TableRow>

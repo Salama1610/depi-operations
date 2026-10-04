@@ -1519,6 +1519,15 @@ export async function POST(req: Request) {
           s && x.title?.trim() && x.platform && Number(x.value) > 0 && x.order_ref?.trim(),
           "Student, title, platform, order number and value are required.",
         );
+        // Services are recorded by the coordinators of the Service Team's
+        // groups; Project Operations and administrators can record any.
+        if (!can(u.roles, ["Project Operations", ...admin])) {
+          const team: any = await stmt(
+            "SELECT u.title FROM groups g JOIN users u ON u.id=g.supervisor WHERE g.id=?",
+            s.group_id,
+          ).first();
+          ensure(/service team/i.test(team?.title || ""), "Services are recorded by the coordinators of Service Team groups only.");
+        }
         ensure(x.proof_id && x.payment_proof_id, "Upload the delivery proof and the payment proof.");
         ensure(x.payment_proof_id !== x.proof_id, "Delivery and payment proof must be separate uploaded records.");
         await proof(u, x.proof_id, sid);

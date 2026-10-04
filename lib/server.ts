@@ -370,7 +370,7 @@ export async function loadData(u: any) {
     sessionFeedback,
   ] = await Promise.all([
     all(
-      `SELECT g.*,c.name coordinator_name,s.name supervisor_name,h.name coach_name,m.name account_manager_name FROM groups g JOIN users c ON c.id=g.coordinator JOIN users s ON s.id=g.supervisor JOIN users h ON h.id=g.coach LEFT JOIN users m ON m.id=g.account_manager WHERE ${qg.sql}`,
+      `SELECT g.*,c.name coordinator_name,s.name supervisor_name,s.title supervisor_title,h.name coach_name,m.name account_manager_name FROM groups g JOIN users c ON c.id=g.coordinator JOIN users s ON s.id=g.supervisor JOIN users h ON h.id=g.coach LEFT JOIN users m ON m.id=g.account_manager WHERE ${qg.sql}`,
       ...qg.args,
     ),
     all(

@@ -692,7 +692,7 @@ export function ProgramFlow() {
                 <div>
                   <h2>{t("Group closure & archive")}</h2>
                   <p>
-                    {t("Closure reconciles learners, actions, cases, gigs and evidence. Archive makes the group read-only.")}
+                    {t("Closure reconciles learners, actions, cases, services and evidence. Archive makes the group read-only.")}
                   </p>
                 </div>
               </div>
@@ -1132,7 +1132,7 @@ export function ProgramFlow() {
               <>
                 {field("reason", t("Closure reason"))}
                 <p className="footnote">
-                  {t("The system will block closure until all learners, actions, cases, gigs and evidence are reconciled.")}
+                  {t("The system will block closure until all learners, actions, cases, services and evidence are reconciled.")}
                 </p>
               </>
             )}

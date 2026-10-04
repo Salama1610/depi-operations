@@ -499,7 +499,7 @@ export function GlobalSearch({
           <DialogHeader>
             <DialogTitle>{t("Search the workspace")}</DialogTitle>
             <DialogDescription>
-              {t("Find scoped students, applications, groups, gigs, evidence, certificates, outcomes, cases and authorized accounts.")}
+              {t("Find scoped students, applications, groups, services, evidence, certificates, outcomes, cases and authorized accounts.")}
             </DialogDescription>
           </DialogHeader>
           <label className="search-box">

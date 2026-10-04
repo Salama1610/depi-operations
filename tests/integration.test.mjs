@@ -2770,3 +2770,25 @@ test("students give feedback after each session, once, and the group's people se
   assert.ok(data.sessionFeedback.some((f) => f.session_id === "SES-FB-DONE"));
   current = { id: "owner", email: "owner@example.com" };
 });
+
+test("services (paid gigs) are recorded by the coordinators of Service Team groups only", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  await dbExec("DELETE FROM rate_limits");
+  const group = await dbRow("SELECT g.id,g.supervisor,g.coordinator,u.email FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.status='Active' AND EXISTS (SELECT 1 FROM students s WHERE s.group_id=g.id AND s.lifecycle='Active') LIMIT 1");
+  const learner = await dbRow("SELECT id FROM students WHERE group_id=? AND lifecycle='Active' LIMIT 1", group.id);
+  const created = new Date().toISOString();
+  for (const id of ["ST-DELIVERY", "ST-PAYMENT"])
+    await dbExec("INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)", id, learner.id, id.toLowerCase(), id + ".png", "image/png", 120, id + "-hash", "owner", created);
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo" }).format(new Date());
+  await dbExec("UPDATE groups SET start_date=? WHERE id=?", "2020-01-01", group.id);
+  const gig = { student_id: learner.id, title: "Banner design", platform: "Khamsat", value: 20, currency: "USD", order_ref: "KH-ST-1", paid_on: today, proof_id: "ST-DELIVERY", payment_proof_id: "ST-PAYMENT" };
+  const title = (await dbRow("SELECT title FROM users WHERE id=?", group.supervisor)).title;
+  current = { id: group.coordinator, email: group.email };
+  await dbExec("UPDATE users SET title='Team Supervisor · Target Team' WHERE id=?", group.supervisor);
+  assert.match((await post("gig", { ...gig, id: "GIG-ST-1" })).error, /Service Team groups only/);
+  await dbExec("UPDATE users SET title='Team Supervisor · Service Team' WHERE id=?", group.supervisor);
+  await check("gig", { ...gig, id: "GIG-ST-1" });
+  assert.ok(await dbRow("SELECT id FROM gigs WHERE id='GIG-ST-1'"));
+  await dbExec("UPDATE users SET title=? WHERE id=?", title, group.supervisor);
+  current = { id: "owner", email: "owner@example.com" };
+});

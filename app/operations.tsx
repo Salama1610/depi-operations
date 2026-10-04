@@ -116,7 +116,7 @@ const nav = [
   ["groups", "Groups", Layers],
   ["sessions", "Sessions", CalendarDays],
   ["accounts", "Accounts", WalletCards],
-  ["gigs", "Gigs", BriefcaseBusiness],
+  ["gigs", "Services", BriefcaseBusiness],
   ["quality", "Quality review", ShieldCheck],
   ["cases", "Cases", Flag],
   ["reports", "Reports", ChartNoAxesCombined],
@@ -147,7 +147,7 @@ const titles: Row = {
   account: "Add client account",
   reserve_account: "Reserve eligible account",
   allocate: "Allocate account",
-  gig: "Record a paid gig",
+  gig: "Record a paid service",
   gig_transition: "Record client activity",
   evidence: "Submit evidence",
   review: "Review evidence",
@@ -179,10 +179,10 @@ const actionCopy: Row = {
   allocate: "Eligibility and account reuse are checked before allocation.",
   review: "Record a decision and clear correction guidance.",
   gig_transition:
-    "Attach a screenshot of this activity before progressing the gig.",
+    "Attach a screenshot of this activity before progressing the service.",
   staff: "Access changes take effect immediately and are audited.",
-  evidence: "Only completed, paid gigs can enter the review pipeline.",
-  gig: "Record the gig once it is paid. Its delivery and payment screenshots go straight into review.",
+  evidence: "Only completed, paid services can enter the review pipeline.",
+  gig: "Record the service once it is paid. Its delivery and payment screenshots go straight into review.",
   session:
     "Sessions follow the group delivery model, approved duration and coach-assignment controls.",
   session_reschedule:
@@ -942,7 +942,14 @@ export default function Operations({ module: initialModule }: { module: string }
     sessions: ["Coach Operations", "Project Operations", "Operations Systems / Admin"],
     groups: ["Operations Systems / Admin"],
   };
-  const canCreate = (m: string) => !createRoles[m] || can(user.roles, createRoles[m]);
+  // Services are recorded by the coordinators of the Service Team's groups,
+  // and by Project Operations and administrators.
+  const recordsServices =
+    can(user.roles, ["Project Operations", "Operations Systems / Admin"]) ||
+    (can(user.roles, ["Operations Coordinator"]) &&
+      groups.some((g) => g.coordinator === user.id && /service team/i.test(g.supervisor_title || "")));
+  const canCreate = (m: string) =>
+    m === "gigs" ? recordsServices : !createRoles[m] || can(user.roles, createRoles[m]);
   // Only the leaders set the schedule; the row argument is kept for callers.
   const plansSession = (_r: Row) =>
     can(user.roles, ["Coach Operations", "Project Operations", "Operations Systems / Admin"]);
@@ -1069,7 +1076,7 @@ export default function Operations({ module: initialModule }: { module: string }
         q: "No Contact",
       },
       {
-        label: t("Gigs waiting for review"),
+        label: t("Services waiting for review"),
         value: reviews.length,
         detail: t("{v0} require correction", { v0: rejected.length }),
         icon: Files,
@@ -1177,7 +1184,7 @@ export default function Operations({ module: initialModule }: { module: string }
             <section className="journey-card">
               <div className="eyebrow">{t("COHORT JOURNEY")}</div>
               <h2>{t("Progress with proof.")}</h2>
-              <p>{t("Only Quality-accepted gigs count toward graduation.")}</p>
+              <p>{t("Only Quality-accepted services count toward graduation.")}</p>
               <div className="journey-total">
                 <strong>{graduates.length}</strong>
                 <span>
@@ -1202,7 +1209,7 @@ export default function Operations({ module: initialModule }: { module: string }
                   <div key={v}>
                     <span>
                       <i className={"stage-dot dot-" + i} />
-                      {v === "Graduated" ? t("Graduated") : v + " qualifying gigs"}
+                      {v === "Graduated" ? t("Graduated") : v + " " + t("qualifying services")}
                     </span>
                     <strong>
                       {v === "Graduated"
@@ -1760,7 +1767,7 @@ export default function Operations({ module: initialModule }: { module: string }
               (d.requests || []).filter(qMatch),
               [
                 studentCol,
-                { key: "task", label: t("Gig") },
+                { key: "task", label: t("Service") },
                 { key: "platform", label: t("Marketplace") },
                 { key: "value", label: t("Credit needed") },
                 {
@@ -1844,12 +1851,12 @@ export default function Operations({ module: initialModule }: { module: string }
       .filter((r) => filter === "All" || r.stage === filter)
       .sort((a, b) => String(a.stage_at).localeCompare(String(b.stage_at)));
     content = panel(
-      t("Gigs and their review"),
+      t("Services and their review"),
       generic(
         rows,
         [
           studentCol,
-          { key: "title", label: t("Gig") },
+          { key: "title", label: t("Service") },
           { key: "platform", label: t("Platform") },
           {
             key: "value",
@@ -2122,7 +2129,7 @@ export default function Operations({ module: initialModule }: { module: string }
                   <Users size={15} /> {t("Distribute waiting students evenly")}
                 </button>
                 <button className="small-btn" disabled={busy} onClick={() => quick("evidence_qc_assign", {})}>
-                  <Files size={15} /> {t("Distribute gig evidence evenly")}
+                  <Files size={15} /> {t("Distribute service evidence evenly")}
                 </button>
                 <small className="qc-lead-note">
                   {t("A student’s services stay together with one reviewer, and a student waiting for review goes to whoever currently holds the fewest. Reviewers:")}{" "}{qualityReviewers.map((r) => `${r.name} (${reviewerStudents.get(r.id) || 0})`).join(", ") || t("none active")}.
@@ -2188,7 +2195,7 @@ export default function Operations({ module: initialModule }: { module: string }
             rows,
             [
               studentCol,
-              { key: "gig_id", label: t("Gig") },
+              { key: "gig_id", label: t("Service") },
               { key: "source", label: t("External source") },
               statusCol,
               {
@@ -2320,12 +2327,12 @@ export default function Operations({ module: initialModule }: { module: string }
           {panel(
             t("Graduation policy"),
             <div className="prose">
-              <div className="rule-number">{t("3 gigs × $5 minimum")}</div>
+              <div className="rule-number">{t("3 services × $5 minimum")}</div>
               <p>
-                {t("Total qualifying value of at least $15, or one qualifying gig of $300 or more.")}
+                {t("Total qualifying value of at least $15, or one qualifying service of $300 or more.")}
               </p>
               <p>
-                {t("Evidence must be Quality Accepted, and the gig must be paid. Non-USD gigs count only after a separately approved rate is applied and stored with the gig.")}
+                {t("Evidence must be Quality Accepted, and the service must be paid. Non-USD services count only after a separately approved rate is applied and stored with the service.")}
               </p>
               <Badge value="Round 5 · v1" />
             </div>,
@@ -3192,7 +3199,7 @@ export default function Operations({ module: initialModule }: { module: string }
                             return { ...g, review, stage: review ? review.status : g.status };
                           }),
                         [
-                          { key: "title", label: t("Gig") },
+                          { key: "title", label: t("Service") },
                           { key: "value", label: t("Value"), render: (r) => r.currency + " " + r.value },
                           { key: "stage", label: t("Review stage"), render: (r) => <Badge value={r.stage} /> },
                         ],
@@ -3640,11 +3647,11 @@ export default function Operations({ module: initialModule }: { module: string }
                   <>
                     {studentPick()}
                     {choice("platform", t("Marketplace"), controlledPlatforms)}
-                    {field("title", t("Gig the client account will order"))}
+                    {field("title", t("Service the client account will order"))}
                     {field("value", t("Credit needed (USD)"), "number")}
                     {field("notes", t("Request notes"), "text", false)}
                     <p className="footnote">
-                      {t("The programme's client account on this marketplace orders the student's gig. Up to three requests per student.")}
+                      {t("The programme's client account on this marketplace orders the student's service. Up to three requests per student.")}
                     </p>
                   </>
                 );
@@ -3725,7 +3732,7 @@ export default function Operations({ module: initialModule }: { module: string }
                       <strong>{modal!.title}</strong>
                       <Badge value={modal!.status} />
                       <small>
-                        {t("Gig")}{" "}{modal!.id} {t("· account")}{" "}{modal!.account_id}
+                        {t("Service")}{" "}{modal!.id} {t("· account")}{" "}{modal!.account_id}
                       </small>
                     </div>
                     {field("reason", t("Approved refund reason"))}
@@ -3756,7 +3763,7 @@ export default function Operations({ module: initialModule }: { module: string }
                 return (
                   <>
                     {studentPick()}
-                    {field("title", t("Gig title"))}
+                    {field("title", t("Service title"))}
                     <div className="form-grid">
                       {choice("platform", t("Platform"), gigPlatforms)}
                       {field("order_ref", t("Order number"))}
@@ -3804,7 +3811,7 @@ export default function Operations({ module: initialModule }: { module: string }
                 return (
                   <>
                     <div className="info-box">
-                      <strong>{t("Gig")}{" "}{form.gig_id}</strong>
+                      <strong>{t("Service")}{" "}{form.gig_id}</strong>
                       <span>{t("Currency:")}{" "}{form.currency}</span>
                     </div>
                     {choice(
@@ -3827,7 +3834,7 @@ export default function Operations({ module: initialModule }: { module: string }
                         })),
                     )}
                     <p className="footnote">
-                      {t("The applied USD value is calculated once from the original gig value and stored with the exact approved rate.")}
+                      {t("The applied USD value is calculated once from the original service value and stored with the exact approved rate.")}
                     </p>
                   </>
                 );
@@ -3865,7 +3872,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     {studentPick()}
                     {choice(
                       "gig_id",
-                      t("Paid gig"),
+                      t("Paid service"),
                       gigs
                         .filter(
                           (g) =>
@@ -4213,10 +4220,10 @@ export default function Operations({ module: initialModule }: { module: string }
                                   failedAttempts: "Failed contact attempts",
                                   failedWindowDays: "Attempt window (days)",
                                   target: "Graduation target (%)",
-                                  minGig: "Minimum gig value (USD)",
-                                  gigCount: "Qualifying gig count",
+                                  minGig: "Minimum service value (USD)",
+                                  gigCount: "Qualifying service count",
                                   minTotal: "Minimum total (USD)",
-                                  largeGig: "Large-gig threshold (USD)",
+                                  largeGig: "Large-service threshold (USD)",
                                   riskAttendance: "At Risk attendance (%)",
                                   criticalAttendance: "Critical attendance (%)",
                                   journeyDelayedLag: "Delayed journey lag",
