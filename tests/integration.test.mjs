@@ -2661,38 +2661,55 @@ test("the coordinator and coach answer attending or unavailable, and the leaders
   await dbExec("DELETE FROM group_coaches WHERE id='GC-ANSWER-1'");
 });
 
-test("the session checklist: the coordinator and coach tick their own steps, the app fills the rest", async () => {
+test("the coordinator's checklist: instructor confirmed before, instructor entered during, attendance taken after", async () => {
   current = { id: "owner", email: "owner@example.com" };
   const group = await dbRow("SELECT g.id,u.id uid,u.email FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.status='Active' AND g.id NOT IN (SELECT group_id FROM sessions WHERE week=7) LIMIT 1");
   await check("session", { id: "SES-CHECK-1", group_id: group.id, title: "Week 7 coaching", starts_at: new Date(Date.now() + 140 * 86400000).toISOString(), week: 7, duration_minutes: 180, coach_id: "staff-coach" });
-  const ticks = async () => (await dbRows("SELECT item,done_by FROM session_checks WHERE session_id='SES-CHECK-1' ORDER BY item")).map((r) => r.item);
-  // The group's coordinator ticks the day-before steps.
+  const ticks = async () => (await dbRows("SELECT item FROM session_checks WHERE session_id='SES-CHECK-1' ORDER BY item")).map((r) => r.item);
   current = { id: group.uid, email: group.email };
-  await check("session_check", { id: "SES-CHECK-1", item: "trainer_notified" });
-  await check("session_check", { id: "SES-CHECK-1", item: "whatsapp_confirmed" });
-  await check("session_check", { id: "SES-CHECK-1", item: "technical_confirmed" });
-  assert.deepEqual(await ticks(), ["technical_confirmed", "trainer_notified", "whatsapp_confirmed"]);
-  // Ticking twice changes nothing; unticking removes it.
-  await check("session_check", { id: "SES-CHECK-1", item: "trainer_notified" });
-  await check("session_check", { id: "SES-CHECK-1", item: "whatsapp_confirmed", done: false });
-  assert.deepEqual(await ticks(), ["technical_confirmed", "trainer_notified"]);
-  // The coach's step is the coach's, and the app's steps are nobody's.
-  assert.match((await post("session_check", { id: "SES-CHECK-1", item: "trainer_joined" })).error, /session's coach/);
-  assert.match((await post("session_check", { id: "SES-CHECK-1", item: "attendance_recorded" })).error, /filled in by the app/);
-  assert.match((await post("session_check", { id: "SES-CHECK-1", item: "nonsense" })).error, /Unknown checklist step/);
+  await check("session_check", { id: "SES-CHECK-1", item: "instructor_confirmed" });
+  await check("session_check", { id: "SES-CHECK-1", item: "instructor_entered" });
+  assert.deepEqual(await ticks(), ["instructor_confirmed", "instructor_entered"]);
+  await check("session_check", { id: "SES-CHECK-1", item: "instructor_entered", done: false });
+  assert.deepEqual(await ticks(), ["instructor_confirmed"]);
+  assert.match((await post("session_check", { id: "SES-CHECK-1", item: "attendance_taken" })).error, /filled in by the app/);
+  assert.match((await post("session_check", { id: "SES-CHECK-1", item: "trainer_notified" })).error, /Unknown checklist step/, "the old steps are gone");
+  // The steps are the coordinator's, not the coach's or another coordinator's.
   current = { id: "coach-login", email: "staff-coach@example.invalid" };
-  await check("session_check", { id: "SES-CHECK-1", item: "trainer_joined" });
-  assert.match((await post("session_check", { id: "SES-CHECK-1", item: "assignment_sent" })).error, /group's coordinator/);
-  // A coordinator of another group cannot tick it.
+  assert.match((await post("session_check", { id: "SES-CHECK-1", item: "instructor_entered" })).error, /group's coordinator/);
   const other = await dbRow("SELECT u.id,u.email FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.coordinator<>? LIMIT 1", group.uid);
   if (other) {
     current = { id: other.id, email: other.email };
-    assert.ok((await post("session_check", { id: "SES-CHECK-1", item: "assignment_sent" })).error);
+    assert.ok((await post("session_check", { id: "SES-CHECK-1", item: "instructor_entered" })).error);
   }
-  // Moving the session clears the day-before steps but keeps the rest.
-  current = { id: "owner", email: "owner@example.com" };
-  await check("session_reschedule", { id: "SES-CHECK-1", starts_at: new Date(Date.now() + 141 * 86400000).toISOString(), reason: "Trainer moved the slot" });
-  assert.deepEqual(await ticks(), ["trainer_joined"]);
   const audit = await dbRow("SELECT action FROM audit_events WHERE action='session_check' LIMIT 1");
   assert.ok(audit, "every tick is audited");
+  current = { id: "owner", email: "owner@example.com" };
 });
+
+test("attendance is taken from the session itself, each student attended or absent", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  const group = await dbRow("SELECT g.id,u.id uid,u.email FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.status='Active' AND g.id NOT IN (SELECT group_id FROM sessions WHERE week IN (5,6)) AND (SELECT count(*) FROM students s WHERE s.group_id=g.id AND s.lifecycle='Active')>=2 LIMIT 1");
+  const roster = (await dbRows("SELECT id FROM students WHERE group_id=? AND lifecycle='Active' ORDER BY id", group.id)).map((r) => r.id);
+  await check("session", { id: "SES-REG-1", group_id: group.id, title: "Week 5 coaching", starts_at: new Date(Date.now() - 2 * 3600000).toISOString(), week: 5, duration_minutes: 180 });
+  await check("session", { id: "SES-REG-LATER", group_id: group.id, title: "Week 6 coaching", starts_at: new Date(Date.now() + 150 * 86400000).toISOString(), week: 6, duration_minutes: 180 });
+  current = { id: group.uid, email: group.email };
+  assert.match((await post("session_attendance", { id: "SES-REG-LATER", marks: { [roster[0]]: "Present" } })).error, /once a session has started/);
+  assert.match((await post("session_attendance", { id: "SES-REG-1", marks: { [roster[0]]: "Late" } })).error, /attended or absent/);
+  assert.match((await post("session_attendance", { id: "SES-REG-1", marks: { S10001: "Present" } })).error, /belong to the session's group/);
+  const marks = Object.fromEntries(roster.map((id, i) => [id, i === 0 ? "Absent" : "Present"]));
+  await check("session_attendance", { id: "SES-REG-1", marks });
+  const saved = await dbRows("SELECT student_id,status FROM attendance WHERE session_id='SES-REG-1' ORDER BY student_id");
+  assert.equal(saved.length, roster.length);
+  assert.equal(saved.find((r) => r.student_id === roster[0]).status, "Absent");
+  assert.ok(saved.slice(1).every((r) => r.status === "Present"));
+  // Marking again corrects it rather than adding a second row.
+  await check("session_attendance", { id: "SES-REG-1", marks: { [roster[0]]: "Present" } });
+  assert.equal((await dbRow("SELECT count(*) n FROM attendance WHERE session_id='SES-REG-1'")).n, roster.length);
+  // Another group's coordinator cannot take it.
+  const other = await dbRow("SELECT u.id,u.email FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.coordinator<>? LIMIT 1", group.uid);
+  current = { id: other.id, email: other.email };
+  assert.match((await post("session_attendance", { id: "SES-REG-1", marks: { [roster[0]]: "Absent" } })).error, /coordinator or the session's coach/);
+  current = { id: "owner", email: "owner@example.com" };
+});
+

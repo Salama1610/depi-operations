@@ -792,3 +792,16 @@ input:focus-visible {
 /* QC queue: the service opens from its row, with its address shown. */
 .service-open{display:inline-flex;flex-direction:column;align-items:flex-start;gap:2px;max-width:340px}
 .service-open .service-url{word-break:break-all;max-width:340px}
+
+/* Sessions: a session opens its register; each student is attended or absent. */
+.session-open{display:inline-flex;flex-direction:column;align-items:flex-start;text-align:start;gap:2px}
+.attendance-list{display:flex;flex-direction:column;max-height:52vh;overflow-y:auto;border:1px solid var(--border,#e3e9f2);border-radius:10px}
+.attendance-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 12px;border-bottom:1px solid var(--border,#edf1f7)}
+.attendance-row:last-child{border-bottom:0}
+.attendance-row>span:first-child{display:flex;flex-direction:column}
+.attendance-row small{color:#8a98ad;font-size:12px}
+.attendance-toggle{display:inline-flex;border:1px solid #dce4ef;border-radius:8px;overflow:hidden;flex-shrink:0}
+.attendance-toggle button{padding:6px 12px;font-size:13px;background:transparent;border:0;color:#5d7292}
+.attendance-toggle button+button{border-inline-start:1px solid #dce4ef}
+.attendance-toggle button.is-on.present{background:#e7f6f0;color:#32856f;font-weight:600}
+.attendance-toggle button.is-on.absent{background:#fdeeea;color:#b26054;font-weight:600}

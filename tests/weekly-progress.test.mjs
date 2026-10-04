@@ -167,17 +167,18 @@ test("a coordinator's schedule carries the group's meeting link", () => {
 });
 
 test("the checklist works out the automatic steps", async () => {
-  const { checklistState } = await vite.ssrLoadModule("/lib/domain/session-checklist.ts");
-  const ticks = ["trainer_notified", "whatsapp_confirmed", "technical_confirmed"].map((item) => ({ item }));
-  let state = checklistState({ week: 1, coach_confirmed_at: "2026-10-10T10:00:00Z" }, ticks, ["S1", "S2"], new Set(["S1"]));
-  assert.equal(state.trainer_confirmed.done, true);
-  assert.equal(state.all_confirmations.done, true);
-  assert.equal(state.attendance_recorded.done, false, "one student is still unmarked");
-  assert.equal(state.assignment_collected, undefined, "collecting the assignment starts from the second session");
-  state = checklistState({ week: 2, coach_unavailable: "Ill" }, ticks, ["S1"], new Set(["S1"]));
-  assert.equal(state.trainer_confirmed.done, false);
-  assert.equal(state.trainer_confirmed.flagged, "Ill");
-  assert.equal(state.all_confirmations.done, false);
-  assert.equal(state.attendance_recorded.done, true);
-  assert.ok(state.assignment_collected);
+  const { checklistState, sessionChecklist } = await vite.ssrLoadModule("/lib/domain/session-checklist.ts");
+  assert.deepEqual(sessionChecklist.map((i) => i.key), ["instructor_confirmed", "instructor_entered", "attendance_taken"]);
+  let state = checklistState({ week: 1, coach_confirmed_at: "2026-10-10T10:00:00Z" }, [], ["S1", "S2"], new Set(["S1"]));
+  assert.equal(state.instructor_confirmed.done, true, "the coach confirming counts");
+  assert.equal(state.instructor_entered.done, false);
+  assert.equal(state.attendance_taken.done, false, "one student is still unmarked");
+  state = checklistState({ week: 2, coach_unavailable: "Ill" }, [{ item: "instructor_entered" }], ["S1"], new Set(["S1"]));
+  assert.equal(state.instructor_confirmed.done, false);
+  assert.equal(state.instructor_confirmed.flagged, "Ill");
+  assert.equal(state.instructor_entered.done, true);
+  assert.equal(state.attendance_taken.done, true);
+  state = checklistState({ week: 3 }, [{ item: "instructor_confirmed" }], [], new Set());
+  assert.equal(state.instructor_confirmed.done, true, "the coordinator's tick");
 });
+

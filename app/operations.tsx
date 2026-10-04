@@ -157,6 +157,7 @@ const titles: Row = {
   lifecycle: "Update lifecycle status",
   staff: "Manage staff access",
   attendance: "Record attendance",
+  session_attendance: "Take attendance",
   milestone: "Update coaching milestone",
   transfer: "Transfer student",
   task_bank: "Add approved controlled task",
@@ -366,7 +367,8 @@ export default function Operations({ module: initialModule }: { module: string }
     [serviceFilters, setServiceFilters] = useState<Row>({ state: "Pending", platform: "All", track: "All", group: "All", coordinator: "All", reviewer: "All", age: "All", automatic: "All", corrections: "All" }),
     [submissionFilters, setSubmissionFilters] = useState<Row>({ state: "All", track: "All", group: "All", coordinator: "All" }),
     [saved, setSaved] = useState<string[]>([]),
-    [checklistFor, setChecklistFor] = useState<string | null>(null);
+    [checklistFor, setChecklistFor] = useState<string | null>(null),
+    [sessionFilters, setSessionFilters] = useState<Row>({ day: "All", time: "All" });
   async function refresh() {
     try {
       setError("");
@@ -953,8 +955,25 @@ export default function Operations({ module: initialModule }: { module: string }
         ));
   const answersAsCoordinator = (r: Row) =>
     can(user.roles, ["Operations Coordinator"]) && sessionGroupOf(r)?.coordinator === user.id;
-  // The per-session checklist: the coordinator's steps, the coach's step, and
-  // the ones the app works out from confirmations and the attendance register.
+  // A session's register: its group's active students, by name.
+  const rosterOf = (r: Row) =>
+    (d.students || [])
+      .filter((s: Row) => s.group_id === r.group_id && s.lifecycle === "Active")
+      .sort((a: Row, b: Row) => String(a.name).localeCompare(String(b.name)));
+  // Attendance is taken from the session itself once it has started, by its
+  // group's coordinator, its coach or a leader.
+  const takesAttendance = (r: Row) =>
+    r.status !== "Cancelled" &&
+    Date.parse(r.starts_at) <= Date.now() &&
+    (plansSession(r) || answersAsCoordinator(r) || answersAsCoach(r));
+  const openAttendance = (r: Row) => {
+    const marks: Row = {};
+    for (const a of attendance.filter((a) => a.session_id === r.id))
+      marks[a.student_id] = a.status === "Absent" ? "Absent" : "Present";
+    open("session_attendance", { ...r, marks });
+  };
+  // The coordinator's checklist: instructor confirmed, instructor entered, and
+  // attendance taken, which the app works out from the register.
   const checklistOf = (r: Row) => {
     const active = (d.students || [])
       .filter((s: Row) => s.group_id === r.group_id && s.lifecycle === "Active")
@@ -1433,9 +1452,18 @@ export default function Operations({ module: initialModule }: { module: string }
             coach.onboarding_status === "Complete",
         ),
     );
+    // Day of the week and start time, in Cairo, for the filters.
+    const sessionDay = (s: Row) =>
+      new Date(s.starts_at).toLocaleDateString("en-US", { weekday: "long", timeZone: "Africa/Cairo" });
+    const sessionTime = (s: Row) =>
+      new Date(s.starts_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" });
+    const weekdays = ["Saturday", "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+    const times = Array.from(new Set(sessions.map(sessionTime))).sort();
     const sessionRows = sessions
       .filter(qMatch)
       .filter((session) => filter === "All" || session.status === filter)
+      .filter((session) => sessionFilters.day === "All" || sessionDay(session) === sessionFilters.day)
+      .filter((session) => sessionFilters.time === "All" || sessionTime(session) === sessionFilters.time)
       .sort((a, b) => a.starts_at.localeCompare(b.starts_at));
     content = (
       <>
@@ -1485,6 +1513,20 @@ export default function Operations({ module: initialModule }: { module: string }
             {t("Coverage gaps")}
           </span>
         </div>
+        <div className="filter-row">
+          <Pick
+            label={t("Day")}
+            value={sessionFilters.day}
+            onChange={(day) => setSessionFilters({ ...sessionFilters, day })}
+            options={[{ value: "All", label: t("Every day") }, ...weekdays.map((d) => ({ value: d, label: t(d) }))]}
+          />
+          <Pick
+            label={t("Time")}
+            value={sessionFilters.time}
+            onChange={(time) => setSessionFilters({ ...sessionFilters, time })}
+            options={[{ value: "All", label: t("Any time") }, ...times.map((v) => ({ value: v, label: v }))]}
+          />
+        </div>
         {panel(
           t("Session schedule"),
           generic(
@@ -1506,7 +1548,19 @@ export default function Operations({ module: initialModule }: { module: string }
               </>
             ),
           },
-          { key: "title", label: t("Session") },
+          {
+            key: "title",
+            label: t("Session"),
+            render: (r) =>
+              takesAttendance(r) ? (
+                <button className="text-link session-open" onClick={() => openAttendance(r)} title={t("Take attendance")}>
+                  <strong>{r.title}</strong>
+                  <small className="table-subline">{t("Attendance: {v0}/{v1}", { v0: attendance.filter((a) => a.session_id === r.id).length, v1: rosterOf(r).length })}</small>
+                </button>
+              ) : (
+                <strong>{r.title}</strong>
+              ),
+          },
           { key: "group_id", label: t("Group") },
           {
             key: "coach_id",
@@ -1604,12 +1658,8 @@ export default function Operations({ module: initialModule }: { module: string }
                   </button>
                 </>
               )}
-            {r.status !== "Cancelled" &&
-              Date.parse(r.starts_at) <= Date.now() && (
-              <button
-                className="small-btn"
-                onClick={() => open("attendance", { session_id: r.id })}
-              >
+            {takesAttendance(r) && (
+              <button className="small-btn" onClick={() => openAttendance(r)}>
                 {t("Attendance")}
               </button>
             )}
@@ -3430,6 +3480,46 @@ export default function Operations({ module: initialModule }: { module: string }
                 );
               if (a === "session_cancel")
                 return <>{field("reason", t("Reason for cancellation"))}</>;
+              if (a === "session_attendance") {
+                const roster = rosterOf(modal!);
+                const marks: Row = form.marks || {};
+                const mark = (id: string, status: string) => setForm({ ...form, marks: { ...marks, [id]: status } });
+                return (
+                  <>
+                    <div className="info-box">
+                      <strong>{modal!.title}</strong>
+                      <small>{modal!.group_id} · {fmt(modal!.starts_at)}</small>
+                    </div>
+                    {roster.length === 0 ? (
+                      <Empty title={t("No active students in this group")} />
+                    ) : (
+                      <>
+                        <div className="detail-actions">
+                          <button type="button" className="small-btn" onClick={() => setForm({ ...form, marks: Object.fromEntries(roster.map((s: Row) => [s.id, "Present"])) })}>
+                            {t("Mark everyone attended")}
+                          </button>
+                          <small>{t("{v0} attended · {v1} absent · {v2} not marked", {
+                            v0: roster.filter((s: Row) => marks[s.id] === "Present").length,
+                            v1: roster.filter((s: Row) => marks[s.id] === "Absent").length,
+                            v2: roster.filter((s: Row) => !marks[s.id]).length,
+                          })}</small>
+                        </div>
+                        <div className="attendance-list">
+                          {roster.map((s: Row) => (
+                            <div className="attendance-row" key={s.id}>
+                              <span><strong>{s.name}</strong><small>{s.id}</small></span>
+                              <span className="attendance-toggle">
+                                <button type="button" className={marks[s.id] === "Present" ? "is-on present" : ""} onClick={() => mark(s.id, "Present")}>{t("Attended")}</button>
+                                <button type="button" className={marks[s.id] === "Absent" ? "is-on absent" : ""} onClick={() => mark(s.id, "Absent")}>{t("Absent")}</button>
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </>
+                );
+              }
               if (a === "attendance")
                 {
                   const selectedSession = sessions.find(

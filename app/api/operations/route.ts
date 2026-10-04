@@ -1042,6 +1042,55 @@ export async function POST(req: Request) {
           jobs.push(stmt("DELETE FROM session_checks WHERE id=?", existing.id));
         break;
       }
+      case "session_attendance": {
+        // Attendance for a whole session at once: the coordinator, the coach
+        // or a leader opens the session and marks each student attended or absent.
+        permit(u, ["Coach", "Operations Coordinator", ...sessionLeaders]);
+        const session: any = await stmt("SELECT * FROM sessions WHERE id=?", id).first();
+        ensure(session, "Session not found.");
+        ensure(
+          session.status !== "Cancelled" && session.starts_at <= t,
+          "Attendance can only be taken once a session has started.",
+        );
+        const group: any = await stmt("SELECT * FROM groups WHERE id=?", session.group_id).first();
+        if (!can(u.roles, sessionLeaders))
+          ensure(
+            (can(u.roles, ["Operations Coordinator"]) && group?.coordinator === u.id) ||
+              (can(u.roles, ["Coach"]) &&
+                (session.coach_id
+                  ? session.coach_id === u.id
+                  : Boolean(
+                      await stmt(
+                        "SELECT id FROM group_coaches WHERE group_id=? AND user_id=? AND status='Active'",
+                        session.group_id,
+                        u.id,
+                      ).first(),
+                    ))),
+            "Only the group's coordinator or the session's coach takes its attendance.",
+          );
+        const marks = Object.entries((x.marks || {}) as Record<string, string>);
+        ensure(marks.length > 0, "Mark at least one student.");
+        ensure(marks.every(([, v]) => ["Present", "Absent"].includes(v)), "Mark each student attended or absent.");
+        const members = new Set(
+          (await all("SELECT id FROM students WHERE group_id=?", session.group_id)).map((r: any) => r.id),
+        );
+        ensure(marks.every(([studentId]) => members.has(studentId)), "Every student must belong to the session's group.");
+        for (const [studentId, status] of marks)
+          jobs.push(
+            stmt(
+              "INSERT INTO attendance VALUES(?,?,?,?,?,?,?) ON CONFLICT(session_id,student_id) DO UPDATE SET status=excluded.status,recorder=excluded.recorder,source=excluded.source,updated_at=excluded.updated_at",
+              uid("ATT"),
+              id,
+              studentId,
+              status,
+              u.id,
+              "Session register",
+              t,
+            ),
+          );
+        auditValue = { session_id: id, present: marks.filter(([, v]) => v === "Present").length, absent: marks.filter(([, v]) => v === "Absent").length };
+        break;
+      }
       case "attendance": {
         permit(u, ["Coach", "Coach Operations", "Project Operations"]);
         const session: any = await stmt(
