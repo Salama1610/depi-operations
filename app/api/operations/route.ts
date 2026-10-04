@@ -787,7 +787,7 @@ export async function POST(req: Request) {
             group, "Open", "Scheduled. Waiting for the coordinator and the coach to confirm.", u.id, t,
           )),
           stmt(
-            "INSERT INTO sessions(id,group_id,coach_id,title,starts_at,session_day,duration_minutes,status,week,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO sessions(id,group_id,coach_id,title,starts_at,session_day,duration_minutes,status,week,updated_at,coordinator_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             id,
             x.group_id,
             x.coach_id || null,
@@ -798,6 +798,7 @@ export async function POST(req: Request) {
             "Scheduled",
             session.week,
             t,
+            group.coordinator,
           ),
         );
         break;
@@ -1077,6 +1078,83 @@ export async function POST(req: Request) {
           );
         else if (!done && existing)
           jobs.push(stmt("DELETE FROM session_checks WHERE id=?", existing.id));
+        break;
+      }
+      case "session_coach": {
+        // A different coach for one session only, such as a backup when the
+        // group's coach cannot come. It is Coach Operations' decision; they can
+        // name a coach already in the system or add a new one here. The other
+        // sessions, before and after, keep their coach, so payment follows
+        // who actually held each session.
+        permit(u, ["Coach Operations"]);
+        const session: any = await stmt("SELECT * FROM sessions WHERE id=?", id).first();
+        ensure(session && ["Scheduled", "Confirmed"].includes(session.status), "Only a session still to come can change its coach.");
+        ensure(Date.parse(session.starts_at) > Date.now(), "A session that has started keeps the coach who held it.");
+        ensure(x.reason?.trim().length >= 5, "Say why this session needs another coach.");
+        let coachId = String(x.coach_id || "").trim();
+        if (!coachId) {
+          // A new coach: their sign-in is their email and national ID, as for all staff.
+          const email = String(x.new_email || "").trim().toLowerCase();
+          const name = String(x.new_name || "").trim();
+          ensure(name && email.includes("@"), "Enter the new coach's name and email.");
+          const nationalId = normalizeNationalId(x.new_national_id);
+          ensure(isNationalId(nationalId), nationalIdProblem(x.new_national_id) || "Enter the new coach's 14-digit national ID; it is their first password.");
+          const existing: any = await stmt("SELECT * FROM users WHERE lower(email)=?", email).first();
+          ensure(!existing, "Someone with this email is already in the system; choose them from the list instead.");
+          ensure(!(await stmt("SELECT id FROM users WHERE trim(national_id)=?", nationalId).first()), "Another member of staff is recorded with this national ID.");
+          coachId = uid("USR");
+          jobs.push(
+            stmt(
+              "INSERT INTO users(id,email,name,roles,scopes,active,national_id,phone,title) VALUES(?,?,?,?,?,?,?,?,?)",
+              coachId,
+              email,
+              name,
+              JSON.stringify(["Coach"]),
+              "[]",
+              1,
+              nationalId,
+              normalizePhone(x.new_phone) || null,
+              "Backup Coach",
+            ),
+          );
+          signIn = { email, nationalId, name, active: true, reset: false };
+        } else {
+          const coach: any = await stmt("SELECT * FROM users WHERE id=? AND active=1", coachId).first();
+          ensure(coach && JSON.parse(coach.roles || "[]").includes("Coach"), "Choose an active coach.");
+        }
+        ensure(coachId !== session.coach_id, "This coach is already on the session.");
+        const clash: any = await stmt(
+          "SELECT group_id FROM sessions WHERE coach_id=? AND session_day=? AND status<>'Cancelled' AND id<>?",
+          coachId,
+          session.session_day,
+          id,
+        ).first();
+        ensure(!clash, `This coach already has a session that day (${clash?.group_id}).`);
+        auditPrevious = session;
+        jobs.push(
+          stmt(
+            "UPDATE sessions SET coach_id=?,coach_confirmed_at=NULL,coach_unavailable=NULL,status='Scheduled',confirmed_at=NULL,updated_at=? WHERE id=?",
+            coachId,
+            t,
+            id,
+          ),
+          // The backup coach can see the group's students, to take the session's attendance.
+          stmt(
+            `INSERT INTO group_coaches(id,group_id,user_id,coach_type,status,onboarding_status,checklist,assigned_by,assigned_at,onboarded_at)
+             VALUES(?,?,?,?,?,?,?,?,?,NULL)
+             ON CONFLICT(group_id,user_id,coach_type) DO UPDATE SET status='Active',assigned_by=excluded.assigned_by`,
+            uid("GC"),
+            session.group_id,
+            coachId,
+            "Backup Coach",
+            "Active",
+            "Pending",
+            "[]",
+            u.id,
+            t,
+          ),
+        );
+        auditValue = { session_id: id, from: session.coach_id, to: coachId, reason: x.reason.trim(), new_coach: !x.coach_id };
         break;
       }
       case "session_attendance": {

@@ -1165,6 +1165,39 @@ export async function POST(req: Request) {
           owner.id,
           ...groupIds,
         ));
+        // The new coach or coordinator takes the sessions still to come. Held
+        // sessions keep who held them, because that is what people are paid by.
+        if (x.owner_type === "Coordinator")
+          jobs.push(stmt(
+            `UPDATE sessions SET coordinator_id=?,coordinator_confirmed_at=NULL,coordinator_unavailable=NULL,updated_at=? WHERE group_id IN (${marks}) AND starts_at>? AND status IN ('Scheduled','Confirmed')`,
+            owner.id,
+            t,
+            ...groupIds,
+            t,
+          ));
+        if (x.owner_type === "Coach") {
+          const upcoming = await all(
+            `SELECT id,group_id,session_day,coach_id FROM sessions WHERE group_id IN (${marks}) AND starts_at>? AND status IN ('Scheduled','Confirmed')`,
+            ...groupIds,
+            t,
+          );
+          const moving = new Set(upcoming.map((s: any) => s.id));
+          for (const s of upcoming) {
+            const clash: any = await stmt(
+              "SELECT id,group_id FROM sessions WHERE coach_id=? AND session_day=? AND status<>'Cancelled'",
+              owner.id,
+              s.session_day,
+            ).first();
+            ensure(!clash || moving.has(clash.id), `${owner.name} already has a session on ${s.session_day} (${clash?.group_id}).`);
+          }
+          jobs.push(stmt(
+            `UPDATE sessions SET coach_id=?,coach_confirmed_at=NULL,coach_unavailable=NULL,status='Scheduled',confirmed_at=NULL,updated_at=? WHERE group_id IN (${marks}) AND starts_at>? AND status IN ('Scheduled','Confirmed')`,
+            owner.id,
+            t,
+            ...groupIds,
+            t,
+          ));
+        }
         // Naming the coach of a group is not the same as putting them to work:
         // a session and the first evidence review both need an onboarded
         // functional assignment, so the row is created here and the onboarding

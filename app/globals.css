@@ -895,3 +895,10 @@ input:focus-visible {
 .portal-gigs{background:#fff;border:1px solid #e3e9f2;border-radius:10px}
 .portal-more{margin-top:10px}
 .portal-history summary{cursor:pointer;font-weight:600;color:#5d7292}
+
+/* Sessions: the date filters, a coach's pay list, feedback scores. */
+.date-filter{min-width:150px}
+.date-filter input{border:1px solid #d9e2ef;border-radius:8px;padding:8px 10px;font:inherit}
+.pay-sessions summary{cursor:pointer;color:#315ce8;font-size:13px}
+.pay-sessions ul{margin:6px 0 0;padding-inline-start:18px;font-size:12px;color:#5d7292;max-height:220px;overflow-y:auto}
+.feedback-scores{font-weight:700;letter-spacing:.5px}

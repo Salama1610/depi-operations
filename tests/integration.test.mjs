@@ -2922,3 +2922,42 @@ test("leaders upload the portal's students and gigs sheets, which replace the la
   assert.match((await (await post({ action: "begin", sheet: "students", mapping: studentsMapping, total: 1 })).json()).error, /uploaded by supervisors/);
   current = { id: "owner", email: "owner@example.com" };
 });
+
+test("a backup coach takes one session, and a group's new coach or coordinator takes only the sessions to come", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  // The group with the most free weeks, and three of them.
+  const groups = await dbRows("SELECT g.id,g.coordinator,(SELECT count(*) FROM sessions t WHERE t.group_id=g.id AND t.status<>'Cancelled') n FROM groups g WHERE g.status='Active' ORDER BY n, g.id LIMIT 1");
+  const group = groups[0];
+  const taken = new Set((await dbRows("SELECT week FROM sessions WHERE group_id=? AND status<>'Cancelled'", group.id)).map((r) => Number(r.week)));
+  const [w1, w2, w3] = [1, 2, 3, 4, 5, 6, 7, 8].filter((w) => !taken.has(w));
+  const at = (days) => new Date(Date.now() + days * 86400000).toISOString();
+  await check("session", { id: "SES-PAY-PAST", group_id: group.id, title: "Held", starts_at: at(-10), week: w1, duration_minutes: 180, coach_id: "staff-coach" });
+  await check("session", { id: "SES-PAY-NEXT", group_id: group.id, title: "Next", starts_at: at(170), week: w2, duration_minutes: 180, coach_id: "staff-coach" });
+  await check("session", { id: "SES-PAY-LATER", group_id: group.id, title: "Later", starts_at: at(177), week: w3, duration_minutes: 180, coach_id: "staff-coach" });
+  assert.equal((await dbRow("SELECT coordinator_id FROM sessions WHERE id='SES-PAY-PAST'")).coordinator_id, group.coordinator, "a session remembers its coordinator");
+  // A backup coach for one session, created on the spot by Coach Operations.
+  current = { id: "staff-coach-ops", email: "staff-coach-ops@example.invalid" };
+  assert.match((await post("session_coach", { id: "SES-PAY-PAST", coach_id: "staff-support-coach", reason: "Cover" })).error, /has started keeps the coach/);
+  assert.match((await post("session_coach", { id: "SES-PAY-NEXT", new_name: "Backup Coach", new_email: "backup.coach@example.org", new_national_id: "123", reason: "Mariam is travelling" })).error, /national ID/i);
+  await check("session_coach", { id: "SES-PAY-NEXT", new_name: "Backup Coach", new_email: "backup.coach@example.org", new_national_id: "29901011234567", new_phone: "1012345678", reason: "Mariam is travelling" });
+  const backup = await dbRow("SELECT * FROM users WHERE email='backup.coach@example.org'");
+  assert.ok(JSON.parse(backup.roles).includes("Coach"));
+  assert.equal(backup.title, "Backup Coach");
+  assert.equal((await dbRow("SELECT coach_id FROM sessions WHERE id='SES-PAY-NEXT'")).coach_id, backup.id, "the backup holds that session");
+  assert.equal((await dbRow("SELECT coach_id FROM sessions WHERE id='SES-PAY-LATER'")).coach_id, "staff-coach", "the next one keeps its coach");
+  assert.ok(await dbRow("SELECT id FROM group_coaches WHERE group_id=? AND user_id=? AND coach_type='Backup Coach'", group.id, backup.id), "and can see the group to take attendance");
+  current = { id: "coach-login", email: "staff-coach@example.invalid" };
+  assert.match((await post("session_coach", { id: "SES-PAY-LATER", coach_id: "staff-support-coach", reason: "Swap" })).error, /role/);
+  // A new group coach and coordinator take the sessions to come; the held session keeps both.
+  current = { id: "owner", email: "owner@example.com" };
+  const coordinator = await dbRow("SELECT id FROM users WHERE roles LIKE '%Operations Coordinator%' AND id<>? AND active=1 LIMIT 1", group.coordinator);
+  await programCheck("bulk_group_owner", { group_ids: [group.id], owner_type: "Coordinator", owner: coordinator.id, reason: "New coordinator for the group" });
+  await programCheck("bulk_group_owner", { group_ids: [group.id], owner_type: "Coach", owner: "staff-support-coach", reason: "New coach for the group" });
+  const past = await dbRow("SELECT coach_id,coordinator_id FROM sessions WHERE id='SES-PAY-PAST'");
+  assert.equal(past.coach_id, "staff-coach", "the held session keeps the coach who held it");
+  assert.equal(past.coordinator_id, group.coordinator, "and its coordinator");
+  const later = await dbRow("SELECT coach_id,coordinator_id FROM sessions WHERE id='SES-PAY-LATER'");
+  assert.equal(later.coach_id, "staff-support-coach");
+  assert.equal(later.coordinator_id, coordinator.id);
+  await programCheck("bulk_group_owner", { group_ids: [group.id], owner_type: "Coordinator", owner: group.coordinator, reason: "Restore" });
+});

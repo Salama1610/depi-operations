@@ -161,6 +161,7 @@ const titles: Row = {
   staff: "Manage staff access",
   attendance: "Record attendance",
   account_topup: "Record a top-up",
+  session_coach: "Change the coach for one session",
   session_attendance: "Take attendance",
   milestone: "Update coaching milestone",
   transfer: "Transfer student",
@@ -374,6 +375,11 @@ export default function Operations({ module: initialModule }: { module: string }
     [checklistFor, setChecklistFor] = useState<string | null>(null),
     [feedbackFor, setFeedbackFor] = useState<string | null>(null),
     [accountFilters, setAccountFilters] = useState<Row>({ platform: "All", status: "All", request: "Open", ledger: "All" }),
+    [insightFilters, setInsightFilters] = useState<Row>({
+      group: "All", coach: "All", from: "", to: "", absentOnly: false,
+      rating: "All", searched: "All", commentsOnly: false,
+      month: new Date().toISOString().slice(0, 7), payee: "Coaches",
+    }),
     [sessionFilters, setSessionFilters] = useState<Row>({ day: "All", time: "All" }),
     [joinLogin, setJoinLogin] = useState<Row | null>(null);
   // A join login is shown for a minute, then forgotten.
@@ -1554,8 +1560,128 @@ export default function Operations({ module: initialModule }: { module: string }
       .filter((session) => sessionFilters.day === "All" || sessionDay(session) === sessionFilters.day)
       .filter((session) => sessionFilters.time === "All" || sessionTime(session) === sessionFilters.time)
       .sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+    // What happened in the sessions: attendance, feedback and who held them.
+    const ended = (x: Row) => x.status !== "Cancelled" && Date.parse(x.starts_at) + Number(x.duration_minutes || 180) * 60000 <= Date.now();
+    const inRange = (iso: string) =>
+      (!insightFilters.from || iso.slice(0, 10) >= insightFilters.from) && (!insightFilters.to || iso.slice(0, 10) <= insightFilters.to);
+    const insightSessions = sessions
+      .filter((x) => insightFilters.group === "All" || x.group_id === insightFilters.group)
+      .filter((x) => insightFilters.coach === "All" || x.coach_id === insightFilters.coach)
+      .filter((x) => inRange(x.starts_at));
+    const coachesSeen = Array.from(new Set(sessions.map((x) => x.coach_id).filter(Boolean))) as string[];
+    const insightFilterRow = (
+      <div className="filter-row">
+        <Pick label={t("Group")} value={insightFilters.group} onChange={(group) => setInsightFilters({ ...insightFilters, group })} options={[{ value: "All", label: t("Every group") }, ...groups.map((g) => ({ value: g.id, label: g.id }))]} />
+        <Pick label={t("Coach")} value={insightFilters.coach} onChange={(coach) => setInsightFilters({ ...insightFilters, coach })} options={[{ value: "All", label: t("Every coach") }, ...coachesSeen.map((id) => ({ value: id, label: owner(id) }))]} />
+        <label className="field date-filter">{t("From")}<input type="date" value={insightFilters.from} onChange={(e) => setInsightFilters({ ...insightFilters, from: e.target.value })} /></label>
+        <label className="field date-filter">{t("To")}<input type="date" value={insightFilters.to} onChange={(e) => setInsightFilters({ ...insightFilters, to: e.target.value })} /></label>
+      </div>
+    );
+
+    // Attendance: each held session's register, and the students missing sessions.
+    const heldSessions = insightSessions.filter(ended).sort((a, b) => b.starts_at.localeCompare(a.starts_at));
+    const registerOf = (x: Row) => {
+      const roster = rosterOf(x);
+      const marks = attendance.filter((a) => a.session_id === x.id);
+      const present = marks.filter((a) => a.status !== "Absent").length;
+      return { roster: roster.length, present, absent: marks.length - present, unmarked: Math.max(0, roster.length - marks.length) };
+    };
+    const registers = heldSessions.map((x) => ({ ...x, register: registerOf(x) }));
+    const marked = registers.reduce((n, x) => n + x.register.present + x.register.absent, 0);
+    const presentTotal = registers.reduce((n, x) => n + x.register.present, 0);
+    const studentAttendance = (() => {
+      const byStudent = new Map<string, Row>();
+      for (const x of heldSessions)
+        for (const st of rosterOf(x)) {
+          const row = byStudent.get(st.id) || { id: st.id, name: st.name, group_id: st.group_id, held: 0, present: 0, absent: 0, last: "" };
+          row.held += 1;
+          const mark = attendance.find((a) => a.session_id === x.id && a.student_id === st.id);
+          if (mark?.status === "Absent") row.absent += 1;
+          else if (mark) {
+            row.present += 1;
+            if (x.starts_at > row.last) row.last = x.starts_at;
+          }
+          byStudent.set(st.id, row);
+        }
+      return Array.from(byStudent.values())
+        .filter((r) => !insightFilters.absentOnly || r.absent > 0)
+        .sort((a, b) => b.absent - a.absent || a.name.localeCompare(b.name));
+    })();
+
+    // Feedback, filtered.
+    const feedbackRows = (d.sessionFeedback || [])
+      .map((f: Row) => ({ ...f, session: sessions.find((x) => x.id === f.session_id) }))
+      .filter((f: Row) => f.session && insightSessions.some((x) => x.id === f.session_id))
+      .filter((f: Row) => insightFilters.rating === "All" || (insightFilters.rating === "Low" ? Number(f.satisfaction) <= 2 : Number(f.satisfaction) >= 4))
+      .filter((f: Row) => insightFilters.searched === "All" || (insightFilters.searched === "Yes") === (Number(f.searched_gig) === 1 || f.searched_gig === true))
+      .filter((f: Row) => !insightFilters.commentsOnly || f.liked || f.comments)
+      .sort((a: Row, b: Row) => String(b.created_at).localeCompare(String(a.created_at)));
+    const byCoach = Object.values(
+      feedbackRows.reduce((out: Row, f: Row) => {
+        const id = f.session.coach_id || "none";
+        (out[id] ||= { coach: id, rows: [] as Row[] }).rows.push(f);
+        return out;
+      }, {} as Row),
+    ) as Row[];
+
+    // Sessions held, for paying coaches and coordinators: each session counts
+    // for the coach and coordinator it had when it was held.
+    const payMonth = insightFilters.month;
+    const paySessions = sessions.filter(ended).filter((x) => payMonth === "All" || x.starts_at.slice(0, 7) === payMonth);
+    const verified = (x: Row) => {
+      const st = checklistOf(x);
+      return Boolean(st.attendance_taken?.done || st.instructor_entered?.done);
+    };
+    const payRows = Object.values(
+      paySessions.reduce((out: Row, x: Row) => {
+        const id = (insightFilters.payee === "Coordinators" ? x.coordinator_id : x.coach_id) || "none";
+        const row = (out[id] ||= { person: id, sessions: [] as Row[] });
+        row.sessions.push(x);
+        return out;
+      }, {} as Row),
+    )
+      .map((r: Row) => ({
+        ...r,
+        held: r.sessions.length,
+        verified: r.sessions.filter(verified).length,
+        hours: r.sessions.reduce((n: number, x: Row) => n + Number(x.duration_minutes || 180) / 60, 0),
+        groups: new Set(r.sessions.map((x: Row) => x.group_id)).size,
+      }))
+      .sort((a: Row, b: Row) => b.held - a.held) as Row[];
+    const months = Array.from(new Set(sessions.filter(ended).map((x) => x.starts_at.slice(0, 7)))).sort().reverse();
+    const downloadPay = () => {
+      const lines = [["Person", "Role", "Sessions held", "Verified", "Hours", "Groups", "Session dates"].join(",")];
+      for (const r of payRows)
+        lines.push(
+          [
+            owner(r.person),
+            insightFilters.payee === "Coordinators" ? "Coordinator" : "Coach",
+            r.held,
+            r.verified,
+            r.hours,
+            r.groups,
+            r.sessions.map((x: Row) => `${x.starts_at.slice(0, 10)} ${x.group_id} W${x.week}`).join("; "),
+          ]
+            .map((v) => `"${String(v).replace(/"/g, '""')}"`)
+            .join(","),
+        );
+      const blob = new Blob(["\ufeff" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `sessions-held-${insightFilters.payee.toLowerCase()}-${payMonth}.csv`;
+      a.click();
+    };
+    const paysPeople = can(user.roles, ["Coach Operations", "Project Operations", "Higher Board", "Operations Systems / Admin"]);
+
     content = (
-      <>
+      <Tabs defaultValue="schedule">
+        <TabsList>
+          <TabsTrigger value="schedule">{t("Schedule")}</TabsTrigger>
+          <TabsTrigger value="attendance">{t("Attendance")}</TabsTrigger>
+          <TabsTrigger value="feedback">{t("Feedback")} <span className="count">{(d.sessionFeedback || []).length}</span></TabsTrigger>
+          {paysPeople && <TabsTrigger value="pay">{t("Sessions held")}</TabsTrigger>}
+        </TabsList>
+        <TabsContent value="schedule">
         <div className="mini-stats session-stats">
           <span>
             <strong>
@@ -1789,11 +1915,161 @@ export default function Operations({ module: initialModule }: { module: string }
                 {t("Attendance")}
               </button>
             )}
+            {can(user.roles, ["Coach Operations", "Operations Systems / Admin"]) &&
+              ["Scheduled", "Confirmed"].includes(r.status) &&
+              Date.parse(r.starts_at) > Date.now() && (
+                <button className="small-btn" onClick={() => open("session_coach", { ...r, mode: "existing", coach_id: "" })}>
+                  {t("Change coach")}
+                </button>
+              )}
           </div>
             ),
           ),
         )}
-      </>
+        </TabsContent>
+        <TabsContent value="attendance">
+          {insightFilterRow}
+          <div className="filter-row">
+            <label className="check"><Checkbox checked={insightFilters.absentOnly} onCheckedChange={(v) => setInsightFilters({ ...insightFilters, absentOnly: v === true })} />{t("Only students who missed a session")}</label>
+          </div>
+          <div className="mini-stats">
+            <span><strong>{marked ? Math.round((100 * presentTotal) / marked) : 0}%</strong>{t("Attendance rate")}</span>
+            <span><strong>{heldSessions.length}</strong>{t("Sessions held")}</span>
+            <span className={registers.some((x) => x.register.unmarked > 0) ? "is-warning" : ""}><strong>{registers.filter((x) => x.register.unmarked > 0).length}</strong>{t("Registers not complete")}</span>
+            <span><strong>{studentAttendance.filter((r) => r.absent >= 2).length}</strong>{t("Students absent twice or more")}</span>
+          </div>
+          {panel(
+            t("Session registers"),
+            registers.length
+              ? generic(
+                  registers,
+                  [
+                    { key: "starts_at", label: t("Date"), render: (x) => <span>{fmt(x.starts_at)}<small className="table-subline">{t("Week {v0}", { v0: x.week })}</small></span> },
+                    { key: "group_id", label: t("Group") },
+                    { key: "coach_id", label: t("Coach"), render: (x) => owner(x.coach_id) },
+                    { key: "present", label: t("Attended"), render: (x) => x.register.present },
+                    { key: "absent", label: t("Absent"), render: (x) => x.register.absent },
+                    { key: "unmarked", label: t("Not marked"), render: (x) => (x.register.unmarked ? <strong className="credit-out">{x.register.unmarked}</strong> : 0) },
+                    { key: "rate", label: t("Rate"), render: (x) => (x.register.present + x.register.absent ? Math.round((100 * x.register.present) / (x.register.present + x.register.absent)) + "%" : "—") },
+                  ],
+                  (x) => (takesAttendance(x) ? <button className="small-btn" onClick={() => openAttendance(x)}>{x.register.unmarked ? t("Take attendance") : t("Edit")}</button> : null),
+                )
+              : <Empty title={t("No session has been held in this period")} />,
+          )}
+          {panel(
+            t("Students' attendance"),
+            studentAttendance.length
+              ? generic(
+                  studentAttendance.slice(0, 300),
+                  [
+                    { key: "name", label: t("Student"), render: (r) => <span><strong>{r.name}</strong><small className="table-subline">{r.group_id}</small></span> },
+                    { key: "present", label: t("Attended"), render: (r) => `${r.present}/${r.held}` },
+                    { key: "absent", label: t("Absent"), render: (r) => (r.absent >= 2 ? <Badge value={t("{v0} absences", { v0: r.absent })} /> : r.absent) },
+                    { key: "rate", label: t("Rate"), render: (r) => (r.present + r.absent ? Math.round((100 * r.present) / (r.present + r.absent)) + "%" : "—") },
+                    { key: "last", label: t("Last attended"), render: (r) => (r.last ? fmt(r.last) : "—") },
+                  ],
+                  (r) => <button className="small-btn" onClick={() => setSelected(students.find((x) => x.id === r.id) || null)}>{t("Open student")}</button>,
+                )
+              : <Empty title={t("No attendance to show")} />,
+          )}
+        </TabsContent>
+        <TabsContent value="feedback">
+          {insightFilterRow}
+          <div className="filter-row">
+            <Pick label={t("Satisfaction")} value={insightFilters.rating} onChange={(rating) => setInsightFilters({ ...insightFilters, rating })} options={[{ value: "All", label: t("Any rating") }, { value: "Low", label: t("Low (1–2)") }, { value: "High", label: t("High (4–5)") }]} />
+            <Pick label={t("Searched for a gig")} value={insightFilters.searched} onChange={(searched) => setInsightFilters({ ...insightFilters, searched })} options={[{ value: "All", label: t("Either") }, { value: "Yes", label: t("Yes") }, { value: "No", label: t("No") }]} />
+            <label className="check"><Checkbox checked={insightFilters.commentsOnly} onCheckedChange={(v) => setInsightFilters({ ...insightFilters, commentsOnly: v === true })} />{t("Only with written comments")}</label>
+          </div>
+          <div className="mini-stats">
+            <span><strong>{feedbackRows.length}</strong>{t("Responses")}</span>
+            <span><strong>{average(feedbackRows, "satisfaction")}</strong>{t("Satisfaction")}</span>
+            <span><strong>{average(feedbackRows, "clarity")}</strong>{t("Coach's clarity")}</span>
+            <span><strong>{average(feedbackRows, "usefulness")}</strong>{t("Mentorship usefulness")}</span>
+            <span><strong>{feedbackRows.length ? Math.round((100 * feedbackRows.filter((f: Row) => Number(f.searched_gig) === 1 || f.searched_gig === true).length) / feedbackRows.length) : 0}%</strong>{t("Searched for a gig")}</span>
+          </div>
+          {panel(
+            t("By coach"),
+            byCoach.length
+              ? generic(
+                  byCoach.sort((a, b) => b.rows.length - a.rows.length),
+                  [
+                    { key: "coach", label: t("Coach"), render: (r) => owner(r.coach) },
+                    { key: "sessions", label: t("Sessions"), render: (r) => new Set(r.rows.map((f: Row) => f.session_id)).size },
+                    { key: "responses", label: t("Responses"), render: (r) => r.rows.length },
+                    { key: "satisfaction", label: t("Satisfaction"), render: (r) => average(r.rows, "satisfaction") },
+                    { key: "clarity", label: t("Coach's clarity"), render: (r) => average(r.rows, "clarity") },
+                    { key: "usefulness", label: t("Mentorship usefulness"), render: (r) => average(r.rows, "usefulness") },
+                  ],
+                )
+              : <Empty title={t("No feedback in this view")} />,
+          )}
+          {panel(
+            t("Responses"),
+            feedbackRows.length
+              ? generic(
+                  feedbackRows.slice(0, 300),
+                  [
+                    { key: "created_at", label: t("Date"), render: (f) => <span>{fmt(f.session.starts_at)}<small className="table-subline">{f.session.group_id} · {t("Week {v0}", { v0: f.session.week })}</small></span> },
+                    { key: "coach", label: t("Coach"), render: (f) => owner(f.session.coach_id) },
+                    { key: "student_id", label: t("Student"), render: (f) => name(f.student_id) },
+                    { key: "ratings", label: t("Ratings"), render: (f) => <span className="feedback-scores" title={t("Satisfaction · clarity · usefulness")}>{f.satisfaction} · {f.clarity} · {f.usefulness}</span> },
+                    { key: "searched_gig", label: t("Searched for a gig"), render: (f) => (Number(f.searched_gig) === 1 || f.searched_gig === true ? t("Yes") : t("No")) },
+                    { key: "liked", label: t("Liked most"), render: (f) => <small>{f.liked || "—"}</small> },
+                    { key: "comments", label: t("Comments or support needed"), render: (f) => <small>{f.comments || "—"}</small> },
+                  ],
+                )
+              : <Empty title={t("No feedback in this view")} />,
+          )}
+        </TabsContent>
+        {paysPeople && (
+          <TabsContent value="pay">
+            <div className="filter-row">
+              <Pick label={t("Month")} value={payMonth} onChange={(month) => setInsightFilters({ ...insightFilters, month })} options={[{ value: "All", label: t("All time") }, ...months.map((m) => ({ value: m, label: m }))]} />
+              <Pick label={t("Paying")} value={insightFilters.payee} onChange={(payee) => setInsightFilters({ ...insightFilters, payee })} options={[{ value: "Coaches", label: t("Coaches") }, { value: "Coordinators", label: t("Coordinators") }]} />
+              <button className="small-btn" disabled={!payRows.length} onClick={downloadPay}>{t("Download CSV")}</button>
+            </div>
+            <p className="footnote">
+              {t("A session counts once it has ended and was not cancelled, for the coach and coordinator it had at the time; changing a group's coach or coordinator later does not move it. Verified means its attendance was taken or the instructor was marked as entered.")}
+            </p>
+            <div className="mini-stats">
+              <span><strong>{paySessions.length}</strong>{t("Sessions held")}</span>
+              <span><strong>{paySessions.filter(verified).length}</strong>{t("Verified")}</span>
+              <span><strong>{payRows.length}</strong>{insightFilters.payee === "Coordinators" ? t("Coordinators") : t("Coaches")}</span>
+            </div>
+            {panel(
+              insightFilters.payee === "Coordinators" ? t("Sessions held per coordinator") : t("Sessions held per coach"),
+              payRows.length
+                ? generic(
+                    payRows,
+                    [
+                      { key: "person", label: insightFilters.payee === "Coordinators" ? t("Coordinator") : t("Coach"), render: (r) => <strong>{r.person === "none" ? t("Not assigned") : owner(r.person)}</strong> },
+                      { key: "held", label: t("Sessions held"), render: (r) => <strong>{r.held}</strong> },
+                      { key: "verified", label: t("Verified"), render: (r) => (r.verified < r.held ? <span>{r.verified}<small className="table-subline credit-out">{t("{v0} not verified", { v0: r.held - r.verified })}</small></span> : r.verified) },
+                      { key: "hours", label: t("Hours"), render: (r) => r.hours },
+                      { key: "groups", label: t("Groups"), render: (r) => r.groups },
+                      {
+                        key: "dates",
+                        label: t("Sessions"),
+                        render: (r) => (
+                          <details className="pay-sessions">
+                            <summary>{t("{v0} sessions", { v0: r.held })}</summary>
+                            <ul>
+                              {r.sessions
+                                .sort((a: Row, b: Row) => a.starts_at.localeCompare(b.starts_at))
+                                .map((x: Row) => (
+                                  <li key={x.id}>{fmt(x.starts_at)} · {x.group_id} · {t("Week {v0}", { v0: x.week })}{verified(x) ? " ✓" : ""}</li>
+                                ))}
+                            </ul>
+                          </details>
+                        ),
+                      },
+                    ],
+                  )
+                : <Empty title={t("No session has been held in this period")} />,
+            )}
+          </TabsContent>
+        )}
+      </Tabs>
     );
   } else if (module === "portal") {
     content = <PortalView staffName={owner} />;
@@ -3876,6 +4152,40 @@ export default function Operations({ module: initialModule }: { module: string }
                 );
               if (a === "session_cancel")
                 return <>{field("reason", t("Reason for cancellation"))}</>;
+              if (a === "session_coach") {
+                const coaches = staff
+                  .filter((u: Row) => {
+                    const held = Array.isArray(u.roles) ? u.roles : JSON.parse(u.roles || "[]");
+                    return held.includes("Coach") && u.active !== false && u.active !== 0 && u.id !== modal!.coach_id;
+                  })
+                  .sort((a: Row, b: Row) => String(a.name).localeCompare(String(b.name)));
+                return (
+                  <>
+                    <div className="info-box">
+                      <strong>{modal!.title}</strong>
+                      <small>{modal!.group_id} · {fmt(modal!.starts_at)} · {t("now")}: {owner(modal!.coach_id)}</small>
+                    </div>
+                    <p className="footnote">{t("Only this session changes coach. The sessions before and after it keep theirs, so each session is paid to the coach who held it.")}</p>
+                    {choice("mode", t("Coach for this session"), [
+                      { value: "existing", label: t("A coach already in the system") },
+                      { value: "new", label: t("A new coach") },
+                    ])}
+                    {form.mode === "new" ? (
+                      <>
+                        {field("new_name", t("Full name"))}
+                        {field("new_email", t("Email"), "email")}
+                        <div className="form-grid">
+                          {field("new_national_id", t("National ID (their first password)"))}
+                          {field("new_phone", t("Phone"), "text", false)}
+                        </div>
+                      </>
+                    ) : (
+                      choice("coach_id", t("Coach"), coaches.map((c: Row) => ({ value: c.id, label: c.name + (c.title ? " · " + c.title : "") })))
+                    )}
+                    {field("reason", t("Why this session needs another coach"))}
+                  </>
+                );
+              }
               if (a === "session_attendance") {
                 const roster = rosterOf(modal!);
                 const marks: Row = form.marks || {};

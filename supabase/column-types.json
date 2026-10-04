@@ -206,7 +206,8 @@
     "coordinator_confirmed_at": "timestamptz",
     "coach_confirmed_at": "timestamptz",
     "coordinator_unavailable": "text",
-    "coach_unavailable": "text"
+    "coach_unavailable": "text",
+    "coordinator_id": "text"
   },
   "attendance": {
     "id": "text",
