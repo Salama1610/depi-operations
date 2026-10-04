@@ -16,18 +16,32 @@
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-export function credentialKeyConfigured(hex: string | undefined) {
-  return /^[a-fA-F0-9]{64}$/.test(String(hex ?? ""));
+/**
+ * The 32 key bytes, from 64 hexadecimal characters or from base64 (the form
+ * `openssl rand -base64 32` produces, and the one the deployment was given).
+ */
+function keyBytes(value: string | undefined): Uint8Array | null {
+  const text = String(value ?? "").trim();
+  if (/^[a-fA-F0-9]{64}$/.test(text)) return Uint8Array.from(text.match(/../g)!, (pair) => parseInt(pair, 16));
+  if (/^[A-Za-z0-9+/]{43}=$/.test(text)) {
+    const bytes = fromBase64(text);
+    return bytes.length === 32 ? bytes : null;
+  }
+  return null;
 }
 
-export async function credentialKey(hex: string | undefined): Promise<CryptoKey> {
-  if (!credentialKeyConfigured(hex)) {
+export function credentialKeyConfigured(value: string | undefined) {
+  return keyBytes(value) !== null;
+}
+
+export async function credentialKey(value: string | undefined): Promise<CryptoKey> {
+  const bytes = keyBytes(value);
+  if (!bytes) {
     throw new Error(
-      "Configure CREDENTIAL_ENCRYPTION_KEY with a 32-byte hexadecimal key before storing marketplace credentials.",
+      "Configure CREDENTIAL_ENCRYPTION_KEY with a 32-byte key (64 hexadecimal characters or base64) before storing credentials.",
     );
   }
-  const bytes = Uint8Array.from(String(hex).match(/../g)!, (pair) => parseInt(pair, 16));
-  return crypto.subtle.importKey("raw", bytes, "AES-GCM", false, ["encrypt", "decrypt"]);
+  return crypto.subtle.importKey("raw", bytes as BufferSource, "AES-GCM", false, ["encrypt", "decrypt"]);
 }
 
 function toBase64(bytes: Uint8Array) {

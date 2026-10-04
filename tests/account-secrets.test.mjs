@@ -12,8 +12,13 @@ import {
 
 const KEY = "b".repeat(64);
 
-test("a key is required, and must be 32 bytes of hexadecimal", async () => {
+test("a key is required, and must be 32 bytes in hexadecimal or base64", async () => {
   assert.equal(credentialKeyConfigured(KEY), true);
+  const base64 = Buffer.alloc(32, 7).toString("base64");
+  assert.equal(credentialKeyConfigured(base64), true, "the base64 form openssl produces");
+  assert.equal(credentialKeyConfigured(Buffer.alloc(16, 7).toString("base64")), false, "16 bytes is too short");
+  const sealed = await sealCredential(await credentialKey(base64), "ACC-B64", "user", "pass");
+  assert.equal((await openCredential(await credentialKey(base64), "ACC-B64", sealed)).password, "pass");
   assert.equal(credentialKeyConfigured(undefined), false);
   assert.equal(credentialKeyConfigured(""), false);
   assert.equal(credentialKeyConfigured("short"), false);
