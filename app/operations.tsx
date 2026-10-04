@@ -368,6 +368,7 @@ export default function Operations({ module: initialModule }: { module: string }
     [submissionFilters, setSubmissionFilters] = useState<Row>({ state: "All", track: "All", group: "All", coordinator: "All" }),
     [saved, setSaved] = useState<string[]>([]),
     [checklistFor, setChecklistFor] = useState<string | null>(null),
+    [feedbackFor, setFeedbackFor] = useState<string | null>(null),
     [sessionFilters, setSessionFilters] = useState<Row>({ day: "All", time: "All" });
   async function refresh() {
     try {
@@ -955,6 +956,10 @@ export default function Operations({ module: initialModule }: { module: string }
         ));
   const answersAsCoordinator = (r: Row) =>
     can(user.roles, ["Operations Coordinator"]) && sessionGroupOf(r)?.coordinator === user.id;
+  // Students' feedback on a session, and an average of one of its ratings.
+  const feedbackOf = (sessionId: string) => (d.sessionFeedback || []).filter((f: Row) => f.session_id === sessionId);
+  const average = (rows: Row[], key: string) =>
+    rows.length ? (rows.reduce((n, r) => n + Number(r[key] || 0), 0) / rows.length).toFixed(1) : "—";
   // A session's register: its group's active students, by name.
   const rosterOf = (r: Row) =>
     (d.students || [])
@@ -1603,6 +1608,20 @@ export default function Operations({ module: initialModule }: { module: string }
                 <button className="text-link" onClick={() => setChecklistFor(r.id)}>
                   {steps.some((x) => x.flagged) ? "⚠ " : ""}
                   {done} / {steps.length}
+                </button>
+              );
+            },
+          },
+          {
+            key: "feedback",
+            label: t("Feedback"),
+            render: (r) => {
+              const given = feedbackOf(r.id);
+              if (!given.length) return Date.parse(r.starts_at) <= Date.now() && r.status !== "Cancelled" ? <small>{t("None yet")}</small> : "—";
+              return (
+                <button className="text-link" onClick={() => setFeedbackFor(r.id)}>
+                  ★ {average(given, "satisfaction")}
+                  <small className="table-subline">{t("{v0} responses", { v0: given.length })}</small>
                 </button>
               );
             },
@@ -3271,13 +3290,13 @@ export default function Operations({ module: initialModule }: { module: string }
                             <span>
                               {t(item.label)}
                               {item.fromWeek ? <small className="table-subline">{t("From the second session")}</small> : null}
-                              {item.owner === "auto" ? (
-                                <small className="table-subline">
-                                  {st.flagged ? `⚠ ${t("Unavailable")}: ${st.flagged}` : t("Filled in automatically")}
-                                </small>
+                              {st.flagged ? (
+                                <small className="table-subline">⚠ {t("Unavailable")}: {st.flagged}</small>
+                              ) : item.owner === "auto" ? (
+                                <small className="table-subline">{t("Filled in automatically")}</small>
                               ) : st.done ? (
                                 <small className="table-subline">
-                                  {owner(st.by || "")} · {st.at ? new Date(st.at).toLocaleString(locale === "ar" ? "ar-EG" : "en-GB", { timeZone: "Africa/Cairo", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}
+                                  {st.by ? owner(st.by) : t("The coach confirmed")} · {st.at ? new Date(st.at).toLocaleString(locale === "ar" ? "ar-EG" : "en-GB", { timeZone: "Africa/Cairo", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}
                                 </small>
                               ) : (
                                 <small className="table-subline">{item.owner === "coach" ? t("Coach") : t("Coordinator")}</small>
@@ -3288,6 +3307,43 @@ export default function Operations({ module: initialModule }: { module: string }
                       })}
                   </div>
                 ))}
+            </DialogContent>
+          </Dialog>
+        );
+      })()}
+      {(() => {
+        const r = feedbackFor ? (d.sessions || []).find((x: Row) => x.id === feedbackFor) : null;
+        const rows: Row[] = r ? feedbackOf(r.id) : [];
+        const searched = rows.filter((f) => Number(f.searched_gig) === 1 || f.searched_gig === true).length;
+        return (
+          <Dialog open={!!r} onOpenChange={(v) => !v && setFeedbackFor(null)}>
+            <DialogContent className="action-dialog sm:max-w-[620px] max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>{t("Session feedback")}</DialogTitle>
+                <DialogDescription>
+                  {r ? `${r.title} · ${r.group_id} · ${owner(r.coach_id)} · ${t("{v0} responses", { v0: rows.length })}` : ""}
+                </DialogDescription>
+              </DialogHeader>
+              {r && (
+                <>
+                  <div className="mini-stats">
+                    <span><strong>{average(rows, "satisfaction")}</strong>{t("Satisfaction")}</span>
+                    <span><strong>{average(rows, "clarity")}</strong>{t("Coach's clarity")}</span>
+                    <span><strong>{average(rows, "usefulness")}</strong>{t("Mentorship usefulness")}</span>
+                    <span><strong>{rows.length ? Math.round((100 * searched) / rows.length) : 0}%</strong>{t("Searched for a gig")}</span>
+                  </div>
+                  <div className="feedback-comments">
+                    {rows.filter((f) => f.liked || f.comments).map((f) => (
+                      <div className="info-box" key={f.id}>
+                        <strong>{name(f.student_id)}</strong>
+                        {f.liked && <span><small>{t("Liked most:")}</small> {f.liked}</span>}
+                        {f.comments && <span><small>{t("Comments or support needed:")}</small> {f.comments}</span>}
+                      </div>
+                    ))}
+                    {!rows.some((f) => f.liked || f.comments) && <Empty title={t("No written comments")} />}
+                  </div>
+                </>
+              )}
             </DialogContent>
           </Dialog>
         );

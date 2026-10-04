@@ -104,10 +104,83 @@ function submissionStatus(studentId: string, t: string, completedAt: "now" | "la
   );
 }
 
+/**
+ * The student's group sessions that have ended, newest first, each with
+ * whether the student has given feedback on it yet.
+ */
+async function sessionsForFeedback(studentId: string) {
+  const learner: any = await stmt("SELECT group_id FROM students WHERE id=?", studentId).first();
+  if (!learner?.group_id) return [];
+  const rows = await all(
+    `SELECT t.id,t.title,t.week,t.starts_at,t.duration_minutes,u.name coach_name,
+            (SELECT f.id FROM session_feedback f WHERE f.session_id=t.id AND f.student_id=?) feedback_id
+     FROM sessions t LEFT JOIN users u ON u.id=t.coach_id
+     WHERE t.group_id=? AND t.status<>'Cancelled' AND t.starts_at<=?
+     ORDER BY t.starts_at DESC LIMIT 20`,
+    studentId,
+    learner.group_id,
+    now(),
+  );
+  return rows
+    .filter((r: any) => Date.parse(r.starts_at) + Number(r.duration_minutes || 180) * 60000 <= Date.now())
+    .map((r: any) => ({
+      id: r.id,
+      title: r.title,
+      week: r.week,
+      starts_at: r.starts_at,
+      coach_name: r.coach_name && !/unassigned/i.test(r.coach_name) ? r.coach_name : null,
+      given: Boolean(r.feedback_id),
+    }));
+}
+
+const rating = (value: unknown, question: string) => {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1 || n > 5) throw new Error(`Answer "${question}" from 1 to 5.`);
+  return n;
+};
+
+/** A student's feedback on a session they had: once per session, after it ended. */
+async function sessionFeedback(x: any) {
+  const s = await currentStudent();
+  await rateLimit("session-feedback:" + s.id, 30, 60);
+  const session: any = await stmt("SELECT * FROM sessions WHERE id=?", x.session_id).first();
+  if (!session || session.group_id !== s.group_id) throw new Error("This session is not one of your group's.");
+  if (session.status === "Cancelled") throw new Error("This session was cancelled.");
+  if (Date.parse(session.starts_at) + Number(session.duration_minutes || 180) * 60000 > Date.now())
+    throw new Error("Feedback opens once the session has ended.");
+  if (await stmt("SELECT id FROM session_feedback WHERE session_id=? AND student_id=?", session.id, s.id).first())
+    throw new Error("You have already given feedback on this session.");
+  if (typeof x.searched_gig !== "boolean") throw new Error('Answer "Did you search for a gig through platforms?"');
+  const text = (value: unknown) => String(value || "").trim().slice(0, 1000) || null;
+  const t = now();
+  await db().batch([
+    stmt(
+      "INSERT INTO session_feedback(id,session_id,student_id,satisfaction,clarity,searched_gig,usefulness,liked,comments,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+      uid("SFB"),
+      session.id,
+      s.id,
+      rating(x.satisfaction, "How satisfied are you with today's session?"),
+      rating(x.clarity, "How clear was the coach's explanation?"),
+      x.searched_gig ? 1 : 0,
+      rating(x.usefulness, "How useful was today's mentorship for you?"),
+      text(x.liked),
+      text(x.comments),
+      t,
+    ),
+    auditStmt(s, "Session feedback", session.id, { satisfaction: x.satisfaction, clarity: x.clarity, usefulness: x.usefulness }, null, uid("REQ")),
+  ]);
+  return Response.json({ ok: true, sessions: await sessionsForFeedback(s.id) });
+}
+
 export async function GET() {
   try {
     const s = await currentStudent();
-    return Response.json({ ok: true, student: { id: s.id, name: s.name, email: s.email }, ...(await studentView(s.id)) });
+    return Response.json({
+      ok: true,
+      student: { id: s.id, name: s.name, email: s.email },
+      ...(await studentView(s.id)),
+      feedback_sessions: await sessionsForFeedback(s.id),
+    });
   } catch (e: any) {
     return Response.json({ error: e.message }, { status: 403 });
   }
@@ -124,6 +197,7 @@ export async function POST(req: Request) {
     }
     const x = await req.json();
     if (x.action === "qc_review") return await qcReview(x);
+    if (x.action === "session_feedback") return await sessionFeedback(x);
     if (x.action !== "submit_services") throw new Error("Choose a service-link action.");
     const s = await currentStudent();
     await rateLimit("student-services:" + s.id, 30, 60);

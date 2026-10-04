@@ -2737,3 +2737,36 @@ test("rescheduling a session moves the group from it on, and only Coach Operatio
   assert.equal(JSON.parse(audit.value).moved.length, 2);
   current = { id: "owner", email: "owner@example.com" };
 });
+
+test("students give feedback after each session, once, and the group's people see it", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const group = await dbRow("SELECT g.id,u.id uid,u.email FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.status='Active' AND g.id NOT IN (SELECT group_id FROM sessions WHERE week IN (7,8)) AND EXISTS (SELECT 1 FROM students s WHERE s.group_id=g.id AND s.lifecycle='Active' AND s.email IS NOT NULL) LIMIT 1");
+  const learner = await dbRow("SELECT id,email FROM students WHERE group_id=? AND lifecycle='Active' AND email IS NOT NULL LIMIT 1", group.id);
+  await check("session", { id: "SES-FB-DONE", group_id: group.id, title: "Week 7 coaching", starts_at: new Date(Date.now() - 5 * 3600000).toISOString(), week: 7, duration_minutes: 180 });
+  await check("session", { id: "SES-FB-LATER", group_id: group.id, title: "Week 8 coaching", starts_at: new Date(Date.now() + 160 * 86400000).toISOString(), week: 8, duration_minutes: 180 });
+  const servicesApi = await route("student-services");
+  const send = (body) => servicesApi.POST(new Request("https://test.local/api/student-services", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
+  const answers = { satisfaction: 5, clarity: 4, searched_gig: true, usefulness: 5, liked: "Pricing a first gig", comments: "More time on proposals" };
+  current = { id: learner.id, email: learner.email };
+  const view = await (await servicesApi.GET()).json();
+  const listed = view.feedback_sessions.map((s) => s.id);
+  assert.ok(listed.includes("SES-FB-DONE"), "an ended session asks for feedback");
+  assert.ok(!listed.includes("SES-FB-LATER"), "a future one does not");
+  assert.match((await (await send({ action: "session_feedback", session_id: "SES-FB-LATER", ...answers })).json()).error, /once the session has ended/);
+  assert.match((await (await send({ action: "session_feedback", session_id: "SES-FB-DONE", ...answers, clarity: 7 })).json()).error, /from 1 to 5/);
+  assert.match((await (await send({ action: "session_feedback", session_id: "SES-FB-DONE", ...answers, searched_gig: undefined })).json()).error, /search for a gig/);
+  const r = await send({ action: "session_feedback", session_id: "SES-FB-DONE", ...answers });
+  assert.equal(r.status, 200, await r.clone().text());
+  assert.ok((await r.json()).sessions.find((s) => s.id === "SES-FB-DONE").given);
+  assert.match((await (await send({ action: "session_feedback", session_id: "SES-FB-DONE", ...answers })).json()).error, /already given feedback/);
+  const row = await dbRow("SELECT * FROM session_feedback WHERE session_id='SES-FB-DONE'");
+  assert.equal(row.student_id, learner.id);
+  assert.equal(Number(row.searched_gig), 1);
+  assert.equal(row.comments, "More time on proposals");
+  // The group's coordinator sees it in their workspace.
+  current = { id: group.uid, email: group.email };
+  const data = await (await api.GET()).json();
+  assert.ok(data.sessionFeedback.some((f) => f.session_id === "SES-FB-DONE"));
+  current = { id: "owner", email: "owner@example.com" };
+});

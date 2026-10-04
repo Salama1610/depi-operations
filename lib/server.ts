@@ -367,6 +367,7 @@ export async function loadData(u: any) {
     accounts,
     staff,
     sessionChecks,
+    sessionFeedback,
   ] = await Promise.all([
     all(
       `SELECT g.*,c.name coordinator_name,s.name supervisor_name,h.name coach_name,m.name account_manager_name FROM groups g JOIN users c ON c.id=g.coordinator JOIN users s ON s.id=g.supervisor JOIN users h ON h.id=g.coach LEFT JOIN users m ON m.id=g.account_manager WHERE ${qg.sql}`,
@@ -522,6 +523,11 @@ export async function loadData(u: any) {
     ),
     all(
       `SELECT c.* FROM session_checks c JOIN sessions t ON t.id=c.session_id JOIN groups g ON g.id=t.group_id WHERE ${qg.sql}`,
+      ...qg.args,
+    ),
+    // Students' feedback after their sessions, for the people who run the group.
+    all(
+      `SELECT f.* FROM session_feedback f JOIN sessions t ON t.id=f.session_id JOIN groups g ON g.id=t.group_id WHERE ${qg.sql}`,
       ...qg.args,
     ),
   ]);
@@ -706,6 +712,7 @@ export async function loadData(u: any) {
     reviews,
     sessions,
     sessionChecks,
+    sessionFeedback,
     groupCoaches,
     taskBank,
     savedViews,

@@ -646,5 +646,17 @@
     "item": "text",
     "done_by": "text",
     "done_at": "timestamptz"
+  },
+  "session_feedback": {
+    "id": "text",
+    "session_id": "text",
+    "student_id": "text",
+    "satisfaction": "smallint",
+    "clarity": "smallint",
+    "searched_gig": "boolean",
+    "usefulness": "smallint",
+    "liked": "text",
+    "comments": "text",
+    "created_at": "timestamptz"
   }
 }

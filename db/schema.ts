@@ -1089,3 +1089,26 @@ export const sessionChecks = sqliteTable(
     index("session_checks_session_idx").on(t.sessionId),
   ],
 );
+export const sessionFeedback = sqliteTable(
+  "session_feedback",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id),
+    studentId: text("student_id")
+      .notNull()
+      .references(() => students.id),
+    satisfaction: integer("satisfaction").notNull(),
+    clarity: integer("clarity").notNull(),
+    searchedGig: integer("searched_gig", { mode: "boolean" }).notNull(),
+    usefulness: integer("usefulness").notNull(),
+    liked: text("liked"),
+    comments: text("comments"),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("session_feedback_student").on(t.sessionId, t.studentId),
+    index("session_feedback_session_idx").on(t.sessionId),
+  ],
+);

@@ -62,6 +62,117 @@ function needsSignIn(message: string) {
   return /sign in|not been linked|no longer be updated|staff workspace/i.test(message);
 }
 
+type FeedbackSession = { id: string; title: string; week: number; starts_at: string; coach_name: string | null; given: boolean };
+type FeedbackAnswers = { satisfaction?: number; clarity?: number; searched_gig?: boolean; usefulness?: number; liked?: string; comments?: string };
+
+/** The questions students answer after each session, about it and its coach. */
+const ratingQuestions: { key: "satisfaction" | "clarity" | "usefulness"; text: string }[] = [
+  { key: "satisfaction", text: "How satisfied are you with today's session?" },
+  { key: "clarity", text: "How clear was the coach's explanation?" },
+  { key: "usefulness", text: "How useful was today's mentorship for you?" },
+];
+
+/**
+ * Feedback after each session: the student's ended sessions, newest first,
+ * with a short form for each one they have not answered yet.
+ */
+function SessionFeedback({ sessions, onSent }: { sessions: FeedbackSession[]; onSent: (s: FeedbackSession[]) => void }) {
+  const t = useT();
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [answers, setAnswers] = useState<FeedbackAnswers>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const due = sessions.filter((s) => !s.given);
+  const complete =
+    ratingQuestions.every((q) => answers[q.key]) && typeof answers.searched_gig === "boolean";
+  async function send(sessionId: string) {
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/student-services", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "session_feedback", session_id: sessionId, ...answers }),
+      });
+      const value = await response.json();
+      if (!response.ok || value.error) throw new Error(value.error || t("Unable to send your feedback."));
+      onSent(value.sessions || []);
+      setOpenId(null);
+      setAnswers({});
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (!sessions.length) return null;
+  return (
+    <section className="student-card" aria-labelledby="feedback-title">
+      <div className="student-card-heading">
+        <div>
+          <h2 id="feedback-title">{t("Session feedback")}</h2>
+          <p>{due.length ? t("Tell us how each session went. It takes a minute.") : t("Thank you. You have given feedback on every session so far.")}</p>
+        </div>
+        {due.length > 0 && <span className="student-status pending">{t("{v0} waiting", { v0: due.length })}</span>}
+      </div>
+      <div className="student-service-list">
+        {sessions.map((s) => (
+          <article className="student-service-row feedback-row" key={s.id}>
+            <div className="student-slot">
+              <span>{t("Week {v0}", { v0: s.week })}</span>
+              <strong>{new Date(s.starts_at).toLocaleDateString()}</strong>
+            </div>
+            <div>
+              <div className="feedback-head">
+                <span><strong>{s.title}</strong>{s.coach_name ? <small> · {s.coach_name}</small> : null}</span>
+                {s.given ? (
+                  <span className="student-status success"><Check size={13} /> {t("Feedback sent")}</span>
+                ) : openId !== s.id ? (
+                  <button type="button" className="student-secondary" onClick={() => { setOpenId(s.id); setAnswers({}); setError(""); }}>{t("Give feedback")}</button>
+                ) : null}
+              </div>
+              {openId === s.id && (
+                <form className="feedback-form" onSubmit={(e) => { e.preventDefault(); if (complete) send(s.id); }}>
+                  {ratingQuestions.map((q) => (
+                    <fieldset key={q.key}>
+                      <legend>{t(q.text)}</legend>
+                      <div className="feedback-scale">
+                        {[1, 2, 3, 4, 5].map((n) => (
+                          <button type="button" key={n} className={answers[q.key] === n ? "is-on" : ""} onClick={() => setAnswers({ ...answers, [q.key]: n })} aria-label={`${n}`}>{n}</button>
+                        ))}
+                      </div>
+                    </fieldset>
+                  ))}
+                  <fieldset>
+                    <legend>{t("Did you search for a gig through platforms?")}</legend>
+                    <div className="feedback-scale">
+                      <button type="button" className={answers.searched_gig === true ? "is-on" : ""} onClick={() => setAnswers({ ...answers, searched_gig: true })}>{t("Yes")}</button>
+                      <button type="button" className={answers.searched_gig === false ? "is-on" : ""} onClick={() => setAnswers({ ...answers, searched_gig: false })}>{t("No")}</button>
+                    </div>
+                  </fieldset>
+                  <label className="feedback-text">
+                    {t("What did you like most about today's session?")}
+                    <textarea rows={2} value={answers.liked || ""} onChange={(e) => setAnswers({ ...answers, liked: e.target.value })} />
+                  </label>
+                  <label className="feedback-text">
+                    {t("Any comments or support needed?")}
+                    <textarea rows={2} value={answers.comments || ""} onChange={(e) => setAnswers({ ...answers, comments: e.target.value })} />
+                  </label>
+                  {error && <p className="student-form-error" role="alert">{error}</p>}
+                  <div className="student-actions">
+                    <button type="button" className="student-secondary" onClick={() => setOpenId(null)}>{t("Cancel")}</button>
+                    <button type="submit" className="student-primary" disabled={!complete || busy}><Send size={16} />{busy ? t("Sending…") : t("Send feedback")}</button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export default function StudentServicesPage() {
   const t = useT();
   const [student, setStudent] = useState<{ id: string; name: string; email?: string } | null>(null);
@@ -72,6 +183,7 @@ export default function StudentServicesPage() {
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [reviews, setReviews] = useState<any[]>([]);
+  const [feedbackSessions, setFeedbackSessions] = useState<FeedbackSession[]>([]);
   const [lastReviewedAt, setLastReviewedAt] = useState<string | null>(null);
   // New links typed into each section, corrections to links sent back, and
   // whether the student is confirming the submission.
@@ -87,6 +199,7 @@ export default function StudentServicesPage() {
       const value = await response.json();
       if (!response.ok || value.error) throw new Error(value.error || t("Unable to load your services."));
       setStudent(value.student);
+      setFeedbackSessions(value.feedback_sessions || []);
       setServices(value.services || empty());
       setSubmission(value.submission);
       setReviews(value.reviews || []);
@@ -294,6 +407,7 @@ export default function StudentServicesPage() {
               </div>
             </form>
           </section>
+          <SessionFeedback sessions={feedbackSessions} onSent={setFeedbackSessions} />
           {reviews.length > 0 && (
             <section className="student-card" aria-labelledby="review-history-title">
               <div className="student-card-heading"><div><h2 id="review-history-title">{t("Review updates")}</h2><p>{t("Your approval and correction history.")}</p></div></div>

@@ -805,3 +805,17 @@ input:focus-visible {
 .attendance-toggle button+button{border-inline-start:1px solid #dce4ef}
 .attendance-toggle button.is-on.present{background:#e7f6f0;color:#32856f;font-weight:600}
 .attendance-toggle button.is-on.absent{background:#fdeeea;color:#b26054;font-weight:600}
+
+/* Session feedback: the student's form and the staff summary. */
+.feedback-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.feedback-head small{color:#8a98ad}
+.feedback-form{display:flex;flex-direction:column;gap:14px;margin-top:14px}
+.feedback-form fieldset{border:0;padding:0;margin:0}
+.feedback-form legend{font-size:14px;color:#3b5174;margin-bottom:7px;font-weight:600}
+.feedback-scale{display:inline-flex;gap:6px;flex-wrap:wrap}
+.feedback-scale button{min-width:42px;padding:8px 12px;border:1px solid #dce4ef;border-radius:8px;background:#fff;color:#5d7292;font-weight:600}
+.feedback-scale button.is-on{background:#315ce8;border-color:#315ce8;color:#fff}
+.feedback-text{display:flex;flex-direction:column;gap:6px;font-size:14px;color:#3b5174;font-weight:600}
+.feedback-text textarea{border:1px solid #d9e2ef;border-radius:8px;padding:10px 12px;font:inherit;font-weight:400;color:#314969}
+.feedback-comments{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+.feedback-comments .info-box{flex-direction:column;align-items:flex-start;gap:4px}
