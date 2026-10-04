@@ -1345,4 +1345,10 @@ export const ar: Record<string, string> = {
   "Attendance taken": "تم تسجيل الحضور",
   "This moves the group: this session and the {v0} later ones shift by the same amount. Earlier sessions stay as they were.": "هذا ينقل المجموعة: هذه الجلسة و{v0} من الجلسات التالية تتحرك بنفس المقدار. الجلسات السابقة تبقى كما هي.",
   "Rescheduling moves the whole group from this session on. It needs a reason, and the coordinator and coach confirm the new times again.": "إعادة الجدولة تنقل المجموعة بالكامل بدءًا من هذه الجلسة. تحتاج إلى سبب، ويؤكد المنسق والمدرب المواعيد الجديدة مرة أخرى.",
+  "Why it is rejected (the student sees this)": "سبب الرفض (يراه الطالب)",
+  "Comment": "تعليق",
+  "Approve only when the service page is active, correct, track-relevant and belongs to the student. An approved link is final. A rejected link goes back to the student with your comment, and the updated link returns to you for review.": "وافق فقط عندما تكون صفحة الخدمة نشطة وصحيحة ومناسبة للمسار وتخص الطالب. الرابط الموافق عليه نهائي. الرابط المرفوض يعود إلى الطالب مع تعليقك، ويعود إليك الرابط المحدث للمراجعة.",
+  "Rejected, waiting on the student": "مرفوض، بانتظار الطالب",
+  "Rejected:": "مرفوض:",
+  "Paste the updated link below and submit it.": "الصق الرابط المحدث بالأسفل وأرسله.",
 };

@@ -301,17 +301,17 @@ async function qcReview(x: any) {
   const u = await actor();
   permit(u, ["Quality Member", "Quality Lead"]);
   if (!["Lock", "Needs Correction"].includes(x.decision))
-    throw new Error("Choose Lock or Needs Correction.");
+    throw new Error("Choose Approve or Reject.");
   const comment = String(x.comment || "").trim();
   if (comment.length > 1000) throw new Error("Review comments must be 1,000 characters or fewer.");
   if (x.decision === "Needs Correction" && !comment)
-    throw new Error("Add a correction comment for the student.");
+    throw new Error("Add a comment telling the student why the link is rejected.");
   const link: any = await stmt("SELECT * FROM service_links WHERE id=?", x.service_id).first();
   if (!link) throw new Error("Service link not found.");
   if (link.qc_status === "Locked")
-    throw new Error("This service link is already locked. The student submits a new link instead.");
+    throw new Error("This service link is already approved. The student submits a new link instead.");
   if (link.auto_status === "Failed" && x.decision === "Lock")
-    throw new Error("The automatic check failed for this link, so it can only be returned for correction.");
+    throw new Error("The automatic check failed for this link, so it can only be rejected.");
   if (link.qc_actor && link.qc_actor !== u.id && !u.roles.includes("Quality Lead"))
     throw new Error("This student is assigned to another reviewer.");
   await student(u, link.student_id);

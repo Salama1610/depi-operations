@@ -39,6 +39,7 @@ const empty = (): Service[] => [];
 /** The stored review states, in the words the student understands. */
 const reviewLabel: Record<string, string> = {
   Locked: "Approved",
+  "Needs Correction": "Rejected",
   "Pending QC": "With your coordinator",
   "In Progress": "Add more links",
   Pending: "With your coordinator",
@@ -250,7 +251,7 @@ export default function StudentServicesPage() {
                             </div>
                             {correction && (
                               <>
-                                <div className="student-qc-note"><strong>{t("Correction needed:")}</strong> {service.qc_comment}</div>
+                                <div className="student-qc-note"><strong>{t("Rejected:")}</strong> {service.qc_comment} {t("Paste the updated link below and submit it.")}</div>
                                 <div className="student-url-wrap student-fix">
                                   <input type="url" value={fix} disabled={busy} placeholder={t("Corrected link")} onChange={(e) => { setSaved(false); setFixes((current) => ({ ...current, [service.slot]: e.target.value })); }} />
                                 </div>

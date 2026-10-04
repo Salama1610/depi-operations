@@ -1006,6 +1006,9 @@ export default function Operations({ module: initialModule }: { module: string }
     ) : (
       <span>… {t("Waiting")}</span>
     );
+  // A service link's review, in the words QC decides in: approved or rejected.
+  const qcState = (status?: string) =>
+    status === "Locked" ? "Approved" : status === "Needs Correction" ? "Rejected" : status === "Pending" ? "Waiting for review" : status || "";
   // A service link named by the marketplace it is on.
   const serviceLabel = (platform?: string) =>
     !platform ? t("Service") : platform === "External service" ? t("Other site") : t("{v0} service", { v0: platform });
@@ -2058,7 +2061,7 @@ export default function Operations({ module: initialModule }: { module: string }
             <>
             <div className="mini-stats service-qc-stats">
               <span><strong>{serviceLinks.filter((r) => r.qc_status === "Pending").length}</strong>{t("Awaiting review")}</span>
-              <span><strong>{serviceLinks.filter((r) => r.qc_status === "Needs Correction").length}</strong>{t("Need student correction")}</span>
+              <span><strong>{serviceLinks.filter((r) => r.qc_status === "Needs Correction").length}</strong>{t("Rejected, waiting on the student")}</span>
               <span><strong>{serviceLinks.filter((r) => r.auto_status === "Failed").length}</strong>{t("Automatic check failed")}</span>
               <span><strong>{serviceLinks.filter((r) => r.qc_status === "Pending" && Date.now() - Date.parse(r.updated_at) > 48 * 3600000).length}</strong>{t("Past 48-hour SLA")}</span>
             </div>
@@ -2069,7 +2072,7 @@ export default function Operations({ module: initialModule }: { module: string }
                 onChange={(state) => setServiceFilters({ ...serviceFilters, state })}
                 options={[
                   { value: "Pending", label: t("Waiting for review") },
-                  { value: "Needs Correction", label: t("Waiting on the student") },
+                  { value: "Needs Correction", label: t("Rejected, waiting on the student") },
                   { value: "All", label: t("Both") },
                 ]}
               />
@@ -2126,7 +2129,7 @@ export default function Operations({ module: initialModule }: { module: string }
                           {qualityReviewers.map((q) => <option key={q.id} value={q.id}>{q.name} ({reviewerStudents.get(q.id) || 0})</option>)}
                         </select>
                       : <span>{owner(r.qc_actor) === "Unassigned" ? t("Waiting for a reviewer") : owner(r.qc_actor)}<small className="table-subline">{owner(r.coordinator)}</small></span> },
-                  { key: "qc_status", label: t("Review state"), render: (r) => <span><Badge value={r.qc_status} />{resubmitted(r) && <Badge value={t("Resubmitted")} />}<small className="table-subline">{Math.round((Date.now() - Date.parse(r.updated_at)) / 3600000)}{t("h · revision")}{" "}{r.revision}</small></span> },
+                  { key: "qc_status", label: t("Review state"), render: (r) => <span><Badge value={t(qcState(r.qc_status))} />{resubmitted(r) && <Badge value={t("Resubmitted")} />}<small className="table-subline">{Math.round((Date.now() - Date.parse(r.updated_at)) / 3600000)}{t("h · revision")}{" "}{r.revision}</small></span> },
                 ],
                 (r) => <div className="detail-actions">{canDecideServiceLinks && (r.qc_actor === user.id || isQualityLead) && <button className="small-btn" onClick={() => open("service_qc_review", { ...r, service_id: r.id, student_id: r.student_id, decision: r.qc_status === "Needs Correction" ? "Lock" : "" })}>{t("Review")}</button>}</div>,
               )),
@@ -3148,7 +3151,7 @@ export default function Operations({ module: initialModule }: { module: string }
                           <Empty title={t("No service links submitted")} text={t("The student has not submitted service links yet.")} />
                         ) : serviceLinks.filter((link) => link.student_id === selectedStudent.id).map((link) => (
                           <article key={link.id}>
-                            <div className="detail-actions"><Badge value={serviceLabel(link.platform)} /><Badge value={link.qc_status} /><Badge value={link.auto_status} /></div>
+                            <div className="detail-actions"><Badge value={serviceLabel(link.platform)} /><Badge value={t(qcState(link.qc_status))} /><Badge value={link.auto_status} /></div>
                             <h3><a className="text-link" href={link.url} target="_blank" rel="noreferrer">{link.platform} <ExternalLink size={14} /></a></h3>
                             <p>{(() => { try { return JSON.parse(link.auto_result || "{}").message; } catch { return t("Automatic details unavailable."); } })()}</p>
                             <small>{t("Revision")}{" "}{link.revision} {t("· submitted")}{" "}{new Date(link.submitted_at).toLocaleString()}{link.qc_at ? t(" · reviewed {v0} by {v1}", { v0: new Date(link.qc_at).toLocaleString(), v1: link.reviewer_name || owner(link.qc_actor) }) : ""}</small>
@@ -3938,7 +3941,10 @@ export default function Operations({ module: initialModule }: { module: string }
                         return <div className="info-box"><strong>{automatic.message}</strong>{(automatic.checks || []).map((check: string) => <small key={check}>{check}</small>)}</div>;
                       } catch { return null; }
                     })()}
-                    {choice("decision", t("Review decision"), ["Lock", "Needs Correction"])}
+                    {choice("decision", t("Review decision"), [
+                      { value: "Lock", label: t("Approve") },
+                      { value: "Needs Correction", label: t("Reject") },
+                    ])}
                     {form.decision === "Needs Correction" && (
                       <Pick
                         label={t("Correction template")}
@@ -3952,9 +3958,9 @@ export default function Operations({ module: initialModule }: { module: string }
                         ]}
                       />
                     )}
-                    {field("comment", t("Comment / correction guidance"), "text", form.decision === "Needs Correction")}
+                    {field("comment", form.decision === "Needs Correction" ? t("Why it is rejected (the student sees this)") : t("Comment"), "text", form.decision === "Needs Correction")}
                     <p className="footnote">
-                      {t("Lock only when the service page is active, correct, track-relevant and belongs to the student. A locked link is final, and a link the automatic check failed can only be returned for correction.")}
+                      {t("Approve only when the service page is active, correct, track-relevant and belongs to the student. An approved link is final. A rejected link goes back to the student with your comment, and the updated link returns to you for review.")}
                     </p>
                   </>
                 );
