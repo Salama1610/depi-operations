@@ -158,6 +158,7 @@ const titles: Row = {
   lifecycle: "Update lifecycle status",
   staff: "Manage staff access",
   attendance: "Record attendance",
+  account_topup: "Record a top-up",
   session_attendance: "Take attendance",
   milestone: "Update coaching milestone",
   transfer: "Transfer student",
@@ -370,7 +371,7 @@ export default function Operations({ module: initialModule }: { module: string }
     [saved, setSaved] = useState<string[]>([]),
     [checklistFor, setChecklistFor] = useState<string | null>(null),
     [feedbackFor, setFeedbackFor] = useState<string | null>(null),
-    [accountFilters, setAccountFilters] = useState<Row>({ platform: "All", status: "All", request: "Open" }),
+    [accountFilters, setAccountFilters] = useState<Row>({ platform: "All", status: "All", request: "Open", ledger: "All" }),
     [sessionFilters, setSessionFilters] = useState<Row>({ day: "All", time: "All" });
   async function refresh() {
     try {
@@ -474,6 +475,11 @@ export default function Operations({ module: initialModule }: { module: string }
   const coachesOnly =
     can(user.roles, ["Coach Operations"]) &&
     !can(user.roles, ["Project Operations", "Operations Systems / Admin", "Higher Board", "Team Supervisor"]);
+  // The people who top up client accounts: the Service Team's supervisor,
+  // Higher Board and administrators (the server checks the same).
+  const keepsAccounts =
+    can(user.roles, ["Higher Board", "Operations Systems / Admin"]) ||
+    (can(user.roles, ["Team Supervisor"]) && /service team/i.test(user.title || ""));
   const shownNav = nav.filter(([m]) =>
     qualityOnly
       ? m === "quality"
@@ -506,7 +512,7 @@ export default function Operations({ module: initialModule }: { module: string }
                 "Project Operations",
                 "Operations Coordinator",
                 "Operations Systems / Admin",
-              ])
+              ]) || keepsAccounts
             : true,
   );
   // A module nobody showed them is not a module they can open by typing its
@@ -965,6 +971,17 @@ export default function Operations({ module: initialModule }: { module: string }
         ));
   const answersAsCoordinator = (r: Row) =>
     can(user.roles, ["Operations Coordinator"]) && sessionGroupOf(r)?.coordinator === user.id;
+  // What a credit change was, from its sign and how it was recorded.
+  const creditKind = (e: Row) =>
+    /^Top-up/.test(e.reason || "")
+      ? "Top-up"
+      : /^Opening/.test(e.reason || "")
+        ? "Opening balance"
+        : Number(e.delta) < 0
+          ? "Service charged"
+          : e.gig_id
+            ? "Refund"
+            : "Top-up";
   // Students' feedback on a session, and an average of one of its ratings.
   const feedbackOf = (sessionId: string) => (d.sessionFeedback || []).filter((f: Row) => f.session_id === sessionId);
   const average = (rows: Row[], key: string) =>
@@ -1720,6 +1737,14 @@ export default function Operations({ module: initialModule }: { module: string }
       );
     const requestStage = (r: Row) => (r.status === "Submitted" && activeReservation(r.id) ? "Reserved" : r.status);
     const managesAccounts = can(user.roles, ["Higher Board", "Operations Systems / Admin"]);
+    // Every change to an account's credit, newest first: opening balances,
+    // top-ups, services charged and refunds.
+    const ledger: Row[] = (d.creditLedger || [])
+      .filter((e: Row) => accountFilters.platform === "All" || accounts.find((a) => a.id === e.account_id)?.platform === accountFilters.platform)
+      .filter((e: Row) => accountFilters.ledger === "All" || creditKind(e) === accountFilters.ledger);
+    const thisMonth = new Date().toISOString().slice(0, 7);
+    const toppedUp = (d.creditLedger || []).filter((e: Row) => creditKind(e) === "Top-up" && String(e.created_at).startsWith(thisMonth));
+    const spent = (d.creditLedger || []).filter((e: Row) => creditKind(e) === "Service charged" && String(e.created_at).startsWith(thisMonth));
     const pool = accounts
       .filter(qMatch)
       .filter((r) => accountFilters.platform === "All" || r.platform === accountFilters.platform)
@@ -1779,7 +1804,83 @@ export default function Operations({ module: initialModule }: { module: string }
             <TabsTrigger value="requests">
               {t("Requests")}{" "}<span className="count">{openRequests.length}</span>
             </TabsTrigger>
+            {(keepsAccounts || can(user.roles, ["Project Operations"])) && (
+              <TabsTrigger value="credit">
+                {t("Credit tracker")}{" "}<span className="count">{(d.creditLedger || []).length}</span>
+              </TabsTrigger>
+            )}
           </TabsList>
+          <TabsContent value="credit">
+            <div className="mini-stats">
+              <span><strong>{money(toppedUp.reduce((n: number, e: Row) => n + Number(e.delta), 0))}</strong>{t("Topped up this month")}</span>
+              <span><strong>{money(-spent.reduce((n: number, e: Row) => n + Number(e.delta), 0))}</strong>{t("Spent on services this month")}</span>
+              <span><strong>{money(accounts.reduce((n, a) => n + Number(a.credits || 0), 0))}</strong>{t("Credit left in all accounts")}</span>
+            </div>
+            <div className="filter-row">
+              <Pick label={t("Marketplace")} value={accountFilters.platform} onChange={(platform) => setAccountFilters({ ...accountFilters, platform })} options={["All", ...controlledPlatforms]} />
+              <Pick
+                label={t("Showing")}
+                value={accountFilters.ledger}
+                onChange={(ledger) => setAccountFilters({ ...accountFilters, ledger })}
+                options={[
+                  { value: "All", label: t("Every change") },
+                  { value: "Top-up", label: t("Top-ups") },
+                  { value: "Service charged", label: t("Services charged") },
+                  { value: "Refund", label: t("Refunds") },
+                  { value: "Opening balance", label: t("Opening balances") },
+                ]}
+              />
+            </div>
+            {panel(
+              t("Credit history"),
+              ledger.length ? (
+                generic(
+                  ledger,
+                  [
+                    {
+                      key: "created_at",
+                      label: t("Date"),
+                      render: (e) => <span>{fmt(e.created_at)}<small className="table-subline">{new Date(e.created_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" })}</small></span>,
+                    },
+                    {
+                      key: "account_id",
+                      label: t("Account"),
+                      render: (e) => {
+                        const acc = accounts.find((a) => a.id === e.account_id);
+                        return <span><strong>{acc?.label || e.account_id}</strong><small className="table-subline">{acc?.platform}</small></span>;
+                      },
+                    },
+                    { key: "kind", label: t("Change"), render: (e) => <Badge value={t(creditKind(e))} /> },
+                    {
+                      key: "delta",
+                      label: t("Amount"),
+                      render: (e) => <strong className={Number(e.delta) >= 0 ? "credit-in" : "credit-out"}>{Number(e.delta) >= 0 ? "+" : "−"}{money(Math.abs(Number(e.delta)))}</strong>,
+                    },
+                    { key: "balance_after", label: t("Balance after"), render: (e) => money(e.balance_after) },
+                    { key: "actor", label: t("Recorded by"), render: (e) => owner(e.actor) },
+                    {
+                      key: "reason",
+                      label: t("Details"),
+                      render: (e) => {
+                        const gig = e.gig_id ? (d.gigs || []).find((g: Row) => g.id === e.gig_id) : null;
+                        const detail = String(e.reason || "").replace(/^(Top-up|Service charged) · /, "");
+                        return <span>{detail}{gig ? <small className="table-subline">{name(gig.student_id)}</small> : null}</span>;
+                      },
+                    },
+                  ],
+                )
+              ) : (
+                <Empty title={(d.creditLedger || []).length ? t("No credit change matches these filters") : t("No credit recorded yet. Add the client accounts with their opening credit, then record top-ups here.")} />
+              ),
+              keepsAccounts && accounts.length ? (
+                <div className="detail-actions">
+                  <button className="primary small" onClick={() => open("account_topup", { id: "" })}>
+                    <Plus size={15} /> {t("Record a top-up")}
+                  </button>
+                </div>
+              ) : null,
+            )}
+          </TabsContent>
           <TabsContent value="pool">
             <div className="filter-row">
               <Pick label={t("Marketplace")} value={accountFilters.platform} onChange={(platform) => setAccountFilters({ ...accountFilters, platform })} options={["All", ...controlledPlatforms]} />
@@ -1827,12 +1928,19 @@ export default function Operations({ module: initialModule }: { module: string }
                     },
                   ],
                   (r) =>
-                    managesAccounts && r.status !== "Retired" ? (
-                      <button className="small-btn" onClick={() => open("account_status", r)}>{t("Manage")}</button>
-                    ) : null,
+                    r.status === "Retired" ? null : (
+                      <div className="detail-actions">
+                        {keepsAccounts && (
+                          <button className="small-btn" onClick={() => open("account_topup", { id: r.id })}>{t("Top up")}</button>
+                        )}
+                        {managesAccounts && (
+                          <button className="small-btn" onClick={() => open("account_status", r)}>{t("Manage")}</button>
+                        )}
+                      </div>
+                    ),
                 )
               ) : (
-                <Empty title={accounts.length ? t("No account matches these filters") : t("No client accounts yet")} />
+                <Empty title={accounts.length ? t("No account matches these filters") : t("No client accounts yet. Higher Board adds each account with its opening credit; top-ups are then recorded on the Credit tracker.")} />
               ),
               <div className="detail-actions">
                 {can(user.roles, ["Higher Board"]) && (
@@ -4435,6 +4543,39 @@ export default function Operations({ module: initialModule }: { module: string }
                     {field("reason", t("Decision reason"))}
                   </>
                 );
+              if (a === "account_topup") {
+                const acc = (d.accounts || []).find((c: Row) => c.id === form.id);
+                return (
+                  <>
+                    {modal!.id ? (
+                      <div className="account-summary">
+                        <div>
+                          <strong>{acc?.label}</strong>
+                          <small>{acc?.id} · {acc?.platform}</small>
+                        </div>
+                        <Badge value={acc?.status} />
+                        <span className="account-credit">{"$" + Number(acc?.credits || 0).toLocaleString("en-US", { maximumFractionDigits: 2 })}<small>{t("credit now")}</small></span>
+                      </div>
+                    ) : (
+                      choice(
+                        "id",
+                        t("Account"),
+                        (d.accounts || [])
+                          .filter((c: Row) => c.status !== "Retired")
+                          .map((c: Row) => ({ value: c.id, label: `${c.label} · ${c.platform} · $${c.credits}` })),
+                      )
+                    )}
+                    {field("amount", t("Top-up amount (USD)"), "number")}
+                    {field("reference", t("Receipt or transfer reference"))}
+                    {field("note", t("Note"), "text", false)}
+                    {acc && Number(form.amount) > 0 && (
+                      <p className="footnote">
+                        {t("Credit after this top-up: {v0}", { v0: "$" + (Number(acc.credits || 0) + Number(form.amount)).toLocaleString("en-US", { maximumFractionDigits: 2 }) })}
+                      </p>
+                    )}
+                  </>
+                );
+              }
               if (a === "account_status") {
                 // The same moves the server allows from each state.
                 const flow: Record<string, string[]> = {

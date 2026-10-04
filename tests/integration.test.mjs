@@ -2792,3 +2792,29 @@ test("services (paid gigs) are recorded by the coordinators of Service Team grou
   await dbExec("UPDATE users SET title=? WHERE id=?", title, group.supervisor);
   current = { id: "owner", email: "owner@example.com" };
 });
+
+test("the Service Team supervisor records account top-ups, each a new row in the credit history", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  await check("account", { id: "ACC-TOPUP-1", label: "Nafezly client 1", platform: "Nafezly", credits: 40 });
+  const supervisor = await dbRow("SELECT id,email,title FROM users WHERE id='staff-nour'");
+  current = { id: "supervisor-login", email: "staff-nour@example.invalid" };
+  await dbExec("UPDATE users SET title='Team Supervisor · Target Team' WHERE id='staff-nour'");
+  assert.match((await post("account_topup", { id: "ACC-TOPUP-1", amount: 25, reference: "TRX-1001" })).error, /Service Team's supervisor/);
+  await dbExec("UPDATE users SET title='Team Supervisor · Service Team' WHERE id='staff-nour'");
+  assert.match((await post("account_topup", { id: "ACC-TOPUP-1", amount: 0, reference: "TRX-1001" })).error, /top-up amount/);
+  assert.match((await post("account_topup", { id: "ACC-TOPUP-1", amount: 25, reference: "" })).error, /reference/);
+  await check("account_topup", { id: "ACC-TOPUP-1", amount: 25, reference: "TRX-1001", note: "October budget" });
+  await check("account_topup", { id: "ACC-TOPUP-1", amount: 10.5, reference: "TRX-1002" });
+  assert.equal(Number((await dbRow("SELECT credits FROM accounts WHERE id='ACC-TOPUP-1'")).credits), 75.5);
+  const history = await dbRows("SELECT delta,balance_after,reason,actor FROM account_credit_ledger WHERE account_id='ACC-TOPUP-1' ORDER BY created_at, balance_after");
+  assert.deepEqual(history.map((h) => Number(h.delta)), [40, 25, 10.5], "opening balance, then each top-up");
+  assert.equal(Number(history[2].balance_after), 75.5);
+  assert.equal(history[1].reason, "Top-up · TRX-1001 · October budget");
+  assert.equal(history[1].actor, "staff-nour");
+  // The supervisor sees the pool and the history in the workspace.
+  const data = await (await api.GET()).json();
+  assert.ok(data.accounts.some((a) => a.id === "ACC-TOPUP-1"));
+  assert.ok(data.creditLedger.some((e) => e.account_id === "ACC-TOPUP-1"));
+  await dbExec("UPDATE users SET title=? WHERE id='staff-nour'", supervisor.title);
+  current = { id: "owner", email: "owner@example.com" };
+});

@@ -13,6 +13,7 @@ import {
   proof,
   permit,
   scopeSql,
+  keepsAccounts,
   auditStmt,
   loadData,
   graduationStmt,
@@ -1455,7 +1456,38 @@ export async function POST(req: Request) {
             gig,
             -Number(r.value),
             balance,
-            `Allocation for request ${r.id}`,
+            `Service charged · ${r.task}`,
+            u.id,
+            t,
+          ),
+        );
+        break;
+      }
+      case "account_topup": {
+        // A top-up adds credit to a client account. The Service Team's
+        // supervisor records it (Higher Board and administrators can too),
+        // with the receipt or transfer reference. Each one is a new row in
+        // the credit history; nothing earlier is edited.
+        permit(u, ["Team Supervisor", "Higher Board"]);
+        ensure(keepsAccounts(u), "Top-ups are recorded by the Service Team's supervisor or Higher Board.");
+        const a: any = await stmt("SELECT * FROM accounts WHERE id=?", id).first();
+        ensure(a && a.status !== "Retired", "Choose an active client account.");
+        const amount = Math.round(Number(x.amount) * 100) / 100;
+        ensure(Number.isFinite(amount) && amount > 0 && amount <= 100000, "Enter the top-up amount in USD.");
+        const reference = String(x.reference || "").trim();
+        ensure(reference.length >= 3, "Record the receipt or transfer reference.");
+        const note = String(x.note || "").trim().slice(0, 300);
+        const balance = Math.round((Number(a.credits) + amount) * 100) / 100;
+        auditPrevious = a;
+        jobs.push(
+          stmt("UPDATE accounts SET credits=credits+? WHERE id=?", amount, id),
+          stmt(
+            "INSERT INTO account_credit_ledger(id,account_id,delta,balance_after,reason,actor,created_at) VALUES(?,?,?,?,?,?,?)",
+            uid("CR"),
+            id,
+            amount,
+            balance,
+            `Top-up · ${reference}${note ? " · " + note : ""}`,
             u.id,
             t,
           ),

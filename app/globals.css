@@ -861,3 +861,7 @@ input:focus-visible {
 .account-credentials{margin-top:12px;border-top:1px solid #edf1f7;padding-top:10px}
 .account-credentials summary{cursor:pointer;font-size:13px;color:#5d7292;font-weight:600}
 @media (max-width:640px){.account-summary{grid-template-columns:1fr}.account-credit{align-items:flex-start}.checklist-stepper li{grid-template-columns:28px minmax(0,1fr)}.checklist-action{grid-column:2}}
+
+/* Credit tracker: money in and money out. */
+.credit-in{color:#32856f}
+.credit-out{color:#b26054}

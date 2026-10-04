@@ -307,6 +307,18 @@ export async function teamCoordinators(u: any): Promise<string[] | null> {
     .map((p) => p.id);
 }
 
+/**
+ * Who tops up the client accounts: the Service Team's supervisor, alongside
+ * Higher Board and administrators. They see the account pool and its credit
+ * history so they can record each top-up.
+ */
+export function keepsAccounts(u: any) {
+  return (
+    can(u.roles, ["Higher Board", "Operations Systems / Admin"]) ||
+    (can(u.roles, ["Team Supervisor"]) && /service team/i.test(u.title || ""))
+  );
+}
+
 export async function loadData(u: any) {
   const q = scopeSql(u);
   // The same rule for queries that carry no students of their own.
@@ -495,10 +507,10 @@ export async function loadData(u: any) {
     can(u.roles, ["Project Operations", "Operations Systems / Admin", "Quality Lead"])
       ? all("SELECT * FROM fx_rates ORDER BY effective_date DESC")
       : none,
-    can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin"])
+    can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin"]) || keepsAccounts(u)
       ? all("SELECT * FROM account_reservations ORDER BY created_at DESC")
       : none,
-    can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin"])
+    can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin"]) || keepsAccounts(u)
       ? all("SELECT * FROM account_credit_ledger ORDER BY created_at DESC LIMIT 1000")
       : none,
     all(
@@ -513,7 +525,7 @@ export async function loadData(u: any) {
       "Higher Board",
       "Project Operations",
       "Operations Systems / Admin",
-    ]) ? all("SELECT id,label,platform,status,credits FROM accounts") : none,
+    ]) || keepsAccounts(u) ? all("SELECT id,label,platform,status,credits FROM accounts") : none,
     // Everyone sees who their colleagues are and how to reach them; the
     // national ID is a first password, so only an administrator sees it.
     all(
