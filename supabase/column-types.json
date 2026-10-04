@@ -658,5 +658,16 @@
     "liked": "text",
     "comments": "text",
     "created_at": "timestamptz"
+  },
+  "join_accounts": {
+    "id": "text",
+    "kind": "text",
+    "provider": "text",
+    "group_id": "text",
+    "username": "text",
+    "secret": "text",
+    "iv": "text",
+    "updated_by": "text",
+    "updated_at": "timestamptz"
   }
 }

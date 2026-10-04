@@ -865,3 +865,9 @@ input:focus-visible {
 /* Credit tracker: money in and money out. */
 .credit-in{color:#32856f}
 .credit-out{color:#b26054}
+
+.join-cell { display: inline-flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; align-items: center; }
+.join-cell button.text-link { background: none; border: 0; padding: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 0.25rem; }
+.join-login { display: grid; gap: 0.35rem; }
+.join-login label { font-size: 0.8rem; color: var(--muted-foreground, #64748b); }
+.join-login code { user-select: all; padding: 0.4rem 0.6rem; border-radius: 6px; background: var(--muted, #f1f5f9); font-size: 0.95rem; word-break: break-all; }

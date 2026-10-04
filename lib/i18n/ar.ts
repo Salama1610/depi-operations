@@ -1469,4 +1469,9 @@ export const ar: Record<string, string> = {
   "Note": "ملاحظة",
   "Credit after this top-up: {v0}": "الرصيد بعد هذا الشحن: {v0}",
   "No client accounts yet. Higher Board adds each account with its opening credit; top-ups are then recorded on the Credit tracker.": "لا توجد حسابات عملاء بعد. يضيف المجلس الأعلى كل حساب برصيده الافتتاحي، ثم تُسجل عمليات الشحن في متابعة الرصيد.",
+  "Coach login": "حساب دخول المدرب",
+  "Coordinator login": "حساب دخول المنسق",
+  "Shown for one minute. Do not share it.": "يظهر لمدة دقيقة واحدة. لا تشاركه.",
+  "Email or username": "البريد الإلكتروني أو اسم المستخدم",
+  "Request failed": "تعذّر تنفيذ الطلب",
 };

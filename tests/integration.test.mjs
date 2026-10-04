@@ -2818,3 +2818,50 @@ test("the Service Team supervisor records account top-ups, each a new row in the
   await dbExec("UPDATE users SET title=? WHERE id='staff-nour'", supervisor.title);
   current = { id: "owner", email: "owner@example.com" };
 });
+
+test("session join logins are encrypted and shown only to the group's own people", async () => {
+  const api = await route("join-accounts");
+  const call = async (x) =>
+    (await api.POST(new Request("https://test.local/api/join-accounts", { method: "POST", body: JSON.stringify(x) }))).json();
+  globalThis.__testEnv.CREDENTIAL_ENCRYPTION_KEY = "b".repeat(64);
+  const group = await dbRow(
+    "SELECT g.id,g.supervisor,c.id cid,c.email cemail,s.email semail FROM groups g JOIN users c ON c.id=g.coordinator JOIN users s ON s.id=g.supervisor WHERE g.status='Active' AND g.coach<>'staff-support-coach' AND NOT EXISTS (SELECT 1 FROM group_coaches x WHERE x.group_id=g.id AND x.user_id='staff-support-coach' AND x.status='Active') LIMIT 1",
+  );
+  await dbExec("UPDATE groups SET provider='YAT', coach='staff-coach' WHERE id=?", group.id);
+  // Only an administrator stores them.
+  current = { id: group.cid, email: group.cemail };
+  assert.match((await call({ action: "set", kind: "coach", provider: "YAT", group_id: group.id, username: "g@yat.example", password: "coach-pass-1" })).error, /role/);
+  current = { id: "owner", email: "owner@example.com" };
+  assert.equal((await call({ action: "set", kind: "coach", provider: "YAT", group_id: group.id, username: "g@yat.example", password: "coach-pass-1" })).ok, true);
+  assert.equal((await call({ action: "set", kind: "coordinator", provider: "YAT", username: "coord@yat.example", password: "coord-pass-1" })).ok, true);
+  const raw = JSON.stringify(await dbRows("SELECT * FROM join_accounts"));
+  assert.ok(!raw.includes("coach-pass-1") && !raw.includes("g@yat.example"), "stored encrypted");
+
+  // The group's coach and Coach Operations see the coach login.
+  current = { id: "coach-login", email: "staff-coach@example.invalid" };
+  assert.equal((await call({ action: "reveal", kind: "coach", group_id: group.id })).password, "coach-pass-1");
+  assert.match((await call({ action: "reveal", kind: "coordinator", group_id: group.id })).error, /not yours/);
+  current = { id: "coach-ops-login", email: "staff-coach-ops@example.invalid" };
+  assert.equal((await call({ action: "reveal", kind: "coach", group_id: group.id })).username, "g@yat.example");
+  assert.match((await call({ action: "reveal", kind: "coordinator", group_id: group.id })).error, /not yours/);
+  // Another coach does not.
+  current = { id: "support-coach-login", email: "staff-support-coach@example.invalid" };
+  assert.match((await call({ action: "reveal", kind: "coach", group_id: group.id })).error, /not yours/);
+
+  // The coordinator and their supervisor see the coordinators' login, not the coach's.
+  current = { id: group.cid, email: group.cemail };
+  assert.equal((await call({ action: "reveal", kind: "coordinator", group_id: group.id })).password, "coord-pass-1");
+  assert.match((await call({ action: "reveal", kind: "coach", group_id: group.id })).error, /not yours/);
+  current = { id: group.supervisor, email: group.semail };
+  assert.equal((await call({ action: "reveal", kind: "coordinator", group_id: group.id })).username, "coord@yat.example");
+  // A coordinator of another group does not.
+  const other = await dbRow("SELECT u.id,u.email FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.coordinator<>? AND g.supervisor<>? LIMIT 1", group.cid, group.supervisor);
+  if (other) {
+    current = { id: other.id, email: other.email };
+    assert.match((await call({ action: "reveal", kind: "coordinator", group_id: group.id })).error, /not yours/);
+  }
+  current = { id: "owner", email: "owner@example.com" };
+  const audit = await dbRows("SELECT value FROM audit_events WHERE action='Join login shown'");
+  assert.ok(audit.length >= 4, "every look is recorded");
+  assert.ok(!JSON.stringify(audit).includes("pass-1"), "and the password never reaches the audit log");
+});

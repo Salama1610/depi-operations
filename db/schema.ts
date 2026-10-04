@@ -1112,3 +1112,16 @@ export const sessionFeedback = sqliteTable(
     index("session_feedback_session_idx").on(t.sessionId),
   ],
 );
+export const joinAccounts = sqliteTable("join_accounts", {
+  id: text("id").primaryKey(),
+  kind: text("kind").notNull(),
+  provider: text("provider").notNull(),
+  groupId: text("group_id").references(() => groups.id),
+  username: text("username").notNull(),
+  secret: text("secret").notNull(),
+  iv: text("iv").notNull(),
+  updatedBy: text("updated_by")
+    .notNull()
+    .references(() => users.id),
+  updatedAt: text("updated_at").notNull(),
+});

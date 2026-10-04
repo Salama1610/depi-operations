@@ -372,7 +372,31 @@ export default function Operations({ module: initialModule }: { module: string }
     [checklistFor, setChecklistFor] = useState<string | null>(null),
     [feedbackFor, setFeedbackFor] = useState<string | null>(null),
     [accountFilters, setAccountFilters] = useState<Row>({ platform: "All", status: "All", request: "Open", ledger: "All" }),
-    [sessionFilters, setSessionFilters] = useState<Row>({ day: "All", time: "All" });
+    [sessionFilters, setSessionFilters] = useState<Row>({ day: "All", time: "All" }),
+    [joinLogin, setJoinLogin] = useState<Row | null>(null);
+  // A join login is shown for a minute, then forgotten.
+  useEffect(() => {
+    if (!joinLogin) return;
+    const timer = setTimeout(() => setJoinLogin(null), 60000);
+    return () => clearTimeout(timer);
+  }, [joinLogin]);
+  async function showJoinLogin(r: Row, kind: "coach" | "coordinator") {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/join-accounts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reveal", kind, group_id: r.group_id }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || t("Request failed"));
+      setJoinLogin({ ...body, kind, group_id: r.group_id });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function refresh() {
     try {
       setError("");
@@ -962,6 +986,25 @@ export default function Operations({ module: initialModule }: { module: string }
   const plansSession = (_r: Row) =>
     can(user.roles, ["Coach Operations", "Project Operations", "Operations Systems / Admin"]);
   // The two people who answer for a session: its coach and the group's coordinator.
+  // Who may see a session's join logins: the coach's is the group's coach's and
+  // Coach Operations'; the coordinators' is the coordinator's, their
+  // supervisor's and Project Operations'. The server checks the same.
+  const seesCoachLogin = (r: Row) =>
+    sessionGroupOf(r)?.provider === "YAT" &&
+    (can(user.roles, ["Coach Operations", "Operations Systems / Admin"]) ||
+      (can(user.roles, ["Coach"]) &&
+        (sessionGroupOf(r)?.coach === user.id ||
+          (d.groupCoaches || []).some(
+            (c: Row) => c.group_id === r.group_id && c.user_id === user.id && c.status === "Active",
+          ))));
+  const seesCoordinatorLogin = (r: Row) => {
+    const g = sessionGroupOf(r);
+    return (
+      can(user.roles, ["Project Operations", "Operations Systems / Admin"]) ||
+      (can(user.roles, ["Operations Coordinator"]) && g?.coordinator === user.id) ||
+      (can(user.roles, ["Team Supervisor"]) && g?.supervisor === user.id)
+    );
+  };
   const answersAsCoach = (r: Row) =>
     can(user.roles, ["Coach"]) &&
     (r.coach_id
@@ -1666,12 +1709,26 @@ export default function Operations({ module: initialModule }: { module: string }
             label: t("Link"),
             render: (r) => {
               const link = groups.find((g) => g.id === r.group_id)?.session_link;
-              return link ? (
-                <a className="text-link" href={link} target="_blank" rel="noreferrer">
-                  <ExternalLink size={14} /> {t("Join")}
-                </a>
-              ) : (
-                "—"
+              return (
+                <span className="join-cell">
+                  {link ? (
+                    <a className="text-link" href={link} target="_blank" rel="noreferrer">
+                      <ExternalLink size={14} /> {t("Join")}
+                    </a>
+                  ) : (
+                    "—"
+                  )}
+                  {seesCoachLogin(r) && (
+                    <button className="text-link" disabled={busy} onClick={() => showJoinLogin(r, "coach")}>
+                      <LockKeyhole size={13} /> {t("Coach login")}
+                    </button>
+                  )}
+                  {seesCoordinatorLogin(r) && (
+                    <button className="text-link" disabled={busy} onClick={() => showJoinLogin(r, "coordinator")}>
+                      <LockKeyhole size={13} /> {t("Coordinator login")}
+                    </button>
+                  )}
+                </span>
               );
             },
           },
@@ -3474,6 +3531,24 @@ export default function Operations({ module: initialModule }: { module: string }
           )}
         </SheetContent>
       </Sheet>
+      <Dialog open={!!joinLogin} onOpenChange={(v) => !v && setJoinLogin(null)}>
+        <DialogContent className="action-dialog sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>{joinLogin?.kind === "coach" ? t("Coach login") : t("Coordinator login")}</DialogTitle>
+            <DialogDescription>
+              {joinLogin?.group_id} · {t("Shown for one minute. Do not share it.")}
+            </DialogDescription>
+          </DialogHeader>
+          {joinLogin && (
+            <div className="join-login">
+              <label>{t("Email or username")}</label>
+              <code>{joinLogin.username}</code>
+              <label>{t("Password")}</label>
+              <code>{joinLogin.password}</code>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
       {(() => {
         const r = checklistFor ? (d.sessions || []).find((x: Row) => x.id === checklistFor) : null;
         const state = r ? checklistOf(r) : {};
