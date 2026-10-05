@@ -204,7 +204,7 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
           )}
           <div className="detail-actions">
             <button className="small-btn" disabled={!!progress} onClick={() => setDraft(null)}>{t("Cancel")}</button>
-            <button className="small-btn is-strong" disabled={!!progress || problems.length > 0} onClick={upload}>
+            <button className="primary small" disabled={!!progress || problems.length > 0} onClick={upload}>
               {progress ? t("Uploading…") : t("Replace the {v0} with this file", { v0: draft.sheet === "students" ? t("students sheet") : t("gigs sheet") })}
             </button>
           </div>
@@ -296,7 +296,7 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
 
 function PortalRow({ s, c, open, gigs, onToggle }: { s: Row; c?: Row; open: boolean; gigs?: Row[]; onToggle: () => void }) {
   const t = useT();
-  const tone = (v?: string) => (/Graduat/.test(v || "") ? "graduated" : /Approved/.test(v || "") ? "ok" : /Reject|Not/.test(v || "") ? "bad" : /Pending|Started/.test(v || "") ? "warn" : "info");
+  const tone = (v?: string) => (/Graduat|Approved/.test(v || "") ? "green" : /Reject|Not/.test(v || "") ? "red" : /Pending|Started/.test(v || "") ? "amber" : "neutral");
   return (
     <>
       <tr className={open ? "is-open" : ""}>
