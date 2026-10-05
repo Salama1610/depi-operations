@@ -6,7 +6,7 @@
 // sits at the top and narrows the list as the person types. Labels arrive
 // already translated: callers pass t(label).
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -35,15 +35,17 @@ export function SearchableSelect({
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
+  const listId = useId();
   const items = options.map((o) => (typeof o === "string" ? { value: o, label: o } : o));
   const chosen = items.find((o) => o.value === value);
-  return (
+  const select = (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
           type="button"
           role="combobox"
           aria-expanded={open}
+          aria-controls={listId}
           aria-label={label || placeholder}
           aria-required={required}
           className={"searchable-select " + (className || "")}
@@ -52,7 +54,7 @@ export function SearchableSelect({
           <ChevronDown size={16} />
         </button>
       </PopoverTrigger>
-      <PopoverContent className="searchable-select-list" align="start">
+      <PopoverContent id={listId} className="searchable-select-list" align="start">
         <Command
           filter={(itemValue, search) => {
             const item = items.find((o) => o.value === itemValue);
@@ -86,5 +88,22 @@ export function SearchableSelect({
         </Command>
       </PopoverContent>
     </Popover>
+  );
+  if (!required) return select;
+  // A required choice still stops the form: the browser checks this hidden
+  // copy of the value and points at the dropdown when it is empty.
+  return (
+    <span className="searchable-select-required">
+      {select}
+      <input
+        className="searchable-select-proxy"
+        tabIndex={-1}
+        aria-hidden="true"
+        required
+        value={value}
+        onChange={() => {}}
+        onFocus={() => setOpen(true)}
+      />
+    </span>
   );
 }

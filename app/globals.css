@@ -1036,3 +1036,5 @@ small, .text-xs, .table-subline, .footnote, .badge, .count, .due, .task-owner, l
 .searchable-select-list [cmdk-item]{min-height:44px;font-size:14px;gap:8px;color:var(--ink)}
 .searchable-select-list [cmdk-item][data-selected=true]{background:var(--navy-soft);color:var(--navy)}
 .searchable-select-list .is-hidden{visibility:hidden}
+.searchable-select-required{position:relative;display:block;width:100%}
+.searchable-select-proxy{position:absolute;inset-inline-start:12px;bottom:0;width:1px;height:1px !important;min-height:0 !important;padding:0;border:0;opacity:0;pointer-events:none}

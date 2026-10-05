@@ -1,5 +1,6 @@
 "use client";
 import { useT } from "@/lib/i18n/context";
+import { SearchableSelect } from "@/components/searchable-select";
 import { useState, useEffect } from "react";
 import { Download, LockKeyhole, RefreshCw, Search } from "lucide-react";
 import {
@@ -577,29 +578,11 @@ export function RetentionPanel() {
       <div className="form-grid">
         <label className="field">
           {t("Data scope")}
-          <select value={form.scope} onChange={field("scope")}>
-            {[
-              "audit_events",
-              "attachments",
-              "notifications",
-              "automation_runs",
-              "imports",
-              "exports",
-            ].map((x) => (
-              <option key={x}>{x}</option>
-            ))}
-          </select>
+          <SearchableSelect label={t("Data scope")} value={form.scope} onChange={(scope) => setForm({ ...form, scope })} options={["audit_events", "attachments", "notifications", "automation_runs", "imports", "exports"]} />
         </label>
         <label className="field">
           {t("Approved action")}
-          <select
-            value={form.retention_action}
-            onChange={field("retention_action")}
-          >
-            {["archive", "anonymize", "secure_delete"].map((x) => (
-              <option key={x}>{x}</option>
-            ))}
-          </select>
+          <SearchableSelect label={t("Approved action")} value={form.retention_action} onChange={(retention_action) => setForm({ ...form, retention_action })} options={["archive", "anonymize", "secure_delete"]} />
         </label>
         <label className="field">
           {t("Retention days")}

@@ -17,7 +17,8 @@ export const dynamic = "force-dynamic";
 // the sheet's previous upload only when every row has arrived, so a reader
 // never sees half a sheet. See lib/domain/portal-sheets.ts.
 
-const leaders = ["Higher Board", "Operations Systems / Admin", ...portalUploadRoles];
+// The quality team reads the whole cohort too: they check services against it.
+const leaders = ["Higher Board", "Operations Systems / Admin", "Quality Member", ...portalUploadRoles];
 const sheets: PortalSheet[] = ["students", "gigs"];
 const chunkLimit = 1000;
 const mappingName = "DEPI portal export";
@@ -44,7 +45,7 @@ export async function GET(req: Request) {
     const u = await actor();
     await rateLimit("portal:" + u.id, 60, 60);
     const scope = await scopedStudentIds(u);
-    ensure(scope === null || can(u.roles, ["Operations Coordinator", "Coach"]), "The portal view is for the leaders and the coordinators.");
+    ensure(scope === null || can(u.roles, ["Operations Coordinator", "Coach"]), "The portal view is for the leaders, the quality team and the coordinators.");
     const url = new URL(req.url);
     const [students, gigs] = await Promise.all([activeBatch("students"), activeBatch("gigs")]);
     // One student's gigs, on request.

@@ -12,6 +12,7 @@ import { ProgramFlow } from "./program-flow";
 import { WeeklyProgress } from "./weekly-progress";
 import { acceptedServicePlatforms } from "@/lib/domain/service-links";
 import { PortalView } from "./portal-view";
+import { SearchableSelect } from "@/components/searchable-select";
 import { GraduationDots, TodayView } from "./today";
 import { coachPayout, coachRates } from "@/lib/domain/payouts";
 import { checklistState, sessionChecklist, type ChecklistItem } from "@/lib/domain/session-checklist";
@@ -22,7 +23,6 @@ import {
   Users,
   Layers,
   CalendarDays,
-  WalletCards,
   BriefcaseBusiness,
   Files,
   ShieldCheck,
@@ -46,8 +46,6 @@ import {
   Paperclip,
   ExternalLink,
   RefreshCw,
-  GraduationCap,
-  CalendarRange,
   LockKeyhole,
   Check,
 } from "lucide-react";
@@ -79,16 +77,8 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Progress } from "@/components/ui/progress";
 import {
   Table,
   TableHeader,
@@ -195,7 +185,7 @@ const actionCopy: Row = {
   session_unavailable:
     "Project Operations, Coach Operations and the group's supervisor are notified at once so the session can be covered or moved.",
   service_qc_review:
-    "One link at a time. Lock a correct link, or leave a clear correction comment for the student.",
+    "One link at a time. Approve a correct link, or reject it with a clear comment for the student.",
   bulk_group_owner:
     "The group and its students move to the coordinator you choose. The change is audited.",
 };
@@ -231,6 +221,9 @@ const weeklyGateChecks = [
   "At Risk and Critical intervention owner",
   "Supervisor exception review complete",
 ];
+// Stored review states keep their names; people always read Approved or Rejected.
+const shownStatus: Record<string, string> = { Locked: "Approved", Lock: "Approved", "Needs Correction": "Rejected" };
+
 function Badge({ value }: { value: any }) {
   const t = useT();
   return (
@@ -250,7 +243,7 @@ function Badge({ value }: { value: any }) {
                   : "info")
       }
     >
-      {typeof value === "string" ? t(value) : value}
+      {typeof value === "string" ? t(shownStatus[value] || value) : value}
     </span>
   );
 }
@@ -272,21 +265,17 @@ function Pick({
   return (
     <span className="pick-field">
       <span className="pick-label">{label}</span>
-      <Select value={value || undefined} onValueChange={onChange}>
-        <SelectTrigger className="pick" aria-label={label}>
-          <SelectValue placeholder={label} />
-        </SelectTrigger>
-        <SelectContent>
-          {options.map((o) => {
-            const a = typeof o === "string" ? { value: o, label: o } : o;
-            return (
-              <SelectItem key={a.value} value={a.value}>
-                {t(a.label)}
-              </SelectItem>
-            );
-          })}
-        </SelectContent>
-      </Select>
+      <SearchableSelect
+        value={value}
+        onChange={onChange}
+        label={label}
+        placeholder={label}
+        className="pick"
+        options={options.map((o) => {
+          const a = typeof o === "string" ? { value: o, label: o } : o;
+          return { value: a.value, label: t(a.label) };
+        })}
+      />
     </span>
   );
 }
@@ -449,10 +438,7 @@ export default function Operations({ module: initialModule }: { module: string }
   });
   const openTasks = tasks.filter((t) => t.status === "Open");
   const overdue = openTasks.filter((t) => t.due < new Date().toISOString());
-  const dueToday = openTasks.filter((t) => t.due.slice(0, 10) === today());
   const noContact = students.filter((s) => s.contact_due);
-  const critical = students.filter((s) => s.risk.status === "Critical");
-  const atRisk = students.filter((s) => s.risk.status === "At Risk");
   const graduates = students.filter((s) => s.graduation.includes("Graduate"));
   const accepted = evidence.filter((e) => e.status === "Accepted");
   const reviews = evidence.filter((e) =>
@@ -798,14 +784,6 @@ export default function Operations({ module: initialModule }: { module: string }
       )}
     </div>
   );
-  function routeQueue(q: string) {
-    // Same in-page switch as the sidebar, carrying the queue as state.
-    window.history.pushState(null, "", "/work?queue=" + encodeURIComponent(q));
-    setFilter(q);
-    setSearch("");
-    setModule("work");
-    window.scrollTo({ top: 0 });
-  }
   useEffect(() => {
     const p = new URLSearchParams(window.location.search),
       q = p.get("queue"),
@@ -2348,7 +2326,7 @@ export default function Operations({ module: initialModule }: { module: string }
           {insightFilterRow}
           <div className="filter-row">
             <Pick label={t("Satisfaction")} value={insightFilters.rating} onChange={(rating) => setInsightFilters({ ...insightFilters, rating })} options={[{ value: "All", label: t("Any rating") }, { value: "Low", label: t("Low (1–2)") }, { value: "High", label: t("High (4–5)") }]} />
-            <Pick label={t("Searched for a gig")} value={insightFilters.searched} onChange={(searched) => setInsightFilters({ ...insightFilters, searched })} options={[{ value: "All", label: t("Either") }, { value: "Yes", label: t("Yes") }, { value: "No", label: t("No") }]} />
+            <Pick label={t("Searched for work on the platforms")} value={insightFilters.searched} onChange={(searched) => setInsightFilters({ ...insightFilters, searched })} options={[{ value: "All", label: t("Either") }, { value: "Yes", label: t("Yes") }, { value: "No", label: t("No") }]} />
             <label className="check"><Checkbox checked={insightFilters.commentsOnly} onCheckedChange={(v) => setInsightFilters({ ...insightFilters, commentsOnly: v === true })} />{t("Only with written comments")}</label>
           </div>
           <div className="mini-stats">
@@ -2356,7 +2334,7 @@ export default function Operations({ module: initialModule }: { module: string }
             <span><strong>{average(feedbackRows, "satisfaction")}</strong>{t("Satisfaction")}</span>
             <span><strong>{average(feedbackRows, "clarity")}</strong>{t("Coach's clarity")}</span>
             <span><strong>{average(feedbackRows, "usefulness")}</strong>{t("Mentorship usefulness")}</span>
-            <span><strong>{feedbackRows.length ? Math.round((100 * feedbackRows.filter((f: Row) => Number(f.searched_gig) === 1 || f.searched_gig === true).length) / feedbackRows.length) : 0}%</strong>{t("Searched for a gig")}</span>
+            <span><strong>{feedbackRows.length ? Math.round((100 * feedbackRows.filter((f: Row) => Number(f.searched_gig) === 1 || f.searched_gig === true).length) / feedbackRows.length) : 0}%</strong>{t("Searched for work on the platforms")}</span>
           </div>
           {panel(
             t("By coach"),
@@ -2384,7 +2362,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     { key: "coach", label: t("Coach"), render: (f) => owner(f.session.coach_id) },
                     { key: "student_id", label: t("Student"), render: (f) => name(f.student_id) },
                     { key: "ratings", label: t("Ratings"), render: (f) => <span className="feedback-scores" title={t("Satisfaction · clarity · usefulness")}>{f.satisfaction} · {f.clarity} · {f.usefulness}</span> },
-                    { key: "searched_gig", label: t("Searched for a gig"), render: (f) => (Number(f.searched_gig) === 1 || f.searched_gig === true ? t("Yes") : t("No")) },
+                    { key: "searched_gig", label: t("Searched for work on the platforms"), render: (f) => (Number(f.searched_gig) === 1 || f.searched_gig === true ? t("Yes") : t("No")) },
                     { key: "liked", label: t("Liked most"), render: (f) => <small>{f.liked || "—"}</small> },
                     { key: "comments", label: t("Comments or support needed"), render: (f) => <small>{f.comments || "—"}</small> },
                   ],
@@ -2588,7 +2566,7 @@ export default function Operations({ module: initialModule }: { module: string }
         keepsAccounts ||
         can(user.roles, ["Project Operations", "Higher Board"]) ||
         (can(user.roles, ["Operations Coordinator"]) && groups.some((g) => g.coordinator === user.id && g.supervisor_team === "Service Team"));
-      const seesPortal = can(user.roles, ["Team Supervisor", "Project Operations", "Coach Operations", "Quality Lead", "Higher Board", "Operations Systems / Admin", "Operations Coordinator"]);
+      const seesPortal = can(user.roles, ["Team Supervisor", "Project Operations", "Coach Operations", "Quality Lead", "Quality Member", "Higher Board", "Operations Systems / Admin", "Operations Coordinator"]);
       content = (
         <Tabs defaultValue="services">
           <TabsList>
@@ -2663,7 +2641,7 @@ export default function Operations({ module: initialModule }: { module: string }
       Number(r.links_submitted) === 0
         ? "Not submitted"
         : Number(r.links_need_correction) > 0
-          ? "Needs student correction"
+          ? "Rejected, waiting on the student"
           : Number(r.links_pending) > 0
             ? "Awaiting QC"
             : Number(r.links_kafiil) + Number(r.links_nafezly) >= 3
@@ -2678,8 +2656,8 @@ export default function Operations({ module: initialModule }: { module: string }
       .filter((r) => submissionFilters.coordinator === "All" || r.coordinator === submissionFilters.coordinator)
       .sort(
         (a, b) =>
-          ["Not submitted", "Incomplete", "Needs student correction", "Awaiting QC", "Complete"].indexOf(a.follow_up) -
-            ["Not submitted", "Incomplete", "Needs student correction", "Awaiting QC", "Complete"].indexOf(b.follow_up) ||
+          ["Not submitted", "Incomplete", "Rejected, waiting on the student", "Awaiting QC", "Complete"].indexOf(a.follow_up) -
+            ["Not submitted", "Incomplete", "Rejected, waiting on the student", "Awaiting QC", "Complete"].indexOf(b.follow_up) ||
           String(a.student_name).localeCompare(String(b.student_name)),
       );
     const submissionCount = (state: string) =>
@@ -2689,12 +2667,12 @@ export default function Operations({ module: initialModule }: { module: string }
         <div className="mini-stats service-qc-stats">
           <span><strong>{submissionCount("Not submitted")}</strong>{t("Not submitted")}</span>
           <span><strong>{submissionCount("Awaiting QC")}</strong>{t("Awaiting QC")}</span>
-          <span><strong>{submissionCount("Needs student correction")}</strong>{t("Needs student correction")}</span>
+          <span><strong>{submissionCount("Rejected, waiting on the student")}</strong>{t("Rejected, waiting on the student")}</span>
           <span><strong>{submissionCount("Incomplete")}</strong>{t("Incomplete")}</span>
           <span><strong>{submissionCount("Complete")}</strong>{t("Complete")}</span>
         </div>
         <div className="filter-row service-qc-filters">
-          <Pick label={t("Follow-up")} value={submissionFilters.state} onChange={(state) => setSubmissionFilters({ ...submissionFilters, state })} options={["All", "Not submitted", "Incomplete", "Needs student correction", "Awaiting QC", "Complete"]} />
+          <Pick label={t("Follow-up")} value={submissionFilters.state} onChange={(state) => setSubmissionFilters({ ...submissionFilters, state })} options={["All", "Not submitted", "Incomplete", "Rejected, waiting on the student", "Awaiting QC", "Complete"]} />
           <Pick label={t("Track")} value={submissionFilters.track} onChange={(track) => setSubmissionFilters({ ...submissionFilters, track })} options={["All", ...Array.from(new Set(serviceSubmissionStatus.map((r) => r.track).filter(Boolean)))]} />
           <Pick label={t("Group")} value={submissionFilters.group} onChange={(group) => setSubmissionFilters({ ...submissionFilters, group })} options={["All", ...Array.from(new Set(serviceSubmissionStatus.map((r) => r.group_id).filter(Boolean)))]} />
           <Pick label={t("Coordinator")} value={submissionFilters.coordinator} onChange={(coordinator) => setSubmissionFilters({ ...submissionFilters, coordinator })} options={[{ value: "All", label: t("All coordinators") }, ...Array.from(new Set(serviceSubmissionStatus.map((r) => r.coordinator).filter(Boolean))).map((id) => ({ value: id, label: owner(id) }))]} />
@@ -2708,7 +2686,7 @@ export default function Operations({ module: initialModule }: { module: string }
               { key: "group_id", label: t("Group"), render: (r) => <span>{r.group_id}<small className="table-subline">{r.track}</small></span> },
               { key: "coordinator", label: t("Coordinator"), render: (r) => owner(r.coordinator) },
               { key: "follow_up", label: t("Follow-up"), render: (r) => <Badge value={r.follow_up} /> },
-              { key: "links_submitted", label: t("Locked"), render: (r) => <span>{r.links_locked}/3<small className="table-subline">{r.submitted_at ? t("{v0} submitted {v1}", { v0: r.links_submitted, v1: new Date(r.submitted_at).toLocaleDateString() }) : t("never submitted")}</small></span> },
+              { key: "links_submitted", label: t("Approved"), render: (r) => <span>{r.links_locked}/3<small className="table-subline">{r.submitted_at ? t("{v0} submitted {v1}", { v0: r.links_submitted, v1: new Date(r.submitted_at).toLocaleDateString() }) : t("never submitted")}</small></span> },
             ],
             (r) => <div className="detail-actions"><button className="small-btn" onClick={() => setSelected(students.find((x) => x.id === r.student_id) || null)}>{t("Open student")}</button></div>,
           )),
@@ -2830,10 +2808,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     ) },
                   { key: "auto_status", label: t("Automatic check"), render: (r) => <Badge value={r.auto_status} /> },
                   { key: "reviewer_name", label: t("Reviewer"), render: (r) => isQualityLead && r.qc_status !== "Locked"
-                      ? <select className="pick-inline" aria-label={t("Assign this student to a reviewer")} value={r.qc_actor || ""} disabled={busy} onChange={(e) => e.target.value && quick("service_qc_assign", { student_id: r.student_id, reviewer_id: e.target.value })}>
-                          <option value="">{t("Waiting for a reviewer")}</option>
-                          {qualityReviewers.map((q) => <option key={q.id} value={q.id}>{q.name} ({reviewerStudents.get(q.id) || 0})</option>)}
-                        </select>
+                      ? <SearchableSelect className="pick-inline" label={t("Assign this student to a reviewer")} placeholder={t("Waiting for a reviewer")} value={r.qc_actor || ""} onChange={(v) => !busy && v && quick("service_qc_assign", { student_id: r.student_id, reviewer_id: v })} options={qualityReviewers.map((q) => ({ value: q.id, label: `${q.name} (${reviewerStudents.get(q.id) || 0})` }))} />
                       : <span>{owner(r.qc_actor) === "Unassigned" ? t("Waiting for a reviewer") : owner(r.qc_actor)}<small className="table-subline">{owner(r.coordinator)}</small></span> },
                   { key: "qc_status", label: t("Review state"), render: (r) => <span><Badge value={t(qcState(r.qc_status))} />{resubmitted(r) && <Badge value={t("Resubmitted")} />}<small className="table-subline">{Math.round((Date.now() - Date.parse(r.updated_at)) / 3600000)}{t("h · revision")}{" "}{r.revision}</small></span> },
                 ],
@@ -2907,6 +2882,18 @@ export default function Operations({ module: initialModule }: { module: string }
           ),
         )}
       </>
+    );
+    // The quality team checks services against the DEPI portal's own records.
+    const qualityView = content;
+    content = (
+      <Tabs defaultValue="review">
+        <TabsList>
+          <TabsTrigger value="review">{t("Review queue")}</TabsTrigger>
+          <TabsTrigger value="portal">{t("Gigs portal view")}</TabsTrigger>
+        </TabsList>
+        <TabsContent value="review">{qualityView}</TabsContent>
+        <TabsContent value="portal"><PortalView staffName={owner} /></TabsContent>
+      </Tabs>
     );
   } else if (module === "cases") {
     content = panel(
@@ -3442,7 +3429,7 @@ export default function Operations({ module: initialModule }: { module: string }
                               groups: "Create group",
                               sessions: "Schedule session",
                               accounts: "Request account",
-                              gigs: "Record gig",
+                              gigs: "Record a paid service",
                               cases: "Open case",
                               work: "Create action",
                               administration: "Add staff",
@@ -3645,7 +3632,7 @@ export default function Operations({ module: initialModule }: { module: string }
                   const options: [string, "reminder" | "absence" | "congratulations", Row][] = [
                     [t("Session reminder"), "reminder", { name: selectedStudent.name, title: next?.title || "", when: next ? fmt(next.starts_at) + " " + new Date(next.starts_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" }) : "", link: link || "" }],
                     [t("Absence follow-up"), "absence", { name: selectedStudent.name }],
-                    [t("First-gig congratulations"), "congratulations", { name: selectedStudent.name }],
+                    [t("First-service congratulations"), "congratulations", { name: selectedStudent.name }],
                   ];
                   const any = whatsapp(selectedStudent.phone, "absence", {});
                   return any ? (
@@ -4031,7 +4018,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     <span><strong>{average(rows, "satisfaction")}</strong>{t("Satisfaction")}</span>
                     <span><strong>{average(rows, "clarity")}</strong>{t("Coach's clarity")}</span>
                     <span><strong>{average(rows, "usefulness")}</strong>{t("Mentorship usefulness")}</span>
-                    <span><strong>{rows.length ? Math.round((100 * searched) / rows.length) : 0}%</strong>{t("Searched for a gig")}</span>
+                    <span><strong>{rows.length ? Math.round((100 * searched) / rows.length) : 0}%</strong>{t("Searched for work on the platforms")}</span>
                   </div>
                   <div className="feedback-comments">
                     {rows.filter((f) => f.liked || f.comments).map((f) => (
@@ -4261,19 +4248,18 @@ export default function Operations({ module: initialModule }: { module: string }
                     <p className="footnote">{t("One screenshot of a message sent to the whole group logs a contact for every active student in it.")}</p>
                     <label className="field">
                       {t("Group")} *
-                      <select
+                      <SearchableSelect
                         className="pick-inline"
+                        label={t("Group")}
+                        placeholder={t("Choose a group")}
+                        required
                         value={form.group_id || ""}
-                        onChange={(e) => {
-                          const anchor = students.find((x) => x.group_id === e.target.value && x.lifecycle === "Active");
-                          setForm({ ...form, group_id: e.target.value, student_id: anchor?.id || "" });
+                        onChange={(groupId) => {
+                          const anchor = students.find((x) => x.group_id === groupId && x.lifecycle === "Active");
+                          setForm({ ...form, group_id: groupId, student_id: anchor?.id || "" });
                         }}
-                      >
-                        <option value="">{t("Choose a group")}</option>
-                        {mine.map((g) => (
-                          <option key={g.id} value={g.id}>{g.id} · {students.filter((x) => x.group_id === g.id && x.lifecycle === "Active").length} {t("students")}</option>
-                        ))}
-                      </select>
+                        options={mine.map((g) => ({ value: g.id, label: `${g.id} · ${students.filter((x) => x.group_id === g.id && x.lifecycle === "Active").length} ${t("students")}` }))}
+                      />
                     </label>
                     <div className="form-grid">
                       {choice("channel", t("Channel"), ["WhatsApp", "Phone", "Email", "Teams", "In person"])}
@@ -5495,12 +5481,11 @@ export default function Operations({ module: initialModule }: { module: string }
                       <th scope="row">{header}</th>
                       <td><small>{String(importRows.find((row: Row) => String(row[header] ?? "").trim())?.[header] ?? "—")}</small></td>
                       <td>
-                        <select
+                        <SearchableSelect
                           className="pick-inline"
-                          aria-label={t("Field filled by {v0}", { v0: header })}
+                          label={t("Field filled by {v0}", { v0: header })}
                           value={importMapping[header] || ""}
-                          onChange={(e) => {
-                            const field = e.target.value;
+                          onChange={(field) => {
                             const next: Row = { ...importMapping };
                             // One field cannot be filled from two columns.
                             for (const [other, value] of Object.entries(next))
@@ -5509,12 +5494,8 @@ export default function Operations({ module: initialModule }: { module: string }
                             else delete next[header];
                             setImportMapping(next);
                           }}
-                        >
-                          <option value="">{t("Ignore this column")}</option>
-                          {[...mappingKeys, ...mappingFields.filter((f) => !mappingKeys.includes(f))].map((field) => (
-                            <option key={field} value={field}>{field.replace(/_/g, " ")}</option>
-                          ))}
-                        </select>
+                          options={[{ value: "", label: t("Ignore this column") }, ...[...mappingKeys, ...mappingFields.filter((f) => !mappingKeys.includes(f))].map((field) => ({ value: field, label: field.replace(/_/g, " ") }))]}
+                        />
                       </td>
                     </tr>
                   ))}

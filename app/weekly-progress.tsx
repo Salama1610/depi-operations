@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, CalendarRange } from "lucide-react";
 import { useLocale, useT } from "@/lib/i18n/context";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { can } from "@/lib/domain/rules";
+import { SearchableSelect } from "@/components/searchable-select";
 
 type Row = Record<string, any>;
 
@@ -222,7 +223,7 @@ export function WeeklyProgress({ data, onStudent }: { data: Row; onStudent: (id:
     { label: "Students contacted", value: `${totals.contacted} / ${totals.students}`, detail: pct(totals.contacted, totals.students) },
     { label: "Sessions this week", value: `${totals.held} / ${totals.sessions}`, detail: t("held of scheduled") },
     { label: "Attendance", value: totals.attendance, detail: t("of recorded attendance") },
-    { label: "Service links", value: String(totals.submitted), detail: t("{v0} links locked", { v0: totals.locked }) },
+    { label: "Service links", value: String(totals.submitted), detail: t("{v0} links approved", { v0: totals.locked }) },
     { label: "Services recorded", value: String(totals.evidence), detail: t("{v0} overdue actions now", { v0: totals.overdue }) },
   ];
   const filtered = supervisor !== "All" || coordinator !== "All" || track !== "All";
@@ -243,7 +244,7 @@ export function WeeklyProgress({ data, onStudent }: { data: Row; onStudent: (id:
         <Table>
           <TableHeader>
             <TableRow>
-              {[first, "Groups", "Students", "Contacted", "Sessions held", "Attendance", "Links submitted", "Links locked", "Services", "Overdue", "At risk"].map((h) => (
+              {[first, "Groups", "Students", "Contacted", "Sessions held", "Attendance", "Links submitted", "Links approved", "Services", "Overdue", "At risk"].map((h) => (
                 <TableHead key={h}>{t(h)}</TableHead>
               ))}
             </TableRow>
@@ -319,28 +320,13 @@ export function WeeklyProgress({ data, onStudent }: { data: Row; onStudent: (id:
             {t("Next week")} <ChevronRight size={16} className="flip-rtl" />
           </button>
           {leader && view.supervisorOptions.length > 0 && (
-            <select className="weekly-filter" value={supervisor} onChange={(e) => setSupervisor(e.target.value)} aria-label={t("Supervisor")}>
-              <option value="All">{t("All supervisors")}</option>
-              {view.supervisorOptions.map((s: Row) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
+            <SearchableSelect className="weekly-filter" label={t("Supervisor")} value={supervisor} onChange={setSupervisor} options={[{ value: "All", label: t("All supervisors") }, ...view.supervisorOptions.map((s: Row) => ({ value: s.id, label: s.name }))]} />
           )}
           {!ownWeek && !coachesOnly && view.coordinatorOptions.length > 1 && (
-            <select className="weekly-filter" value={coordinator} onChange={(e) => setCoordinator(e.target.value)} aria-label={t("Coordinator")}>
-              <option value="All">{t("Every coordinator")}</option>
-              {view.coordinatorOptions.map((s: Row) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
+            <SearchableSelect className="weekly-filter" label={t("Coordinator")} value={coordinator} onChange={setCoordinator} options={[{ value: "All", label: t("Every coordinator") }, ...view.coordinatorOptions.map((s: Row) => ({ value: s.id, label: s.name }))]} />
           )}
           {view.trackOptions.length > 1 && (
-            <select className="weekly-filter" value={track} onChange={(e) => setTrack(e.target.value)} aria-label={t("Track")}>
-              <option value="All">{t("Every track")}</option>
-              {view.trackOptions.map((name: string) => (
-                <option key={name} value={name}>{name}</option>
-              ))}
-            </select>
+            <SearchableSelect className="weekly-filter" label={t("Track")} value={track} onChange={setTrack} options={[{ value: "All", label: t("Every track") }, ...view.trackOptions.map((name: string) => ({ value: name, label: name }))]} />
           )}
           {filtered && (
             <button
@@ -550,7 +536,7 @@ function StudentWeek({
                   )}
                 </TableCell>
                 <TableCell>
-                  {links.length ? t("{v0} of 3 locked", { v0: locked }) : t("Not submitted")}
+                  {links.length ? t("{v0} of 3 approved", { v0: locked }) : t("Not submitted")}
                 </TableCell>
                 <TableCell>
                   {s.next_task ? (
