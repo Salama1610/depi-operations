@@ -236,13 +236,17 @@ function Badge({ value }: { value: any }) {
     <span
       className={
         "badge " +
-        (/Critical|Rejected|Overdue|Blocked|S1|S2|Unresponsive|Access Issue/.test(value)
-          ? "red"
-          : /Risk|Pending|Submitted|Review|Waiting|Delayed|Funding|Cooldown|Reserved/.test(value)
-            ? "amber"
-            : /Accepted|Graduat|Complete|Available|Present|On Track/.test(value)
-              ? "green"
-              : "neutral")
+        (/Graduat/.test(value)
+          ? "graduated"
+          : /Closed|Cancelled|Retired|Withdrawn|Archived|Abandoned|Replaced|Removed/.test(value)
+            ? "closed"
+            : /Critical|Rejected|Overdue|Blocked|S1|S2|Unresponsive|Access Issue|Absent/.test(value)
+              ? "bad"
+              : /Risk|Pending|Submitted|Review|Waiting|Delayed|Funding|Cooldown|Reserved/.test(value)
+                ? "warn"
+                : /Accepted|Approved|Complete|Available|Present|On Track|On track|Confirmed|Active|Locked/.test(value)
+                  ? "ok"
+                  : "info")
       }
     >
       {typeof value === "string" ? t(value) : value}
@@ -1410,7 +1414,7 @@ export default function Operations({ module: initialModule }: { module: string }
               ),
               keepsAccounts && accounts.length ? (
                 <div className="detail-actions">
-                  <button className="primary small" onClick={() => open("account_topup", { id: "" })}>
+                  <button className="small-btn is-strong" onClick={() => open("account_topup", { id: "" })}>
                     <Plus size={15} /> {t("Record a top-up")}
                   </button>
                 </div>
@@ -1518,7 +1522,7 @@ export default function Operations({ module: initialModule }: { module: string }
               ),
               <div className="detail-actions">
                 {can(user.roles, ["Higher Board"]) && (
-                  <button className="primary small" onClick={() => open("account")}>
+                  <button className="small-btn is-strong" onClick={() => open("account")}>
                     <Plus size={15} /> {t("Add account")}
                   </button>
                 )}
@@ -1610,7 +1614,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     const reservation = activeReservation(r.id);
                     return reservation ? (
                       <button
-                        className="primary small"
+                        className="small-btn is-strong"
                         onClick={() => open("allocate", { request: r.id, student_id: r.student_id, reservation_id: reservation.id, account: reservation.account_id })}
                       >
                         {t("Approve allocation")}
@@ -3893,7 +3897,7 @@ export default function Operations({ module: initialModule }: { module: string }
                               ) : editable ? (
                                 <button
                                   type="button"
-                                  className={st.done ? "small-btn" : "primary small"}
+                                  className={st.done ? "small-btn" : "small-btn is-strong"}
                                   disabled={busy}
                                   onClick={() => quick("session_check", { id: r.id, item: item.key, done: !st.done })}
                                 >

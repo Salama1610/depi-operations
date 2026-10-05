@@ -42,13 +42,16 @@ const time = (iso: string) =>
   new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" });
 const pct = (part: number, whole: number) => (whole ? Math.round((100 * part) / whole) : null);
 const tone = (value: number | null, good = 85, fair = 65) =>
-  value === null ? "neutral" : value >= good ? "green" : value >= fair ? "amber" : "red";
+  value === null ? "info" : value >= good ? "ok" : value >= fair ? "warn" : "bad";
+/** The word that always goes with a status colour. */
+const word = (value: number | null, good = 85, fair = 65) =>
+  value === null ? "No data yet" : value >= good ? "On track" : value >= fair ? "At risk" : "Critical";
 const ended = (s: Row) => s.status !== "Cancelled" && Date.parse(s.starts_at) + Number(s.duration_minutes || 180) * 60000 <= Date.now();
 
 /** A KPI card: the figure, its word, and what it measures. */
 function Kpi({ label, value, unit = "%", note, good, fair }: { label: string; value: number | null; unit?: string; note?: string; good?: number; fair?: number }) {
   const t = useT();
-  const level = tone(value, good, fair);
+  const level = { ok: "green", warn: "amber", bad: "red", info: "neutral" }[tone(value, good, fair)];
   return (
     <div className={"kpi-card kpi-" + level}>
       <span className="kpi-value">{value === null ? "—" : value + unit}</span>
@@ -155,7 +158,7 @@ function CoordinatorToday({ ctx }: { ctx: TodayContext }) {
                   <div className="today-actions">
                     {link && <a className="small-btn" href={link} target="_blank" rel="noreferrer"><ExternalLink size={14} /> {t("Join")}</a>}
                     {ctx.takesAttendance(s) ? (
-                      <button className={marked ? "small-btn" : "primary small"} onClick={() => ctx.openAttendance(s)}>
+                      <button className={marked ? "small-btn" : "small-btn is-strong"} onClick={() => ctx.openAttendance(s)}>
                         {marked ? t("Attendance taken") : t("Take attendance")}
                       </button>
                     ) : (
@@ -213,7 +216,7 @@ function CoordinatorToday({ ctx }: { ctx: TodayContext }) {
                     <span className={"badge " + (left < 0 ? "red" : left < 12 ? "amber" : "green")}>
                       {left < 0 ? t("{v0}h overdue", { v0: -left }) : t("{v0}h left", { v0: left })}
                     </span>
-                    <button className="primary small" onClick={() => ctx.open("review", e)}>{t("Review")}</button>
+                    <button className="small-btn is-strong" onClick={() => ctx.open("review", e)}>{t("Review")}</button>
                   </div>
                 </article>
               );
@@ -254,9 +257,9 @@ function SupervisorToday({ ctx }: { ctx: TodayContext }) {
               {ranked.map(({ id, k, score }) => (
                 <tr key={id}>
                   <td><strong>{ctx.owner(id)}</strong><small className="table-subline">{t("{v0} students", { v0: k.students })}</small></td>
-                  <td><span className={"badge " + tone(score)}>{score === null ? "—" : score + "%"}</span></td>
+                  <td><span className={"badge " + tone(score)}>{score === null ? t("No data yet") : `${score}% · ${t(word(score))}`}</span></td>
                   {[k.sameDay, k.reviews48, k.contact, k.accuracy].map((v, i) => (
-                    <td key={i}><span className={"badge " + tone(v)}>{v === null ? "—" : v + "%"}</span></td>
+                    <td key={i}><span className={"badge " + tone(v)}>{v === null ? "—" : `${v}% · ${t(word(v))}`}</span></td>
                   ))}
                   <td>{k.overdueReviews ? <strong className="credit-out">{k.overdueReviews}</strong> : 0}</td>
                   <td>
@@ -464,9 +467,9 @@ function CoachToday({ ctx }: { ctx: TodayContext }) {
               <small>{s.group_id} · {s.title} · {t("Week {v0}", { v0: s.week })}</small>
               <div className="coach-card-actions">
                 {link && <a className="small-btn" href={link} target="_blank" rel="noreferrer"><ExternalLink size={15} /> {t("Join")}</a>}
-                {ctx.canAttend(s) && <button className="primary small" onClick={() => ctx.confirm(s)}><Check size={15} /> {t("Confirm")}</button>}
+                {ctx.canAttend(s) && <button className="small-btn is-strong" onClick={() => ctx.confirm(s)}><Check size={15} /> {t("Confirm")}</button>}
                 {ctx.canDecline(s) && <button className="small-btn" onClick={() => ctx.open("session_unavailable", s)}>{t("Unavailable")}</button>}
-                {ctx.takesAttendance(s) && <button className="primary small" onClick={() => ctx.openAttendance(s)}>{t("Take attendance")}</button>}
+                {ctx.takesAttendance(s) && <button className="small-btn is-strong" onClick={() => ctx.openAttendance(s)}>{t("Take attendance")}</button>}
                 <button className="small-btn" onClick={() => ctx.open("milestone", { group_id: s.group_id })}>{t("Update milestone")}</button>
               </div>
             </article>

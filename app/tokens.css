@@ -1,0 +1,60 @@
+/*
+ * The one place colours live. Every colour in the interface is one of these;
+ * nothing else in the code writes a hex value.
+ *
+ * Navy is structure: the sidebar, headers, numbers and links.
+ * Orange is the main button, one per screen. The brighter orange is for the
+ * logo and big numbers only. Sky is a background or a progress bar, never text.
+ * The status colours are fixed, and every one is shown with its word:
+ * On track, At risk, Critical, Info, Graduated, Closed.
+ */
+:root {
+  /* Brand */
+  --navy: #094268;
+  --navy-deep: #062f4b;
+  --navy-soft: #e8eff5;
+  --orange: #c23c00;
+  --orange-dark: #9c3000;
+  --orange-bright: #e44701;
+  --sky: #4ab7dd;
+  --sky-soft: #e8f6fb;
+
+  /* Text on the navy sidebar */
+  --on-navy: #ffffff;
+  --on-navy-2: #c9dbe8;
+
+  /* Fonts: Tajawal for Arabic, Montserrat for codes, platforms and money,
+     Bebas Neue for big numbers. */
+  --font-text: "Tajawal", "Montserrat", "Segoe UI", Tahoma, Arial, sans-serif;
+  --font-code: "Montserrat", "Segoe UI", Arial, sans-serif;
+  --font-number: "Bebas Neue", "Montserrat", Impact, sans-serif;
+
+  /* Text and surfaces */
+  --ink: #14263d;
+  --ink-2: #3b4f6b;
+  --ink-3: #5f6f86;
+  --surface: #ffffff;
+  --surface-muted: #f5f7fa;
+  --page: #f4f6f9;
+  --line: #e2e8f0;
+  --line-strong: #c8d3e0;
+  --shadow: rgba(9, 66, 104, 0.08);
+  --overlay: rgba(9, 66, 104, 0.35);
+
+  /* Status: always with a word next to the colour */
+  --ok: #1f7a55;
+  --ok-bg: #e6f4ed;
+  --ok-line: #bfe3d0;
+  --warn: #8a5300;
+  --warn-bg: #fff3dc;
+  --warn-line: #f2d49b;
+  --bad: #b42318;
+  --bad-bg: #fdeceb;
+  --bad-line: #f4c7c2;
+  --info: #094268;
+  --info-bg: #e8f6fb;
+  --graduated: #ffffff;
+  --graduated-bg: #094268;
+  --closed: #4b5565;
+  --closed-bg: #eceff3;
+}
