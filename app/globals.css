@@ -904,3 +904,41 @@ input:focus-visible {
 .feedback-scores{font-weight:700;letter-spacing:.5px}
 
 .attendance-upload{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+
+/* Today: KPI cards, today's lists, the week, a coach's cards. */
+.today{display:flex;flex-direction:column;gap:14px}
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+.kpi-card{display:flex;flex-direction:column;gap:4px;border:1px solid #e0e7f1;border-radius:12px;background:#fff;padding:14px 16px;border-top:4px solid #c9d4e4}
+.kpi-card .kpi-value{font-size:30px;font-weight:700;color:#094268;line-height:1.1}
+.kpi-card strong{font-size:14px;color:#263d60}
+.kpi-card small{font-size:13px;color:#6d7f9a}
+.kpi-green{border-top-color:#2f8f6b}.kpi-amber{border-top-color:#d98a1c}.kpi-red{border-top-color:#c0392b}
+.today-panel h3{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.today-list{display:flex;flex-direction:column}
+.today-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid #edf1f7;flex-wrap:wrap}
+.today-row:last-child{border-bottom:0}
+.today-row>div:first-child,.today-row>button.text-link{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:start}
+.today-row small{color:#6d7f9a;font-size:13px}
+.today-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.today-table{width:100%;border-collapse:collapse;font-size:14px}
+.today-table th,.today-table td{padding:9px 10px;border-bottom:1px solid #edf1f7;text-align:start}
+.funnel{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+.funnel-team{display:flex;flex-direction:column;gap:6px}
+.funnel-step{position:relative;display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border-radius:8px;overflow:hidden}
+.funnel-bar{position:absolute;inset-inline-start:0;top:0;bottom:0;background:#4AB7DD33;border-radius:8px}
+.funnel-step small,.funnel-step b{position:relative}
+.week-grid{display:grid;grid-template-columns:repeat(7,minmax(90px,1fr));gap:8px;overflow-x:auto}
+.week-day{display:flex;flex-direction:column;gap:2px;border:1px solid #e0e7f1;border-radius:10px;padding:10px;background:#fff}
+.week-day.is-today{border-color:#094268;box-shadow:0 0 0 2px #09426822}
+.week-day .num{font-size:26px;font-weight:700;color:#094268}
+.week-day small{color:#6d7f9a;font-size:13px}
+.warning-box{display:flex;align-items:center;gap:8px;background:#fff7e9;border-color:#f0d3a6;color:#8a5a12}
+.coach-today .coach-card{border:1px solid #e0e7f1;border-radius:12px;background:#fff;padding:14px;display:flex;flex-direction:column;gap:6px}
+.coach-card-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.coach-card-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+.coach-card-actions>*{min-height:44px}
+.grad-dots{display:inline-flex;gap:4px;vertical-align:middle}
+.grad-dots i{width:12px;height:12px;border-radius:50%;border:2px solid #094268;display:inline-block}
+.grad-dots i.is-done{background:#094268}
+.wa-btn{color:#1f7a4d}
+.case-mark{display:inline-flex;width:34px;justify-content:center;color:#c0392b}
