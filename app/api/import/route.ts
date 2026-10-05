@@ -13,7 +13,7 @@ import { applyMapping, isNationalId, nationalIdProblem, normalizeNationalId } fr
 import { POST as operate } from "@/app/api/operations/route";
 import { POST as program } from "@/app/api/program/route";
 const allowed: Record<string, string[]> = {
-  staff: ["name", "email", "roles", "national_id", "phone", "active", "reason"],
+  staff: ["name", "email", "roles", "title", "team", "national_id", "phone", "active", "reason"],
   students: ["id", "name", "group_id", "email", "phone", "lifecycle", "engagement", "coaching"],
   groups: [
     "id",
@@ -130,7 +130,7 @@ const actions: Record<string, string> = {
   contacts: "contact",
   tasks: "task",
   sessions: "session",
-  attendance: "attendance",
+  attendance: "session_attendance",
   task_bank: "task_bank",
   accounts: "account",
   requests: "account_request",
@@ -522,6 +522,8 @@ async function reviewUpdates(u: any, module: string, rawRows: any[], options: { 
  * whoever fills the sheet write JSON.
  */
 const shape: Record<string, (row: any) => any> = {
+  // An attendance row is one mark on its session's register.
+  attendance: (row) => ({ id: row.session_id, marks: { [row.student_id]: row.status } }),
   staff: (row) => ({
     ...row,
     roles: String(row.roles ?? "")

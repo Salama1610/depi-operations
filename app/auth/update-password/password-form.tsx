@@ -4,7 +4,7 @@ import { LanguageToggle, useT } from "@/lib/i18n/context";
 import { FormEvent, useState } from "react";
 import { ArrowRight, LockKeyhole } from "lucide-react";
 
-export default function PasswordForm() {
+export default function PasswordForm({ first = false }: { first?: boolean }) {
   const t = useT();
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
@@ -35,7 +35,7 @@ export default function PasswordForm() {
           <img className="brand-mark-img" src="/brand/mark.png" alt="" width={38} height={38} />
           <span><strong>{t("DEPI")}</strong><small>{t("Round 5 operations")}</small></span></a>
           <LanguageToggle className="auth-lang auth-lang-dark" />
-          <div className="auth-form-heading"><span className="auth-icon"><LockKeyhole size={22} /></span><h2>{t("Choose a new password")}</h2><p>{t("Use at least eight characters. A longer, unique password is safer.")}</p></div>
+          <div className="auth-form-heading"><span className="auth-icon"><LockKeyhole size={22} /></span><h2>{first ? t("Choose your own password") : t("Choose a new password")}</h2><p>{first ? t("Your first password is your national ID. Choose your own to continue: at least eight characters, and not your national ID.") : t("Use at least eight characters. A longer, unique password is safer.")}</p></div>
           <form className="auth-form" onSubmit={submit}>
             <label><span>{t("New password")}</span><div className="auth-input"><LockKeyhole size={18} /><input type="password" autoComplete="new-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} /></div></label>
             <label><span>{t("Confirm password")}</span><div className="auth-input"><LockKeyhole size={18} /><input type="password" autoComplete="new-password" minLength={8} required value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></div></label>

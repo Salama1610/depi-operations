@@ -39,7 +39,7 @@ const within = (value: string | null | undefined, from: string, to: string) => {
   return day >= from && day <= to;
 };
 const pct = (n: number, d: number) => (d ? Math.round((n / d) * 100) + "%" : "—");
-const ATTENDED = ["Present", "Late"];
+const ATTENDED = ["Present"];
 const roleList = (person: Row): string[] => {
   try {
     return Array.isArray(person.roles) ? person.roles : JSON.parse(person.roles || "[]");

@@ -45,6 +45,8 @@ async function AccessGate({ email }: { email?: string }) {
 export default async function Page(){
   const authUser = await getSupabaseUser();
   if (!authUser) redirect("/login");
+  // Nobody works on their first password, which is their national ID.
+  if (!authUser.user_metadata?.password_changed_at) redirect("/auth/update-password?first=1");
 
   let destination: "student" | "staff" | "denied" = "denied";
   try {

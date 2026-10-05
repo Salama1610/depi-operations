@@ -642,13 +642,9 @@ test("session delivery enforces model limits, coach coverage and lifecycle contr
     "Cancelled",
   );
   assert.equal((await sessionCase()).status, "Closed");
-  r = await post("attendance", {
-    session_id: "SES-RULE-1",
-    student_id: "S10001",
-    status: "Present",
-    source: "Coach roll call",
-  });
-  assert.match(r.error, /non-cancelled/);
+  r = await post("session_attendance", { id: "SES-RULE-1", marks: { S10001: "Present" } });
+  assert.match(r.error, /once a session has started/);
+  assert.match((await post("attendance", { session_id: "SES-RULE-1", student_id: "S10001", status: "Present" })).error, /not supported/, "the per-student action is gone");
   const deliveredAt = new Date(Date.now() - 86400000).toISOString();
   await check("session", {
     id: "SES-RULE-COMPLETE",
@@ -677,13 +673,10 @@ test("session delivery enforces model limits, coach coverage and lifecycle contr
   assert.match(r.error, /attendance/i);
   current = { id: "owner", email: "owner@example.com" };
   const activeStudents = (await dbRows("SELECT id FROM students WHERE group_id='G103' AND lifecycle='Active'"));
-  for (const student of activeStudents)
-    await check("attendance", {
-      session_id: "SES-RULE-COMPLETE",
-      student_id: student.id,
-      status: "Present",
-      source: "Coach roll call",
-    });
+  await check("session_attendance", {
+    id: "SES-RULE-COMPLETE",
+    marks: Object.fromEntries(activeStudents.map((student) => [student.id, "Present"])),
+  });
   current = {
     id: "support-coach-login",
     email: "staff-support-coach@example.invalid",
@@ -2784,9 +2777,9 @@ test("services (paid gigs) are recorded by the coordinators of Service Team grou
   const gig = { student_id: learner.id, title: "Banner design", platform: "Khamsat", value: 20, currency: "USD", order_ref: "KH-ST-1", paid_on: today, proof_id: "ST-DELIVERY", payment_proof_id: "ST-PAYMENT" };
   const title = (await dbRow("SELECT title FROM users WHERE id=?", group.supervisor)).title;
   current = { id: group.coordinator, email: group.email };
-  await dbExec("UPDATE users SET title='Team Supervisor · Target Team' WHERE id=?", group.supervisor);
+  await dbExec("UPDATE users SET team='Target Team' WHERE id=?", group.supervisor);
   assert.match((await post("gig", { ...gig, id: "GIG-ST-1" })).error, /Service Team groups only/);
-  await dbExec("UPDATE users SET title='Team Supervisor · Service Team' WHERE id=?", group.supervisor);
+  await dbExec("UPDATE users SET team='Service Team' WHERE id=?", group.supervisor);
   await check("gig", { ...gig, id: "GIG-ST-1" });
   assert.ok(await dbRow("SELECT id FROM gigs WHERE id='GIG-ST-1'"));
   await dbExec("UPDATE users SET title=? WHERE id=?", title, group.supervisor);
@@ -2798,9 +2791,9 @@ test("the Service Team supervisor records account top-ups, each a new row in the
   await check("account", { id: "ACC-TOPUP-1", label: "Nafezly client 1", platform: "Nafezly", credits: 40 });
   const supervisor = await dbRow("SELECT id,email,title FROM users WHERE id='staff-nour'");
   current = { id: "supervisor-login", email: "staff-nour@example.invalid" };
-  await dbExec("UPDATE users SET title='Team Supervisor · Target Team' WHERE id='staff-nour'");
+  await dbExec("UPDATE users SET team='Target Team' WHERE id='staff-nour'");
   assert.match((await post("account_topup", { id: "ACC-TOPUP-1", amount: 25, reference: "TRX-1001" })).error, /Service Team's supervisor/);
-  await dbExec("UPDATE users SET title='Team Supervisor · Service Team' WHERE id='staff-nour'");
+  await dbExec("UPDATE users SET team='Service Team' WHERE id='staff-nour'");
   assert.match((await post("account_topup", { id: "ACC-TOPUP-1", amount: 0, reference: "TRX-1001" })).error, /top-up amount/);
   assert.match((await post("account_topup", { id: "ACC-TOPUP-1", amount: 25, reference: "" })).error, /reference/);
   await check("account_topup", { id: "ACC-TOPUP-1", amount: 25, reference: "TRX-1001", note: "October budget" });
@@ -2960,4 +2953,45 @@ test("a backup coach takes one session, and a group's new coach or coordinator t
   assert.equal(later.coach_id, "staff-support-coach");
   assert.equal(later.coordinator_id, coordinator.id);
   await programCheck("bulk_group_owner", { group_ids: [group.id], owner_type: "Coordinator", owner: group.coordinator, reason: "Restore" });
+});
+
+
+test("attendance is Present or Absent, and a coach cannot change what the coordinator saved", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  const group = (await dbRows("SELECT g.id,g.coordinator,(SELECT count(*) FROM sessions t WHERE t.group_id=g.id AND t.status<>'Cancelled') n FROM groups g WHERE g.status='Active' AND (SELECT count(*) FROM students s WHERE s.group_id=g.id AND s.lifecycle='Active')>=2 ORDER BY n, g.id LIMIT 1"))[0];
+  const taken = new Set((await dbRows("SELECT week FROM sessions WHERE group_id=? AND status<>'Cancelled'", group.id)).map((r) => Number(r.week)));
+  const week = [1, 2, 3, 4, 5, 6, 7, 8].find((w) => !taken.has(w));
+  await check("session", { id: "SES-TRUTH-1", group_id: group.id, title: "Register", starts_at: new Date(Date.now() - 3 * 3600000).toISOString(), week, duration_minutes: 180 });
+  await dbExec(
+    "INSERT OR IGNORE INTO group_coaches(id,group_id,user_id,coach_type,status,onboarding_status,assigned_by,assigned_at) VALUES(?,?,?,?,?,?,?,?)",
+    "GC-TRUTH-1", group.id, "staff-coach", "Outcome Coach", "Active", "Pending", "owner", new Date().toISOString(),
+  );
+  const [a, b] = (await dbRows("SELECT id FROM students WHERE group_id=? AND lifecycle='Active' ORDER BY id LIMIT 2", group.id)).map((r) => r.id);
+  const coordinator = await dbRow("SELECT id,email FROM users WHERE id=?", group.coordinator);
+  current = { id: coordinator.id, email: coordinator.email };
+  assert.match((await post("session_attendance", { id: "SES-TRUTH-1", marks: { [a]: "Late" } })).error, /attended or absent/);
+  await check("session_attendance", { id: "SES-TRUTH-1", marks: { [a]: "Absent" } });
+  // The coach marks both present; the coordinator's Absent stands.
+  current = { id: "coach-login", email: "staff-coach@example.invalid" };
+  await check("session_attendance", { id: "SES-TRUTH-1", marks: { [a]: "Present", [b]: "Present" } });
+  assert.equal((await dbRow("SELECT status FROM attendance WHERE session_id='SES-TRUTH-1' AND student_id=?", a)).status, "Absent");
+  assert.equal((await dbRow("SELECT status FROM attendance WHERE session_id='SES-TRUTH-1' AND student_id=?", b)).status, "Present");
+  // The coordinator can still change their own mark.
+  current = { id: coordinator.id, email: coordinator.email };
+  await check("session_attendance", { id: "SES-TRUTH-1", marks: { [a]: "Present" } });
+  assert.equal((await dbRow("SELECT status FROM attendance WHERE session_id='SES-TRUTH-1' AND student_id=?", a)).status, "Present");
+  current = { id: "owner", email: "owner@example.com" };
+});
+
+test("staff carry a title and a team chosen from two, set in the staff form and audited", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  await check("staff", { name: "Team Probe", email: "team.probe@example.org", roles: ["Operations Coordinator"], title: "Operations Coordinator", team: "Service Team", reason: "New coordinator" });
+  let row = await dbRow("SELECT title,team FROM users WHERE email='team.probe@example.org'");
+  assert.deepEqual([row.title, row.team], ["Operations Coordinator", "Service Team"]);
+  assert.match((await post("staff", { name: "Team Probe", email: "team.probe@example.org", roles: ["Operations Coordinator"], team: "Sales Team", reason: "Typo" })).error, /Target Team or the Service Team/);
+  await check("staff", { name: "Team Probe", email: "team.probe@example.org", roles: ["Operations Coordinator"], team: "Target Team", reason: "Moved to the Target Team" });
+  row = await dbRow("SELECT title,team FROM users WHERE email='team.probe@example.org'");
+  assert.deepEqual([row.title, row.team], ["Operations Coordinator", "Target Team"], "the title stays when only the team changes");
+  const audit = await dbRow("SELECT value,reason FROM audit_events WHERE action='staff' ORDER BY created_at DESC LIMIT 1");
+  assert.deepEqual(JSON.parse(audit.value).team_change, { from: "Service Team", to: "Target Team" });
 });

@@ -207,10 +207,8 @@ async function programData(u: any) {
         c.status === "Active" &&
         c.onboarding_status === "Complete",
     );
-    return (
-      !assigned.some((c) => c.coach_type === "Outcome Coach") ||
-      !assigned.some((c) => c.coach_type === "Support Coach")
-    );
+    // Exactly one onboarded coach, Outcome or Support; a backup does not count.
+    return assigned.filter((c) => c.coach_type === "Outcome Coach" || c.coach_type === "Support Coach").length !== 1;
   });
   const roleSet = new Set(staff.flatMap((s) => JSON.parse(s.roles)));
   const requiredRoles = [
@@ -264,19 +262,12 @@ async function programData(u: any) {
         : "Quality approval remains independent from delivery and account allocation.",
     },
     {
-      key: "tracks",
-      label: "Track and group structure",
-      status:
-        new Set(activeGroups.map((g) => g.track)).size >= 20 ? "Pass" : "Warn",
-      detail: `${new Set(activeGroups.map((g) => g.track)).size} active tracks across ${activeGroups.length} active groups; Round 5 planning target is 20 tracks.`,
-    },
-    {
       key: "coaches",
-      label: "Both coach functions onboarded",
+      label: "One onboarded coach per group",
       status: missingCoachGroups.length ? "Block" : "Pass",
       detail: missingCoachGroups.length
-        ? `${missingCoachGroups.length} active groups still need an onboarded Outcome Coach or Support Coach.`
-        : "Every active group has both coaching functions.",
+        ? `${missingCoachGroups.length} active groups do not have exactly one onboarded coach (Outcome or Support).`
+        : "Every active group has exactly one onboarded coach.",
     },
     {
       key: "sessions",

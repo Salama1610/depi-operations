@@ -9,7 +9,8 @@
     "auth_user_id": "uuid",
     "national_id": "text",
     "phone": "text",
-    "title": "text"
+    "title": "text",
+    "team": "text"
   },
   "policies": {
     "id": "text",

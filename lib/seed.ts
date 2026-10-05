@@ -971,10 +971,10 @@ export async function seed(
         index < 20
           ? "Present"
           : index < 22
-            ? "Late"
+            ? "Present"
             : index < 24
               ? "Absent"
-              : "Excused",
+              : "Absent",
         "staff-support-coach",
         "Coach session register",
         at(-2, 13),

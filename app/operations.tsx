@@ -159,7 +159,6 @@ const titles: Row = {
   engagement: "Review engagement status",
   lifecycle: "Update lifecycle status",
   staff: "Manage staff access",
-  attendance: "Record attendance",
   account_topup: "Record a top-up",
   session_coach: "Change the coach for one session",
   session_attendance: "Take attendance",
@@ -511,7 +510,7 @@ export default function Operations({ module: initialModule }: { module: string }
   // Higher Board and administrators (the server checks the same).
   const keepsAccounts =
     can(user.roles, ["Higher Board", "Operations Systems / Admin"]) ||
-    (can(user.roles, ["Team Supervisor"]) && /service team/i.test(user.title || ""));
+    (can(user.roles, ["Team Supervisor"]) && user.team === "Service Team");
   const shownNav = nav.filter(([m]) =>
     qualityOnly
       ? m === "quality"
@@ -997,7 +996,7 @@ export default function Operations({ module: initialModule }: { module: string }
   const recordsServices =
     can(user.roles, ["Project Operations", "Operations Systems / Admin"]) ||
     (can(user.roles, ["Operations Coordinator"]) &&
-      groups.some((g) => g.coordinator === user.id && /service team/i.test(g.supervisor_title || "")));
+      groups.some((g) => g.coordinator === user.id && g.supervisor_team === "Service Team"));
   const canCreate = (m: string) =>
     m === "gigs" ? recordsServices : !createRoles[m] || can(user.roles, createRoles[m]);
   // Only the leaders set the schedule; the row argument is kept for callers.
@@ -1058,11 +1057,41 @@ export default function Operations({ module: initialModule }: { module: string }
     r.status !== "Cancelled" &&
     Date.parse(r.starts_at) <= Date.now() &&
     (plansSession(r) || answersAsCoordinator(r) || answersAsCoach(r));
+  // Everyone starts Present; the person taking the register taps the absent ones.
   const openAttendance = (r: Row) => {
     const marks: Row = {};
+    for (const st of rosterOf(r)) marks[st.id] = "Present";
     for (const a of attendance.filter((a) => a.session_id === r.id))
       marks[a.student_id] = a.status === "Absent" ? "Absent" : "Present";
-    open("session_attendance", { ...r, marks });
+    open("session_attendance", { ...r, marks, teams: "" });
+  };
+  // A Microsoft Teams attendance report: whoever appears in it attended.
+  // Teams saves it as UTF-16 text with tabs, so the bytes are read directly;
+  // students are matched by email, then by name.
+  const readTeamsFile = async (file: File, r: Row) => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const text =
+      bytes[0] === 0xff && bytes[1] === 0xfe
+        ? new TextDecoder("utf-16le").decode(bytes)
+        : file.name.toLowerCase().endsWith(".xlsx")
+          ? (await readSheet(file)).map((row: Row) => Object.values(row).join("\t")).join("\n")
+          : new TextDecoder("utf-8").decode(bytes);
+    const lower = text.toLowerCase();
+    const plain = (v: string) => v.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+    const names = new Set(text.split(/\r?\n/).map((line) => plain(line.split(/\t|,/)[0] || "")).filter((v) => v.length > 3));
+    const roster = rosterOf(r);
+    const marks: Row = {};
+    let found = 0;
+    for (const st of roster) {
+      const here = (st.email && lower.includes(String(st.email).toLowerCase())) || names.has(plain(st.name || ""));
+      marks[st.id] = here ? "Present" : "Absent";
+      if (here) found += 1;
+    }
+    setForm((current: Row) => ({
+      ...current,
+      marks,
+      teams: t("Teams file: {v0} of {v1} students found and marked Present; the rest Absent. Check before saving.", { v0: found, v1: roster.length }),
+    }));
   };
   // The coordinator's checklist: instructor confirmed, instructor entered, and
   // attendance taken, which the app works out from the register.
@@ -4201,21 +4230,27 @@ export default function Operations({ module: initialModule }: { module: string }
                     ) : (
                       <>
                         <div className="detail-actions">
-                          <button type="button" className="small-btn" onClick={() => setForm({ ...form, marks: Object.fromEntries(roster.map((s: Row) => [s.id, "Present"])) })}>
-                            {t("Mark everyone attended")}
+                          <button type="button" className="small-btn" onClick={() => setForm({ ...form, marks: Object.fromEntries(roster.map((s: Row) => [s.id, "Present"])), teams: "" })}>
+                            {t("Mark all present")}
                           </button>
-                          <small>{t("{v0} attended · {v1} absent · {v2} not marked", {
+                          <label className="small-btn attendance-upload">
+                            <Upload size={14} /> {t("Upload Teams attendance file")}
+                            <input type="file" accept=".csv,.txt,.xlsx" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) readTeamsFile(f, modal!); e.target.value = ""; }} />
+                          </label>
+                          <small>{t("{v0} present · {v1} absent · {v2} not marked", {
                             v0: roster.filter((s: Row) => marks[s.id] === "Present").length,
                             v1: roster.filter((s: Row) => marks[s.id] === "Absent").length,
                             v2: roster.filter((s: Row) => !marks[s.id]).length,
                           })}</small>
                         </div>
+                        {form.teams && <div className="info-box">{form.teams}</div>}
+                        <p className="footnote">{t("Everyone starts as Present. Tap the students who were absent, then save. The group's coordinator has the final word: a coach cannot change a mark the coordinator saved.")}</p>
                         <div className="attendance-list">
                           {roster.map((s: Row) => (
                             <div className="attendance-row" key={s.id}>
                               <span><strong>{s.name}</strong><small>{s.id}</small></span>
                               <span className="attendance-toggle">
-                                <button type="button" className={marks[s.id] === "Present" ? "is-on present" : ""} onClick={() => mark(s.id, "Present")}>{t("Attended")}</button>
+                                <button type="button" className={marks[s.id] === "Present" ? "is-on present" : ""} onClick={() => mark(s.id, "Present")}>{t("Present")}</button>
                                 <button type="button" className={marks[s.id] === "Absent" ? "is-on absent" : ""} onClick={() => mark(s.id, "Absent")}>{t("Absent")}</button>
                               </span>
                             </div>
@@ -4226,51 +4261,6 @@ export default function Operations({ module: initialModule }: { module: string }
                   </>
                 );
               }
-              if (a === "attendance")
-                {
-                  const selectedSession = sessions.find(
-                    (session) => session.id === form.session_id,
-                  );
-                  return (
-                    <>
-                    {choice(
-                      "session_id",
-                      t("Session"),
-                      sessions
-                        .filter(
-                          (session) =>
-                            session.status !== "Cancelled" &&
-                            Date.parse(session.starts_at) <= Date.now(),
-                        )
-                        .map((session) => ({
-                          value: session.id,
-                          label: session.group_id + " · " + session.title,
-                        })),
-                    )}
-                    {choice(
-                      "student_id",
-                      t("Student"),
-                      students
-                        .filter(
-                          (student) =>
-                            !selectedSession ||
-                            student.group_id === selectedSession.group_id,
-                        )
-                        .map((student) => ({
-                          value: student.id,
-                          label: student.name + " · " + student.id,
-                        })),
-                    )}
-                    {choice("status", t("Attendance"), [
-                      "Present",
-                      "Absent",
-                      "Late",
-                      "Excused",
-                    ])}
-                    {field("source", t("Source"), "text", false)}
-                  </>
-                );
-                }
               if (a === "account_request")
                 return (
                   <>
@@ -4757,6 +4747,14 @@ export default function Operations({ module: initialModule }: { module: string }
                     {field("email", t("Staff email"), "email")}
                     {field("national_id", t("National ID (their first password)"), "text", false)}
                     {field("phone", t("Phone number"), "text", false)}
+                    <div className="form-grid">
+                      {field("title", t("Title"), "text", false)}
+                      {choice("team", t("Team"), [
+                        { value: "", label: t("No team") },
+                        { value: "Target Team", label: t("Target Team") },
+                        { value: "Service Team", label: t("Service Team") },
+                      ], false)}
+                    </div>
                     <div className="review-checks">
                       {roles.map((r) => (
                         <label className="check" key={r}>
@@ -5134,6 +5132,8 @@ export default function Operations({ module: initialModule }: { module: string }
                     name: "Example Coordinator",
                     email: "name@example.com",
                     roles: "Operations Coordinator",
+                    title: "Operations Coordinator",
+                    team: "Service Team",
                     national_id: "29001011234567",
                     phone: "01000000000",
                     active: "active",

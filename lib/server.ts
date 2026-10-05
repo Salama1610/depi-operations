@@ -171,7 +171,7 @@ export async function provisionStaffLogin(
     ensure(/^\d{14}$/.test(secret), "Record this person's national ID before resetting their sign-in.");
     await authAdmin(`users/${existing.id}`, {
       method: "PUT",
-      body: JSON.stringify({ password: secret, email_confirm: true, ban_duration: "none" }),
+      body: JSON.stringify({ password: secret, email_confirm: true, ban_duration: "none", user_metadata: { password_changed_at: null } }),
     });
     return "reset";
   }
@@ -315,7 +315,7 @@ export async function teamCoordinators(u: any): Promise<string[] | null> {
 export function keepsAccounts(u: any) {
   return (
     can(u.roles, ["Higher Board", "Operations Systems / Admin"]) ||
-    (can(u.roles, ["Team Supervisor"]) && /service team/i.test(u.title || ""))
+    (can(u.roles, ["Team Supervisor"]) && u.team === "Service Team")
   );
 }
 
@@ -382,7 +382,7 @@ export async function loadData(u: any) {
     sessionFeedback,
   ] = await Promise.all([
     all(
-      `SELECT g.*,c.name coordinator_name,s.name supervisor_name,s.title supervisor_title,h.name coach_name,m.name account_manager_name FROM groups g JOIN users c ON c.id=g.coordinator JOIN users s ON s.id=g.supervisor JOIN users h ON h.id=g.coach LEFT JOIN users m ON m.id=g.account_manager WHERE ${qg.sql}`,
+      `SELECT g.*,c.name coordinator_name,s.name supervisor_name,s.title supervisor_title,s.team supervisor_team,h.name coach_name,m.name account_manager_name FROM groups g JOIN users c ON c.id=g.coordinator JOIN users s ON s.id=g.supervisor JOIN users h ON h.id=g.coach LEFT JOIN users m ON m.id=g.account_manager WHERE ${qg.sql}`,
       ...qg.args,
     ),
     all(
@@ -530,8 +530,8 @@ export async function loadData(u: any) {
     // national ID is a first password, so only an administrator sees it.
     all(
       can(u.roles, ["Operations Systems / Admin"])
-        ? "SELECT id,name,email,roles,scopes,active,title,phone,national_id FROM users"
-        : "SELECT id,name,email,roles,scopes,active,title,phone FROM users",
+        ? "SELECT id,name,email,roles,scopes,active,title,team,phone,national_id FROM users"
+        : "SELECT id,name,email,roles,scopes,active,title,team,phone FROM users",
     ),
     all(
       `SELECT c.* FROM session_checks c JOIN sessions t ON t.id=c.session_id JOIN groups g ON g.id=t.group_id WHERE ${qg.sql}`,
@@ -597,13 +597,11 @@ export async function loadData(u: any) {
         Math.floor((Date.now() - Date.parse(s.start_date)) / 604800000) + 1,
       ),
     );
-    const a = (attendanceByStudent.get(s.id) || []).filter(
-      (record) => record.status !== "Excused",
-    );
+    const a = attendanceByStudent.get(s.id) || [];
     s.attendance = a.length
       ? Math.round(
           (100 *
-            a.filter((a) => ["Present", "Late"].includes(a.status)).length) /
+            a.filter((a) => a.status === "Present").length) /
             a.length,
         )
       : null;

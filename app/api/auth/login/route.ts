@@ -11,9 +11,11 @@ export async function POST(request: Request) {
     const email = body.email?.trim().toLowerCase();
     if (!email || !body.password || body.password.length > 256) return Response.json({ error: "Enter your email and password." }, { status: 400 });
     const supabase = await createSupabaseServerClient();
-    const { error } = await supabase.auth.signInWithPassword({ email, password: body.password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password: body.password });
     if (error) return Response.json({ error: "Email or password is incorrect." }, { status: 401 });
-    return Response.json({ ok: true, redirect: "/" });
+    // Everyone starts with their national ID as the password and must choose their own.
+    const changed = Boolean(data.user?.user_metadata?.password_changed_at);
+    return Response.json({ ok: true, redirect: changed ? "/" : "/auth/update-password?first=1" });
   } catch {
     return Response.json({ error: "Sign-in is temporarily unavailable. Please try again." }, { status: 500 });
   }

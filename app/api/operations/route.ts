@@ -1183,13 +1183,25 @@ export async function POST(req: Request) {
                     ))),
             "Only the group's coordinator or the session's coach takes its attendance.",
           );
-        const marks = Object.entries((x.marks || {}) as Record<string, string>);
+        let marks = Object.entries((x.marks || {}) as Record<string, string>);
         ensure(marks.length > 0, "Mark at least one student.");
         ensure(marks.every(([, v]) => ["Present", "Absent"].includes(v)), "Mark each student attended or absent.");
         const members = new Set(
           (await all("SELECT id FROM students WHERE group_id=?", session.group_id)).map((r: any) => r.id),
         );
         ensure(marks.every(([studentId]) => members.has(studentId)), "Every student must belong to the session's group.");
+        // The group's coordinator is the source of truth: a coach does not
+        // overwrite a mark the coordinator saved, and sees which were kept.
+        const coordinatorId = session.coordinator_id || group?.coordinator;
+        const fromCoordinator = can(u.roles, sessionLeaders) || u.id === coordinatorId;
+        let kept = 0;
+        if (!fromCoordinator) {
+          const theirs = new Set(
+            (await all("SELECT student_id FROM attendance WHERE session_id=? AND recorder=?", id, coordinatorId)).map((r: any) => r.student_id),
+          );
+          kept = marks.filter(([studentId]) => theirs.has(studentId)).length;
+          marks = marks.filter(([studentId]) => !theirs.has(studentId));
+        }
         for (const [studentId, status] of marks)
           jobs.push(
             stmt(
@@ -1203,47 +1215,7 @@ export async function POST(req: Request) {
               t,
             ),
           );
-        auditValue = { session_id: id, present: marks.filter(([, v]) => v === "Present").length, absent: marks.filter(([, v]) => v === "Absent").length };
-        break;
-      }
-      case "attendance": {
-        permit(u, ["Coach", "Coach Operations", "Project Operations"]);
-        const session: any = await stmt(
-          "SELECT * FROM sessions WHERE id=?",
-          x.session_id,
-        ).first();
-        ensure(
-          session && s && session.group_id === s.group_id,
-          "Student must belong to the session group.",
-        );
-        ensure(
-          session.status !== "Cancelled" && session.starts_at <= t,
-          "Attendance can only be recorded after a non-cancelled session starts.",
-        );
-        if (
-          can(u.roles, ["Coach"]) &&
-          !can(u.roles, ["Coach Operations", "Project Operations"])
-        )
-          ensure(
-            !session.coach_id || session.coach_id === u.id,
-            "Only the coach assigned to this session can record attendance.",
-          );
-        ensure(
-          ["Present", "Absent", "Late", "Excused"].includes(x.status),
-          "Invalid attendance status.",
-        );
-        jobs.push(
-          stmt(
-            "INSERT INTO attendance VALUES(?,?,?,?,?,?,?) ON CONFLICT(session_id,student_id) DO UPDATE SET status=excluded.status,recorder=excluded.recorder,source=excluded.source,updated_at=excluded.updated_at",
-            uid("ATT"),
-            x.session_id,
-            sid,
-            x.status,
-            u.id,
-            x.source || "Staff entry",
-            t,
-          ),
-        );
+        auditValue = { session_id: id, present: marks.filter(([, v]) => v === "Present").length, absent: marks.filter(([, v]) => v === "Absent").length, kept_coordinator_marks: kept };
         break;
       }
       case "milestone": {
@@ -1635,10 +1607,10 @@ export async function POST(req: Request) {
         // groups; Project Operations and administrators can record any.
         if (!can(u.roles, ["Project Operations", ...admin])) {
           const team: any = await stmt(
-            "SELECT u.title FROM groups g JOIN users u ON u.id=g.supervisor WHERE g.id=?",
+            "SELECT u.team FROM groups g JOIN users u ON u.id=g.supervisor WHERE g.id=?",
             s.group_id,
           ).first();
-          ensure(/service team/i.test(team?.title || ""), "Services are recorded by the coordinators of Service Team groups only.");
+          ensure(team?.team === "Service Team", "Services are recorded by the coordinators of Service Team groups only.");
         }
         ensure(x.proof_id && x.payment_proof_id, "Upload the delivery proof and the payment proof.");
         ensure(x.payment_proof_id !== x.proof_id, "Delivery and payment proof must be separate uploaded records.");
@@ -2361,6 +2333,10 @@ export async function POST(req: Request) {
         ensure(!x.national_id || isNationalId(nationalId), nationalIdProblem(x.national_id) || "Check the national ID.");
         const phone = normalizePhone(x.phone);
         ensure(phone.length <= 40, "Phone number is too long.");
+        // Title is free text; Team is one of two, never typed.
+        const title = x.title === undefined ? undefined : String(x.title || "").trim().slice(0, 120) || null;
+        const team = x.team === undefined ? undefined : String(x.team || "").trim() || null;
+        ensure(team === undefined || team === null || ["Target Team", "Service Team"].includes(team), "Choose the Target Team or the Service Team.");
         ensure(x.reason?.trim(), "Document the access change reason.");
         const email = String(x.email).trim().toLowerCase();
         const old: any = await stmt(
@@ -2389,19 +2365,21 @@ export async function POST(req: Request) {
           auditPrevious = old;
           jobs.push(
             stmt(
-              "UPDATE users SET name=?,roles=?,active=?,national_id=coalesce(?,national_id),phone=coalesce(?,phone) WHERE id=?",
+              "UPDATE users SET name=?,roles=?,active=?,national_id=coalesce(?,national_id),phone=coalesce(?,phone),title=?,team=? WHERE id=?",
               x.name,
               JSON.stringify(x.roles),
               active,
               nationalId || null,
               phone || null,
+              title === undefined ? old.title ?? null : title,
+              team === undefined ? old.team ?? null : team,
               old.id,
             ),
           );
         } else
           jobs.push(
             stmt(
-              "INSERT INTO users(id,email,name,roles,scopes,active,national_id,phone) VALUES(?,?,?,?,?,?,?,?)",
+              "INSERT INTO users(id,email,name,roles,scopes,active,national_id,phone,title,team) VALUES(?,?,?,?,?,?,?,?,?,?)",
               uid("USR"),
               email,
               x.name,
@@ -2410,6 +2388,8 @@ export async function POST(req: Request) {
               active,
               nationalId || null,
               phone || null,
+              title ?? null,
+              team ?? null,
             ),
           );
         // Recorded on the audit entry so an administrator can see whether the
@@ -2417,6 +2397,8 @@ export async function POST(req: Request) {
         auditValue = {
           ...auditValue,
           national_id: nationalId ? "recorded" : "missing",
+          title_change: old && title !== undefined && (old.title ?? null) !== title ? { from: old.title ?? null, to: title } : undefined,
+          team_change: old && team !== undefined && (old.team ?? null) !== team ? { from: old.team ?? null, to: team } : undefined,
           phone: phone ? "recorded" : "missing",
           sign_in_reset: x.reset_sign_in ? true : undefined,
         };
