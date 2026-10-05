@@ -110,6 +110,7 @@ const nav = [
   ["groups", "Groups", Layers],
   ["sessions", "Sessions", CalendarDays],
   ["gigs", "Services", BriefcaseBusiness],
+  ["portal", "Gigs portal view", Files],
   ["quality", "Quality review", ShieldCheck],
   ["administration", "Administration", Settings2],
 ] as const;
@@ -301,7 +302,7 @@ function saveBlob(bytes: any, name: string, type: string) {
 }
 /** The module a path points at: "/" is the overview, "/students" is students. */
 /** Pages that were folded into another: evidence now lives on each gig. */
-const movedModules: Record<string, string> = { evidence: "gigs", cases: "work", reports: "weekly", accounts: "gigs", portal: "gigs" };
+const movedModules: Record<string, string> = { evidence: "gigs", cases: "work", reports: "weekly", accounts: "gigs" };
 function moduleFromPath(pathname: string) {
   const raw = pathname.replace(/^\/+|\/+$/g, "").split("/")[0];
   const segment = movedModules[raw] || raw;
@@ -506,15 +507,16 @@ export default function Operations({ module: initialModule }: { module: string }
     (can(user.roles, ["Team Supervisor"]) && user.team === "Service Team");
   const shownNav = nav.filter(([m]) =>
     qualityOnly
-      ? m === "quality"
+      ? m === "quality" || m === "portal"
       : m === "administration"
         ? can(user.roles, ["Operations Systems / Admin"])
-        : (m as string) === "portal"
+        : m === "portal"
           ? can(user.roles, [
               "Team Supervisor",
               "Project Operations",
               "Coach Operations",
               "Quality Lead",
+              "Quality Member",
               "Higher Board",
               "Operations Systems / Admin",
               "Operations Coordinator",
@@ -1572,27 +1574,6 @@ export default function Operations({ module: initialModule }: { module: string }
                     },
                   ],
                   (r) => {
-                    if (r.status === "Assigned" && recordsServices) {
-                      const reservation = (d.reservations || []).find((z: Row) => z.request_id === r.id);
-                      const account = accounts.find((a) => a.id === reservation?.account_id);
-                      return (
-                        <button
-                          className="small-btn"
-                          onClick={() =>
-                            open("gig", {
-                              student_id: r.student_id,
-                              platform: r.platform,
-                              value: r.value,
-                              currency: "USD",
-                              paid_by_account: account?.label || "",
-                              title: r.task,
-                            })
-                          }
-                        >
-                          {t("Record the paid service")}
-                        </button>
-                      );
-                    }
                     if (r.status !== "Submitted" || !can(user.roles, ["Higher Board"])) return null;
                     const reservation = activeReservation(r.id);
                     return reservation ? (
@@ -2570,17 +2551,14 @@ export default function Operations({ module: initialModule }: { module: string }
         keepsAccounts ||
         can(user.roles, ["Project Operations", "Higher Board"]) ||
         (can(user.roles, ["Operations Coordinator"]) && groups.some((g) => g.coordinator === user.id && g.supervisor_team === "Service Team"));
-      const seesPortal = can(user.roles, ["Team Supervisor", "Project Operations", "Coach Operations", "Quality Lead", "Quality Member", "Higher Board", "Operations Systems / Admin", "Operations Coordinator"]);
       content = (
         <Tabs defaultValue="services">
           <TabsList>
             <TabsTrigger value="services">{t("Services")}</TabsTrigger>
             {seesAccounts && <TabsTrigger value="accounts">{t("Client accounts")}</TabsTrigger>}
-            {seesPortal && <TabsTrigger value="portal">{t("Gigs portal view")}</TabsTrigger>}
           </TabsList>
           <TabsContent value="services">{servicesView}</TabsContent>
           {seesAccounts && <TabsContent value="accounts">{accountsView()}</TabsContent>}
-          {seesPortal && <TabsContent value="portal"><PortalView staffName={owner} /></TabsContent>}
         </Tabs>
       );
     }
@@ -2887,18 +2865,8 @@ export default function Operations({ module: initialModule }: { module: string }
         )}
       </>
     );
-    // The quality team checks services against the DEPI portal's own records.
-    const qualityView = content;
-    content = (
-      <Tabs defaultValue="review">
-        <TabsList>
-          <TabsTrigger value="review">{t("Review queue")}</TabsTrigger>
-          <TabsTrigger value="portal">{t("Gigs portal view")}</TabsTrigger>
-        </TabsList>
-        <TabsContent value="review">{qualityView}</TabsContent>
-        <TabsContent value="portal"><PortalView staffName={owner} /></TabsContent>
-      </Tabs>
-    );
+  } else if (module === "portal") {
+    content = <PortalView staffName={owner} />;
   } else if (module === "cases") {
     content = panel(
       t("Incident & intervention register"),
