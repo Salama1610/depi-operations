@@ -7,6 +7,7 @@ import {
   now,
   rateLimit,
   scopeSql,
+  refuseDemo,
 } from "@/lib/server";
 import { can, dataTransferRefusal, dataTransferRoles, ensure, roles } from "@/lib/domain/rules";
 import { applyMapping, isNationalId, nationalIdProblem, normalizeNationalId } from "@/lib/domain/sheet-mapping";
@@ -551,6 +552,7 @@ const programModules = new Set([
 export async function GET(req: Request) {
   try {
     const u = await actor();
+    refuseDemo(u);
     ensure(can(u.roles, dataTransferRoles), dataTransferRefusal);
     await rateLimit("import-mappings:" + u.id, 60, 60);
     const module = new URL(req.url).searchParams.get("module") || "";
@@ -576,6 +578,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const u = await actor();
+    refuseDemo(u);
     ensure(can(u.roles, dataTransferRoles), dataTransferRefusal);
     await rateLimit("import:" + u.id, 20, 60);
     const x = await req.json();

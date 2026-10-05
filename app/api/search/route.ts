@@ -1,5 +1,6 @@
 import { actor, all, rateLimit, scopeSql } from "@/lib/server";
 import { can, ensure } from "@/lib/domain/rules";
+import { sameSide } from "@/lib/demo";
 
 export async function GET(req: Request) {
   try {
@@ -18,7 +19,7 @@ export async function GET(req: Request) {
         all(`SELECT 'evidence' type,e.id id,e.status label,s.name detail FROM evidence e JOIN students s ON s.id=e.student_id JOIN groups g ON g.id=s.group_id WHERE ${q.sql} AND e.id LIKE ? ESCAPE '\\' ORDER BY e.created_at DESC LIMIT 5`, ...q.args, like),
         all(`SELECT 'case' type,c.id id,c.title label,c.status||coalesce(' · '||s.name,'') detail FROM cases c LEFT JOIN students s ON s.id=c.student_id LEFT JOIN groups g ON g.id=s.group_id WHERE (${q.sql}) AND (c.id LIKE ? ESCAPE '\\' OR c.title LIKE ? ESCAPE '\\') ORDER BY c.created_at DESC LIMIT 5`, ...q.args, like, like),
         can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin"])
-          ? all(`SELECT 'account' type,id,label,platform||' · '||status detail FROM accounts WHERE id LIKE ? ESCAPE '\\' OR label LIKE ? ESCAPE '\\' ORDER BY id LIMIT 5`, like, like)
+          ? all(`SELECT 'account' type,id,label,platform||' · '||status detail FROM accounts WHERE ${sameSide(u, "id")} AND (id LIKE ? ESCAPE '\\' OR label LIKE ? ESCAPE '\\') ORDER BY id LIMIT 5`, like, like)
           : Promise.resolve([]),
         can(u.roles, ["Project Operations", "Operations Coordinator", "Team Supervisor", "Operations Systems / Admin"])
           ? all(

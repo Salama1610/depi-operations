@@ -1703,4 +1703,9 @@ export const ar: Record<string, string> = {
   "Choose": "اختر",
   "Review queue": "قائمة المراجعة",
   "One link at a time. Approve a correct link, or reject it with a clear comment for the student.": "رابط واحد في كل مرة. اعتمد الرابط الصحيح، أو ارفضه مع تعليق واضح للطالب.",
+  "DEMO ACCOUNT": "حساب تجريبي",
+  "Made-up groups and students for trying things out. Nothing here touches real records.": "مجموعات وطلاب وهميون للتجربة. لا شيء هنا يمس السجلات الحقيقية.",
+  "Reset the demo": "إعادة ضبط التجربة",
+  "The demo is back to its starting point, timed around now.": "عادت التجربة إلى بدايتها، بمواعيد حول الوقت الحالي.",
+  "This is not available in the demo. Demo accounts work on the demo groups only.": "هذا غير متاح في التجربة. الحسابات التجريبية تعمل على المجموعات التجريبية فقط.",
 };

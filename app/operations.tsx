@@ -486,6 +486,8 @@ export default function Operations({ module: initialModule }: { module: string }
   // The quality team is here to review published services and nothing else, so
   // that is the whole of their workspace. Anyone who also holds an operations
   // role keeps the rest of it.
+  // A demo sign-in (see lib/demo.ts) works on made-up groups and can reset them.
+  const demoAccount = String(user.id || "").startsWith("DEMO-");
   const qualityOnly =
     heldRoles(user).length > 0 &&
     heldRoles(user).every((role) => role === "Quality Member" || role === "Quality Lead");
@@ -619,6 +621,8 @@ export default function Operations({ module: initialModule }: { module: string }
           ? result.summary.remaining
             ? t("{v0} policy actions processed · Run again for {v1} remaining", { v0: result.summary.processed, v1: result.summary.remaining })
             : t("{v0} policy actions processed", { v0: result.summary.processed })
+          : action === "demo_refresh"
+            ? t("The demo is back to its starting point, timed around now.")
           : action === "load_demo_data"
             ? t("Synthetic pilot loaded · {v0} students across {v1} groups", { v0: result.summary.students, v1: result.summary.groups })
           : t("Updated"),
@@ -3275,15 +3279,24 @@ export default function Operations({ module: initialModule }: { module: string }
           {!d.setup && (
             <div className="demo-banner">
               <span className="demo-label">
-                {d.workspaceMode === "demo"
-                  ? t("PILOT WORKSPACE")
-                  : t("PRODUCTION WORKSPACE")}
+                {demoAccount
+                  ? t("DEMO ACCOUNT")
+                  : d.workspaceMode === "demo"
+                    ? t("PILOT WORKSPACE")
+                    : t("PRODUCTION WORKSPACE")}
               </span>
               <span>
-                {d.workspaceMode === "demo"
-                  ? t("Synthetic roster · No real student or client data")
-                  : t("Live operational records · Staff access only")}
+                {demoAccount
+                  ? t("Made-up groups and students for trying things out. Nothing here touches real records.")
+                  : d.workspaceMode === "demo"
+                    ? t("Synthetic roster · No real student or client data")
+                    : t("Live operational records · Staff access only")}
               </span>
+              {demoAccount && (
+                <button className="small-btn" disabled={busy} onClick={() => quick("demo_refresh", {})}>
+                  <RefreshCw size={15} /> {t("Reset the demo")}
+                </button>
+              )}
               <span className="banner-date">
                 {new Date().toLocaleDateString("en-GB", {
                   day: "numeric",

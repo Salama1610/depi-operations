@@ -1,4 +1,4 @@
-import { actor, all, auditStmt, db, now, rateLimit, scopeSql, stmt, uid } from "@/lib/server";
+import { actor, all, auditStmt, db, now, rateLimit, refuseDemo, scopeSql, stmt, uid } from "@/lib/server";
 import { can, ensure } from "@/lib/domain/rules";
 import {
   linkStudent,
@@ -43,6 +43,7 @@ async function activeBatch(sheet: PortalSheet) {
 export async function GET(req: Request) {
   try {
     const u = await actor();
+    refuseDemo(u);
     await rateLimit("portal:" + u.id, 60, 60);
     const scope = await scopedStudentIds(u);
     ensure(scope === null || can(u.roles, ["Operations Coordinator", "Coach"]), "The portal view is for the leaders, the quality team and the coordinators.");
@@ -115,6 +116,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const u = await actor();
+    refuseDemo(u);
     ensure(uploads(u), "The portal sheets are uploaded by supervisors, Project Operations, Coach Operations, the Quality Lead and administrators.");
     await rateLimit("portal-upload:" + u.id, 120, 60);
     const x = await req.json();

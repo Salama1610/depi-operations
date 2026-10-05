@@ -3011,3 +3011,33 @@ test("one screenshot of a group message logs a contact for every active student 
   for (const m of members) assert.equal((await dbRow("SELECT last_contact FROM students WHERE id=?", m.id)).last_contact.slice(0, 16), at.slice(0, 16));
   current = { id: "owner", email: "owner@example.com" };
 });
+
+test("demo accounts work on the demo groups only, and nobody else sees them", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  const first = await check("demo_refresh");
+  assert.equal(first.kept, 0, first.reasons?.join(" | "));
+  // A second refresh starts the demo over without tripping on the first.
+  assert.equal((await check("demo_refresh")).kept, 0);
+  const real = await dbRow("SELECT s.id FROM students s WHERE s.id NOT LIKE 'DEMO-%' LIMIT 1");
+  try {
+    current = { id: "demo-auth-coordinator", email: "demo.coordinator@example.com" };
+    const view = await (await api.GET()).json();
+    assert.deepEqual(view.groups.map((g) => g.id).sort(), ["DEMO-G1", "DEMO-G2"]);
+    assert.ok(view.students.length && view.students.every((s) => s.id.startsWith("DEMO-")));
+    assert.ok(view.staff.every((p) => p.id.startsWith("DEMO-")), "only the demo team");
+    // This week's session started half an hour ago, so attendance can be taken now.
+    const live = view.sessions.find((s) => s.id === "DEMO-G1-W2");
+    assert.ok(Date.parse(live.starts_at) <= Date.now());
+    await check("session_attendance", { id: "DEMO-G1-W2", marks: { "DEMO-S01": "Present", "DEMO-S02": "Absent" } });
+    assert.match((await post("task", { student_id: real.id, title: "Real", due: new Date().toISOString(), category: "Contact", priority: "High" })).error, /demo|scope/i);
+    assert.match((await post("staff", { name: "X", email: "x@example.com" })).error, /demo/i);
+    assert.match((await post("session_coach", { id: "DEMO-G1-W3", new_email: "real@example.com", new_name: "Real" })).error, /demo/i);
+
+    current = { id: "owner", email: "owner@example.com" };
+    const owner = await (await api.GET()).json();
+    assert.ok(!owner.groups.some((g) => g.id.startsWith("DEMO-")), "real users never see demo groups");
+    assert.ok(!owner.staff.some((p) => p.id.startsWith("DEMO-")), "nor the demo team");
+  } finally {
+    current = { id: "owner", email: "owner@example.com" };
+  }
+});

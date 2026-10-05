@@ -427,8 +427,9 @@ async function qcReview(x: any) {
  * are one piece of work: the same reviewer sees all three, forms one view of
  * the person, and decides each link on its own.
  */
-async function reviewerPool() {
-  const staff = await all("SELECT id, roles FROM users WHERE active=1");
+async function reviewerPool(demo: boolean) {
+  // A demo student's work goes to the demo reviewer, and real work never does.
+  const staff = await all(`SELECT id, roles FROM users WHERE active=1 AND id ${demo ? "" : "NOT "}LIKE 'DEMO-%'`);
   return staff
     .filter((person: any) => {
       let held: string[] = [];
@@ -448,7 +449,7 @@ async function reviewerPool() {
  * otherwise whoever currently holds the fewest students.
  */
 export async function reviewerFor(studentId: string, priorActor?: string | null) {
-  const pool = await reviewerPool();
+  const pool = await reviewerPool(String(studentId).startsWith("DEMO-"));
   if (!pool.length) return null;
   if (priorActor && pool.includes(priorActor)) return priorActor;
   const counts = new Map(pool.map((id) => [id, 0]));

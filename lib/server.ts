@@ -2,6 +2,7 @@ import { getSupabaseUser } from "./supabase/server";
 import { env } from "./env";
 import { database } from "./data/database";
 import { objectStore } from "./data/storage";
+import { DEMO_PASSWORD, isDemo, sameSide } from "./demo";
 import {
   ensure,
   can,
@@ -186,6 +187,25 @@ export async function provisionStaffLogin(
   return active ? "existing" : "suspended";
 }
 
+/**
+ * A demo sign-in: created on the first refresh, and put back to the shared
+ * demo password on every one after, in case somebody changed it.
+ */
+export async function provisionDemoLogin(email: string, name: string) {
+  if (!env.SUPABASE_URL?.trim() || !env.SUPABASE_SERVICE_ROLE_KEY?.trim()) return "skipped";
+  const found = await authAdmin(`users?per_page=20&filter=${encodeURIComponent(email)}`);
+  const existing = (found?.users || []).find((user: any) => String(user.email || "").toLowerCase() === email);
+  const body = { password: DEMO_PASSWORD, email_confirm: true, user_metadata: { full_name: name, demo: true } };
+  if (existing) await authAdmin(`users/${existing.id}`, { method: "PUT", body: JSON.stringify({ ...body, ban_duration: "none" }) });
+  else await authAdmin("users", { method: "POST", body: JSON.stringify({ email, ...body }) });
+  return existing ? "reset" : "created";
+}
+
+/** Demo sign-ins try things out on demo records; this is real work. */
+export function refuseDemo(u: any) {
+  ensure(!isDemo(u), "This is not available in the demo. Demo accounts work on the demo groups only.");
+}
+
 export function permit(u: any, allowed: string[]) {
   // Operations Systems / Admin owns the workspace and may perform any action.
   // The separation-of-duties rules are unaffected: they compare identities, not
@@ -209,7 +229,8 @@ export function permit(u: any, allowed: string[]) {
 export function scopeSql(u: any, alias = "g", studentAlias: string | null = "s") {
   // Depi Industry was dropped from Round 5. Its groups stay in the database for
   // the record, but nobody sees them; delete this line to bring them back.
-  const shown = `COALESCE(${alias}.delivery_model,'Regular')<>'Industry'`;
+  // Demo sign-ins see the demo groups and nothing else; nobody else sees them.
+  const shown = `COALESCE(${alias}.delivery_model,'Regular')<>'Industry' AND ${sameSide(u, alias + ".id")}`;
   if (
     can(u.roles, [
       "Project Operations",
@@ -295,8 +316,8 @@ export async function teamCoordinators(u: any): Promise<string[] | null> {
   if (can(u.roles, ["Project Operations", "Operations Systems / Admin"])) return null;
   if (!can(u.roles, ["Team Supervisor"])) return [];
   const [people, groups] = await Promise.all([
-    all("SELECT id,roles FROM users WHERE active=1"),
-    all("SELECT coordinator,supervisor FROM groups WHERE status<>'Archived'"),
+    all(`SELECT id,roles FROM users WHERE active=1 AND ${sameSide(u, "id")}`),
+    all(`SELECT coordinator,supervisor FROM groups WHERE status<>'Archived' AND ${sameSide(u, "id")}`),
   ]);
   const elsewhere = new Set(groups.filter((g) => g.supervisor !== u.id).map((g) => g.coordinator));
   return people
@@ -343,6 +364,8 @@ export async function loadData(u: any) {
     "Higher Board",
   ]);
   const broad = can(u.roles, ["Project Operations", "Operations Systems / Admin"]);
+  // Cases about the programme as a whole are real work, so not for demo eyes.
+  const programmeWide = isDemo(u) ? "1=0" : "1=1";
   const [
     groups,
     students,
@@ -397,7 +420,7 @@ export async function loadData(u: any) {
     scoped("account_requests"),
     scoped("attendance"),
     all(
-      `SELECT t.* FROM cases t LEFT JOIN students s ON s.id=t.student_id LEFT JOIN groups g ON g.id=COALESCE(s.group_id,t.group_id) WHERE (t.student_id IS NULL AND t.group_id IS NULL) OR ${q.sql}`,
+      `SELECT t.* FROM cases t LEFT JOIN students s ON s.id=t.student_id LEFT JOIN groups g ON g.id=COALESCE(s.group_id,t.group_id) WHERE (${programmeWide} AND t.student_id IS NULL AND t.group_id IS NULL) OR ${q.sql}`,
       ...q.args,
     ),
     all(
@@ -480,7 +503,7 @@ export async function loadData(u: any) {
         )
       : none,
     broad
-      ? all("SELECT * FROM audit_events ORDER BY created_at DESC LIMIT 200")
+      ? all(`SELECT * FROM audit_events WHERE ${sameSide(u, "actor")} ORDER BY created_at DESC LIMIT 200`)
       : all("SELECT * FROM audit_events WHERE actor=? ORDER BY created_at DESC LIMIT 100", u.id),
     all(
       "SELECT value FROM audit_events WHERE action IN ('Workspace initialized with 1,000 synthetic students','Blank production workspace initialized') ORDER BY CASE WHEN action='Workspace initialized with 1,000 synthetic students' THEN 0 ELSE 1 END,created_at DESC LIMIT 1",
@@ -497,7 +520,7 @@ export async function loadData(u: any) {
       ...q.args,
     ),
     all(
-      `SELECT x.* FROM case_events x JOIN cases c ON c.id=x.case_id LEFT JOIN students s ON s.id=c.student_id LEFT JOIN groups g ON g.id=COALESCE(s.group_id,c.group_id) WHERE (c.student_id IS NULL AND c.group_id IS NULL) OR ${q.sql} ORDER BY x.created_at DESC LIMIT 500`,
+      `SELECT x.* FROM case_events x JOIN cases c ON c.id=x.case_id LEFT JOIN students s ON s.id=c.student_id LEFT JOIN groups g ON g.id=COALESCE(s.group_id,c.group_id) WHERE (${programmeWide} AND c.student_id IS NULL AND c.group_id IS NULL) OR ${q.sql} ORDER BY x.created_at DESC LIMIT 500`,
       ...q.args,
     ),
     all(
@@ -508,10 +531,10 @@ export async function loadData(u: any) {
       ? all("SELECT * FROM fx_rates ORDER BY effective_date DESC")
       : none,
     can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin"]) || keepsAccounts(u)
-      ? all("SELECT * FROM account_reservations ORDER BY created_at DESC")
+      ? all(`SELECT * FROM account_reservations WHERE ${sameSide(u, "account_id")} ORDER BY created_at DESC`)
       : none,
     can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin"]) || keepsAccounts(u)
-      ? all("SELECT * FROM account_credit_ledger ORDER BY created_at DESC LIMIT 1000")
+      ? all(`SELECT * FROM account_credit_ledger WHERE ${sameSide(u, "account_id")} ORDER BY created_at DESC LIMIT 1000`)
       : none,
     all(
       `SELECT x.* FROM evidence_packages x JOIN evidence e ON e.id=x.evidence_id JOIN students s ON s.id=e.student_id JOIN groups g ON g.id=s.group_id WHERE ${q.sql} ORDER BY x.created_at DESC`,
@@ -525,13 +548,13 @@ export async function loadData(u: any) {
       "Higher Board",
       "Project Operations",
       "Operations Systems / Admin",
-    ]) || keepsAccounts(u) ? all("SELECT id,label,platform,status,credits FROM accounts") : none,
+    ]) || keepsAccounts(u) ? all(`SELECT id,label,platform,status,credits FROM accounts WHERE ${sameSide(u, "id")}`) : none,
     // Everyone sees who their colleagues are and how to reach them; the
     // national ID is a first password, so only an administrator sees it.
     all(
       can(u.roles, ["Operations Systems / Admin"])
-        ? "SELECT id,name,email,roles,scopes,active,title,team,phone,national_id FROM users"
-        : "SELECT id,name,email,roles,scopes,active,title,team,phone FROM users",
+        ? `SELECT id,name,email,roles,scopes,active,title,team,phone,national_id FROM users WHERE ${sameSide(u, "id")}`
+        : `SELECT id,name,email,roles,scopes,active,title,team,phone FROM users WHERE ${sameSide(u, "id")}`,
     ),
     all(
       `SELECT c.* FROM session_checks c JOIN sessions t ON t.id=c.session_id JOIN groups g ON g.id=t.group_id WHERE ${qg.sql}`,

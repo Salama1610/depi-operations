@@ -1,5 +1,5 @@
 import { env } from "@/lib/env";
-import { actor, auditStmt, db, now, permit, rateLimit, stmt, uid } from "@/lib/server";
+import { actor, auditStmt, db, now, permit, rateLimit, stmt, uid, refuseDemo } from "@/lib/server";
 import { can, ensure } from "@/lib/domain/rules";
 import { credentialKey, openCredential, sealCredential } from "@/lib/domain/account-secrets";
 import { joinAccountId, type JoinKind } from "@/lib/domain/join-accounts";
@@ -38,6 +38,7 @@ async function mayReveal(u: any, kind: JoinKind, group: any) {
 export async function POST(req: Request) {
   try {
     const u = await actor();
+    refuseDemo(u);
     await rateLimit("join-accounts:" + u.id, 20, 60);
     ensure(
       !req.headers.get("origin") || req.headers.get("origin") === new URL(req.url).origin,

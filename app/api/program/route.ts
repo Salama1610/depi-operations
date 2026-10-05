@@ -12,6 +12,7 @@ import {
   teamCoordinators,
   uid,
 } from "@/lib/server";
+import { isDemo, sameSide } from "@/lib/demo";
 import { can, dataTransferRefusal, dataTransferRoles, ensure } from "@/lib/domain/rules";
 import { toCSV, toXLSX } from "@/lib/spreadsheet";
 
@@ -180,7 +181,7 @@ async function programData(u: any) {
   ]);
   const [staff, definitions, reportRuns, retention, attachments, accountControls] = await Promise.all([
     all(
-      "SELECT id,name,email,roles,active FROM users WHERE active=1 ORDER BY name",
+      `SELECT id,name,email,roles,active FROM users WHERE active=1 AND ${sameSide(u, "id")} ORDER BY name`,
     ),
     all("SELECT * FROM report_definitions ORDER BY updated_at DESC"),
     can(u.roles, ["Project Operations", "Operations Systems / Admin"])
@@ -466,6 +467,15 @@ export async function POST(req: Request) {
     const x = await req.json();
     const u = await actor();
     await rateLimit(`program-write:${u.id}`, 120, 60);
+    // In the demo, a supervisor can still hand demo groups to the demo coordinator.
+    if (isDemo(u))
+      ensure(
+        x.action === "bulk_group_owner" &&
+          Array.isArray(x.group_ids) &&
+          x.group_ids.every((g: any) => String(g).startsWith("DEMO-")) &&
+          String(x.owner || "").startsWith("DEMO-"),
+        "This is not available in the demo. Demo accounts work on the demo groups only.",
+      );
     const requestId = x.request_id || uid("REQ");
     const prior: any = await stmt(
       "SELECT actor FROM audit_events WHERE request_id=?",

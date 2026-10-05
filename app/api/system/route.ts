@@ -1,10 +1,11 @@
 import { env } from "@/lib/env";
-import { actor, permit, all, stmt, auditStmt, db, uid, now, rateLimit } from "@/lib/server";
+import { actor, permit, all, stmt, auditStmt, db, uid, now, rateLimit, refuseDemo } from "@/lib/server";
 import { ensure } from "@/lib/domain/rules";
 
 export async function GET() {
   try {
     const u = await actor();
+    refuseDemo(u);
     await rateLimit("system:" + u.id, 60, 60);
     permit(u, ["Operations Systems / Admin"]);
     const [missingEmail, duplicateEmails, roster] = await Promise.all([
@@ -29,6 +30,7 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const u = await actor();
+    refuseDemo(u);
     await rateLimit("system-write:" + u.id, 20, 60);
     permit(u, ["Operations Systems / Admin"]);
     ensure(!req.headers.get("origin") || req.headers.get("origin") === new URL(req.url).origin, "Cross-site action rejected.");

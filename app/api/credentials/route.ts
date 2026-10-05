@@ -1,5 +1,5 @@
 import { env } from "@/lib/env";
-import { actor, permit, stmt, auditStmt, db, uid, now, rateLimit, scopeSql } from "@/lib/server";
+import { actor, permit, stmt, auditStmt, db, uid, now, rateLimit, scopeSql, refuseDemo } from "@/lib/server";
 import { can, ensure } from "@/lib/domain/rules";
 import { credentialKey, credentialKeyConfigured, openCredential, sealCredential } from "@/lib/domain/account-secrets";
 
@@ -31,6 +31,7 @@ async function mayReveal(u: any, accountId: string) {
 export async function POST(req: Request) {
   try {
     const u = await actor();
+    refuseDemo(u);
     await rateLimit("credentials:" + u.id, 12, 60);
     ensure(
       !req.headers.get("origin") || req.headers.get("origin") === new URL(req.url).origin,

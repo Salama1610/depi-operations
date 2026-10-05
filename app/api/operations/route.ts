@@ -20,7 +20,9 @@ import {
   appliedPolicy,
   rateLimit,
   provisionStaffLogin,
+  provisionDemoLogin,
 } from "@/lib/server";
+import { demoPeople, demoPlan, demoStudentEmail, isDemo, sameSide } from "@/lib/demo";
 import {
   ensure,
   roles,
@@ -88,10 +90,70 @@ async function ensureUnusedProof(attachmentIds: string[], ownEvidence: string | 
   }
 }
 
+/** What a demo sign-in may try. Everything else changes real records. */
+const demoActions = new Set([
+  "case", "case_transition", "complete_task", "contact", "engagement", "milestone", "lifecycle", "task", "saved_view",
+  "service_qc_assign", "service_qc_review", "group_contact", "account_topup",
+  "session", "session_attendance", "session_cancel", "session_check", "session_coach", "session_confirm",
+  "session_reschedule", "session_unavailable",
+]);
+
+/**
+ * A demo sign-in works on the demo groups, with the demo team, and nowhere
+ * else: every record the request names must lead back to a DEMO- group.
+ */
+async function demoGuard(x: any) {
+  const elsewhere = "This is not available in the demo. Demo accounts work on the demo groups only.";
+  ensure(demoActions.has(x.action), elsewhere);
+  ensure(!x.new_email, "Adding a new coach is not available in the demo. Choose the demo coach.");
+  for (const person of [x.coach_id, x.reviewer_id])
+    if (person) ensure(String(person).startsWith("DEMO-"), "Choose someone from the demo team.");
+  const touched: string[] = [];
+  if (x.group_id) touched.push(String(x.group_id));
+  if (x.student_id) {
+    const row: any = await stmt("SELECT group_id FROM students WHERE id=?", x.student_id).first();
+    touched.push(String(row?.group_id || ""));
+  }
+  if (x.service_id) {
+    const row: any = await stmt("SELECT s.group_id FROM service_links l JOIN students s ON s.id=l.student_id WHERE l.id=?", x.service_id).first();
+    touched.push(String(row?.group_id || ""));
+  }
+  if (x.id) {
+    const row: any = await stmt(
+      `SELECT group_id FROM sessions WHERE id=?
+       UNION ALL SELECT COALESCE(s.group_id,c.group_id) FROM cases c LEFT JOIN students s ON s.id=c.student_id WHERE c.id=?
+       UNION ALL SELECT s.group_id FROM tasks k JOIN students s ON s.id=k.student_id WHERE k.id=?
+       UNION ALL SELECT id FROM accounts WHERE id=?`,
+      x.id, x.id, x.id, x.id,
+    ).first();
+    if (row) touched.push(String(row.group_id || ""));
+  }
+  ensure(x.action === "saved_view" || touched.length > 0, elsewhere);
+  ensure(touched.every((g) => g.startsWith("DEMO-")), elsewhere);
+}
+
+/** Puts the demo back to its starting state and its sign-ins to the demo password. */
+async function refreshDemo() {
+  let kept = 0;
+  const reasons: string[] = [];
+  // One at a time: a reviewed link cannot be removed, and that must not stop the rest.
+  for (const [sql, ...params] of demoPlan(Date.now())) {
+    try {
+      await stmt(sql, ...params).run();
+    } catch (error: any) {
+      kept++;
+      if (reasons.length < 5) reasons.push(`${sql.slice(0, 40)}… ${error?.message || error}`);
+    }
+  }
+  for (const p of demoPeople) await provisionDemoLogin(p.email, p.name);
+  await provisionDemoLogin(demoStudentEmail, "Demo Student");
+  return { kept, reasons };
+}
+
 /** The active Quality Member holding the fewest gig reviews; the lead carries none. */
 async function leastLoadedEvidenceReviewer(): Promise<string | null> {
   const members = (await all(
-    "SELECT id FROM users WHERE active=1 AND roles LIKE '%Quality Member%' AND roles NOT LIKE '%Quality Lead%' ORDER BY id",
+    "SELECT id FROM users WHERE active=1 AND roles LIKE '%Quality Member%' AND roles NOT LIKE '%Quality Lead%' AND id NOT LIKE 'DEMO-%' ORDER BY id",
   )) as any[];
   let best: { id: string; n: number } | null = null;
   for (const m of members) {
@@ -344,6 +406,11 @@ export async function POST(req: Request) {
     const u = await actor();
     await rateLimit("operations:" + u.id, 180, 60);
     ensure(typeof x.action === "string", "Choose an operation.");
+    if (x.action === "demo_refresh") {
+      ensure(isDemo(u) || can(u.roles, ["Operations Systems / Admin"]), "Only a demo account or an administrator can refresh the demo.");
+      return Response.json({ ok: true, ...(await refreshDemo()) });
+    }
+    if (isDemo(u)) await demoGuard(x);
     const key = x.request_id || uid("REQ");
     ensure(typeof key === "string" && key.length < 150, "Invalid request key.");
     const prior: any = await stmt(
@@ -969,7 +1036,7 @@ export async function POST(req: Request) {
         if (!attending) {
           jobs.push(stmt("UPDATE cases SET severity='S2 High' WHERE source=?", "session-" + session.id));
           // The leaders, and the group's own supervisor, hear about it at once.
-          const people = await all("SELECT id,roles FROM users WHERE active=1");
+          const people = await all(`SELECT id,roles FROM users WHERE active=1 AND ${sameSide(u, "id")}`);
           const leaders = new Set<string>(
             people
               .filter((p: any) => {
@@ -2633,7 +2700,7 @@ export async function POST(req: Request) {
                UNION SELECT supervisor FROM groups WHERE id=(SELECT group_id FROM students WHERE id=?)
              )`,
             uid("NTF"),
-            next === "Locked" ? "Student service link approved" : "Student service link needs correction",
+            next === "Locked" ? "Student service link approved" : "Student service link rejected",
             link.student_id,
             `service-review:${link.id}:${link.revision}:${next}`,
             t,
@@ -2654,7 +2721,7 @@ export async function POST(req: Request) {
         // The team leader does not carry a share of the reviewing, so the pool
         // for service work is the members. Gig evidence keeps its wider pool.
         const reviewers = (await (await stmt(
-          "SELECT id FROM users WHERE active=1 AND roles LIKE '%Quality Member%' AND roles NOT LIKE '%Quality Lead%' ORDER BY id",
+          `SELECT id FROM users WHERE active=1 AND roles LIKE '%Quality Member%' AND roles NOT LIKE '%Quality Lead%' AND ${sameSide(u, "id")} ORDER BY id`,
         ).all()).results) as any[];
         ensure(reviewers.length, "Add an active Quality Member before assigning reviews.");
         if (x.reviewer_id) {

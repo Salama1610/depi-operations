@@ -1,4 +1,4 @@
-import { actor, auditStmt, db, permit, rateLimit, stmt } from "@/lib/server";
+import { actor, auditStmt, db, permit, rateLimit, stmt, refuseDemo } from "@/lib/server";
 import { ensure } from "@/lib/domain/rules";
 
 export const dynamic = "force-dynamic";
@@ -217,6 +217,7 @@ export async function POST(request: Request) {
     const origin = request.headers.get("origin");
     ensure(!origin || origin === new URL(request.url).origin, "Cross-site requests are not allowed.");
     const user = await actor();
+    refuseDemo(user);
     permit(user, adminRoles);
     await rateLimit(`roster-import:${user.id}`, 360, 60);
     const x = await request.json();

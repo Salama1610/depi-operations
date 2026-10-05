@@ -1,4 +1,4 @@
-import {actor,all,auditStmt,db,now,permit,rateLimit,stmt,uid} from '@/lib/server';
+import {actor,all,auditStmt,db,now,permit,rateLimit,stmt,uid,refuseDemo} from '@/lib/server';
 import {ensure} from '@/lib/domain/rules';
 
 const scopes=['audit_events','attachments','notifications','automation_runs','imports','exports'];
@@ -6,7 +6,7 @@ const actions=['archive','anonymize','secure_delete'];
 
 export async function GET(){
   try{
-    const u=await actor();permit(u,['Operations Systems / Admin']);await rateLimit('retention:'+u.id,60,60);
+    const u=await actor();refuseDemo(u);permit(u,['Operations Systems / Admin']);await rateLimit('retention:'+u.id,60,60);
     const configurations=await all("SELECT key,value,classification,updated_by,updated_at FROM system_configuration WHERE key LIKE 'retention:%' ORDER BY key");
     const history=await all('SELECT * FROM retention_actions ORDER BY created_at DESC LIMIT 50');
     return Response.json({configurations,history,notice:'Execution remains disabled until an approved organizational/legal period is configured for the exact data scope.'},{headers:{'Cache-Control':'private,no-store'}});
@@ -15,7 +15,7 @@ export async function GET(){
 
 export async function POST(req:Request){
   try{
-    const u=await actor();permit(u,['Operations Systems / Admin']);await rateLimit('retention:'+u.id,20,60);
+    const u=await actor();refuseDemo(u);permit(u,['Operations Systems / Admin']);await rateLimit('retention:'+u.id,20,60);
     ensure(!req.headers.get('origin')||req.headers.get('origin')===new URL(req.url).origin,'Cross-site action rejected.');
     const x=await req.json();
     ensure(scopes.includes(x.scope)&&actions.includes(x.retention_action)&&Number.isInteger(+x.days)&&+x.days>=1&&+x.days<=36500&&x.authority?.trim()&&x.reason?.trim(),'Scope, approved action, period, authority and reason are required.');
