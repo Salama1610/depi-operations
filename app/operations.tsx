@@ -239,6 +239,20 @@ const weeklyGateChecks = [
 // Stored review states keep their names; people always read Approved or Rejected.
 const shownStatus: Record<string, string> = { Locked: "Approved", Lock: "Approved", "Needs Correction": "Rejected" };
 
+/**
+ * A coloured status pill, all the same size: green when good, amber to watch,
+ * red when something is wrong, grey for no data. Confirmations, attendance and
+ * feedback all use it, so the same colour means the same thing everywhere.
+ */
+function Cue({ tone, children, title }: { tone: "ok" | "warn" | "bad" | "info"; children: React.ReactNode; title?: string }) {
+  return <span className={"cue is-" + tone} title={title}>{children}</span>;
+}
+/** A percentage: 80% and up is good, 60-79% to watch, below 60% a problem. */
+const rateTone = (pct: number | null) => (pct === null ? "info" : pct >= 80 ? "ok" : pct >= 60 ? "warn" : "bad");
+/** A 1-5 rating average: 4 and up is good, 3 to 3.9 to watch, below 3 a problem. */
+const scoreTone = (avg: string) => (avg === "—" ? "info" : Number(avg) >= 4 ? "ok" : Number(avg) >= 3 ? "warn" : "bad");
+const pctOf = (a: number, b: number) => (b ? Math.round((100 * a) / b) : null);
+
 function Badge({ value }: { value: any }) {
   const t = useT();
   return (
@@ -558,12 +572,13 @@ export default function Operations({ module: initialModule }: { module: string }
         : m === "quality"
           ? canSeeServiceQueue || can(user.roles, ["Higher Board"])
           : m === "accounts"
-            ? can(user.roles, [
-                "Higher Board",
-                "Project Operations",
-                "Operations Coordinator",
-                "Operations Systems / Admin",
-              ]) || keepsAccounts
+            ? // Freelance client accounts only, for the Service Team's coordinators,
+              // the people who keep the accounts, and the leaders. A session's
+              // sign-in accounts stay on the session.
+              can(user.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin"]) ||
+              keepsAccounts ||
+              (can(user.roles, ["Operations Coordinator"]) &&
+                groups.some((g) => g.coordinator === user.id && g.supervisor_team === "Service Team"))
             : true,
   );
   // A module nobody showed them is not a module they can open by typing its
@@ -1160,7 +1175,7 @@ export default function Operations({ module: initialModule }: { module: string }
       teams: t("Teams file: {v0} of {v1} students found and marked Present; the rest Absent. Check before saving.", { v0: found, v1: roster.length }),
     }));
   };
-  // The coordinator's checklist: instructor confirmed, instructor entered, and
+  // The coordinator's checklist: coach confirmed, coach entered, and
   // attendance taken, which the app works out from the register.
   const checklistOf = (r: Row) => {
     const active = (d.students || [])
@@ -1993,22 +2008,22 @@ export default function Operations({ module: initialModule }: { module: string }
             render: (r) => {
               const link = groups.find((g) => g.id === r.group_id)?.session_link;
               return (
-                <span className="join-cell">
+                <span className="join-cell session-access">
                   {link ? (
-                    <a className="text-link" href={link} target="_blank" rel="noreferrer">
+                    <a className="access-btn is-join" href={link} target="_blank" rel="noreferrer">
                       <ExternalLink size={14} /> {t("Join")}
                     </a>
                   ) : (
-                    "—"
+                    <span className="access-btn is-missing">{t("No link yet")}</span>
                   )}
                   {seesCoachLogin(r) && (
-                    <button className="text-link" disabled={busy} onClick={() => showJoinLogin(r, "coach")}>
-                      <LockKeyhole size={13} /> {t("Coach login")}
+                    <button type="button" className="access-btn is-coach" disabled={busy} onClick={() => showJoinLogin(r, "coach")}>
+                      <LockKeyhole size={14} /> {t("Coach login")}
                     </button>
                   )}
                   {seesCoordinatorLogin(r) && (
-                    <button className="text-link" disabled={busy} onClick={() => showJoinLogin(r, "coordinator")}>
-                      <LockKeyhole size={13} /> {t("Coordinator login")}
+                    <button type="button" className="access-btn is-coordinator" disabled={busy} onClick={() => showJoinLogin(r, "coordinator")}>
+                      <LockKeyhole size={14} /> {t("Coordinator login")}
                     </button>
                   )}
                 </span>
@@ -2078,7 +2093,7 @@ export default function Operations({ module: initialModule }: { module: string }
             <label className="check"><Checkbox checked={insightFilters.absentOnly} onCheckedChange={(v) => setInsightFilters({ ...insightFilters, absentOnly: v === true })} />{t("Only students who missed a session")}</label>
           </div>
           <div className="mini-stats">
-            <span><strong>{marked ? Math.round((100 * presentTotal) / marked) : 0}%</strong>{t("Attendance rate")}</span>
+            <span className={"cue-stat is-" + rateTone(pctOf(presentTotal, marked))}><strong>{marked ? Math.round((100 * presentTotal) / marked) : 0}%</strong>{t("Attendance rate")}</span>
             <span><strong>{heldSessions.length}</strong>{t("Sessions held")}</span>
             <span className={registers.some((x) => x.register.unmarked > 0) ? "is-warning" : ""}><strong>{registers.filter((x) => x.register.unmarked > 0).length}</strong>{t("Registers not complete")}</span>
             <span><strong>{studentAttendance.filter((r) => r.absent >= 2).length}</strong>{t("Students absent twice or more")}</span>
@@ -2092,10 +2107,10 @@ export default function Operations({ module: initialModule }: { module: string }
                     { key: "starts_at", label: t("Date"), render: (x) => <span>{fmt(x.starts_at)}<small className="table-subline">{t("Week {v0}", { v0: x.week })}</small></span> },
                     { key: "group_id", label: t("Group") },
                     { key: "coach_id", label: t("Coach"), render: (x) => owner(x.coach_id) },
-                    { key: "present", label: t("Attended"), render: (x) => x.register.present },
-                    { key: "absent", label: t("Absent"), render: (x) => x.register.absent },
-                    { key: "unmarked", label: t("Not marked"), render: (x) => (x.register.unmarked ? <strong className="credit-out">{x.register.unmarked}</strong> : 0) },
-                    { key: "rate", label: t("Rate"), render: (x) => (x.register.present + x.register.absent ? Math.round((100 * x.register.present) / (x.register.present + x.register.absent)) + "%" : "—") },
+                    { key: "present", label: t("Attended"), render: (x) => <Cue tone="ok">{x.register.present}</Cue> },
+                    { key: "absent", label: t("Absent"), render: (x) => <Cue tone={x.register.absent ? "bad" : "info"}>{x.register.absent}</Cue> },
+                    { key: "unmarked", label: t("Not marked"), render: (x) => <Cue tone={x.register.unmarked ? "warn" : "ok"}>{x.register.unmarked}</Cue> },
+                    { key: "rate", label: t("Rate"), render: (x) => { const pct = pctOf(x.register.present, x.register.present + x.register.absent); return <Cue tone={rateTone(pct)}>{pct === null ? "—" : pct + "%"}</Cue>; } },
                   ],
                   (x) => (takesAttendance(x) ? <button className="small-btn" onClick={() => openAttendance(x)}>{x.register.unmarked ? t("Take attendance") : t("Edit")}</button> : null),
                 )
@@ -2108,9 +2123,9 @@ export default function Operations({ module: initialModule }: { module: string }
                   studentAttendance.slice(0, 300),
                   [
                     { key: "name", label: t("Student"), render: (r) => <span><strong>{r.name}</strong><small className="table-subline">{r.group_id}</small></span> },
-                    { key: "present", label: t("Attended"), render: (r) => `${r.present}/${r.held}` },
-                    { key: "absent", label: t("Absent"), render: (r) => (r.absent >= 2 ? <Badge value={t("{v0} absences", { v0: r.absent })} /> : r.absent) },
-                    { key: "rate", label: t("Rate"), render: (r) => (r.present + r.absent ? Math.round((100 * r.present) / (r.present + r.absent)) + "%" : "—") },
+                    { key: "present", label: t("Attended"), render: (r) => <Cue tone="ok">{`${r.present}/${r.held}`}</Cue> },
+                    { key: "absent", label: t("Absent"), render: (r) => <Cue tone={r.absent >= 2 ? "bad" : r.absent ? "warn" : "info"} title={r.absent >= 2 ? t("{v0} absences", { v0: r.absent }) : undefined}>{r.absent}</Cue> },
+                    { key: "rate", label: t("Rate"), render: (r) => { const pct = pctOf(r.present, r.present + r.absent); return <Cue tone={rateTone(pct)}>{pct === null ? "—" : pct + "%"}</Cue>; } },
                     { key: "last", label: t("Last attended"), render: (r) => (r.last ? fmt(r.last) : "—") },
                   ],
                   (r) => <button className="small-btn" onClick={() => setSelected(students.find((x) => x.id === r.id) || null)}>{t("Open student")}</button>,
@@ -2127,9 +2142,9 @@ export default function Operations({ module: initialModule }: { module: string }
           </div>
           <div className="mini-stats">
             <span><strong>{feedbackRows.length}</strong>{t("Responses")}</span>
-            <span><strong>{average(feedbackRows, "satisfaction")}</strong>{t("Satisfaction")}</span>
-            <span><strong>{average(feedbackRows, "clarity")}</strong>{t("Coach's clarity")}</span>
-            <span><strong>{average(feedbackRows, "usefulness")}</strong>{t("Mentorship usefulness")}</span>
+            <span className={"cue-stat is-" + scoreTone(average(feedbackRows, "satisfaction"))}><strong>{average(feedbackRows, "satisfaction")}</strong>{t("Satisfaction")}</span>
+            <span className={"cue-stat is-" + scoreTone(average(feedbackRows, "clarity"))}><strong>{average(feedbackRows, "clarity")}</strong>{t("Coach's clarity")}</span>
+            <span className={"cue-stat is-" + scoreTone(average(feedbackRows, "usefulness"))}><strong>{average(feedbackRows, "usefulness")}</strong>{t("Mentorship usefulness")}</span>
             <span><strong>{feedbackRows.length ? Math.round((100 * feedbackRows.filter((f: Row) => Number(f.searched_gig) === 1 || f.searched_gig === true).length) / feedbackRows.length) : 0}%</strong>{t("Searched for work on the platforms")}</span>
           </div>
           {panel(
@@ -2141,9 +2156,9 @@ export default function Operations({ module: initialModule }: { module: string }
                     { key: "coach", label: t("Coach"), render: (r) => owner(r.coach) },
                     { key: "sessions", label: t("Sessions"), render: (r) => new Set(r.rows.map((f: Row) => f.session_id)).size },
                     { key: "responses", label: t("Responses"), render: (r) => r.rows.length },
-                    { key: "satisfaction", label: t("Satisfaction"), render: (r) => average(r.rows, "satisfaction") },
-                    { key: "clarity", label: t("Coach's clarity"), render: (r) => average(r.rows, "clarity") },
-                    { key: "usefulness", label: t("Mentorship usefulness"), render: (r) => average(r.rows, "usefulness") },
+                    { key: "satisfaction", label: t("Satisfaction"), render: (r) => <Cue tone={scoreTone(average(r.rows, "satisfaction"))}>{average(r.rows, "satisfaction")}</Cue> },
+                    { key: "clarity", label: t("Coach's clarity"), render: (r) => <Cue tone={scoreTone(average(r.rows, "clarity"))}>{average(r.rows, "clarity")}</Cue> },
+                    { key: "usefulness", label: t("Mentorship usefulness"), render: (r) => <Cue tone={scoreTone(average(r.rows, "usefulness"))}>{average(r.rows, "usefulness")}</Cue> },
                   ],
                 )
               : <Empty title={t("No feedback in this view")} />,
@@ -2157,8 +2172,12 @@ export default function Operations({ module: initialModule }: { module: string }
                     { key: "created_at", label: t("Date"), render: (f) => <span>{fmt(f.session.starts_at)}<small className="table-subline">{f.session.group_id} · {t("Week {v0}", { v0: f.session.week })}</small></span> },
                     { key: "coach", label: t("Coach"), render: (f) => owner(f.session.coach_id) },
                     { key: "student_id", label: t("Student"), render: (f) => name(f.student_id) },
-                    { key: "ratings", label: t("Ratings"), render: (f) => <span className="feedback-scores" title={t("Satisfaction · clarity · usefulness")}>{f.satisfaction} · {f.clarity} · {f.usefulness}</span> },
-                    { key: "searched_gig", label: t("Searched for work on the platforms"), render: (f) => (Number(f.searched_gig) === 1 || f.searched_gig === true ? t("Yes") : t("No")) },
+                    { key: "ratings", label: t("Ratings"), render: (f) => (
+                      <span className="cue-row" title={t("Satisfaction · clarity · usefulness")}>
+                        {[f.satisfaction, f.clarity, f.usefulness].map((v, i) => <Cue key={i} tone={scoreTone(String(v))}>{v}</Cue>)}
+                      </span>
+                    ) },
+                    { key: "searched_gig", label: t("Searched for work on the platforms"), render: (f) => (Number(f.searched_gig) === 1 || f.searched_gig === true ? <Cue tone="ok">{t("Yes")}</Cue> : <Cue tone="info">{t("No")}</Cue>) },
                     { key: "liked", label: t("Liked most"), render: (f) => <small>{f.liked || "—"}</small> },
                     { key: "comments", label: t("Comments or support needed"), render: (f) => <small>{f.comments || "—"}</small> },
                   ],

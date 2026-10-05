@@ -976,3 +976,26 @@ input:focus-visible {
 .confirm-pill.is-wait{color:#9a6f22;background:#fff5dd;border-color:#f0dcae}
 .confirm-pills.is-row{flex-direction:row;flex-wrap:wrap;margin:10px 0}
 .confirm-pills.is-row .confirm-pill{flex:1 1 200px}
+
+/* Status cues: one size for every coloured number (attendance, feedback). */
+.cue{display:inline-flex;align-items:center;justify-content:center;min-width:56px;min-height:28px;padding:3px 10px;border:1px solid;border-radius:6px;font-size:12px;font-weight:600;line-height:1.2;white-space:nowrap}
+.cue.is-ok{color:#2f7a6d;background:#e8f6f1;border-color:#bfe5d8}
+.cue.is-warn{color:#9a6f22;background:#fff5dd;border-color:#f0dcae}
+.cue.is-bad{color:#b0564e;background:#fdf0ee;border-color:#f1cdc7}
+.cue.is-info{color:#6e81a9;background:#edf1fb;border-color:#d9e1f3}
+.cue-row{display:inline-flex;gap:6px}
+.mini-stats .cue-stat{border-inline-start:4px solid transparent;padding-inline-start:10px}
+.mini-stats .cue-stat.is-ok{border-inline-start-color:#57b39f}
+.mini-stats .cue-stat.is-warn{border-inline-start-color:#e0b04f}
+.mini-stats .cue-stat.is-bad{border-inline-start-color:#d98278}
+.mini-stats .cue-stat.is-info{border-inline-start-color:#c9d3ea}
+
+/* A session's way in: Join and the two sign-ins as buttons of one size. */
+.session-access{display:grid;grid-template-columns:1fr;gap:6px;min-width:170px}
+.access-btn{display:inline-flex;align-items:center;justify-content:flex-start;gap:8px;min-height:32px;padding:5px 10px;border:1px solid;border-radius:6px;font-size:12px;font-weight:600;white-space:nowrap;background:#fff;cursor:pointer}
+.access-btn.is-join{color:#315ce8;background:#f4f6ff;border-color:#cdd8fb}
+.access-btn.is-coach{color:#2f7a6d;background:#e8f6f1;border-color:#bfe5d8}
+.access-btn.is-coordinator{color:#7a4fb0;background:#f4eefc;border-color:#ddcdf2}
+.access-btn.is-missing{color:#8a96a9;background:#f5f7fa;border-color:#e2e7ef;cursor:default}
+.access-btn:disabled{opacity:.6}
+

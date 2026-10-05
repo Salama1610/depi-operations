@@ -1,5 +1,5 @@
-// The coordinator's checklist for each session: before it, the instructor is
-// confirmed; during it, the instructor has entered; after it, attendance is
+// The coordinator's checklist for each session: before it, the coach is
+// confirmed; during it, the coach has entered; after it, attendance is
 // taken. The first two are the coordinator's ticks (the coach's own
 // confirmation also counts as the first); the last is worked out from the
 // attendance register and cannot be ticked by hand.
@@ -17,8 +17,8 @@ export type ChecklistItem = {
 };
 
 export const sessionChecklist: ChecklistItem[] = [
-  { key: "instructor_confirmed", label: "Instructor confirmed", stage: "Before", owner: "coordinator" },
-  { key: "instructor_entered", label: "Instructor entered the session", stage: "During", owner: "coordinator" },
+  { key: "instructor_confirmed", label: "Coach confirmed", stage: "Before", owner: "coordinator" },
+  { key: "instructor_entered", label: "Coach entered the session", stage: "During", owner: "coordinator" },
   { key: "attendance_taken", label: "Attendance taken", stage: "After", owner: "auto" },
 ];
 
@@ -50,7 +50,7 @@ export function checklistState(
 ): Record<string, CheckState> {
   const state: Record<string, CheckState> = {};
   for (const tick of ticks) state[tick.item] = { done: true, by: tick.done_by, at: tick.done_at };
-  // The coordinator confirms the instructor; the coach confirming the session
+  // The coordinator confirms the coach; the coach confirming the session
   // counts too, and the coach saying they cannot come flags it.
   if (session.coach_unavailable) state.instructor_confirmed = { done: false, flagged: String(session.coach_unavailable) };
   else if (!state.instructor_confirmed?.done && session.coach_confirmed_at)
