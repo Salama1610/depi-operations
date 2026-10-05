@@ -247,7 +247,7 @@ export function ReportsPanel({ canExport = false, showStaff = true }: { canExpor
             <div className="mini-stats">
               <span><strong>{data.service_links.submitted_percent}%</strong>{t("Submitted")}</span>
               <span><strong>{data.service_links.fully_approved_percent}%</strong>{t("Fully approved")}</span>
-              <span><strong>{data.service_links.needs_correction_percent}%</strong>{t("Need correction")}</span>
+              <span><strong>{data.service_links.needs_correction_percent}%</strong>{t("Rejected")}</span>
               <span><strong>{data.service_links.average_qc_turnaround_hours ?? "—"}</strong>{t("Average QC hours")}</span>
               <span><strong>{data.service_links.automatic_failure_rate}%</strong>{t("Automatic failures")}</span>
               <span><strong>{data.service_links.average_revisions}</strong>{t("Average revisions")}</span>

@@ -92,7 +92,7 @@ export function coordinatorKpis(ctx: TodayContext, coordinatorId: string) {
   }).length;
   // Data accuracy: active students with an email, a mobile and a 14-digit national ID.
   const theirs = students.filter((s) => theirGroups.has(s.group_id) && s.lifecycle === "Active");
-  const complete = theirs.filter((s) => s.email && /^01\d{9}/.test(String(s.phone || "")) && /^\d{14}$/.test(String(s.national_id || s.id || ""))).length;
+  const complete = theirs.filter((s) => s.email && /^01\d{9}/.test(String(s.phone || "")) && (s.has_national_id || /^\d{14}$/.test(String(s.id || "")))).length;
   const graduated = theirs.filter((s) => /Graduat/.test(s.graduation || "")).length;
   const contacted = theirs.filter((s) => !s.contact_due).length;
   const waiting = evidence.filter((e) => e.status === "Coordinator L1" && theirs.some((s) => s.id === e.student_id));

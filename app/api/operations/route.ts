@@ -94,6 +94,7 @@ async function ensureUnusedProof(attachmentIds: string[], ownEvidence: string | 
 const demoActions = new Set([
   "case", "case_transition", "complete_task", "contact", "engagement", "milestone", "lifecycle", "task", "saved_view",
   "service_qc_assign", "service_qc_review", "group_contact", "account_topup",
+  "gig", "gig_transition", "evidence", "review", "transfer", "account_request", "student",
   "session", "session_attendance", "session_cancel", "session_check", "session_coach", "session_confirm",
   "session_reschedule", "session_unavailable",
 ]);
@@ -114,6 +115,10 @@ async function demoGuard(x: any) {
     const row: any = await stmt("SELECT group_id FROM students WHERE id=?", x.student_id).first();
     touched.push(String(row?.group_id || ""));
   }
+  if (x.gig_id) {
+    const row: any = await stmt("SELECT s.group_id FROM gigs z JOIN students s ON s.id=z.student_id WHERE z.id=?", x.gig_id).first();
+    touched.push(String(row?.group_id || ""));
+  }
   if (x.service_id) {
     const row: any = await stmt("SELECT s.group_id FROM service_links l JOIN students s ON s.id=l.student_id WHERE l.id=?", x.service_id).first();
     touched.push(String(row?.group_id || ""));
@@ -123,8 +128,10 @@ async function demoGuard(x: any) {
       `SELECT group_id FROM sessions WHERE id=?
        UNION ALL SELECT COALESCE(s.group_id,c.group_id) FROM cases c LEFT JOIN students s ON s.id=c.student_id WHERE c.id=?
        UNION ALL SELECT s.group_id FROM tasks k JOIN students s ON s.id=k.student_id WHERE k.id=?
-       UNION ALL SELECT id FROM accounts WHERE id=?`,
-      x.id, x.id, x.id, x.id,
+       UNION ALL SELECT id FROM accounts WHERE id=?
+       UNION ALL SELECT s.group_id FROM gigs z JOIN students s ON s.id=z.student_id WHERE z.id=?
+       UNION ALL SELECT s.group_id FROM evidence e JOIN students s ON s.id=e.student_id WHERE e.id=?`,
+      x.id, x.id, x.id, x.id, x.id, x.id,
     ).first();
     if (row) touched.push(String(row.group_id || ""));
   }

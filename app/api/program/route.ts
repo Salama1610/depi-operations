@@ -11,6 +11,7 @@ import {
   student,
   teamCoordinators,
   uid,
+  hideNationalId,
 } from "@/lib/server";
 import { isDemo, sameSide } from "@/lib/demo";
 import { can, dataTransferRefusal, dataTransferRoles, ensure } from "@/lib/domain/rules";
@@ -103,6 +104,7 @@ async function programData(u: any) {
      FROM students s JOIN groups g ON g.id=s.group_id WHERE ${q.sql} ORDER BY s.created_at DESC`,
     ...q.args,
   );
+  for (const s of students) hideNationalId(u, s);
   const applications = can(u.roles, [
     ...operations,
     "Team Supervisor",

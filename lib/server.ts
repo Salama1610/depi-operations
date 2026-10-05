@@ -206,6 +206,13 @@ export function refuseDemo(u: any) {
   ensure(!isDemo(u), "This is not available in the demo. Demo accounts work on the demo groups only.");
 }
 
+/** Replaces a student's national ID with whether one is recorded, for anyone but an administrator. */
+export function hideNationalId(u: any, s: any) {
+  s.has_national_id = /^\d{14}$/.test(String(s.national_id || ""));
+  if (!can(u.roles, ["Operations Systems / Admin"])) delete s.national_id;
+  return s;
+}
+
 export function permit(u: any, allowed: string[]) {
   // Operations Systems / Admin owns the workspace and may perform any action.
   // The separation-of-duties rules are unaffected: they compare identities, not
@@ -316,13 +323,15 @@ export async function teamCoordinators(u: any): Promise<string[] | null> {
   if (can(u.roles, ["Project Operations", "Operations Systems / Admin"])) return null;
   if (!can(u.roles, ["Team Supervisor"])) return [];
   const [people, groups] = await Promise.all([
-    all(`SELECT id,roles FROM users WHERE active=1 AND ${sameSide(u, "id")}`),
+    all(`SELECT id,roles,team FROM users WHERE active=1 AND ${sameSide(u, "id")}`),
     all(`SELECT coordinator,supervisor FROM groups WHERE status<>'Archived' AND ${sameSide(u, "id")}`),
   ]);
   const elsewhere = new Set(groups.filter((g) => g.supervisor !== u.id).map((g) => g.coordinator));
   return people
     .filter((p) => {
       const held = typeof p.roles === "string" ? JSON.parse(p.roles || "[]") : p.roles || [];
+      // A coordinator on another team is not this supervisor's to take.
+      if (u.team && p.team && p.team !== u.team) return false;
       return held.includes("Operations Coordinator") && !elsewhere.has(p.id);
     })
     .map((p) => p.id);
@@ -354,7 +363,7 @@ export async function loadData(u: any) {
       ...q.args,
     );
   const none = Promise.resolve([] as any[]);
-  const qualityScope = can(u.roles, ["Quality Member", "Quality Lead", "Project Operations"]);
+  const qualityScope = can(u.roles, ["Quality Member", "Quality Lead", "Project Operations", "Operations Systems / Admin"]);
   const coverageScope = can(u.roles, [
     "Quality Member",
     "Quality Lead",
@@ -362,6 +371,7 @@ export async function loadData(u: any) {
     "Operations Coordinator",
     "Team Supervisor",
     "Higher Board",
+    "Operations Systems / Admin",
   ]);
   const broad = can(u.roles, ["Project Operations", "Operations Systems / Admin"]);
   // Cases about the programme as a whole are real work, so not for demo eyes.
@@ -601,6 +611,9 @@ export async function loadData(u: any) {
   );
   const studentsByGroup = bucket(students, "group_id");
   for (const s of students) {
+    // A student's national ID is their first password: only an administrator
+    // sees it. Everyone else learns only whether one is on record.
+    hideNationalId(u, s);
     const group = groupMap.get(s.group_id);
     s.policy = policyMap[group.policy_id];
     {

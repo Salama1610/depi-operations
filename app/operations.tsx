@@ -215,6 +215,12 @@ const programDay = (value: Date = new Date()) => {
   return `${part("year")}-${part("month")}-${part("day")}`;
 };
 /** The end of the programme week (Friday to Thursday, Cairo): the coming Thursday, end of day. */
+/** An instant as the browser's wall time, which is what a datetime-local field shows and sends back. */
+const localInput = (value?: string | number | Date) => {
+  const d = value ? new Date(value) : new Date();
+  if (Number.isNaN(d.getTime())) return "";
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+};
 const weekDue = () => {
   const day = new Date(programDay() + "T12:00:00Z");
   day.setUTCDate(day.getUTCDate() + ((4 - day.getUTCDay() + 7) % 7));
@@ -337,6 +343,9 @@ export default function Operations({ module: initialModule }: { module: string }
     const href = id === "home" ? "/" : "/" + id;
     if (window.location.pathname !== href) window.history.pushState(null, "", href);
     setModule(id);
+    // A filter or search belongs to the page it was set on.
+    setFilter("All");
+    setSearch("");
     window.scrollTo({ top: 0 });
   }
   const [data, setData] = useState<Row | null>(null),
@@ -511,11 +520,12 @@ export default function Operations({ module: initialModule }: { module: string }
     (can(user.roles, ["Team Supervisor"]) && user.team === "Service Team");
   const shownNav = nav.filter(([m]) =>
     qualityOnly
-      ? m === "quality" || m === "portal"
+      ? m === "quality" || (m === "portal" && !demoAccount)
       : m === "administration"
         ? can(user.roles, ["Operations Systems / Admin"])
         : m === "portal"
-          ? can(user.roles, [
+          ? // The portal sheets hold real students, so demo sign-ins do not open them.
+            !demoAccount && can(user.roles, [
               "Team Supervisor",
               "Project Operations",
               "Coach Operations",
@@ -559,7 +569,8 @@ export default function Operations({ module: initialModule }: { module: string }
   // address either.
   const allowedModules = shownNav.map(([m]) => String(m));
   useEffect(() => {
-    if (allowedModules.length && !allowedModules.includes(module)) goTo(allowedModules[0]);
+    // The quality team starts on their review queue.
+    if (allowedModules.length && !allowedModules.includes(module)) goTo(qualityOnly ? "quality" : allowedModules[0]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [module, allowedModules.join(",")]);
   function open(action: string, row: Row = {}) {
@@ -568,8 +579,8 @@ export default function Operations({ module: initialModule }: { module: string }
       ...row,
       student_id: row.student_id || selected?.id || "",
       owner: row.owner || user.id,
-      due: row.due?.slice(0, 16) || weekDue(),
-      occurred_at: new Date().toISOString().slice(0, 16),
+      due: row.due ? localInput(row.due) : weekDue(),
+      occurred_at: localInput(),
       channel: "WhatsApp",
       outcome: "Responded",
       pathway: "Outcome",
@@ -578,7 +589,7 @@ export default function Operations({ module: initialModule }: { module: string }
       coach_id: row.coach_id || "",
       duration_minutes:
         row.duration_minutes || baselinePolicy.sessionMinutes,
-      starts_at: row.starts_at?.slice(0, 16) || "",
+      starts_at: row.starts_at ? localInput(row.starts_at) : "",
       reason: "",
       status: row.status || "",
       checklist: [],
@@ -761,7 +772,7 @@ export default function Operations({ module: initialModule }: { module: string }
         ).length > 0 &&
         choice(
           key,
-          t("Existing {v0}", { v0: label.toLowerCase() }),
+          t("Existing {v0}", { v0: t(label) }),
           (d.attachments || [])
             .filter((a: Row) => a.student_id === form.student_id)
             .map((a: Row) => ({ value: a.id, label: a.name })),
@@ -769,7 +780,7 @@ export default function Operations({ module: initialModule }: { module: string }
       <label className="upload">
         <Upload size={22} />
         <strong>
-          {form[`${key}_name`] || t("Upload {v0}", { v0: label.toLowerCase() })}
+          {form[`${key}_name`] || t("Upload {v0}", { v0: t(label) })}
         </strong>
         <span>{t("PNG or JPEG · up to 8 MB · paste with Ctrl+V or drop it here")}</span>
         <input
@@ -889,7 +900,7 @@ export default function Operations({ module: initialModule }: { module: string }
               <Clock3 size={14} />
               {fmt(task.due)}
             </span>
-            {task.category === "Contact" ? (
+            {task.category === "Contact" && may("contact") ? (
               <button
                 className="small-btn"
                 onClick={() => open("contact", { student_id: task.student_id })}
@@ -1007,10 +1018,25 @@ export default function Operations({ module: initialModule }: { module: string }
   const sessionGroupOf = (r: Row) => groups.find((g) => g.id === r.group_id);
   // The page's main "add" button is offered only to people the server lets
   // add that kind of record: supervisors add no students, sessions or groups.
+  // The roles the server accepts for each action a button opens, so nobody is
+  // offered a button that would be refused. Administrators pass every permit.
+  const opsRoles = ["Project Operations", "Operations Coordinator"];
+  const actionRoles: Record<string, string[]> = {
+    contact: opsRoles,
+    engagement: ["Team Supervisor", "Project Operations"],
+    milestone: ["Coach"],
+    lifecycle: ["Project Operations"],
+    transfer: ["Project Operations", "Team Supervisor"],
+    gig_transition: opsRoles,
+    evidence: opsRoles,
+    task: [...opsRoles, "Team Supervisor", "Coach", "Coach Operations"],
+  };
+  const may = (action: string) => can(user.roles, ["Operations Systems / Admin", ...(actionRoles[action] || [])]);
   const createRoles: Record<string, string[]> = {
     students: ["Project Operations", "Operations Coordinator", "Operations Systems / Admin"],
     sessions: ["Coach Operations", "Project Operations", "Operations Systems / Admin"],
     groups: ["Operations Systems / Admin"],
+    work: ["Operations Systems / Admin", ...actionRoles.task],
   };
   // Services are recorded by the coordinators of the Service Team's groups,
   // and by Project Operations and administrators.
@@ -1247,9 +1273,11 @@ export default function Operations({ module: initialModule }: { module: string }
             <h1>{t("Keep every student moving.")}</h1>
             <p>{t("Your team’s priorities, progress and exceptions in one place.")}</p>
           </div>
-          <button className="primary" onClick={() => open("contact")}>
-            <Plus size={18} /> {t("Log contact")}
-          </button>
+          {may("contact") && (
+            <button className="primary" onClick={() => open("contact")}>
+              <Plus size={18} /> {t("Log contact")}
+            </button>
+          )}
         </div>
         <div className="stats">
           {stats.map((s) => (
@@ -2319,7 +2347,7 @@ export default function Operations({ module: initialModule }: { module: string }
                         return <span><strong>{acc?.label || e.account_id}</strong><small className="table-subline">{acc?.platform}</small></span>;
                       },
                     },
-                    { key: "kind", label: t("Change"), render: (e) => <Badge value={t(creditKind(e))} /> },
+                    { key: "kind", label: t("Change"), render: (e) => <Badge value={creditKind(e)} /> },
                     {
                       key: "delta",
                       label: t("Amount"),
@@ -2597,7 +2625,7 @@ export default function Operations({ module: initialModule }: { module: string }
               </button>
             )}
             {/* A controlled-account gig still moves step by step until it is paid. */}
-            {!r.evidence && !["Paid", "Cancelled", "Failed"].includes(r.status) && (
+            {!r.evidence && !["Paid", "Cancelled", "Failed"].includes(r.status) && may("gig_transition") && (
               <button
                 className="small-btn"
                 onClick={() =>
@@ -2607,7 +2635,7 @@ export default function Operations({ module: initialModule }: { module: string }
                 {t("Record activity")}
               </button>
             )}
-            {!r.evidence && r.status === "Paid" && (
+            {!r.evidence && r.status === "Paid" && may("evidence") && (
               <button
                 className="small-btn"
                 onClick={() => open("evidence", { student_id: r.student_id, gig_id: r.id })}
@@ -2873,7 +2901,7 @@ export default function Operations({ module: initialModule }: { module: string }
                   { key: "reviewer_name", label: t("Reviewer"), render: (r) => isQualityLead && r.qc_status !== "Locked"
                       ? <SearchableSelect className="pick-inline" label={t("Assign this student to a reviewer")} placeholder={t("Waiting for a reviewer")} value={r.qc_actor || ""} onChange={(v) => !busy && v && quick("service_qc_assign", { student_id: r.student_id, reviewer_id: v })} options={qualityReviewers.map((q) => ({ value: q.id, label: `${q.name} (${reviewerStudents.get(q.id) || 0})` }))} />
                       : <span>{owner(r.qc_actor) === "Unassigned" ? t("Waiting for a reviewer") : owner(r.qc_actor)}<small className="table-subline">{owner(r.coordinator)}</small></span> },
-                  { key: "qc_status", label: t("Review state"), render: (r) => <span><Badge value={t(qcState(r.qc_status))} />{resubmitted(r) && <Badge value={t("Resubmitted")} />}<small className="table-subline">{Math.round((Date.now() - Date.parse(r.updated_at)) / 3600000)}{t("h · revision")}{" "}{r.revision}</small></span> },
+                  { key: "qc_status", label: t("Review state"), render: (r) => <span><Badge value={qcState(r.qc_status)} />{resubmitted(r) && <Badge value={t("Resubmitted")} />}<small className="table-subline">{Math.round((Date.now() - Date.parse(r.updated_at)) / 3600000)}{t("h · revision")}{" "}{r.revision}</small></span> },
                 ],
                 (r) => <div className="detail-actions">{canDecideServiceLinks && (r.qc_actor === user.id || isQualityLead) && <button className="small-btn" onClick={() => open("service_qc_review", { ...r, service_id: r.id, student_id: r.student_id, decision: r.qc_status === "Needs Correction" ? "Lock" : "" })}>{t("Review")}</button>}</div>,
               )),
@@ -2889,7 +2917,7 @@ export default function Operations({ module: initialModule }: { module: string }
             <strong>{reviews.length}</strong> {t("Awaiting review")}
           </span>
           <span>
-            <strong>{rejected.length}</strong> {t("Require correction")}
+            <strong>{rejected.length}</strong> {t("Rejected")}
           </span>
           <span>
             <strong>{accepted.length}</strong> {t("Accepted")}
@@ -2965,14 +2993,18 @@ export default function Operations({ module: initialModule }: { module: string }
           { key: "owner", label: t("Owner"), render: (r) => owner(r.owner) },
           { key: "due", label: t("Due"), render: (r) => fmt(r.due) },
         ],
-        (r) => (
-          <button
-            className="small-btn"
-            onClick={() => open("case_transition", r)}
-          >
-            {t("Update")}
-          </button>
-        ),
+        (r) =>
+          // The server lets the owner or a leader move a case; a quality case only the Quality Lead.
+          (r.type === "Quality"
+            ? can(user.roles, ["Quality Lead", "Operations Systems / Admin"])
+            : r.owner === user.id || can(user.roles, ["Project Operations", "Team Supervisor", "Quality Lead", "Operations Systems / Admin"])) && (
+            <button
+              className="small-btn"
+              onClick={() => open("case_transition", r)}
+            >
+              {t("Update")}
+            </button>
+          ),
       ),
     );
   } else if (module === "weekly") {
@@ -3561,7 +3593,7 @@ export default function Operations({ module: initialModule }: { module: string }
                         <Search size={17} />
                         <input
                           placeholder={t("Search {v0}…", {
-                            v0: t(module === "work" ? "actions" : module),
+                            v0: t(module === "work" ? "actions" : String(nav.find((n) => n[0] === module)?.[1] || module)),
                           })}
                           value={search}
                           onChange={(e) => setSearch(e.target.value)}
@@ -3724,14 +3756,16 @@ export default function Operations({ module: initialModule }: { module: string }
                 </div>
               </div>
               <div className="detail-actions">
-                <button
-                  className="primary"
-                  onClick={() =>
-                    open("contact", { student_id: selectedStudent.id })
-                  }
-                >
-                  <MessageSquare size={16} /> {t("Log contact")}
-                </button>
+                {may("contact") && (
+                  <button
+                    className="primary"
+                    onClick={() =>
+                      open("contact", { student_id: selectedStudent.id })
+                    }
+                  >
+                    <MessageSquare size={16} /> {t("Log contact")}
+                  </button>
+                )}
                 <button
                   className="small-btn"
                   onClick={() =>
@@ -3762,14 +3796,16 @@ export default function Operations({ module: initialModule }: { module: string }
                     </details>
                   ) : null;
                 })()}
-                <button
-                  className="small-btn"
-                  onClick={() =>
-                    open("engagement", { student_id: selectedStudent.id })
-                  }
-                >
-                  {t("Review risk")}
-                </button>
+                {may("engagement") && (
+                  <button
+                    className="small-btn"
+                    onClick={() =>
+                      open("engagement", { student_id: selectedStudent.id })
+                    }
+                  >
+                    {t("Review risk")}
+                  </button>
+                )}
               </div>
               <Tabs defaultValue="overview">
                 <TabsList className="detail-tabs">
@@ -3786,7 +3822,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     "audit",
                   ].map((tab) => (
                     <TabsTrigger key={tab} value={tab}>
-                      {t(tab[0].toUpperCase() + tab.slice(1))}
+                      {t(({ gigs: "Paid services", services: "Service links" } as Row)[tab] || tab[0].toUpperCase() + tab.slice(1))}
                     </TabsTrigger>
                   ))}
                 </TabsList>
@@ -3843,30 +3879,36 @@ export default function Operations({ module: initialModule }: { module: string }
                     </p>
                   </div>
                   <div className="detail-actions">
-                    <button
-                      className="small-btn"
-                      onClick={() =>
-                        open("milestone", { student_id: selectedStudent.id })
-                      }
-                    >
-                      {t("Update milestone")}
-                    </button>
-                    <button
-                      className="small-btn"
-                      onClick={() =>
-                        open("lifecycle", { student_id: selectedStudent.id })
-                      }
-                    >
-                      {t("Lifecycle")}
-                    </button>
-                    <button
-                      className="small-btn"
-                      onClick={() =>
-                        open("transfer", { student_id: selectedStudent.id })
-                      }
-                    >
-                      {t("Transfer student")}
-                    </button>
+                    {may("milestone") && (
+                      <button
+                        className="small-btn"
+                        onClick={() =>
+                          open("milestone", { student_id: selectedStudent.id })
+                        }
+                      >
+                        {t("Update milestone")}
+                      </button>
+                    )}
+                    {may("lifecycle") && (
+                      <button
+                        className="small-btn"
+                        onClick={() =>
+                          open("lifecycle", { student_id: selectedStudent.id })
+                        }
+                      >
+                        {t("Lifecycle")}
+                      </button>
+                    )}
+                    {may("transfer") && (
+                      <button
+                        className="small-btn"
+                        onClick={() =>
+                          open("transfer", { student_id: selectedStudent.id })
+                        }
+                      >
+                        {t("Transfer student")}
+                      </button>
+                    )}
                     <button
                       className="small-btn"
                       onClick={() =>
@@ -3934,7 +3976,7 @@ export default function Operations({ module: initialModule }: { module: string }
                           <Empty title={t("No service links submitted")} text={t("The student has not submitted service links yet.")} />
                         ) : serviceLinks.filter((link) => link.student_id === selectedStudent.id).map((link) => (
                           <article key={link.id}>
-                            <div className="detail-actions"><Badge value={serviceLabel(link.platform)} /><Badge value={t(qcState(link.qc_status))} /><Badge value={link.auto_status} /></div>
+                            <div className="detail-actions"><Badge value={serviceLabel(link.platform)} /><Badge value={qcState(link.qc_status)} /><Badge value={link.auto_status} /></div>
                             <h3><a className="text-link" href={link.url} target="_blank" rel="noreferrer">{link.platform} <ExternalLink size={14} /></a></h3>
                             <p>{(() => { try { return JSON.parse(link.auto_result || "{}").message; } catch { return t("Automatic details unavailable."); } })()}</p>
                             <small>{t("Revision")}{" "}{link.revision} {t("· submitted")}{" "}{new Date(link.submitted_at).toLocaleString()}{link.qc_at ? t(" · reviewed {v0} by {v1}", { v0: new Date(link.qc_at).toLocaleString(), v1: link.reviewer_name || owner(link.qc_actor) }) : ""}</small>
@@ -3967,7 +4009,7 @@ export default function Operations({ module: initialModule }: { module: string }
                                 {t("Review")}
                               </button>
                             )
-                          ) : !["Paid", "Cancelled", "Failed"].includes(r.status) ? (
+                          ) : !["Paid", "Cancelled", "Failed"].includes(r.status) && may("gig_transition") ? (
                             <button className="small-btn" onClick={() => open("gig_transition", r)}>
                               {t("Activity")}
                             </button>
@@ -4795,7 +4837,7 @@ export default function Operations({ module: initialModule }: { module: string }
                                     })
                                   }
                                 />
-                                {c}
+                                {t(c)}
                               </label>
                             ))}
                           </div>
