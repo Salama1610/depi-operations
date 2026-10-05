@@ -2040,7 +2040,8 @@ export default function Operations({ module: initialModule }: { module: string }
       a.download = `sessions-held-${insightFilters.payee.toLowerCase()}-${payMonth}.csv`;
       a.click();
     };
-    const paysPeople = can(user.roles, ["Coach Operations", "Project Operations", "Higher Board", "Operations Systems / Admin"]);
+    // Payment calculations are Coach Operations' (and the administrators').
+    const paysPeople = can(user.roles, ["Coach Operations", "Operations Systems / Admin"]);
     const egp = (v: number) => "EGP " + Math.round(v).toLocaleString("en-US");
 
     content = (

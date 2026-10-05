@@ -127,7 +127,6 @@ function CoordinatorToday({ ctx }: { ctx: TodayContext }) {
     .filter((e) => e.status === "Coordinator L1" && e.recorder !== user.id && students.some((s) => s.id === e.student_id && mine.has(s.group_id)))
     .sort((a, b) => String(a.stage_at).localeCompare(String(b.stage_at)));
   const k = coordinatorKpis(ctx, user.id);
-  const commission = ctx.d.commission?.coordinator?.[user.id];
   return (
     <div className="today">
       <div className="kpi-grid">
@@ -135,11 +134,6 @@ function CoordinatorToday({ ctx }: { ctx: TodayContext }) {
         <Kpi label={t("Reviews within 48 hours")} value={k.reviews48} />
         <Kpi label={t("Data accuracy")} value={k.accuracy} good={95} fair={85} />
         <Kpi label={t("Graduation progress")} value={k.graduation} good={60} fair={30} note={t("{v0} of {v1}", { v0: k.graduated, v1: k.students })} />
-        <div className="kpi-card kpi-neutral">
-          <span className="kpi-value money">{commission != null ? "EGP " + Number(commission).toLocaleString("en-US") : "—"}</span>
-          <strong>{t("Expected commission")}</strong>
-          <small>{commission != null ? t("From the graduates so far") : t("Commission rules are not set yet")}</small>
-        </div>
       </div>
 
       <section className="panel today-panel">
