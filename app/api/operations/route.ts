@@ -434,6 +434,94 @@ export async function POST(req: Request) {
         );
         break;
       }
+      case "group_contact": {
+        // One message to the whole group, one screenshot: a contact is logged
+        // for every active student in it. No follow-up action is opened for
+        // each; the coordinator's own tasks stay their list.
+        permit(u, ops);
+        ensure(x.group_id && x.proof_id && x.channel && x.outcome && x.occurred_at, "Group, screenshot, channel, outcome and time are required.");
+        const group: any = await stmt("SELECT * FROM groups WHERE id=?", x.group_id).first();
+        ensure(group, "Group not found.");
+        if (!can(u.roles, ["Project Operations", ...admin]))
+          ensure(group.coordinator === u.id, "You can message only your own groups.");
+        const shot: any = await stmt(
+          "SELECT a.* FROM attachments a JOIN students s ON s.id=a.student_id WHERE a.id=? AND s.group_id=?",
+          x.proof_id,
+          x.group_id,
+        ).first();
+        ensure(shot, "Upload the screenshot of the group message first.");
+        const members = await all("SELECT id FROM students WHERE group_id=? AND lifecycle='Active'", x.group_id);
+        ensure(members.length > 0, "The group has no active students.");
+        const due = new Date(Date.parse(x.occurred_at) + 7 * 86400000).toISOString();
+        for (const m of members) {
+          // Each student's contact keeps a screenshot of its own, as every
+          // contact must; they all point at the one image that was uploaded.
+          let proofId = x.proof_id;
+          if (m.id !== shot.student_id) {
+            proofId = uid("FILE");
+            jobs.push(
+              stmt(
+                "INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)",
+                proofId,
+                m.id,
+                `${shot.key}#${m.id}`,
+                shot.name,
+                shot.mime,
+                shot.size,
+                shot.hash,
+                u.id,
+                t,
+              ),
+              stmt(
+                "INSERT INTO attachment_context VALUES(?,?,?,?,?,?,?,?,?,?)",
+                proofId,
+                x.group_id,
+                null,
+                null,
+                "Group message",
+                null,
+                x.occurred_at,
+                x.channel,
+                "STAFF",
+                null,
+              ),
+            );
+          }
+          jobs.push(
+            stmt(
+              "INSERT INTO contacts VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+              uid("CON"),
+              m.id,
+              x.channel,
+              x.outcome,
+              x.occurred_at,
+              proofId,
+              x.next_action?.trim() || "Group message",
+              u.id,
+              due,
+              (x.notes || "") + " (group message)",
+              u.id,
+              t,
+            ),
+            stmt(
+              "UPDATE students SET last_contact=CASE WHEN last_contact IS NULL OR last_contact<? THEN ? ELSE last_contact END WHERE id=?",
+              x.occurred_at,
+              x.occurred_at,
+              m.id,
+            ),
+          );
+        }
+        jobs.push(
+          stmt(
+            "UPDATE attachment_context SET activity_type='Group message',occurred_at=?,source=?,performed_by_type='STAFF' WHERE attachment_id=?",
+            x.occurred_at,
+            x.channel,
+            x.proof_id,
+          ),
+        );
+        auditValue = { group_id: x.group_id, students: members.length, channel: x.channel };
+        break;
+      }
       case "task": {
         permit(u, [...ops, "Team Supervisor", "Coach", "Coach Operations"]);
         ensure(

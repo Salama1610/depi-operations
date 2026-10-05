@@ -942,3 +942,14 @@ input:focus-visible {
 .grad-dots i.is-done{background:#094268}
 .wa-btn{color:#1f7a4d}
 .case-mark{display:inline-flex;width:34px;justify-content:center;color:#c0392b}
+
+/* Faster daily work: the camera button, the WhatsApp menu, the next action. */
+.proof-field:focus-within,.proof-field:focus{outline:2px dashed #4AB7DD;outline-offset:4px;border-radius:10px}
+.camera-btn{display:inline-flex;align-items:center;gap:6px;margin-top:8px;cursor:pointer;min-height:44px}
+.wa-menu{position:relative;display:inline-block}
+.wa-menu summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;min-height:44px}
+.wa-menu summary::-webkit-details-marker{display:none}
+.wa-menu>div{position:absolute;z-index:20;inset-inline-start:0;top:100%;margin-top:4px;background:#fff;border:1px solid #e0e7f1;border-radius:10px;box-shadow:0 8px 24px #0942681f;display:flex;flex-direction:column;min-width:220px}
+.wa-menu>div a{padding:12px 14px;color:#1f7a4d;font-size:14px;border-bottom:1px solid #edf1f7}
+.wa-menu>div a:last-child{border-bottom:0}
+.next-action-line{font-size:14px;color:#5d7292;margin-top:4px}

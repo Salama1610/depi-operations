@@ -2995,3 +2995,19 @@ test("staff carry a title and a team chosen from two, set in the staff form and 
   const audit = await dbRow("SELECT value,reason FROM audit_events WHERE action='staff' ORDER BY created_at DESC LIMIT 1");
   assert.deepEqual(JSON.parse(audit.value).team_change, { from: "Service Team", to: "Target Team" });
 });
+
+test("one screenshot of a group message logs a contact for every active student in the group", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  const group = await dbRow("SELECT g.id,g.coordinator,u.email FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.status='Active' AND (SELECT count(*) FROM students s WHERE s.group_id=g.id AND s.lifecycle='Active')>=2 LIMIT 1");
+  const members = await dbRows("SELECT id FROM students WHERE group_id=? AND lifecycle='Active' ORDER BY id", group.id);
+  await dbExec("INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)", "GROUP-SHOT-1", members[0].id, "group-shot-1", "group.png", "image/png", 100, "group-shot-hash", "owner", new Date().toISOString());
+  const at = new Date().toISOString();
+  current = { id: group.coordinator, email: group.email };
+  const other = await dbRow("SELECT id FROM groups WHERE coordinator<>? AND status='Active' LIMIT 1", group.coordinator);
+  assert.match((await post("group_contact", { group_id: other.id, proof_id: "GROUP-SHOT-1", channel: "WhatsApp", outcome: "Responded", occurred_at: at })).error, /only your own groups/);
+  await check("group_contact", { group_id: group.id, proof_id: "GROUP-SHOT-1", channel: "WhatsApp", outcome: "Responded", occurred_at: at });
+  const logged = await dbRows("SELECT c.student_id FROM contacts c JOIN attachments a ON a.id=c.proof_id WHERE a.hash='group-shot-hash' AND c.occurred_at=?", at);
+  assert.equal(logged.length, members.length, "every active student has the contact, each with the same screenshot");
+  for (const m of members) assert.equal((await dbRow("SELECT last_contact FROM students WHERE id=?", m.id)).last_contact.slice(0, 16), at.slice(0, 16));
+  current = { id: "owner", email: "owner@example.com" };
+});

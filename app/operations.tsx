@@ -158,6 +158,7 @@ const titles: Row = {
   staff: "Manage staff access",
   account_topup: "Record a top-up",
   session_coach: "Change the coach for one session",
+  group_contact: "Log a group message",
   session_attendance: "Take attendance",
   milestone: "Update coaching milestone",
   transfer: "Transfer student",
@@ -737,7 +738,23 @@ export default function Operations({ module: initialModule }: { module: string }
       staff.map((s: Row) => ({ value: s.id, label: s.name })),
     );
   const proofField = (key = "proof_id", label = "Screenshot proof") => (
-    <div className="proof-field">
+    <div
+      className="proof-field"
+      tabIndex={0}
+      onPaste={(e) => {
+        const file = Array.from(e.clipboardData.files || []).find((f) => f.type.startsWith("image/"));
+        if (file) {
+          e.preventDefault();
+          upload(file, key);
+        }
+      }}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault();
+        const file = Array.from(e.dataTransfer.files || []).find((f) => f.type.startsWith("image/"));
+        if (file) upload(file, key);
+      }}
+    >
       <label className="field">{t(label)} *</label>
       {form.student_id &&
         (d.attachments || []).filter(
@@ -755,7 +772,7 @@ export default function Operations({ module: initialModule }: { module: string }
         <strong>
           {form[`${key}_name`] || t("Upload {v0}", { v0: label.toLowerCase() })}
         </strong>
-        <span>{t("PNG or JPEG · up to 8 MB")}</span>
+        <span>{t("PNG or JPEG · up to 8 MB · paste with Ctrl+V or drop it here")}</span>
         <input
           type="file"
           accept="image/png,image/jpeg"
@@ -764,6 +781,10 @@ export default function Operations({ module: initialModule }: { module: string }
             e.target.files?.[0] && upload(e.target.files[0], key)
           }
         />
+      </label>
+      <label className="small-btn camera-btn">
+        <Upload size={15} /> {t("Take a photo")}
+        <input type="file" accept="image/jpeg,image/png" capture="environment" hidden disabled={busy} onChange={(e) => e.target.files?.[0] && upload(e.target.files[0], key)} />
       </label>
       {form[key] && (
         <span className="proof-ready">
@@ -1160,7 +1181,7 @@ export default function Operations({ module: initialModule }: { module: string }
   };
   const filterOpts =
     module === "students"
-      ? ["All", "Active", "At Risk", "Critical", "No Contact", "Graduated"]
+      ? ["All", "At risk in my groups", "No contact in 7 days", "Active", "At Risk", "Critical", "No Contact", "Graduated"]
       : module === "work"
         ? [
             "All",
@@ -1564,6 +1585,27 @@ export default function Operations({ module: initialModule }: { module: string }
                     },
                   ],
                   (r) => {
+                    if (r.status === "Assigned" && recordsServices) {
+                      const reservation = (d.reservations || []).find((z: Row) => z.request_id === r.id);
+                      const account = accounts.find((a) => a.id === reservation?.account_id);
+                      return (
+                        <button
+                          className="small-btn"
+                          onClick={() =>
+                            open("gig", {
+                              student_id: r.student_id,
+                              platform: r.platform,
+                              value: r.value,
+                              currency: "USD",
+                              paid_by_account: account?.label || "",
+                              title: r.task,
+                            })
+                          }
+                        >
+                          {t("Record the paid service")}
+                        </button>
+                      );
+                    }
                     if (r.status !== "Submitted" || !can(user.roles, ["Higher Board"])) return null;
                     const reservation = activeReservation(r.id);
                     return reservation ? (
@@ -1626,6 +1668,8 @@ export default function Operations({ module: initialModule }: { module: string }
       .filter(
         (s) =>
           filter === "All" ||
+          (filter === "At risk in my groups" && ["At Risk", "Critical"].includes(s.risk.status)) ||
+          (filter === "No contact in 7 days" && s.lifecycle === "Active" && (!s.last_contact || Date.now() - Date.parse(s.last_contact) > 7 * 86400000)) ||
           (filter === "No Contact" && noContact.includes(s)) ||
           (filter === "Graduated" && s.graduation.includes("Graduate")) ||
           s.risk.status === filter,
@@ -3445,10 +3489,16 @@ export default function Operations({ module: initialModule }: { module: string }
                     .join("")}
                 </span>
                 <div>
-                  <h2>{selectedStudent.name}</h2>
+                  <h2>{selectedStudent.name} <GraduationDots graduation={selectedStudent.graduation} /></h2>
                   <p>
                     {selectedStudent.id} · {selectedStudent.group_id} ·{" "}
                     {selectedStudent.track}
+                  </p>
+                  <p className="next-action-line">
+                    <strong>{t("Next action")}:</strong>{" "}
+                    {selectedStudent.next_task
+                      ? `${selectedStudent.next_task.title} · ${fmt(selectedStudent.next_task.due)}`
+                      : t("None yet")}
                   </p>
                 </div>
               </div>
@@ -3487,6 +3537,28 @@ export default function Operations({ module: initialModule }: { module: string }
                 >
                   {t("Next action")}
                 </button>
+                {(() => {
+                  const next = sessions
+                    .filter((x) => x.group_id === selectedStudent.group_id && x.status !== "Cancelled" && Date.parse(x.starts_at) > Date.now())
+                    .sort((a, b) => a.starts_at.localeCompare(b.starts_at))[0];
+                  const link = groups.find((g) => g.id === selectedStudent.group_id)?.session_link;
+                  const options: [string, "reminder" | "absence" | "congratulations", Row][] = [
+                    [t("Session reminder"), "reminder", { name: selectedStudent.name, title: next?.title || "", when: next ? fmt(next.starts_at) + " " + new Date(next.starts_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" }) : "", link: link || "" }],
+                    [t("Absence follow-up"), "absence", { name: selectedStudent.name }],
+                    [t("First-gig congratulations"), "congratulations", { name: selectedStudent.name }],
+                  ];
+                  const any = whatsapp(selectedStudent.phone, "absence", {});
+                  return any ? (
+                    <details className="wa-menu">
+                      <summary className="small-btn wa-btn">WhatsApp</summary>
+                      <div>
+                        {options.map(([label, template, values]) => (
+                          <a key={template} href={whatsapp(selectedStudent.phone, template, values) || "#"} target="_blank" rel="noreferrer">{label}</a>
+                        ))}
+                      </div>
+                    </details>
+                  ) : null;
+                })()}
                 <button
                   className="small-btn"
                   onClick={() =>
@@ -3505,7 +3577,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     "sessions",
                     "gigs",
                     "services",
-                    "accounts",
+                    ...(groups.find((g) => g.id === selectedStudent.group_id)?.supervisor_team === "Service Team" ? ["accounts"] : []),
                     "cases",
                     "timeline",
                     "audit",
@@ -3894,6 +3966,9 @@ export default function Operations({ module: initialModule }: { module: string }
               if (a === "contact")
                 return (
                   <>
+                    <button type="button" className="text-link group-message-link" onClick={() => open("group_contact", { channel: "WhatsApp", outcome: "Responded" })}>
+                      {t("Messaged the whole group? Log one group message instead")}
+                    </button>
                     {studentPick()}
                     <div className="form-grid">
                       {choice("channel", t("Channel"), [
@@ -4079,6 +4154,37 @@ export default function Operations({ module: initialModule }: { module: string }
                 );
               if (a === "session_cancel")
                 return <>{field("reason", t("Reason for cancellation"))}</>;
+              if (a === "group_contact") {
+                const mine = groups.filter((g) => can(user.roles, ["Project Operations", "Operations Systems / Admin"]) || g.coordinator === user.id);
+                return (
+                  <>
+                    <p className="footnote">{t("One screenshot of a message sent to the whole group logs a contact for every active student in it.")}</p>
+                    <label className="field">
+                      {t("Group")} *
+                      <select
+                        className="pick-inline"
+                        value={form.group_id || ""}
+                        onChange={(e) => {
+                          const anchor = students.find((x) => x.group_id === e.target.value && x.lifecycle === "Active");
+                          setForm({ ...form, group_id: e.target.value, student_id: anchor?.id || "" });
+                        }}
+                      >
+                        <option value="">{t("Choose a group")}</option>
+                        {mine.map((g) => (
+                          <option key={g.id} value={g.id}>{g.id} · {students.filter((x) => x.group_id === g.id && x.lifecycle === "Active").length} {t("students")}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="form-grid">
+                      {choice("channel", t("Channel"), ["WhatsApp", "Phone", "Email", "Teams", "In person"])}
+                      {choice("outcome", t("Outcome"), ["Responded", "No response", "Wrong number", "Unreachable"])}
+                    </div>
+                    {field("occurred_at", t("Sent at"), "datetime-local")}
+                    {form.group_id ? proofField() : null}
+                    {field("notes", t("Notes"), "text", false)}
+                  </>
+                );
+              }
               if (a === "session_coach") {
                 const coaches = staff
                   .filter((u: Row) => {
