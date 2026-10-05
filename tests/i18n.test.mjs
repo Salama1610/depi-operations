@@ -26,7 +26,6 @@ const pages = [
   "app/weekly-progress.tsx",
   "app/control-center.tsx",
   "app/portal-view.tsx",
-  "app/today.tsx",
   "app/student/page.tsx",
   "app/login/login-form.tsx",
   "app/auth/update-password/password-form.tsx",
@@ -128,7 +127,7 @@ test("the student portal shell renders in Arabic", async () => {
 
 test("the staff console shell renders in Arabic with the sidebar on the right", async () => {
   const html = await renderIn("ar", "/app/operations.tsx", "default", { module: "home" });
-  assert.match(html, /اليوم/);
+  assert.match(html, /نظرة عامة/);
   assert.match(html, /مهامي/);
   // Program flow is for leaders and administrators; a person with no role does not see it.
   assert.doesNotMatch(html, /مسار البرنامج/);
@@ -136,7 +135,7 @@ test("the staff console shell renders in Arabic with the sidebar on the right", 
   assert.doesNotMatch(html, />Overview</);
 
   const en = await renderIn("en", "/app/operations.tsx", "default", { module: "home" });
-  assert.match(en, />Today</);
+  assert.match(en, />Overview</);
   assert.match(en, /data-side="left"/);
 });
 

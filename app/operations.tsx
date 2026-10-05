@@ -13,7 +13,8 @@ import { WeeklyProgress } from "./weekly-progress";
 import { acceptedServicePlatforms } from "@/lib/domain/service-links";
 import { PortalView } from "./portal-view";
 import { SearchableSelect } from "@/components/searchable-select";
-import { GraduationDots, TodayView } from "./today";
+import { Progress } from "@/components/ui/progress";
+import { GraduationDots } from "./today";
 import { coachPayout, coachRates } from "@/lib/domain/payouts";
 import { checklistState, sessionChecklist, type ChecklistItem } from "@/lib/domain/session-checklist";
 import { useState, useEffect } from "react";
@@ -36,6 +37,9 @@ import {
   ArrowUpRight,
   ArrowRight,
   ChevronRight,
+  CalendarRange,
+  WalletCards,
+  GraduationCap,
   Clock3,
   CheckCircle2,
   AlertTriangle,
@@ -102,16 +106,19 @@ import { readSheet, toCSV, toWorkbook, toXLSX } from "@/lib/spreadsheet";
 import { guessKeyColumn, guessMapping } from "@/lib/domain/sheet-mapping";
 type Row = Record<string, any>;
 const nav = [
-  ["home", "Today", Home],
+  ["home", "Overview", Home],
   ["program", "Program flow", Flag],
-  ["work", "My tasks", CheckCheck],
-  ["weekly", "Performance", ChartNoAxesCombined],
+  ["work", "My work", CheckCheck],
+  ["weekly", "Weekly progress", CalendarRange],
   ["students", "Students", Users],
   ["groups", "Groups", Layers],
   ["sessions", "Sessions", CalendarDays],
+  ["accounts", "Accounts", WalletCards],
   ["gigs", "Services", BriefcaseBusiness],
   ["portal", "Gigs portal view", Files],
   ["quality", "Quality review", ShieldCheck],
+  ["cases", "Cases", Flag],
+  ["reports", "Reports", ChartNoAxesCombined],
   ["administration", "Administration", Settings2],
 ] as const;
 /** Where students take paid work. One spelling each, so an order number is unique per platform. */
@@ -298,7 +305,7 @@ function saveBlob(bytes: any, name: string, type: string) {
 }
 /** The module a path points at: "/" is the overview, "/students" is students. */
 /** Pages that were folded into another: evidence now lives on each gig. */
-const movedModules: Record<string, string> = { evidence: "gigs", cases: "work", reports: "weekly", accounts: "gigs" };
+const movedModules: Record<string, string> = { evidence: "gigs" };
 function moduleFromPath(pathname: string) {
   const raw = pathname.replace(/^\/+|\/+$/g, "").split("/")[0];
   const segment = movedModules[raw] || raw;
@@ -369,8 +376,6 @@ export default function Operations({ module: initialModule }: { module: string }
       month: new Date().toISOString().slice(0, 7), payee: "Coaches",
     }),
     [sessionFilters, setSessionFilters] = useState<Row>({ day: "All", time: "All" }),
-    [myTaskFilter, setMyTaskFilter] = useState("All"),
-    [showAllTasks, setShowAllTasks] = useState(false),
     [joinLogin, setJoinLogin] = useState<Row | null>(null);
   // A join login is shown for a minute, then forgotten.
   useEffect(() => {
@@ -435,7 +440,10 @@ export default function Operations({ module: initialModule }: { module: string }
   });
   const openTasks = tasks.filter((t) => t.status === "Open");
   const overdue = openTasks.filter((t) => t.due < new Date().toISOString());
+  const dueToday = openTasks.filter((t) => t.due.slice(0, 10) === today());
   const noContact = students.filter((s) => s.contact_due);
+  const critical = students.filter((s) => s.risk.status === "Critical");
+  const atRisk = students.filter((s) => s.risk.status === "At Risk");
   const graduates = students.filter((s) => s.graduation.includes("Graduate"));
   const accepted = evidence.filter((e) => e.status === "Accepted");
   const reviews = evidence.filter((e) =>
@@ -528,7 +536,7 @@ export default function Operations({ module: initialModule }: { module: string }
               "Operations Systems / Admin",
               "Higher Board",
             ])
-        : (m as string) === "reports"
+        : m === "reports"
           ? can(user.roles, [
               "Team Supervisor",
               "Project Operations",
@@ -538,7 +546,7 @@ export default function Operations({ module: initialModule }: { module: string }
             ])
         : m === "quality"
           ? canSeeServiceQueue || can(user.roles, ["Higher Board"])
-          : (m as string) === "accounts"
+          : m === "accounts"
             ? can(user.roles, [
                 "Higher Board",
                 "Project Operations",
@@ -713,9 +721,7 @@ export default function Operations({ module: initialModule }: { module: string }
     choice(
       "student_id",
       t("Student"),
-      students
-        .filter((s) => !form.group_id || modal?.action !== "milestone" || s.group_id === form.group_id)
-        .map((s) => ({ value: s.id, label: s.name + " · " + s.id })),
+      students.map((s) => ({ value: s.id, label: s.name + " · " + s.id })),
     );
   // The action owner is whoever records it; the server enforces the same.
   const ownerLine = () => (
@@ -786,6 +792,14 @@ export default function Operations({ module: initialModule }: { module: string }
       )}
     </div>
   );
+  function routeQueue(q: string) {
+    // Same in-page switch as the sidebar, carrying the queue as state.
+    window.history.pushState(null, "", "/work?queue=" + encodeURIComponent(q));
+    setFilter(q);
+    setSearch("");
+    setModule("work");
+    window.scrollTo({ top: 0 });
+  }
   useEffect(() => {
     const p = new URLSearchParams(window.location.search),
       q = p.get("queue"),
@@ -1194,435 +1208,207 @@ export default function Operations({ module: initialModule }: { module: string }
             ? ["All", "Scheduled", "Confirmed", "Completed", "Cancelled"]
           : ["All"];
   let content: any;
-  const reportsView = () => {
-    return (
+  if (module === "home") {
+    const stats = [
+      {
+        label: t("Active students"),
+        value: students.length,
+        detail: t("{v0} assigned groups", { v0: groups.length }),
+        icon: Users,
+        q: "All",
+      },
+      {
+        label: t("Contact compliance"),
+        value: compliance + "%",
+        detail: t("{v0} students need contact", { v0: noContact.length }),
+        icon: MessageSquare,
+        q: "No Contact",
+      },
+      {
+        label: t("Services waiting for review"),
+        value: reviews.length,
+        detail: t("{v0} require correction", { v0: rejected.length }),
+        icon: Files,
+        q: "Evidence Blocker",
+      },
+      {
+        label: t("Graduation progress"),
+        value: graduates.length,
+        detail: t("{v0}% achieved · 85% target", { v0: students.length ? Math.round((graduates.length / students.length) * 100) : 0 }),
+        icon: GraduationCap,
+        q: "All",
+      },
+    ];
+    content = (
       <>
-        <ReportsPanel canExport={canTransfer} showStaff={!coachesOnly} />
+        <div className="greeting">
+          <div>
+            <div className="eyebrow">{t("ROUND 5 / OPERATIONS OVERVIEW")}</div>
+            <h1>{t("Keep every student moving.")}</h1>
+            <p>{t("Your team’s priorities, progress and exceptions in one place.")}</p>
+          </div>
+          <button className="primary" onClick={() => open("contact")}>
+            <Plus size={18} /> {t("Log contact")}
+          </button>
+        </div>
         <div className="stats">
-          {[
-            { label: t("Contact compliance"), n: compliance + "%" },
-            {
-              label: t("Graduation rate"),
-              n:
-                (students.length
-                  ? Math.round((graduates.length / students.length) * 100)
-                  : 0) + "%",
-            },
-            { label: t("Open actions"), n: openTasks.length },
-            { label: t("Quality backlog"), n: reviews.length },
-          ].map((s) => (
-            <div className="stat" key={s.label}>
-              <span>{t(s.label)}</span>
-              <strong>{s.n}</strong>
-              <small>{t("Current assigned student scope")}</small>
-            </div>
+          {stats.map((s) => (
+            <button
+              className="stat"
+              key={s.label}
+              onClick={() => routeQueue(s.q)}
+            >
+              <div>
+                <span>{t(s.label)}</span>
+                <s.icon size={19} />
+              </div>
+              <strong>{s.value}</strong>
+              <small>{s.detail}</small>
+            </button>
           ))}
         </div>
-        {!coachesOnly && panel(
-          t("Coordinator performance"),
-          generic(
-            staff
-              .filter((u: Row) => u.roles.includes("Operations Coordinator"))
-              .map((u: Row) => {
-                const s = students.filter((s) => s.coordinator === u.id);
-                return {
-                  id: u.id,
-                  name: u.name,
-                  title: u.title || "",
-                  students: s.length,
-                  contact: s.length
-                    ? Math.round(
-                        (s.filter((s) => s.last_contact && !s.contact_due)
-                          .length /
-                          s.length) *
-                          100,
-                      ) + "%"
-                    : "—",
-                  overdue: overdue.filter((t) => t.owner === u.id).length,
-                  critical: s.filter((s) => s.risk.status === "Critical")
-                    .length,
-                  graduates: s.filter((s) => s.graduation.includes("Graduate"))
-                    .length,
-                };
-              }),
-            [
-              { key: "name", label: t("Coordinator"), render: (r: Row) => <span className="table-name">{r.name}{r.title && <small>{t(r.title)}</small>}</span> },
-              { key: "students", label: t("Students") },
-              { key: "contact", label: t("Contact compliance") },
-              { key: "overdue", label: t("Overdue") },
-              { key: "critical", label: t("Critical") },
-              { key: "graduates", label: t("Graduated") },
-            ],
-          ),
-        )}
-        <div className="report-grid">
-          {panel(
-            t("Graduation policy"),
-            <div className="prose">
-              <div className="rule-number">{t("3 services × $5 minimum")}</div>
-              <p>
-                {t("Total qualifying value of at least $15, or one qualifying service of $300 or more.")}
-              </p>
-              <p>
-                {t("Evidence must be Quality Accepted, and the service must be paid. Non-USD services count only after a separately approved rate is applied and stored with the service.")}
-              </p>
-              <Badge value="Round 5 · v1" />
-            </div>,
-          )}
-          {panel(
-            t("Metric definitions"),
-            <div className="prose">
-              <h3>{t("Contact compliance")}</h3>
-              <p>
-                {t("Active students with a complete, screenshot-backed contact within 7 days ÷ active students requiring contact.")}
-              </p>
-              <h3>{t("Graduation rate")}</h3>
-              <p>
-                {t("Students meeting the applicable graduation policy ÷ active students in the selected scope.")}
-              </p>
-              <h3>{t("Forecast")}</h3>
-              <p>
-                {t("No forecast published until approved weekly milestone and forecasting policies are configured.")}
-              </p>
-            </div>,
-          )}
-        </div>
-      </>
-    );
-  };
-  const accountsView = (part: "accounts" | "credit" = "accounts") => {
-    const accounts: Row[] = d.accounts || [];
-    const requests: Row[] = d.requests || [];
-    const money = (v: any) => "$" + Number(v || 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
-    const attention = ["Blocked", "Access Issue", "Funding Block", "Under Review"];
-    const activeReservation = (requestId: string) =>
-      (d.reservations || []).find(
-        (z: Row) => z.request_id === requestId && z.status === "Active" && z.expires_at > new Date().toISOString(),
-      );
-    const requestStage = (r: Row) => (r.status === "Submitted" && activeReservation(r.id) ? "Reserved" : r.status);
-    const managesAccounts = can(user.roles, ["Higher Board", "Operations Systems / Admin"]);
-    // Every change to an account's credit, newest first: opening balances,
-    // top-ups, services charged and refunds.
-    const ledger: Row[] = (d.creditLedger || [])
-      .filter((e: Row) => accountFilters.platform === "All" || accounts.find((a) => a.id === e.account_id)?.platform === accountFilters.platform)
-      .filter((e: Row) => accountFilters.ledger === "All" || creditKind(e) === accountFilters.ledger);
-    const thisMonth = new Date().toISOString().slice(0, 7);
-    const toppedUp = (d.creditLedger || []).filter((e: Row) => creditKind(e) === "Top-up" && String(e.created_at).startsWith(thisMonth));
-    const spent = (d.creditLedger || []).filter((e: Row) => creditKind(e) === "Service charged" && String(e.created_at).startsWith(thisMonth));
-    const pool = accounts
-      .filter(qMatch)
-      .filter((r) => accountFilters.platform === "All" || r.platform === accountFilters.platform)
-      .filter((r) =>
-        accountFilters.status === "All"
-          ? true
-          : accountFilters.status === "Attention"
-            ? attention.includes(r.status)
-            : r.status === accountFilters.status,
-      )
-      .sort((x, y) => String(x.platform).localeCompare(String(y.platform)) || Number(y.credits) - Number(x.credits));
-    const requestRows = requests
-      .filter(qMatch)
-      .filter((r) => accountFilters.platform === "All" || r.platform === accountFilters.platform)
-      .filter((r) =>
-        accountFilters.request === "All"
-          ? true
-          : accountFilters.request === "Open"
-            ? r.status === "Submitted"
-            : requestStage(r) === accountFilters.request,
-      );
-    const openRequests = requests.filter((r) => r.status === "Submitted");
-    if (part === "credit") return <>
-            <div className="mini-stats">
-              <span><strong>{money(toppedUp.reduce((n: number, e: Row) => n + Number(e.delta), 0))}</strong>{t("Topped up this month")}</span>
-              <span><strong>{money(-spent.reduce((n: number, e: Row) => n + Number(e.delta), 0))}</strong>{t("Spent on services this month")}</span>
-              <span><strong>{money(accounts.reduce((n, a) => n + Number(a.credits || 0), 0))}</strong>{t("Credit left in all accounts")}</span>
-            </div>
-            <div className="filter-row">
-              <Pick label={t("Marketplace")} value={accountFilters.platform} onChange={(platform) => setAccountFilters({ ...accountFilters, platform })} options={["All", ...controlledPlatforms]} />
-              <Pick
-                label={t("Showing")}
-                value={accountFilters.ledger}
-                onChange={(ledger) => setAccountFilters({ ...accountFilters, ledger })}
-                options={[
-                  { value: "All", label: t("Every change") },
-                  { value: "Top-up", label: t("Top-ups") },
-                  { value: "Service charged", label: t("Services charged") },
-                  { value: "Refund", label: t("Refunds") },
-                  { value: "Opening balance", label: t("Opening balances") },
-                ]}
-              />
-            </div>
-            {panel(
-              t("Credit history"),
-              ledger.length ? (
-                generic(
-                  ledger,
-                  [
-                    {
-                      key: "created_at",
-                      label: t("Date"),
-                      render: (e) => <span>{fmt(e.created_at)}<small className="table-subline">{new Date(e.created_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" })}</small></span>,
-                    },
-                    {
-                      key: "account_id",
-                      label: t("Account"),
-                      render: (e) => {
-                        const acc = accounts.find((a) => a.id === e.account_id);
-                        return <span><strong>{acc?.label || e.account_id}</strong><small className="table-subline">{acc?.platform}</small></span>;
-                      },
-                    },
-                    { key: "kind", label: t("Change"), render: (e) => <Badge value={t(creditKind(e))} /> },
-                    {
-                      key: "delta",
-                      label: t("Amount"),
-                      render: (e) => <strong className={Number(e.delta) >= 0 ? "credit-in" : "credit-out"}>{Number(e.delta) >= 0 ? "+" : "−"}{money(Math.abs(Number(e.delta)))}</strong>,
-                    },
-                    { key: "balance_after", label: t("Balance after"), render: (e) => money(e.balance_after) },
-                    { key: "actor", label: t("Recorded by"), render: (e) => owner(e.actor) },
-                    {
-                      key: "reason",
-                      label: t("Details"),
-                      render: (e) => {
-                        const gig = e.gig_id ? (d.gigs || []).find((g: Row) => g.id === e.gig_id) : null;
-                        const detail = String(e.reason || "").replace(/^(Top-up|Service charged) · /, "");
-                        return <span>{detail}{gig ? <small className="table-subline">{name(gig.student_id)}</small> : null}</span>;
-                      },
-                    },
-                  ],
-                )
-              ) : (
-                <Empty title={(d.creditLedger || []).length ? t("No credit change matches these filters") : t("No credit recorded yet. Add the client accounts with their opening credit, then record top-ups here.")} />
-              ),
-              keepsAccounts && accounts.length ? (
-                <div className="detail-actions">
-                  <button className="primary small" onClick={() => open("account_topup", { id: "" })}>
-                    <Plus size={15} /> {t("Record a top-up")}
-                  </button>
+        <div className="home-grid">
+          <div className="main-column">
+            <section className="priorities">
+              <div className="panel-heading">
+                <div>
+                  <div className="eyebrow">{t("START HERE")}</div>
+                  <h2>{t("Today needs your attention")}</h2>
                 </div>
-              ) : null,
-            )}
-</>;
-    return (
-      <>
-        <div className="mini-stats account-stats">
-          <span><strong>{accounts.filter((a) => a.status === "Available").length}</strong>{t("Available accounts")}</span>
-          <span><strong>{money(accounts.filter((a) => a.status === "Available").reduce((n, a) => n + Number(a.credits || 0), 0))}</strong>{t("Credit available")}</span>
-          <span><strong>{accounts.filter((a) => a.status === "Assigned").length}</strong>{t("Assigned to students")}</span>
-          <span className={accounts.some((a) => attention.includes(a.status)) ? "is-warning" : ""}><strong>{accounts.filter((a) => attention.includes(a.status)).length}</strong>{t("Need attention")}</span>
-          <span><strong>{openRequests.length}</strong>{t("Requests waiting")}</span>
-        </div>
-        <div className="account-capacity">
-          {controlledPlatforms.map((platform) => {
-            const mine = accounts.filter((a) => a.platform === platform);
-            const ready = mine.filter((a) => a.status === "Available");
-            const credit = ready.reduce((n, a) => n + Number(a.credits || 0), 0);
-            const waiting = openRequests.filter((r) => r.platform === platform);
-            const needed = waiting.reduce((n, r) => n + Number(r.value || 0), 0);
-            return (
-              <button
-                key={platform}
-                className={"capacity-card" + (accountFilters.platform === platform ? " is-selected" : "") + (needed > credit ? " is-short" : "")}
-                onClick={() => setAccountFilters({ ...accountFilters, platform: accountFilters.platform === platform ? "All" : platform })}
-              >
-                <strong>{platform}</strong>
-                <span>{t("{v0} of {v1} accounts ready", { v0: ready.length, v1: mine.length })}</span>
-                <span>{t("{v0} credit · {v1} needed by {v2} requests", { v0: money(credit), v1: money(needed), v2: waiting.length })}</span>
-              </button>
-            );
-          })}
-        </div>
-        <Tabs defaultValue={openRequests.length ? "requests" : "pool"}>
-          <TabsList>
-            <TabsTrigger value="pool">
-              {t("Account pool")}{" "}<span className="count">{accounts.length}</span>
-            </TabsTrigger>
-            <TabsTrigger value="requests">
-              {t("Requests")}{" "}<span className="count">{openRequests.length}</span>
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="pool">
-            <div className="filter-row">
-              <Pick label={t("Marketplace")} value={accountFilters.platform} onChange={(platform) => setAccountFilters({ ...accountFilters, platform })} options={["All", ...controlledPlatforms]} />
-              <Pick
-                label={t("State")}
-                value={accountFilters.status}
-                onChange={(status) => setAccountFilters({ ...accountFilters, status })}
-                options={[
-                  { value: "All", label: t("Every state") },
-                  { value: "Available", label: t("Available") },
-                  { value: "Assigned", label: t("Assigned") },
-                  { value: "Attention", label: t("Need attention") },
-                  { value: "Cooldown", label: t("Cooldown") },
-                  { value: "Retired", label: t("Retired") },
-                ]}
-              />
-            </div>
-            {panel(
-              t("Controlled client accounts"),
-              pool.length ? (
-                generic(
-                  pool,
-                  [
-                    {
-                      key: "label",
-                      label: t("Account"),
-                      render: (r) => (
-                        <span><strong>{r.label}</strong><small className="table-subline">{r.id}</small></span>
-                      ),
-                    },
-                    { key: "platform", label: t("Marketplace") },
-                    { key: "status", label: t("State"), render: (r) => <Badge value={r.status} /> },
-                    {
-                      key: "credits",
-                      label: t("Available credit"),
-                      render: (r) => <strong className={Number(r.credits) <= 0 ? "credit-empty" : ""}>{money(r.credits)}</strong>,
-                    },
-                    {
-                      key: "active_assignment",
-                      label: t("With"),
-                      render: (r) => {
-                        const request = r.active_assignment ? requests.find((q) => q.status === "Assigned" && (d.reservations || []).some((z: Row) => z.account_id === r.id && z.request_id === q.id)) : null;
-                        return request ? <span>{name(request.student_id)}<small className="table-subline">{request.task}</small></span> : "—";
-                      },
-                    },
-                  ],
-                  (r) =>
-                    r.status === "Retired" ? null : (
-                      <div className="detail-actions">
-                        {keepsAccounts && (
-                          <button className="small-btn" onClick={() => open("account_topup", { id: r.id })}>{t("Top up")}</button>
-                        )}
-                        {managesAccounts && (
-                          <button className="small-btn" onClick={() => open("account_status", r)}>{t("Manage")}</button>
-                        )}
-                      </div>
-                    ),
-                )
-              ) : (
-                <Empty title={accounts.length ? t("No account matches these filters") : t("No client accounts yet. Higher Board adds each account with its opening credit; top-ups are then recorded on the Credit tracker.")} />
-              ),
-              <div className="detail-actions">
-                {can(user.roles, ["Higher Board"]) && (
-                  <button className="primary small" onClick={() => open("account")}>
-                    <Plus size={15} /> {t("Add account")}
+                <a className="text-link" href="/work">
+                  {t("View my work")}{" "}<ArrowRight size={16} />
+                </a>
+              </div>
+              <div className="priority-grid">
+                {[
+                  {
+                    q: "Overdue",
+                    n: overdue.length,
+                    text: t("Overdue actions"),
+                    icon: Clock3,
+                    color: "red",
+                  },
+                  {
+                    q: "Critical",
+                    n: critical.length,
+                    text: t("Critical students"),
+                    icon: AlertTriangle,
+                    color: "amber",
+                  },
+                  {
+                    q: "Due Today",
+                    n: dueToday.length,
+                    text: t("Due today"),
+                    icon: CheckCheck,
+                    color: "blue",
+                  },
+                ].map((c) => (
+                  <button
+                    key={c.q}
+                    className={"priority " + c.color}
+                    onClick={() => routeQueue(c.q)}
+                  >
+                    <c.icon size={19} />
+                    <strong>{c.n}</strong>
+                    <span>{c.text}</span>
+                    <ArrowUpRight size={16} />
                   </button>
-                )}
-                {can(user.roles, ["Project Operations", "Operations Systems / Admin"]) && (
-                  <button className="small-btn" onClick={() => open("task_bank")}>{t("Add approved task")}</button>
-                )}
+                ))}
+              </div>
+            </section>
+            {panel(
+              t("Next actions"),
+              taskRows([...overdue, ...dueToday].slice(0, 5)),
+              <a href="/work" className="text-link">
+                {t("View all")}{" "}<ChevronRight size={16} />
+              </a>,
+            )}
+            {panel(
+              t("Students needing intervention"),
+              studentRows(critical.slice(0, 4)),
+              <span className="count">{critical.length}</span>,
+            )}
+          </div>
+          <div className="side-column">
+            <section className="journey-card">
+              <div className="eyebrow">{t("COHORT JOURNEY")}</div>
+              <h2>{t("Progress with proof.")}</h2>
+              <p>{t("Only Quality-accepted services count toward graduation.")}</p>
+              <div className="journey-total">
+                <strong>{graduates.length}</strong>
+                <span>
+                  {t("of {v0} students", { v0: students.length })}
+                  <br />
+                  {t("graduated")}
+                </span>
+              </div>
+              <Progress
+                value={
+                  students.length
+                    ? (graduates.length / students.length) * 100
+                    : 0
+                }
+              />
+              <div className="target-line">
+                <span>{t("Current progress")}</span>
+                <span>{t("Target 85%")}</span>
+              </div>
+              <div className="journey-stages">
+                {["0/3", "1/3", "2/3", "Graduated"].map((v, i) => (
+                  <div key={v}>
+                    <span>
+                      <i className={"stage-dot dot-" + i} />
+                      {v === "Graduated" ? t("Graduated") : v + " " + t("qualifying services")}
+                    </span>
+                    <strong>
+                      {v === "Graduated"
+                        ? graduates.length
+                        : students.filter((s) => s.graduation === v).length}
+                    </strong>
+                  </div>
+                ))}
+              </div>
+              <a href="/reports">
+                {t("Explore graduation report")}{" "}<ArrowRight size={16} />
+              </a>
+            </section>
+            {panel(
+              t("Upcoming sessions"),
+              <div className="session-mini">
+                {(d.sessions || []).slice(0, 3).map((s: Row) => (
+                  <a key={s.id} href="/sessions">
+                    <span className="calendar-stamp">
+                      <strong>{new Date(s.starts_at).getDate()}</strong>
+                      <small>
+                        {new Date(s.starts_at).toLocaleDateString("en", {
+                          month: "short",
+                        })}
+                      </small>
+                    </span>
+                    <span>
+                      <strong>{s.group_id} {t("· Delivery clinic")}</strong>
+                      <small>
+                        {new Date(s.starts_at).toLocaleTimeString("en", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}{" "}
+                        {t("· Week")}{" "}{s.week}
+                      </small>
+                    </span>
+                  </a>
+                ))}
               </div>,
             )}
-          </TabsContent>
-          <TabsContent value="requests">
-            <div className="filter-row">
-              <Pick label={t("Marketplace")} value={accountFilters.platform} onChange={(platform) => setAccountFilters({ ...accountFilters, platform })} options={["All", ...controlledPlatforms]} />
-              <Pick
-                label={t("Showing")}
-                value={accountFilters.request}
-                onChange={(request) => setAccountFilters({ ...accountFilters, request })}
-                options={[
-                  { value: "Open", label: t("Waiting for an account") },
-                  { value: "Reserved", label: t("Reserved") },
-                  { value: "Assigned", label: t("Assigned") },
-                  { value: "All", label: t("Every request") },
-                ]}
-              />
+            <div className="policy-note">
+              <ShieldCheck size={20} />
+              <div>
+                <strong>{t("Every action has a trail")}</strong>
+                <p>{t("Round 5 policy v1 · Staff access only")}</p>
+              </div>
             </div>
-            {panel(
-              t("Account requests"),
-              requestRows.length ? (
-                generic(
-                  requestRows,
-                  [
-                    studentCol,
-                    {
-                      key: "task",
-                      label: t("Service"),
-                      render: (r) => <span><strong>{r.task}</strong><small className="table-subline">{r.created_at ? new Date(r.created_at).toLocaleDateString() : ""}</small></span>,
-                    },
-                    { key: "platform", label: t("Marketplace") },
-                    { key: "value", label: t("Credit needed"), render: (r) => money(r.value) },
-                    {
-                      key: "status",
-                      label: t("Progress"),
-                      render: (r) => {
-                        const stage = requestStage(r);
-                        const steps = ["Submitted", "Reserved", "Assigned"];
-                        const at = steps.indexOf(stage);
-                        const hold = activeReservation(r.id);
-                        return (
-                          <span className="request-flow">
-                            {at < 0 ? (
-                              <Badge value={stage} />
-                            ) : (
-                              steps.map((step, i) => (
-                                <i key={step} className={i < at ? "is-past" : i === at ? "is-now" : ""}>{t(step)}</i>
-                              ))
-                            )}
-                            {hold && stage === "Reserved" && (
-                              <small className="table-subline">
-                                {t("Held until {v0}", { v0: new Date(hold.expires_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" }) })}
-                              </small>
-                            )}
-                          </span>
-                        );
-                      },
-                    },
-                  ],
-                  (r) => {
-                    if (r.status !== "Submitted" || !can(user.roles, ["Higher Board"])) return null;
-                    const reservation = activeReservation(r.id);
-                    return reservation ? (
-                      <button
-                        className="primary small"
-                        onClick={() => open("allocate", { request: r.id, student_id: r.student_id, reservation_id: reservation.id, account: reservation.account_id })}
-                      >
-                        {t("Approve allocation")}
-                      </button>
-                    ) : (
-                      <button className="small-btn" onClick={() => open("reserve_account", { request: r.id, student_id: r.student_id })}>
-                        {t("Reserve account")}
-                      </button>
-                    );
-                  },
-                )
-              ) : (
-                <Empty title={requests.length ? t("No request matches these filters") : t("No account requests yet")} />
-              ),
-            )}
-          </TabsContent>
-        </Tabs>
+          </div>
+        </div>
       </>
-    );
-  };
-  if (module === "home") {
-    content = (
-      <TodayView
-        ctx={{
-          user,
-          d,
-          students,
-          groups,
-          sessions,
-          attendance,
-          evidence,
-          can,
-          owner,
-          name,
-          fmt,
-          cairoDay: (v?: string | Date) => programDay(v ? new Date(v) : new Date()),
-          open,
-          openStudent: (id: string) => setSelected(students.find((x) => x.id === id) || null),
-          openAttendance,
-          takesAttendance,
-          canAttend,
-          canDecline,
-          confirm: (x: Row) => quick("session_confirm", { id: x.id }),
-          checklistOf,
-          whatsapp,
-          goTo: (m: string) => goTo(m),
-        }}
-      />
     );
   } else if (module === "program") {
     content = <ProgramFlow />;
@@ -1644,79 +1430,72 @@ export default function Operations({ module: initialModule }: { module: string }
       <span className="count">{rows.length}</span>,
     );
   } else if (module === "work") {
-    const severityRank: Row = { "S1 Critical": 0, "S2 High": 1, "S3 Standard": 3, "S4 Low": 4 };
-    const priorityRank: Row = { Urgent: 0, High: 1, Normal: 3, Low: 4 };
-    const inScope = (studentId?: string) => {
-      if (myTaskFilter === "At risk") return students.some((x) => x.id === studentId && ["At Risk", "Critical"].includes(x.risk.status));
-      if (myTaskFilter === "No contact") return students.some((x) => x.id === studentId && (!x.last_contact || Date.now() - Date.parse(x.last_contact) > 7 * 86400000));
-      if (myTaskFilter === "Overdue") return true;
-      return true;
-    };
-    const items: Row[] = [
-      ...openTasks
-        .filter(qMatch)
-        .map((x) => ({ kind: "task", id: x.id, row: x, title: x.title, student_id: x.student_id, due: x.due, rank: (priorityRank[x.priority] ?? 3) - (x.due < new Date().toISOString() ? 1 : 0) })),
-      ...(d.cases || [])
-        .filter((c: Row) => !["Closed", "Resolved", "Verified"].includes(c.status))
-        .filter(qMatch)
-        .map((c: Row) => ({ kind: "case", id: c.id, row: c, title: c.title, student_id: c.student_id, due: c.due, rank: (severityRank[c.severity] ?? 3) - (c.due < new Date().toISOString() ? 1 : 0) })),
-    ]
-      .filter((x) => inScope(x.student_id))
-      .filter((x) => myTaskFilter !== "Overdue" || x.due < new Date().toISOString())
-      .sort((x, y) => x.rank - y.rank || String(x.due).localeCompare(String(y.due)));
-    const shown = showAllTasks ? items : items.slice(0, 10);
+    let rows = openTasks.filter(qMatch);
+    if (filter === "Overdue")
+      rows = rows.filter((t) => t.due < new Date().toISOString());
+    if (filter === "Due Today")
+      rows = rows.filter((t) => t.due.slice(0, 10) === today());
+    if (["No Contact", "At Risk", "Critical"].includes(filter)) {
+      const ids = new Set(
+        (filter === "No Contact"
+          ? noContact
+          : filter === "Critical"
+            ? critical
+            : atRisk
+        ).map((s) => s.id),
+      );
+      rows = rows.filter((t) => ids.has(t.student_id));
+    }
+    if (filter === "Rejected Evidence")
+      rows = rows.filter((t) => t.category === "Correction");
+    if (filter === "Evidence Blocker")
+      rows = rows.filter((t) =>
+        evidence.some(
+          (e) =>
+            e.student_id === t.student_id &&
+            !["Accepted", "Closed L3"].includes(e.status),
+        ),
+      );
+    if (filter === "Account Requests Pending")
+      rows = rows.filter((t) =>
+        (d.requests || []).some(
+          (r: Row) => r.student_id === t.student_id && r.status === "Submitted",
+        ),
+      );
+    if (filter === "Open Escalations")
+      rows = rows.filter((t) =>
+        (d.cases || []).some(
+          (c: Row) => c.student_id === t.student_id && c.status !== "Closed",
+        ),
+      );
     content = (
       <>
         <div className="queue-tabs">
-          {[
-            ["All", t("All")],
-            ["Overdue", t("Overdue")],
-            ["At risk", t("At risk in my groups")],
-            ["No contact", t("No contact in 7 days")],
-          ].map(([key, label]) => (
-            <button className={myTaskFilter === key ? "active" : ""} key={key} onClick={() => { setMyTaskFilter(key); setShowAllTasks(false); }}>
-              {label}
+          {["All", "Overdue", "Due Today", "No Contact"].map((q) => (
+            <button
+              className={filter === q ? "active" : ""}
+              key={q}
+              onClick={() => setFilter(q)}
+            >
+              {q}
+              <span>
+                {q === "All"
+                  ? openTasks.length
+                  : q === "Overdue"
+                    ? overdue.length
+                    : q === "Due Today"
+                      ? dueToday.length
+                      : noContact.length}
+              </span>
             </button>
           ))}
         </div>
         {panel(
-          t("My tasks · {v0}", { v0: items.length }),
-          shown.length ? (
-            <div className="task-list">
-              {shown.map((x) => (
-                <article className="task-row" key={x.kind + x.id}>
-                  {x.kind === "task" ? (
-                    <button className="complete" aria-label={t("Complete")} disabled={busy} onClick={() => quick("complete_task", { id: x.id })}>
-                      <CheckCheck size={17} />
-                    </button>
-                  ) : (
-                    <span className="case-mark"><Flag size={16} /></span>
-                  )}
-                  <div className="task-main">
-                    <strong>{x.title}</strong>
-                    <button className="text-link muted" onClick={() => x.student_id && setSelected(students.find((st) => st.id === x.student_id) || null)}>
-                      {x.student_id ? name(x.student_id) : t("Group or programme")} <span>· {x.kind === "case" ? t("Case") + " · " + x.row.severity : x.row.category}</span>
-                    </button>
-                  </div>
-                  <span className={x.due < new Date().toISOString() ? "due late" : "due"}><Clock3 size={14} />{fmt(x.due)}</span>
-                  {x.kind === "case" ? (
-                    <button className="small-btn" onClick={() => open("case_transition", x.row)}>{t("Update")}</button>
-                  ) : x.row.category === "Contact" ? (
-                    <button className="small-btn" onClick={() => open("contact", { student_id: x.student_id })}>{t("Log contact")}</button>
-                  ) : (
-                    <button className="small-btn" onClick={() => x.student_id && setSelected(students.find((st) => st.id === x.student_id) || null)}>{t("Open")}</button>
-                  )}
-                </article>
-              ))}
-            </div>
-          ) : (
-            <Empty title={t("Nothing to do here.")} />
+          filter === "All" ? t("Open actions") : filter,
+          paginate(
+            rows.sort((a, b) => a.due.localeCompare(b.due)),
+            taskRows,
           ),
-          items.length > 10 ? (
-            <button className="text-link" onClick={() => setShowAllTasks(!showAllTasks)}>
-              {showAllTasks ? t("Show the top 10") : t("Show all ({v0})", { v0: items.length })}
-            </button>
-          ) : null,
         )}
       </>
     );
@@ -2414,6 +2193,317 @@ export default function Operations({ module: initialModule }: { module: string }
         )}
       </Tabs>
     );
+  } else if (module === "portal") {
+    content = <PortalView staffName={owner} />;
+  } else if (module === "accounts") {
+    const accounts: Row[] = d.accounts || [];
+    const requests: Row[] = d.requests || [];
+    const money = (v: any) => "$" + Number(v || 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
+    const attention = ["Blocked", "Access Issue", "Funding Block", "Under Review"];
+    const activeReservation = (requestId: string) =>
+      (d.reservations || []).find(
+        (z: Row) => z.request_id === requestId && z.status === "Active" && z.expires_at > new Date().toISOString(),
+      );
+    const requestStage = (r: Row) => (r.status === "Submitted" && activeReservation(r.id) ? "Reserved" : r.status);
+    const managesAccounts = can(user.roles, ["Higher Board", "Operations Systems / Admin"]);
+    // Every change to an account's credit, newest first: opening balances,
+    // top-ups, services charged and refunds.
+    const ledger: Row[] = (d.creditLedger || [])
+      .filter((e: Row) => accountFilters.platform === "All" || accounts.find((a) => a.id === e.account_id)?.platform === accountFilters.platform)
+      .filter((e: Row) => accountFilters.ledger === "All" || creditKind(e) === accountFilters.ledger);
+    const thisMonth = new Date().toISOString().slice(0, 7);
+    const toppedUp = (d.creditLedger || []).filter((e: Row) => creditKind(e) === "Top-up" && String(e.created_at).startsWith(thisMonth));
+    const spent = (d.creditLedger || []).filter((e: Row) => creditKind(e) === "Service charged" && String(e.created_at).startsWith(thisMonth));
+    const pool = accounts
+      .filter(qMatch)
+      .filter((r) => accountFilters.platform === "All" || r.platform === accountFilters.platform)
+      .filter((r) =>
+        accountFilters.status === "All"
+          ? true
+          : accountFilters.status === "Attention"
+            ? attention.includes(r.status)
+            : r.status === accountFilters.status,
+      )
+      .sort((x, y) => String(x.platform).localeCompare(String(y.platform)) || Number(y.credits) - Number(x.credits));
+    const requestRows = requests
+      .filter(qMatch)
+      .filter((r) => accountFilters.platform === "All" || r.platform === accountFilters.platform)
+      .filter((r) =>
+        accountFilters.request === "All"
+          ? true
+          : accountFilters.request === "Open"
+            ? r.status === "Submitted"
+            : requestStage(r) === accountFilters.request,
+      );
+    const openRequests = requests.filter((r) => r.status === "Submitted");
+    content = (
+      <>
+        <div className="mini-stats account-stats">
+          <span><strong>{accounts.filter((a) => a.status === "Available").length}</strong>{t("Available accounts")}</span>
+          <span><strong>{money(accounts.filter((a) => a.status === "Available").reduce((n, a) => n + Number(a.credits || 0), 0))}</strong>{t("Credit available")}</span>
+          <span><strong>{accounts.filter((a) => a.status === "Assigned").length}</strong>{t("Assigned to students")}</span>
+          <span className={accounts.some((a) => attention.includes(a.status)) ? "is-warning" : ""}><strong>{accounts.filter((a) => attention.includes(a.status)).length}</strong>{t("Need attention")}</span>
+          <span><strong>{openRequests.length}</strong>{t("Requests waiting")}</span>
+        </div>
+        <div className="account-capacity">
+          {controlledPlatforms.map((platform) => {
+            const mine = accounts.filter((a) => a.platform === platform);
+            const ready = mine.filter((a) => a.status === "Available");
+            const credit = ready.reduce((n, a) => n + Number(a.credits || 0), 0);
+            const waiting = openRequests.filter((r) => r.platform === platform);
+            const needed = waiting.reduce((n, r) => n + Number(r.value || 0), 0);
+            return (
+              <button
+                key={platform}
+                className={"capacity-card" + (accountFilters.platform === platform ? " is-selected" : "") + (needed > credit ? " is-short" : "")}
+                onClick={() => setAccountFilters({ ...accountFilters, platform: accountFilters.platform === platform ? "All" : platform })}
+              >
+                <strong>{platform}</strong>
+                <span>{t("{v0} of {v1} accounts ready", { v0: ready.length, v1: mine.length })}</span>
+                <span>{t("{v0} credit · {v1} needed by {v2} requests", { v0: money(credit), v1: money(needed), v2: waiting.length })}</span>
+              </button>
+            );
+          })}
+        </div>
+        <Tabs defaultValue={openRequests.length ? "requests" : "pool"}>
+          <TabsList>
+            <TabsTrigger value="pool">
+              {t("Account pool")}{" "}<span className="count">{accounts.length}</span>
+            </TabsTrigger>
+            <TabsTrigger value="requests">
+              {t("Requests")}{" "}<span className="count">{openRequests.length}</span>
+            </TabsTrigger>
+            {(keepsAccounts || can(user.roles, ["Project Operations"])) && (
+              <TabsTrigger value="credit">
+                {t("Credit tracker")}{" "}<span className="count">{(d.creditLedger || []).length}</span>
+              </TabsTrigger>
+            )}
+          </TabsList>
+          <TabsContent value="credit">
+            <div className="mini-stats">
+              <span><strong>{money(toppedUp.reduce((n: number, e: Row) => n + Number(e.delta), 0))}</strong>{t("Topped up this month")}</span>
+              <span><strong>{money(-spent.reduce((n: number, e: Row) => n + Number(e.delta), 0))}</strong>{t("Spent on services this month")}</span>
+              <span><strong>{money(accounts.reduce((n, a) => n + Number(a.credits || 0), 0))}</strong>{t("Credit left in all accounts")}</span>
+            </div>
+            <div className="filter-row">
+              <Pick label={t("Marketplace")} value={accountFilters.platform} onChange={(platform) => setAccountFilters({ ...accountFilters, platform })} options={["All", ...controlledPlatforms]} />
+              <Pick
+                label={t("Showing")}
+                value={accountFilters.ledger}
+                onChange={(ledger) => setAccountFilters({ ...accountFilters, ledger })}
+                options={[
+                  { value: "All", label: t("Every change") },
+                  { value: "Top-up", label: t("Top-ups") },
+                  { value: "Service charged", label: t("Services charged") },
+                  { value: "Refund", label: t("Refunds") },
+                  { value: "Opening balance", label: t("Opening balances") },
+                ]}
+              />
+            </div>
+            {panel(
+              t("Credit history"),
+              ledger.length ? (
+                generic(
+                  ledger,
+                  [
+                    {
+                      key: "created_at",
+                      label: t("Date"),
+                      render: (e) => <span>{fmt(e.created_at)}<small className="table-subline">{new Date(e.created_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" })}</small></span>,
+                    },
+                    {
+                      key: "account_id",
+                      label: t("Account"),
+                      render: (e) => {
+                        const acc = accounts.find((a) => a.id === e.account_id);
+                        return <span><strong>{acc?.label || e.account_id}</strong><small className="table-subline">{acc?.platform}</small></span>;
+                      },
+                    },
+                    { key: "kind", label: t("Change"), render: (e) => <Badge value={t(creditKind(e))} /> },
+                    {
+                      key: "delta",
+                      label: t("Amount"),
+                      render: (e) => <strong className={Number(e.delta) >= 0 ? "credit-in" : "credit-out"}>{Number(e.delta) >= 0 ? "+" : "−"}{money(Math.abs(Number(e.delta)))}</strong>,
+                    },
+                    { key: "balance_after", label: t("Balance after"), render: (e) => money(e.balance_after) },
+                    { key: "actor", label: t("Recorded by"), render: (e) => owner(e.actor) },
+                    {
+                      key: "reason",
+                      label: t("Details"),
+                      render: (e) => {
+                        const gig = e.gig_id ? (d.gigs || []).find((g: Row) => g.id === e.gig_id) : null;
+                        const detail = String(e.reason || "").replace(/^(Top-up|Service charged) · /, "");
+                        return <span>{detail}{gig ? <small className="table-subline">{name(gig.student_id)}</small> : null}</span>;
+                      },
+                    },
+                  ],
+                )
+              ) : (
+                <Empty title={(d.creditLedger || []).length ? t("No credit change matches these filters") : t("No credit recorded yet. Add the client accounts with their opening credit, then record top-ups here.")} />
+              ),
+              keepsAccounts && accounts.length ? (
+                <div className="detail-actions">
+                  <button className="primary small" onClick={() => open("account_topup", { id: "" })}>
+                    <Plus size={15} /> {t("Record a top-up")}
+                  </button>
+                </div>
+              ) : null,
+            )}
+          </TabsContent>
+          <TabsContent value="pool">
+            <div className="filter-row">
+              <Pick label={t("Marketplace")} value={accountFilters.platform} onChange={(platform) => setAccountFilters({ ...accountFilters, platform })} options={["All", ...controlledPlatforms]} />
+              <Pick
+                label={t("State")}
+                value={accountFilters.status}
+                onChange={(status) => setAccountFilters({ ...accountFilters, status })}
+                options={[
+                  { value: "All", label: t("Every state") },
+                  { value: "Available", label: t("Available") },
+                  { value: "Assigned", label: t("Assigned") },
+                  { value: "Attention", label: t("Need attention") },
+                  { value: "Cooldown", label: t("Cooldown") },
+                  { value: "Retired", label: t("Retired") },
+                ]}
+              />
+            </div>
+            {panel(
+              t("Controlled client accounts"),
+              pool.length ? (
+                generic(
+                  pool,
+                  [
+                    {
+                      key: "label",
+                      label: t("Account"),
+                      render: (r) => (
+                        <span><strong>{r.label}</strong><small className="table-subline">{r.id}</small></span>
+                      ),
+                    },
+                    { key: "platform", label: t("Marketplace") },
+                    { key: "status", label: t("State"), render: (r) => <Badge value={r.status} /> },
+                    {
+                      key: "credits",
+                      label: t("Available credit"),
+                      render: (r) => <strong className={Number(r.credits) <= 0 ? "credit-empty" : ""}>{money(r.credits)}</strong>,
+                    },
+                    {
+                      key: "active_assignment",
+                      label: t("With"),
+                      render: (r) => {
+                        const request = r.active_assignment ? requests.find((q) => q.status === "Assigned" && (d.reservations || []).some((z: Row) => z.account_id === r.id && z.request_id === q.id)) : null;
+                        return request ? <span>{name(request.student_id)}<small className="table-subline">{request.task}</small></span> : "—";
+                      },
+                    },
+                  ],
+                  (r) =>
+                    r.status === "Retired" ? null : (
+                      <div className="detail-actions">
+                        {keepsAccounts && (
+                          <button className="small-btn" onClick={() => open("account_topup", { id: r.id })}>{t("Top up")}</button>
+                        )}
+                        {managesAccounts && (
+                          <button className="small-btn" onClick={() => open("account_status", r)}>{t("Manage")}</button>
+                        )}
+                      </div>
+                    ),
+                )
+              ) : (
+                <Empty title={accounts.length ? t("No account matches these filters") : t("No client accounts yet. Higher Board adds each account with its opening credit; top-ups are then recorded on the Credit tracker.")} />
+              ),
+              <div className="detail-actions">
+                {can(user.roles, ["Higher Board"]) && (
+                  <button className="primary small" onClick={() => open("account")}>
+                    <Plus size={15} /> {t("Add account")}
+                  </button>
+                )}
+                {can(user.roles, ["Project Operations", "Operations Systems / Admin"]) && (
+                  <button className="small-btn" onClick={() => open("task_bank")}>{t("Add approved task")}</button>
+                )}
+              </div>,
+            )}
+          </TabsContent>
+          <TabsContent value="requests">
+            <div className="filter-row">
+              <Pick label={t("Marketplace")} value={accountFilters.platform} onChange={(platform) => setAccountFilters({ ...accountFilters, platform })} options={["All", ...controlledPlatforms]} />
+              <Pick
+                label={t("Showing")}
+                value={accountFilters.request}
+                onChange={(request) => setAccountFilters({ ...accountFilters, request })}
+                options={[
+                  { value: "Open", label: t("Waiting for an account") },
+                  { value: "Reserved", label: t("Reserved") },
+                  { value: "Assigned", label: t("Assigned") },
+                  { value: "All", label: t("Every request") },
+                ]}
+              />
+            </div>
+            {panel(
+              t("Account requests"),
+              requestRows.length ? (
+                generic(
+                  requestRows,
+                  [
+                    studentCol,
+                    {
+                      key: "task",
+                      label: t("Service"),
+                      render: (r) => <span><strong>{r.task}</strong><small className="table-subline">{r.created_at ? new Date(r.created_at).toLocaleDateString() : ""}</small></span>,
+                    },
+                    { key: "platform", label: t("Marketplace") },
+                    { key: "value", label: t("Credit needed"), render: (r) => money(r.value) },
+                    {
+                      key: "status",
+                      label: t("Progress"),
+                      render: (r) => {
+                        const stage = requestStage(r);
+                        const steps = ["Submitted", "Reserved", "Assigned"];
+                        const at = steps.indexOf(stage);
+                        const hold = activeReservation(r.id);
+                        return (
+                          <span className="request-flow">
+                            {at < 0 ? (
+                              <Badge value={stage} />
+                            ) : (
+                              steps.map((step, i) => (
+                                <i key={step} className={i < at ? "is-past" : i === at ? "is-now" : ""}>{t(step)}</i>
+                              ))
+                            )}
+                            {hold && stage === "Reserved" && (
+                              <small className="table-subline">
+                                {t("Held until {v0}", { v0: new Date(hold.expires_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" }) })}
+                              </small>
+                            )}
+                          </span>
+                        );
+                      },
+                    },
+                  ],
+                  (r) => {
+                    if (r.status !== "Submitted" || !can(user.roles, ["Higher Board"])) return null;
+                    const reservation = activeReservation(r.id);
+                    return reservation ? (
+                      <button
+                        className="primary small"
+                        onClick={() => open("allocate", { request: r.id, student_id: r.student_id, reservation_id: reservation.id, account: reservation.account_id })}
+                      >
+                        {t("Approve allocation")}
+                      </button>
+                    ) : (
+                      <button className="small-btn" onClick={() => open("reserve_account", { request: r.id, student_id: r.student_id })}>
+                        {t("Reserve account")}
+                      </button>
+                    );
+                  },
+                )
+              ) : (
+                <Empty title={requests.length ? t("No request matches these filters") : t("No account requests yet")} />
+              ),
+            )}
+          </TabsContent>
+        </Tabs>
+      </>
+    );
   } else if (module === "gigs") {
     // One row per gig: the paid job and the review of its proof together.
     const latestEvidence = new Map<string, Row>();
@@ -2536,28 +2626,23 @@ export default function Operations({ module: initialModule }: { module: string }
                   {t("Apply FX")}
                 </button>
               )}
-
+            {["Cancelled", "Failed"].includes(r.status) &&
+              r.account_id &&
+              can(user.roles, ["Higher Board"]) &&
+              !(d.creditLedger || []).some(
+                (x: Row) => x.gig_id === r.id && Number(x.delta) > 0,
+              ) && (
+                <button
+                  className="small-btn"
+                  onClick={() => open("refund_credit", r)}
+                >
+                  {t("Refund credit")}
+                </button>
+              )}
           </div>
         ),
       ),
     );
-    {
-      const servicesView = content;
-      const seesAccounts =
-        keepsAccounts ||
-        can(user.roles, ["Project Operations", "Higher Board"]) ||
-        (can(user.roles, ["Operations Coordinator"]) && groups.some((g) => g.coordinator === user.id && g.supervisor_team === "Service Team"));
-      content = (
-        <Tabs defaultValue="services">
-          <TabsList>
-            <TabsTrigger value="services">{t("Services")}</TabsTrigger>
-            {seesAccounts && <TabsTrigger value="accounts">{t("Client accounts")}</TabsTrigger>}
-          </TabsList>
-          <TabsContent value="services">{servicesView}</TabsContent>
-          {seesAccounts && <TabsContent value="accounts">{accountsView()}</TabsContent>}
-        </Tabs>
-      );
-    }
   } else if (module === "quality") {
     const rows = evidence
       .filter(qMatch)
@@ -2891,24 +2976,106 @@ export default function Operations({ module: initialModule }: { module: string }
       ),
     );
   } else if (module === "weekly") {
-    const seesReports = can(user.roles, ["Team Supervisor", "Project Operations", "Coach Operations", "Operations Systems / Admin", "Higher Board"]);
-    const weeklyView = (
+    content = (
       <WeeklyProgress
         data={d}
-        onStudent={(id) => setSelected(students.find((x) => x.id === id) || null)}
+        onStudent={(id) => setSelected(students.find((s) => s.id === id) || null)}
       />
     );
-    content = seesReports ? (
-      <Tabs defaultValue="weekly">
-        <TabsList>
-          <TabsTrigger value="weekly">{t("This week")}</TabsTrigger>
-          <TabsTrigger value="reports">{t("Reports")}</TabsTrigger>
-        </TabsList>
-        <TabsContent value="weekly">{weeklyView}</TabsContent>
-        <TabsContent value="reports">{reportsView()}</TabsContent>
-      </Tabs>
-    ) : (
-      weeklyView
+  } else if (module === "reports") {
+    content = (
+      <>
+        <ReportsPanel canExport={canTransfer} showStaff={!coachesOnly} />
+        <div className="stats">
+          {[
+            { label: t("Contact compliance"), n: compliance + "%" },
+            {
+              label: t("Graduation rate"),
+              n:
+                (students.length
+                  ? Math.round((graduates.length / students.length) * 100)
+                  : 0) + "%",
+            },
+            { label: t("Open actions"), n: openTasks.length },
+            { label: t("Quality backlog"), n: reviews.length },
+          ].map((s) => (
+            <div className="stat" key={s.label}>
+              <span>{t(s.label)}</span>
+              <strong>{s.n}</strong>
+              <small>{t("Current assigned student scope")}</small>
+            </div>
+          ))}
+        </div>
+        {!coachesOnly && panel(
+          t("Coordinator performance"),
+          generic(
+            staff
+              .filter((u: Row) => u.roles.includes("Operations Coordinator"))
+              .map((u: Row) => {
+                const s = students.filter((s) => s.coordinator === u.id);
+                return {
+                  id: u.id,
+                  name: u.name,
+                  title: u.title || "",
+                  students: s.length,
+                  contact: s.length
+                    ? Math.round(
+                        (s.filter((s) => s.last_contact && !s.contact_due)
+                          .length /
+                          s.length) *
+                          100,
+                      ) + "%"
+                    : "—",
+                  overdue: overdue.filter((t) => t.owner === u.id).length,
+                  critical: s.filter((s) => s.risk.status === "Critical")
+                    .length,
+                  graduates: s.filter((s) => s.graduation.includes("Graduate"))
+                    .length,
+                };
+              }),
+            [
+              { key: "name", label: t("Coordinator"), render: (r: Row) => <span className="table-name">{r.name}{r.title && <small>{t(r.title)}</small>}</span> },
+              { key: "students", label: t("Students") },
+              { key: "contact", label: t("Contact compliance") },
+              { key: "overdue", label: t("Overdue") },
+              { key: "critical", label: t("Critical") },
+              { key: "graduates", label: t("Graduated") },
+            ],
+          ),
+        )}
+        <div className="report-grid">
+          {panel(
+            t("Graduation policy"),
+            <div className="prose">
+              <div className="rule-number">{t("3 services × $5 minimum")}</div>
+              <p>
+                {t("Total qualifying value of at least $15, or one qualifying service of $300 or more.")}
+              </p>
+              <p>
+                {t("Evidence must be Quality Accepted, and the service must be paid. Non-USD services count only after a separately approved rate is applied and stored with the service.")}
+              </p>
+              <Badge value="Round 5 · v1" />
+            </div>,
+          )}
+          {panel(
+            t("Metric definitions"),
+            <div className="prose">
+              <h3>{t("Contact compliance")}</h3>
+              <p>
+                {t("Active students with a complete, screenshot-backed contact within 7 days ÷ active students requiring contact.")}
+              </p>
+              <h3>{t("Graduation rate")}</h3>
+              <p>
+                {t("Students meeting the applicable graduation policy ÷ active students in the selected scope.")}
+              </p>
+              <h3>{t("Forecast")}</h3>
+              <p>
+                {t("No forecast published until approved weekly milestone and forecasting policies are configured.")}
+              </p>
+            </div>,
+          )}
+        </div>
+      </>
     );
   } else if (module === "administration") {
     content = (
@@ -2917,8 +3084,6 @@ export default function Operations({ module: initialModule }: { module: string }
           <TabsTrigger value="staff">{t("Staff & access")}</TabsTrigger>
           <TabsTrigger value="policy">{t("Policy versions")}</TabsTrigger>
           <TabsTrigger value="fx">{t("FX rates")}</TabsTrigger>
-          <TabsTrigger value="credit">{t("Credit ledger")}</TabsTrigger>
-          <TabsTrigger value="refunds">{t("Refunds")}</TabsTrigger>
           <TabsTrigger value="retention">{t("Retention")}</TabsTrigger>
           <TabsTrigger value="audit">{t("Audit history")}</TabsTrigger>
           <TabsTrigger value="imports">{t("Data transfer")}</TabsTrigger>
@@ -2977,32 +3142,6 @@ export default function Operations({ module: initialModule }: { module: string }
           <p className="footnote">
             {t("A person signs in with the email listed here and their national ID as the first password. Whole teams are added from a sheet: the import workspace has a staff template with name, email and roles. Groups are then handed over by naming the person — their email or their name is enough, and the coordinator of a group reviews that group’s students.")}
           </p>
-        </TabsContent>
-        <TabsContent value="credit">{accountsView("credit")}</TabsContent>
-        <TabsContent value="refunds">
-          {panel(
-            t("Services eligible for a credit refund"),
-            (() => {
-              const refundable = gigs.filter(
-                (r) => ["Cancelled", "Failed"].includes(r.status) && r.account_id && !(d.creditLedger || []).some((x: Row) => x.gig_id === r.id && Number(x.delta) > 0),
-              );
-              return refundable.length ? (
-                generic(
-                  refundable,
-                  [
-                    studentCol,
-                    { key: "title", label: t("Service") },
-                    { key: "platform", label: t("Marketplace") },
-                    { key: "value", label: t("Value") },
-                    statusCol,
-                  ],
-                  (r) => <button className="small-btn" onClick={() => open("refund_credit", r)}>{t("Refund credit")}</button>,
-                )
-              ) : (
-                <Empty title={t("No cancelled or failed service is waiting for a refund.")} />
-              );
-            })(),
-          )}
         </TabsContent>
         <TabsContent value="policy">
           {panel(
