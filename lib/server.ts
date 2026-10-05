@@ -413,6 +413,7 @@ export async function loadData(u: any) {
     staff,
     sessionChecks,
     sessionFeedback,
+    joinLogins,
   ] = await Promise.all([
     all(
       `SELECT g.*,c.name coordinator_name,s.name supervisor_name,s.title supervisor_title,s.team supervisor_team,h.name coach_name,m.name account_manager_name FROM groups g JOIN users c ON c.id=g.coordinator JOIN users s ON s.id=g.supervisor JOIN users h ON h.id=g.coach LEFT JOIN users m ON m.id=g.account_manager WHERE ${qg.sql}`,
@@ -575,6 +576,10 @@ export async function loadData(u: any) {
       `SELECT f.* FROM session_feedback f JOIN sessions t ON t.id=f.session_id JOIN groups g ON g.id=t.group_id WHERE ${qg.sql}`,
       ...qg.args,
     ),
+    // Which session logins are stored: names and dates only, never the login itself.
+    isDemo(u)
+      ? none
+      : all("SELECT id,kind,provider,group_id,updated_by,updated_at FROM join_accounts"),
   ]);
   loadTimings.db = Date.now() - loadStarted;
   const initialized: any = initializedRows[0];
@@ -759,6 +764,7 @@ export async function loadData(u: any) {
     sessions,
     sessionChecks,
     sessionFeedback,
+    joinLogins,
     groupCoaches,
     taskBank,
     savedViews,

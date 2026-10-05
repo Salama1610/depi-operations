@@ -3039,6 +3039,11 @@ test("demo accounts work on the demo groups only, and nobody else sees them", as
     const owner = await (await api.GET()).json();
     assert.ok(!owner.groups.some((g) => g.id.startsWith("DEMO-")), "real users never see demo groups");
     assert.ok(!owner.staff.some((p) => p.id.startsWith("DEMO-")), "nor the demo team");
+    // The workspace says which session logins exist, never the login itself.
+    await dbExec("INSERT INTO join_accounts(id,kind,provider,group_id,username,secret,iv,updated_by,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING", "coordinator:TEST", "coordinator", "TEST", null, "sealed-user", "sealed-secret", "iv", "owner", new Date().toISOString());
+    const withLogins = await (await api.GET()).json();
+    const login = withLogins.joinLogins.find((x) => x.id === "coordinator:TEST");
+    assert.ok(login && !("secret" in login) && !("username" in login) && !("iv" in login));
   } finally {
     current = { id: "owner", email: "owner@example.com" };
   }

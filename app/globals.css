@@ -999,3 +999,10 @@ input:focus-visible {
 .access-btn.is-missing{color:#8a96a9;background:#f5f7fa;border-color:#e2e7ef;cursor:default}
 .access-btn:disabled{opacity:.6}
 
+/* Session login window: copy buttons, a countdown and the way in. */
+.join-steps{margin:0 0 6px;padding-inline-start:18px;font-size:13px;color:#5c6c87;display:grid;gap:2px}
+.join-secret{display:flex;align-items:center;gap:8px}
+.join-secret code{flex:1;min-width:0}
+.join-footer{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;flex-wrap:wrap}
+.access-btn.is-missing-login{color:#9a6f22;background:#fff5dd;border-color:#f0dcae;cursor:help}
+

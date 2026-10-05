@@ -41,6 +41,9 @@ import {
   WalletCards,
   GraduationCap,
   Clock3,
+  Copy,
+  Eye,
+  EyeOff,
   CheckCircle2,
   XCircle,
   AlertTriangle,
@@ -400,12 +403,21 @@ export default function Operations({ module: initialModule }: { module: string }
       month: new Date().toISOString().slice(0, 7), payee: "Coaches",
     }),
     [sessionFilters, setSessionFilters] = useState<Row>({ day: "All", time: "All" }),
-    [joinLogin, setJoinLogin] = useState<Row | null>(null);
+    [joinLogin, setJoinLogin] = useState<Row | null>(null),
+    [joinLeft, setJoinLeft] = useState(0),
+    [joinShowPassword, setJoinShowPassword] = useState(false),
+    [joinEdit, setJoinEdit] = useState<Row | null>(null);
   // A join login is shown for a minute, then forgotten.
   useEffect(() => {
     if (!joinLogin) return;
+    setJoinLeft(60);
+    setJoinShowPassword(false);
+    const tick = setInterval(() => setJoinLeft((n) => Math.max(0, n - 1)), 1000);
     const timer = setTimeout(() => setJoinLogin(null), 60000);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      clearInterval(tick);
+    };
   }, [joinLogin]);
   async function showJoinLogin(r: Row, kind: "coach" | "coordinator") {
     setBusy(true);
@@ -417,7 +429,7 @@ export default function Operations({ module: initialModule }: { module: string }
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || t("Request failed"));
-      setJoinLogin({ ...body, kind, group_id: r.group_id });
+      setJoinLogin({ ...body, kind, group_id: r.group_id, provider: groups.find((g) => g.id === r.group_id)?.provider, link: groups.find((g) => g.id === r.group_id)?.session_link, title: r.title, starts_at: r.starts_at });
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -1077,6 +1089,18 @@ export default function Operations({ module: initialModule }: { module: string }
           (d.groupCoaches || []).some(
             (c: Row) => c.group_id === r.group_id && c.user_id === user.id && c.status === "Active",
           ))));
+  // Which logins are stored, so a button says "missing" instead of failing.
+  const storedLogin = (kind: "coach" | "coordinator", r: Row) => {
+    const g = sessionGroupOf(r);
+    const id = kind === "coach" ? `coach:${r.group_id}` : `coordinator:${g?.provider || ""}`;
+    return (d.joinLogins || []).some((x: Row) => x.id === id);
+  };
+  // The coach's side of a session on a provider where coaches use their own email.
+  const coachOfSession = (r: Row) =>
+    can(user.roles, ["Coach Operations", "Operations Systems / Admin"]) ||
+    (can(user.roles, ["Coach"]) &&
+      (sessionGroupOf(r)?.coach === user.id ||
+        (d.groupCoaches || []).some((c: Row) => c.group_id === r.group_id && c.user_id === user.id && c.status === "Active")));
   const seesCoordinatorLogin = (r: Row) => {
     const g = sessionGroupOf(r);
     return (
@@ -2016,16 +2040,29 @@ export default function Operations({ module: initialModule }: { module: string }
                   ) : (
                     <span className="access-btn is-missing">{t("No link yet")}</span>
                   )}
-                  {seesCoachLogin(r) && (
-                    <button type="button" className="access-btn is-coach" disabled={busy} onClick={() => showJoinLogin(r, "coach")}>
-                      <LockKeyhole size={14} /> {t("Coach login")}
-                    </button>
+                  {!demoAccount && seesCoachLogin(r) &&
+                    (storedLogin("coach", r) ? (
+                      <button type="button" className="access-btn is-coach" disabled={busy} onClick={() => showJoinLogin(r, "coach")}>
+                        <LockKeyhole size={14} /> {t("Coach login")}
+                      </button>
+                    ) : (
+                      <span className="access-btn is-missing-login" title={t("Ask an administrator to add it under Administration → Session logins.")}>
+                        <AlertTriangle size={14} /> {t("No coach login yet")}
+                      </span>
+                    ))}
+                  {!demoAccount && !seesCoachLogin(r) && coachOfSession(r) && (
+                    <span className="access-btn is-missing">{t("Coach joins with their own email")}</span>
                   )}
-                  {seesCoordinatorLogin(r) && (
-                    <button type="button" className="access-btn is-coordinator" disabled={busy} onClick={() => showJoinLogin(r, "coordinator")}>
-                      <LockKeyhole size={14} /> {t("Coordinator login")}
-                    </button>
-                  )}
+                  {!demoAccount && seesCoordinatorLogin(r) &&
+                    (storedLogin("coordinator", r) ? (
+                      <button type="button" className="access-btn is-coordinator" disabled={busy} onClick={() => showJoinLogin(r, "coordinator")}>
+                        <LockKeyhole size={14} /> {t("Coordinator login")}
+                      </button>
+                    ) : (
+                      <span className="access-btn is-missing-login" title={t("Ask an administrator to add it under Administration → Session logins.")}>
+                        <AlertTriangle size={14} /> {t("No coordinator login yet")}
+                      </span>
+                    ))}
                 </span>
               );
             },
@@ -3141,6 +3178,7 @@ export default function Operations({ module: initialModule }: { module: string }
       <Tabs defaultValue="staff">
         <TabsList>
           <TabsTrigger value="staff">{t("Staff & access")}</TabsTrigger>
+          <TabsTrigger value="logins">{t("Session logins")}</TabsTrigger>
           <TabsTrigger value="policy">{t("Policy versions")}</TabsTrigger>
           <TabsTrigger value="fx">{t("FX rates")}</TabsTrigger>
           <TabsTrigger value="retention">{t("Retention")}</TabsTrigger>
@@ -3301,6 +3339,59 @@ export default function Operations({ module: initialModule }: { module: string }
         </TabsContent>
         <TabsContent value="connections">
           <ControlCenter />
+        </TabsContent>
+        <TabsContent value="logins">
+          {(() => {
+            const stored = new Map((d.joinLogins || []).map((x: Row) => [x.id, x]));
+            const active = groups.filter((g) => g.status !== "Archived" && g.status !== "Closed");
+            const providers = [...new Set(active.map((g) => g.provider).filter(Boolean))].sort();
+            const yat = active.filter((g) => g.provider === "YAT").sort((a, b) => a.id.localeCompare(b.id));
+            const missingCoach = yat.filter((g) => !stored.has(`coach:${g.id}`)).length;
+            const state = (id: string) => {
+              const x: Row | undefined = stored.get(id) as Row | undefined;
+              return x ? (
+                <span><Cue tone="ok">{t("Stored")}</Cue><small className="table-subline">{fmt(x.updated_at)} · {owner(x.updated_by)}</small></span>
+              ) : (
+                <Cue tone="warn">{t("Missing")}</Cue>
+              );
+            };
+            return (
+              <>
+                <p className="footnote">{t("Coordinators share one login per training provider. On YAT each group also has its own coach login; on other providers coaches join with their own email. Logins are stored encrypted and shown for one minute to the people of that group.")}</p>
+                {panel(
+                  t("Coordinator logins (one per provider)"),
+                  generic(
+                    providers.map((provider) => ({ id: `coordinator:${provider}`, provider })),
+                    [
+                      { key: "provider", label: t("Provider") },
+                      { key: "state", label: t("Login"), render: (r) => state(r.id) },
+                    ],
+                    (r) => (
+                      <button className="small-btn" onClick={() => setJoinEdit({ kind: "coordinator", provider: r.provider, username: "", password: "" })}>
+                        {stored.has(r.id) ? t("Replace") : t("Add login")}
+                      </button>
+                    ),
+                  ),
+                )}
+                {panel(
+                  t("Coach logins on YAT ({v0} missing)", { v0: missingCoach }),
+                  generic(
+                    [...yat.filter((g) => !stored.has(`coach:${g.id}`)), ...yat.filter((g) => stored.has(`coach:${g.id}`))].map((g) => ({ id: `coach:${g.id}`, group_id: g.id, coach: g.coach })),
+                    [
+                      { key: "group_id", label: t("Group") },
+                      { key: "coach", label: t("Coach"), render: (r) => owner(r.coach) },
+                      { key: "state", label: t("Login"), render: (r) => state(r.id) },
+                    ],
+                    (r) => (
+                      <button className="small-btn" onClick={() => setJoinEdit({ kind: "coach", provider: "YAT", group_id: r.group_id, username: "", password: "" })}>
+                        {stored.has(r.id) ? t("Replace") : t("Add login")}
+                      </button>
+                    ),
+                  ),
+                )}
+              </>
+            );
+          })()}
         </TabsContent>
         <TabsContent value="imports">
           <div className="panel prose">
@@ -4092,6 +4183,53 @@ export default function Operations({ module: initialModule }: { module: string }
           )}
         </SheetContent>
       </Sheet>
+      <Dialog open={!!joinEdit} onOpenChange={(v) => !v && setJoinEdit(null)}>
+        <DialogContent className="action-dialog sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>{joinEdit?.kind === "coach" ? t("Coach login") : t("Coordinator login")}</DialogTitle>
+            <DialogDescription>
+              {joinEdit?.kind === "coach" ? joinEdit?.group_id : joinEdit?.provider} · {t("Stored encrypted. Replacing it takes effect at once.")}
+            </DialogDescription>
+          </DialogHeader>
+          {joinEdit && (
+            <form
+              className="action-form"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setBusy(true);
+                try {
+                  const res = await fetch("/api/join-accounts", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ action: "set", kind: joinEdit.kind, provider: joinEdit.provider, group_id: joinEdit.group_id, username: joinEdit.username, password: joinEdit.password }),
+                  });
+                  const body = await res.json();
+                  if (!res.ok) throw new Error(body.error || t("Request failed"));
+                  toast.success(t("Login saved"));
+                  setJoinEdit(null);
+                  await refresh();
+                } catch (error: any) {
+                  toast.error(error.message);
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              <label className="field">
+                {t("Email or username")} *
+                <input required autoComplete="off" value={joinEdit.username} onChange={(e) => setJoinEdit({ ...joinEdit, username: e.target.value })} />
+              </label>
+              <label className="field">
+                {t("Password")} *
+                <input required type="password" autoComplete="new-password" value={joinEdit.password} onChange={(e) => setJoinEdit({ ...joinEdit, password: e.target.value })} />
+              </label>
+              <div className="form-footer">
+                <button type="submit" className="primary" disabled={busy}>{t("Save login")}</button>
+              </div>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
       <Dialog open={!!joinLogin} onOpenChange={(v) => !v && setJoinLogin(null)}>
         <DialogContent className="action-dialog sm:max-w-[440px]">
           <DialogHeader>
@@ -4102,10 +4240,37 @@ export default function Operations({ module: initialModule }: { module: string }
           </DialogHeader>
           {joinLogin && (
             <div className="join-login">
+              <ol className="join-steps">
+                <li>{t("Copy the email and the password below.")}</li>
+                <li>{t("Open the session and sign in to {v0} with them.", { v0: joinLogin.provider || t("the platform") })}</li>
+              </ol>
               <label>{t("Email or username")}</label>
-              <code>{joinLogin.username}</code>
+              <div className="join-secret">
+                <code>{joinLogin.username}</code>
+                <button type="button" className="small-btn" onClick={() => { navigator.clipboard?.writeText(joinLogin.username); toast.success(t("Copied")); }}>
+                  <Copy size={14} /> {t("Copy")}
+                </button>
+              </div>
               <label>{t("Password")}</label>
-              <code>{joinLogin.password}</code>
+              <div className="join-secret">
+                <code>{joinShowPassword ? joinLogin.password : "•".repeat(Math.min(12, String(joinLogin.password || "").length || 8))}</code>
+                <button type="button" className="icon-btn" aria-label={joinShowPassword ? t("Hide password") : t("Show password")} onClick={() => setJoinShowPassword(!joinShowPassword)}>
+                  {joinShowPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+                <button type="button" className="small-btn" onClick={() => { navigator.clipboard?.writeText(joinLogin.password); toast.success(t("Copied")); }}>
+                  <Copy size={14} /> {t("Copy")}
+                </button>
+              </div>
+              <div className="join-footer">
+                <Cue tone={joinLeft > 15 ? "info" : "warn"}>{t("Hides in {v0}s", { v0: joinLeft })}</Cue>
+                {joinLogin.link ? (
+                  <a className="primary" href={joinLogin.link} target="_blank" rel="noreferrer">
+                    <ExternalLink size={16} /> {t("Open the session")}
+                  </a>
+                ) : (
+                  <span className="footnote">{t("This group has no meeting link yet.")}</span>
+                )}
+              </div>
             </div>
           )}
         </DialogContent>
