@@ -1698,4 +1698,7 @@ export const ar: Record<string, string> = {
   "Total payout": "إجمالي المستحقات",
   "Export review decisions (Excel)": "تصدير قرارات المراجعة (Excel)",
   "Provider Coach": "مدرب المزود",
+  "Search…": "بحث…",
+  "No matches": "لا توجد نتائج",
+  "Choose": "اختر",
 };

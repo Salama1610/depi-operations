@@ -1026,3 +1026,13 @@ input:not([type=checkbox]):not([type=radio]):not([type=file]):not([hidden]) { mi
 .text-link { min-height: 32px; }
 small, .text-xs, .table-subline, .footnote, .badge, .count, .due, .task-owner, label { font-size: max(13px, 1em); }
 .text-xs { font-size: 13px !important; line-height: 1.35 !important; }
+
+/* Searchable dropdown (components/searchable-select.tsx) */
+.searchable-select{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:44px;padding:0 12px;border:1px solid var(--line-strong);border-radius:8px;background:var(--surface);color:var(--ink);font-size:14px;text-align:start}
+.searchable-select .is-placeholder{color:var(--ink-3)}
+.searchable-select:focus-visible{outline:2px solid var(--navy);outline-offset:2px}
+.searchable-select-list{padding:0 !important;width:var(--radix-popover-trigger-width) !important;min-width:240px;max-width:min(92vw,420px)}
+.searchable-select-list [cmdk-input]{min-height:44px;font-size:14px}
+.searchable-select-list [cmdk-item]{min-height:44px;font-size:14px;gap:8px;color:var(--ink)}
+.searchable-select-list [cmdk-item][data-selected=true]{background:var(--navy-soft);color:var(--navy)}
+.searchable-select-list .is-hidden{visibility:hidden}
