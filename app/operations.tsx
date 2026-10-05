@@ -13,6 +13,7 @@ import { WeeklyProgress } from "./weekly-progress";
 import { acceptedServicePlatforms } from "@/lib/domain/service-links";
 import { PortalView } from "./portal-view";
 import { GraduationDots, TodayView } from "./today";
+import { coachPayout, coachRates } from "@/lib/domain/payouts";
 import { checklistState, sessionChecklist, type ChecklistItem } from "@/lib/domain/session-checklist";
 import { useState, useEffect } from "react";
 import {
@@ -107,7 +108,7 @@ import {
   controlledPlatforms,
   dataTransferRoles,
 } from "@/lib/domain/rules";
-import { readSheet, toCSV, toXLSX } from "@/lib/spreadsheet";
+import { readSheet, toCSV, toWorkbook, toXLSX } from "@/lib/spreadsheet";
 import { guessKeyColumn, guessMapping } from "@/lib/domain/sheet-mapping";
 type Row = Record<string, any>;
 const nav = [
@@ -1964,9 +1965,40 @@ export default function Operations({ module: initialModule }: { module: string }
       const st = checklistOf(x);
       return Boolean(st.attendance_taken?.done || st.instructor_entered?.done);
     };
+    // Coach payout: an Outcome coach is paid 300 a session and 250 for each of
+    // their graduates who did not use a purchased service; a Support coach 500
+    // a session. A session is paid at the coach's type in that group; a
+    // backup coach at their own title.
+    const coachTypeFor = (coachId: string, groupId: string) => {
+      const row = groupCoaches.find((c) => c.user_id === coachId && c.group_id === groupId && ["Outcome Coach", "Support Coach"].includes(c.coach_type));
+      if (row) return row.coach_type;
+      const title = staff.find((x: Row) => x.id === coachId)?.title || "";
+      return ["Outcome Coach", "Support Coach"].includes(title) ? title : title || "Coach";
+    };
+    const coachPay = (r: Row) => {
+      const types = r.sessions.map((x: Row) => coachTypeFor(r.person, x.group_id));
+      const type = types.includes("Outcome Coach") ? "Outcome Coach" : types.includes("Support Coach") ? "Support Coach" : types[0];
+
+      const outcomeGroups = new Set(groupCoaches.filter((c) => c.user_id === r.person && c.coach_type === "Outcome Coach" && c.status === "Active").map((c) => c.group_id));
+      const purchased = new Set(gigs.filter((g) => g.account_id).map((g) => g.student_id));
+      const graduates = students.filter((x) => outcomeGroups.has(x.group_id) && /Graduat/.test(x.graduation || "") && !purchased.has(x.id)).length;
+      const pay = coachPayout(types, graduates);
+      return { type, rate: (coachRates as Row)[type] || 0, graduates, ...pay };
+    };
+    // Coordinators and supervisors: the students of their groups and how many graduated.
+    const peoplePay = (r: Row) => {
+      const theirGroups = new Set(
+        groups.filter((g) => (insightFilters.payee === "Supervisors" ? g.supervisor : g.coordinator) === r.person).map((g) => g.id),
+      );
+      const theirs = students.filter((x) => theirGroups.has(x.group_id));
+      return { students: theirs.length, graduated: theirs.filter((x) => /Graduat/.test(x.graduation || "")).length };
+    };
+    // Supervisors are paid on the sessions of their groups.
+    const supervisorOf = (x: Row) => groups.find((g) => g.id === x.group_id)?.supervisor;
     const payRows = Object.values(
       paySessions.reduce((out: Row, x: Row) => {
-        const id = (insightFilters.payee === "Coordinators" ? x.coordinator_id : x.coach_id) || "none";
+        const id =
+          (insightFilters.payee === "Coordinators" ? x.coordinator_id : insightFilters.payee === "Supervisors" ? supervisorOf(x) : x.coach_id) || "none";
         const row = (out[id] ||= { person: id, sessions: [] as Row[] });
         row.sessions.push(x);
         return out;
@@ -1979,19 +2011,24 @@ export default function Operations({ module: initialModule }: { module: string }
         hours: r.sessions.reduce((n: number, x: Row) => n + Number(x.duration_minutes || 180) / 60, 0),
         groups: new Set(r.sessions.map((x: Row) => x.group_id)).size,
       }))
+      .map((r: Row) => (insightFilters.payee === "Coaches" ? { ...r, ...coachPay(r) } : { ...r, ...peoplePay(r) }))
       .sort((a: Row, b: Row) => b.held - a.held) as Row[];
     const months = Array.from(new Set(sessions.filter(ended).map((x) => x.starts_at.slice(0, 7)))).sort().reverse();
     const downloadPay = () => {
-      const lines = [["Person", "Role", "Sessions held", "Verified", "Hours", "Groups", "Session dates"].join(",")];
+      const coaches = insightFilters.payee === "Coaches";
+      const lines = [
+        ["Person", "Role", "Sessions held", "Verified", "Hours", "Groups", ...(coaches ? ["Coach type", "Rate (EGP)", "Sessions pay (EGP)", "Graduates without purchased services", "Graduate bonus (EGP)", "Payout (EGP)"] : ["Students", "Graduated"]), "Session dates"].join(","),
+      ];
       for (const r of payRows)
         lines.push(
           [
             owner(r.person),
-            insightFilters.payee === "Coordinators" ? "Coordinator" : "Coach",
+            insightFilters.payee === "Coordinators" ? "Coordinator" : insightFilters.payee === "Supervisors" ? "Supervisor" : "Coach",
             r.held,
             r.verified,
             r.hours,
             r.groups,
+            ...(coaches ? [r.type, r.rate, r.sessionsPay, r.graduates, r.bonus, r.total] : [r.students, r.graduated]),
             r.sessions.map((x: Row) => `${x.starts_at.slice(0, 10)} ${x.group_id} W${x.week}`).join("; "),
           ]
             .map((v) => `"${String(v).replace(/"/g, '""')}"`)
@@ -2004,6 +2041,7 @@ export default function Operations({ module: initialModule }: { module: string }
       a.click();
     };
     const paysPeople = can(user.roles, ["Coach Operations", "Project Operations", "Higher Board", "Operations Systems / Admin"]);
+    const egp = (v: number) => "EGP " + Math.round(v).toLocaleString("en-US");
 
     content = (
       <Tabs defaultValue="schedule">
@@ -2357,7 +2395,7 @@ export default function Operations({ module: initialModule }: { module: string }
           <TabsContent value="pay">
             <div className="filter-row">
               <Pick label={t("Month")} value={payMonth} onChange={(month) => setInsightFilters({ ...insightFilters, month })} options={[{ value: "All", label: t("All time") }, ...months.map((m) => ({ value: m, label: m }))]} />
-              <Pick label={t("Paying")} value={insightFilters.payee} onChange={(payee) => setInsightFilters({ ...insightFilters, payee })} options={[{ value: "Coaches", label: t("Coaches") }, { value: "Coordinators", label: t("Coordinators") }]} />
+              <Pick label={t("Paying")} value={insightFilters.payee} onChange={(payee) => setInsightFilters({ ...insightFilters, payee })} options={[{ value: "Coaches", label: t("Coaches") }, { value: "Coordinators", label: t("Coordinators") }, { value: "Supervisors", label: t("Supervisors") }]} />
               <button className="small-btn" disabled={!payRows.length} onClick={downloadPay}>{t("Download CSV")}</button>
             </div>
             <p className="footnote">
@@ -2366,19 +2404,32 @@ export default function Operations({ module: initialModule }: { module: string }
             <div className="mini-stats">
               <span><strong>{paySessions.length}</strong>{t("Sessions held")}</span>
               <span><strong>{paySessions.filter(verified).length}</strong>{t("Verified")}</span>
-              <span><strong>{payRows.length}</strong>{insightFilters.payee === "Coordinators" ? t("Coordinators") : t("Coaches")}</span>
+              <span><strong>{payRows.length}</strong>{insightFilters.payee === "Coordinators" ? t("Coordinators") : insightFilters.payee === "Supervisors" ? t("Supervisors") : t("Coaches")}</span>
+              {insightFilters.payee === "Coaches" && <span><strong>{egp(payRows.reduce((n, r) => n + (r.total || 0), 0))}</strong>{t("Total payout")}</span>}
             </div>
             {panel(
-              insightFilters.payee === "Coordinators" ? t("Sessions held per coordinator") : t("Sessions held per coach"),
+              insightFilters.payee === "Coordinators" ? t("Sessions held per coordinator") : insightFilters.payee === "Supervisors" ? t("Sessions held per supervisor") : t("Sessions held per coach"),
               payRows.length
                 ? generic(
                     payRows,
                     [
-                      { key: "person", label: insightFilters.payee === "Coordinators" ? t("Coordinator") : t("Coach"), render: (r) => <strong>{r.person === "none" ? t("Not assigned") : owner(r.person)}</strong> },
+                      { key: "person", label: insightFilters.payee === "Coordinators" ? t("Coordinator") : insightFilters.payee === "Supervisors" ? t("Supervisor") : t("Coach"), render: (r) => <strong>{r.person === "none" ? t("Not assigned") : owner(r.person)}</strong> },
                       { key: "held", label: t("Sessions held"), render: (r) => <strong>{r.held}</strong> },
                       { key: "verified", label: t("Verified"), render: (r) => (r.verified < r.held ? <span>{r.verified}<small className="table-subline credit-out">{t("{v0} not verified", { v0: r.held - r.verified })}</small></span> : r.verified) },
                       { key: "hours", label: t("Hours"), render: (r) => r.hours },
                       { key: "groups", label: t("Groups"), render: (r) => r.groups },
+                      ...(insightFilters.payee === "Coaches"
+                        ? [
+                            { key: "type", label: t("Coach type"), render: (r: Row) => (r.rate ? t(r.type) : <span className="credit-out">{t(r.type || "Coach")} · {t("No rate")}</span>) },
+                            { key: "sessionsPay", label: t("Sessions pay"), render: (r: Row) => <span className="money">{egp(r.sessionsPay)}<small className="table-subline">{r.held} × {r.rate}</small></span> },
+                            { key: "bonus", label: t("Graduate bonus"), render: (r: Row) => (r.type === "Outcome Coach" ? <span className="money">{egp(r.bonus)}<small className="table-subline">{t("{v0} graduates without purchased services", { v0: r.graduates })}</small></span> : "—") },
+                            { key: "total", label: t("Payout"), render: (r: Row) => <strong className="money">{egp(r.total)}</strong> },
+                          ]
+                        : [
+                            { key: "students", label: t("Students"), render: (r: Row) => r.students },
+                            { key: "graduated", label: t("Graduated"), render: (r: Row) => r.graduated },
+                            { key: "commission", label: t("Commission"), render: () => <small>{t("Commission rules are not set yet")}</small> },
+                          ]),
                       {
                         key: "dates",
                         label: t("Sessions"),
@@ -2711,6 +2762,50 @@ export default function Operations({ module: initialModule }: { module: string }
               <div className="detail-actions qc-lead-actions">
                 <button className="small-btn" disabled={busy} onClick={() => quick("service_qc_assign", {})}>
                   <Users size={15} /> {t("Distribute waiting students evenly")}
+                </button>
+                <button
+                  className="small-btn"
+                  onClick={() => {
+                    const linkOf = (id: string) => serviceLinks.find((l) => l.id === id) || {};
+                    const serviceRows = serviceLinkReviews.map((r: Row) => {
+                      const l: Row = linkOf(r.service_link_id);
+                      return {
+                        "Reviewed at": r.reviewed_at,
+                        Reviewer: r.reviewer_name || owner(r.reviewed_by),
+                        Student: l.student_name || name(l.student_id),
+                        "Student ID": l.student_id,
+                        Group: l.group_id,
+                        Platform: l.platform,
+                        Link: l.url,
+                        Revision: r.revision,
+                        Decision: r.decision === "Lock" || r.decision === "Locked" ? "Approved" : r.decision === "Needs Correction" ? "Rejected" : r.decision,
+                        Comment: r.comment,
+                      };
+                    });
+                    const evidenceRows = (d.reviews || []).map((r: Row) => {
+                      const e: Row = evidence.find((x) => x.id === r.evidence_id) || {};
+                      return {
+                        "Reviewed at": r.created_at,
+                        Reviewer: owner(r.actor),
+                        Student: name(e.student_id),
+                        "Student ID": e.student_id,
+                        Service: e.gig_id,
+                        Decision: r.decision,
+                        Code: r.code,
+                        Notes: r.notes,
+                      };
+                    });
+                    const file = toWorkbook([
+                      { name: "Service link decisions", rows: serviceRows.length ? serviceRows : [{ Note: "No decisions yet" }] },
+                      { name: "Service review decisions", rows: evidenceRows.length ? evidenceRows : [{ Note: "No decisions yet" }] },
+                    ]);
+                    const a = document.createElement("a");
+                    a.href = URL.createObjectURL(new Blob([file as BlobPart], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+                    a.download = `review-decisions-${new Date().toISOString().slice(0, 10)}.xlsx`;
+                    a.click();
+                  }}
+                >
+                  <Download size={15} /> {t("Export review decisions (Excel)")}
                 </button>
                 <button className="small-btn" disabled={busy} onClick={() => quick("evidence_qc_assign", {})}>
                   <Files size={15} /> {t("Distribute service evidence evenly")}
