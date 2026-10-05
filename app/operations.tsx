@@ -42,6 +42,7 @@ import {
   GraduationCap,
   Clock3,
   CheckCircle2,
+  XCircle,
   AlertTriangle,
   Upload,
   Download,
@@ -1185,14 +1186,23 @@ export default function Operations({ module: initialModule }: { module: string }
   const canDecline = (r: Row) =>
     ["Scheduled", "Confirmed"].includes(r.status) &&
     ((answersAsCoach(r) && !r.coach_unavailable) || (answersAsCoordinator(r) && !r.coordinator_unavailable));
-  const answer = (confirmedAt: any, away: any) =>
-    confirmedAt ? (
-      <span>✓ {t("Attending")}</span>
-    ) : away ? (
-      <span title={away}>✗ {t("Unavailable")}: {away}</span>
-    ) : (
-      <span>… {t("Waiting")}</span>
+  // One response pill per person, the same size for the coordinator and the
+  // coach: green with a tick when attending, red with a cross when not, amber
+  // with a clock while waiting.
+  const answer = (who: string, confirmedAt: any, away: any) => {
+    const [tone, Icon, word] = confirmedAt
+      ? ["is-ok", CheckCircle2, t("Attending")]
+      : away
+        ? ["is-away", XCircle, t("Unavailable")]
+        : ["is-wait", Clock3, t("Waiting")];
+    return (
+      <span className={"confirm-pill " + tone} title={away ? `${t("Unavailable")}: ${away}` : undefined}>
+        <Icon size={15} aria-hidden />
+        <b>{who}</b>
+        <span>{word}</span>
+      </span>
     );
+  };
   // A service link's review, in the words QC decides in: approved or rejected.
   const qcState = (status?: string) =>
     status === "Locked" ? "Approved" : status === "Needs Correction" ? "Rejected" : status === "Pending" ? "Waiting for review" : status || "";
@@ -1933,11 +1943,9 @@ export default function Operations({ module: initialModule }: { module: string }
               r.status === "Cancelled" ? (
                 "—"
               ) : (
-                <span>
-                  {t("Coordinator")}: {answer(r.coordinator_confirmed_at, r.coordinator_unavailable)}
-                  <small className="table-subline">
-                    {t("Coach")}: {answer(r.coach_confirmed_at, r.coach_unavailable)}
-                  </small>
+                <span className="confirm-pills">
+                  {answer(t("Coordinator"), r.coordinator_confirmed_at, r.coordinator_unavailable)}
+                  {answer(t("Coach"), r.coach_confirmed_at, r.coach_unavailable)}
                 </span>
               ),
           },
@@ -4106,6 +4114,12 @@ export default function Operations({ module: initialModule }: { module: string }
                       <span><strong>{done}/{steps.length}</strong> {t("steps done")}</span>
                       <span>{t("Coach")}: {owner(r.coach_id)}</span>
                     </div>
+                    {r.status !== "Cancelled" && (
+                      <div className="confirm-pills is-row">
+                        {answer(t("Coordinator"), r.coordinator_confirmed_at, r.coordinator_unavailable)}
+                        {answer(t("Coach"), r.coach_confirmed_at, r.coach_unavailable)}
+                      </div>
+                    )}
                     <div className="student-progress-bar checklist-progress"><span style={{ width: `${steps.length ? (100 * done) / steps.length : 0}%` }} /></div>
                     <ol className="checklist-stepper">
                       {steps.map((item, index) => {
