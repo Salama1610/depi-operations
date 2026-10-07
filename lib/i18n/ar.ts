@@ -1778,6 +1778,7 @@ export const ar: Record<string, string> = {
   "Khamsat": "خمسات",
   "Session {v0} of {v1}": "الجلسة {v0} من {v1}",
   "{v0} min": "{v0} دقيقة",
+  "A duplicate record or concurrent assignment was blocked. Refresh and review the existing record.": "تم منع تسجيل مكرر أو إسناد متزامن. حدّث الصفحة وراجع السجل الموجود.",
   "Search…": "بحث…",
   "No matches": "لا توجد نتائج",
   "Choose": "اختر",

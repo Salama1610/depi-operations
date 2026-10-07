@@ -3287,3 +3287,18 @@ test("staff report technical problems with a screenshot, and the system owner wo
     current = { id: "owner", email: "owner@example.com" };
   }
 });
+
+test("a demo reset lets the same demo link be reviewed again", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  await check("demo_refresh");
+  current = { id: "demo-auth-qc", email: "demo.qc@example.com" };
+  await check("service_qc_review", { service_id: "DEMO-S01-LNK-1", decision: "Lock", comment: "" });
+  current = { id: "owner", email: "owner@example.com" };
+  await check("demo_refresh");
+  const link = await dbRow("SELECT qc_status, revision FROM service_links WHERE id='DEMO-S01-LNK-1'");
+  assert.equal(link.qc_status, "Pending");
+  assert.ok(Number(link.revision) >= 2, "the reset link starts after its last reviewed revision");
+  current = { id: "demo-auth-qc", email: "demo.qc@example.com" };
+  await check("service_qc_review", { service_id: "DEMO-S01-LNK-1", decision: "Lock", comment: "" });
+  current = { id: "owner", email: "owner@example.com" };
+});

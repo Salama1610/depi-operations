@@ -167,10 +167,12 @@ export function demoPlan(nowMs: number): Statement[] {
     const url = platform === "Kafiil" ? `https://kafiil.com/service/${number}-demo-service` : `https://nafezly.com/services/${number}-demo-service`;
     const decided = status !== "Pending";
     plan.push([
-      "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,account_id,submitted_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET url=excluded.url,normalized_url=excluded.normalized_url,platform=excluded.platform,qc_status=excluded.qc_status,qc_comment=excluded.qc_comment,qc_actor=excluded.qc_actor,qc_at=excluded.qc_at,revision=excluded.revision,submitted_at=excluded.submitted_at,updated_at=excluded.updated_at",
+      "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,account_id,submitted_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,(SELECT COALESCE(max(r.revision),0)+1 FROM service_link_reviews r WHERE r.service_link_id=?),?,?,?) ON CONFLICT(id) DO UPDATE SET url=excluded.url,normalized_url=excluded.normalized_url,platform=excluded.platform,qc_status=excluded.qc_status,qc_comment=excluded.qc_comment,qc_actor=excluded.qc_actor,qc_at=excluded.qc_at,revision=excluded.revision,submitted_at=excluded.submitted_at,updated_at=excluded.updated_at",
       `${studentId}-LNK-${slot}`, studentId, slot, url, url, platform, "Needs Review",
       JSON.stringify({ status: "Needs Review", platform, message: "Format verified. QC still confirms availability, ownership, category and track fit.", checks: ["Secure HTTPS link", "Direct public URL", `${platform} is accepted`] }),
-      iso(now - 2 * day), status, comment, "DEMO-QC", decided ? iso(now - day) : null, 1, null, iso(now - 2 * day), iso(now - (decided ? day : 2 * day)),
+      // A link's review history is kept for good, so a reset starts the link
+      // on the revision after its last review, never on one already decided.
+      iso(now - 2 * day), status, comment, "DEMO-QC", decided ? iso(now - day) : null, `${studentId}-LNK-${slot}`, null, iso(now - 2 * day), iso(now - (decided ? day : 2 * day)),
     ]);
   }
   for (const [studentId, status] of [["DEMO-S01", "Needs Correction"], ["DEMO-S02", "Needs Correction"], ["DEMO-S03", "Complete"], ["DEMO-S04", "In Progress"]])

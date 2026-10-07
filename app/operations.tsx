@@ -5550,7 +5550,7 @@ export default function Operations({ module: initialModule }: { module: string }
             })()}
             {formError && (
               <div className="form-error" role="alert">
-                {formError}
+                {t(formError)}
               </div>
             )}
             <div className="form-footer">
