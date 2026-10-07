@@ -14,7 +14,7 @@ export function planPolicyActions(data:any,at=Date.now()):PolicyAction[]{
  const source=`policy-sla:${e.id}:${e.status}:${e.stage_at}`;if(tasks.some((t:any)=>t.source===source))continue;
  const role=e.status==='Coordinator L1'?'Team Supervisor':e.status==='Quality Review'?'Quality Lead':null;
  const lead=role?(data.staff||[]).filter((u:any)=>u.active&&JSON.parse(u.roles).includes(role)).sort((a:any,b:any)=>a.id.localeCompare(b.id))[0]:null;
- planned.push({kind:'task',student_id:s.id,owner:lead?.id||s.supervisor,title:`Escalate ${e.status} SLA breach: ${e.id}`,category:'SLA escalation',priority:'Urgent',due:due(24),source});
+ planned.push({kind:'task',student_id:s.id,owner:(e.status==='Coordinator L1'?s.supervisor:null)||lead?.id||s.supervisor,title:`Escalate ${e.status} SLA breach: ${e.id}`,category:'SLA escalation',priority:'Urgent',due:due(24),source});
  }
  return planned;
 }

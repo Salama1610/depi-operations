@@ -241,7 +241,7 @@ const weeklyGateChecks = [
   "Supervisor exception review complete",
 ];
 // Stored review states keep their names; people always read Approved or Rejected.
-const shownStatus: Record<string, string> = { Locked: "Approved", Lock: "Approved", "Needs Correction": "Rejected" };
+const shownStatus: Record<string, string> = { Locked: "Approved", Lock: "Approved", "Needs Correction": "Rejected", "Coordinator L1": "Coordinator check" };
 
 /**
  * A coloured status pill, all the same size: green when good, amber to watch,
@@ -1066,11 +1066,27 @@ export default function Operations({ module: initialModule }: { module: string }
     task: [...opsRoles, "Team Supervisor", "Coach", "Coach Operations"],
   };
   const may = (action: string) => can(user.roles, ["Operations Systems / Admin", ...(actionRoles[action] || [])]);
+  // A service's proof, at its current step: the coordinator check for the
+  // group's coordinator, supervisor or Project Operations (never whoever
+  // recorded it); the Quality decision for the assigned reviewer or the Quality
+  // Lead; the final review for Project Operations or the Quality Lead.
+  const mayReviewEvidence = (e: Row) => {
+    if (!e) return false;
+    if (can(user.roles, ["Operations Systems / Admin"])) return true;
+    if (e.recorder === user.id && e.status !== "Rejected") return false;
+    const g = groups.find((x) => x.id === students.find((s) => s.id === e.student_id)?.group_id);
+    if (e.status === "Coordinator L1") return g?.coordinator === user.id || g?.supervisor === user.id || can(user.roles, ["Project Operations"]);
+    if (e.status === "Quality Review") return can(user.roles, ["Quality Lead"]) || (can(user.roles, ["Quality Member"]) && e.qc_actor === user.id);
+    if (e.status === "L3 Review" || e.status === "Accepted") return can(user.roles, ["Project Operations", "Quality Lead"]);
+    if (e.status === "Rejected") return can(user.roles, opsRoles);
+    return false;
+  };
   const createRoles: Record<string, string[]> = {
     students: ["Project Operations", "Operations Coordinator", "Operations Systems / Admin"],
     sessions: ["Coach Operations", "Project Operations", "Operations Systems / Admin"],
     groups: ["Operations Systems / Admin"],
     work: ["Operations Systems / Admin", ...actionRoles.task],
+    accounts: ["Operations Systems / Admin", ...opsRoles],
   };
   // Services are recorded by the coordinators of the Service Team's groups,
   // and by Project Operations and administrators.
@@ -1559,7 +1575,7 @@ export default function Operations({ module: initialModule }: { module: string }
               key={q}
               onClick={() => setFilter(q)}
             >
-              {q}
+              {t(q)}
               <span>
                 {q === "All"
                   ? openTasks.length
@@ -2740,7 +2756,7 @@ export default function Operations({ module: initialModule }: { module: string }
         ],
         (r) => (
           <div className="detail-actions">
-            {r.evidence && (
+            {r.evidence && mayReviewEvidence(r.evidence) && (
               <button className="small-btn" onClick={() => open("review", r.evidence)}>
                 {t("Open review")}
               </button>
@@ -3086,7 +3102,7 @@ export default function Operations({ module: initialModule }: { module: string }
               },
             ],
             (r) =>
-              (!assignedOnly || r.qc_actor === user.id) && (
+              (!assignedOnly || r.qc_actor === user.id) && mayReviewEvidence(r) && (
                 <button className="small-btn" onClick={() => open("review", r)}>
                   {t("Open review")}
                 </button>
@@ -3539,7 +3555,7 @@ export default function Operations({ module: initialModule }: { module: string }
             <span className="avatar navy">{user.name?.slice(0, 1) || "A"}</span>
             <div>
               <strong>{user.name}</strong>
-              <small>{user.title ? t(user.title) : user.roles?.[0] || t("Workspace setup")}</small>
+              <small>{user.title ? String(user.title).split(" · ").map((part: string) => t(part)).join(" · ") : user.roles?.[0] || t("Workspace setup")}</small>
             </div>
             <a className="profile-signout" href="/api/auth/logout" title={t("Sign out")} aria-label={t("Sign out")}>
               <LogOut size={17} />
@@ -3989,7 +4005,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     "sessions",
                     // Services are not a coach's to see.
                     ...(onlyCoach ? [] : ["gigs", "services"]),
-                    ...(groups.find((g) => g.id === selectedStudent.group_id)?.supervisor_team === "Service Team" ? ["accounts"] : []),
+                    ...(!onlyCoach && groups.find((g) => g.id === selectedStudent.group_id)?.supervisor_team === "Service Team" ? ["accounts"] : []),
                     "cases",
                     "timeline",
                     "audit",
@@ -4177,7 +4193,7 @@ export default function Operations({ module: initialModule }: { module: string }
                         ],
                         (r) =>
                           r.review ? (
-                            (!assignedOnly || r.review.qc_actor === user.id) && (
+                            (!assignedOnly || r.review.qc_actor === user.id) && mayReviewEvidence(r.review) && (
                               <button className="small-btn" onClick={() => open("review", r.review)}>
                                 {t("Review")}
                               </button>

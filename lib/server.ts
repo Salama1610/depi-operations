@@ -395,7 +395,18 @@ export async function loadData(u: any) {
       ...q.args,
     );
   const none = Promise.resolve([] as any[]);
-  const qualityScope = can(u.roles, ["Quality Member", "Quality Lead", "Project Operations", "Operations Systems / Admin"]);
+  // Service links: the quality team, and everyone who follows the services of
+  // their own groups (coordinators, supervisors, Coach Operations, leaders).
+  const qualityScope = can(u.roles, [
+    "Quality Member",
+    "Quality Lead",
+    "Project Operations",
+    "Operations Systems / Admin",
+    "Operations Coordinator",
+    "Team Supervisor",
+    "Coach Operations",
+    "Higher Board",
+  ]);
   const coverageScope = can(u.roles, [
     "Quality Member",
     "Quality Lead",
