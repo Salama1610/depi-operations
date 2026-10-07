@@ -181,6 +181,25 @@ export function demoPlan(nowMs: number): Statement[] {
       `${studentId}-SUB`, studentId, status, iso(now - 2 * day), iso(now - day), status === "Complete" ? iso(now - day) : null,
     ]);
 
+  // Three made-up client accounts: one with the demo coordinator, two not yet
+  // assigned, so supervisors can practise assigning and keepers top-ups. The
+  // opening credit is written once; the credit history is never rewritten.
+  for (const [id, platform, credits, coordinator, status] of [
+    ["DEMO-ACC-1", "Kafeel", 25, "DEMO-COORD", "Available"],
+    ["DEMO-ACC-2", "Nafezly", 15, null, "Available"],
+    ["DEMO-ACC-3", "Kafeel", 0, null, "Access Issue"],
+  ] as [string, string, number, string | null, string][]) {
+    plan.push([
+      "INSERT INTO accounts(id,platform,label,status,credits,pending_credits,owner_name,coordinator_id,comments) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,coordinator_id=excluded.coordinator_id,owner_name=excluded.owner_name",
+      id, platform, `${id.toLowerCase()}@example.com`, status, credits, 0, "Demo Coordinator", coordinator, "حساب تجريبي",
+    ]);
+    if (credits > 0)
+      plan.push([
+        "INSERT INTO account_credit_ledger(id,account_id,delta,balance_after,reason,actor,created_at) SELECT ?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM account_credit_ledger WHERE account_id=?)",
+        `${id}-OPEN`, id, credits, credits, "Opening approved balance", "DEMO-HB", iso(now - 10 * day), id,
+      ]);
+  }
+
   // Follow-ups waiting for the coordinator.
   for (const [n, title, due] of [
     [5, "اتصال بخصوص غياب الأسبوع الماضي", now + 4 * hour],
