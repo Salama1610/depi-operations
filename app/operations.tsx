@@ -160,6 +160,7 @@ const titles: Row = {
   lifecycle: "Update lifecycle status",
   staff: "Manage staff access",
   account_topup: "Record a top-up",
+  account_coordinator: "Assign to a coordinator",
   session_coach: "Change the coach for one session",
   group_contact: "Log a group message",
   session_attendance: "Take attendance",
@@ -396,7 +397,7 @@ export default function Operations({ module: initialModule }: { module: string }
     [saved, setSaved] = useState<string[]>([]),
     [checklistFor, setChecklistFor] = useState<string | null>(null),
     [feedbackFor, setFeedbackFor] = useState<string | null>(null),
-    [accountFilters, setAccountFilters] = useState<Row>({ platform: "All", status: "All", request: "Open", ledger: "All" }),
+    [accountFilters, setAccountFilters] = useState<Row>({ platform: "All", status: "All", request: "Open", ledger: "All", coordinator: "All", owner: "All" }),
     [insightFilters, setInsightFilters] = useState<Row>({
       group: "All", coach: "All", from: "", to: "", absentOnly: false,
       rating: "All", searched: "All", commentsOnly: false,
@@ -587,10 +588,11 @@ export default function Operations({ module: initialModule }: { module: string }
             ? // Freelance client accounts only, for the Service Team's coordinators,
               // the people who keep the accounts, and the leaders. A session's
               // sign-in accounts stay on the session.
-              can(user.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin"]) ||
+              can(user.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin", "Team Supervisor"]) ||
               keepsAccounts ||
               (can(user.roles, ["Operations Coordinator"]) &&
-                groups.some((g) => g.coordinator === user.id && g.supervisor_team === "Service Team"))
+                (groups.some((g) => g.coordinator === user.id && g.supervisor_team === "Service Team") ||
+                  (d.accounts || []).some((a: Row) => a.coordinator_id === user.id)))
             : true,
   );
   // A module nobody showed them is not a module they can open by typing its
@@ -2298,6 +2300,11 @@ export default function Operations({ module: initialModule }: { module: string }
       );
     const requestStage = (r: Row) => (r.status === "Submitted" && activeReservation(r.id) ? "Reserved" : r.status);
     const managesAccounts = can(user.roles, ["Higher Board", "Operations Systems / Admin"]);
+    // Supervisors (Taha among them) assign accounts to coordinators.
+    const assignsAccounts = can(user.roles, ["Team Supervisor", "Operations Systems / Admin"]);
+    // The owner written in the accounts sheet reaches only its keeper and administrators.
+    const seesOwner = accounts.some((a) => "owner_name" in a);
+    const ownerNames = [...new Set(accounts.map((a) => a.owner_name).filter(Boolean))].sort();
     // Every change to an account's credit, newest first: opening balances,
     // top-ups, services charged and refunds.
     const ledger: Row[] = (d.creditLedger || [])
@@ -2309,6 +2316,14 @@ export default function Operations({ module: initialModule }: { module: string }
     const pool = accounts
       .filter(qMatch)
       .filter((r) => accountFilters.platform === "All" || r.platform === accountFilters.platform)
+      .filter((r) =>
+        accountFilters.coordinator === "All"
+          ? true
+          : accountFilters.coordinator === "None"
+            ? !r.coordinator_id
+            : r.coordinator_id === accountFilters.coordinator,
+      )
+      .filter((r) => !seesOwner || accountFilters.owner === "All" || (accountFilters.owner === "None" ? !r.owner_name : r.owner_name === accountFilters.owner))
       .filter((r) =>
         accountFilters.status === "All"
           ? true
@@ -2458,6 +2473,29 @@ export default function Operations({ module: initialModule }: { module: string }
                   { value: "Retired", label: t("Retired") },
                 ]}
               />
+              <Pick
+                label={t("Coordinator")}
+                value={accountFilters.coordinator}
+                onChange={(coordinator) => setAccountFilters({ ...accountFilters, coordinator })}
+                options={[
+                  { value: "All", label: t("Every coordinator") },
+                  { value: "None", label: t("Not assigned yet") },
+                  ...[...new Set(accounts.map((a) => a.coordinator_id).filter(Boolean))].map((id) => ({ value: String(id), label: owner(String(id)) })),
+                ]}
+              />
+              {seesOwner && (
+                <Pick
+                  label={t("Owner")}
+                  value={accountFilters.owner}
+                  onChange={(o) => setAccountFilters({ ...accountFilters, owner: o })}
+                  options={[{ value: "All", label: t("Every owner") }, { value: "None", label: t("No owner") }, ...ownerNames.map((n) => ({ value: String(n), label: String(n) }))]}
+                />
+              )}
+              {assignsAccounts && pool.length > 0 && (
+                <button className="small-btn" onClick={() => open("account_coordinator", { id: "", account_ids: pool.map((a) => a.id), coordinator_id: "" })}>
+                  {t("Assign the {v0} shown", { v0: pool.length })}
+                </button>
+              )}
             </div>
             {panel(
               t("Controlled client accounts"),
@@ -2469,15 +2507,26 @@ export default function Operations({ module: initialModule }: { module: string }
                       key: "label",
                       label: t("Account"),
                       render: (r) => (
-                        <span><strong>{r.label}</strong><small className="table-subline">{r.id}</small></span>
+                        <span><strong>{r.label}</strong><small className="table-subline">{r.comments || r.id}</small></span>
                       ),
                     },
                     { key: "platform", label: t("Marketplace") },
+                    {
+                      key: "coordinator_id",
+                      label: t("Coordinator"),
+                      render: (r) => (r.coordinator_id ? owner(r.coordinator_id) : <Cue tone="info">{t("Not assigned yet")}</Cue>),
+                    },
+                    ...(seesOwner ? [{ key: "owner_name", label: t("Owner"), render: (r: Row) => r.owner_name || "—" }] : []),
                     { key: "status", label: t("State"), render: (r) => <Badge value={r.status} /> },
                     {
                       key: "credits",
                       label: t("Available credit"),
-                      render: (r) => <strong className={Number(r.credits) <= 0 ? "credit-empty" : ""}>{money(r.credits)}</strong>,
+                      render: (r) => (
+                        <span>
+                          <strong className={Number(r.credits) <= 0 ? "credit-empty" : ""}>{money(r.credits)}</strong>
+                          {Number(r.pending_credits) > 0 && <small className="table-subline">{t("{v0} pending", { v0: money(r.pending_credits) })}</small>}
+                        </span>
+                      ),
                     },
                     {
                       key: "active_assignment",
@@ -2493,6 +2542,11 @@ export default function Operations({ module: initialModule }: { module: string }
                       <div className="detail-actions">
                         {keepsAccounts && (
                           <button className="small-btn" onClick={() => open("account_topup", { id: r.id })}>{t("Top up")}</button>
+                        )}
+                        {assignsAccounts && (
+                          <button className="small-btn" onClick={() => open("account_coordinator", { id: r.id, account_ids: [r.id], coordinator_id: r.coordinator_id || "" })}>
+                            {r.coordinator_id ? t("Reassign") : t("Assign")}
+                          </button>
                         )}
                         {managesAccounts && (
                           <button className="small-btn" onClick={() => open("account_status", r)}>{t("Manage")}</button>
@@ -5386,6 +5440,34 @@ export default function Operations({ module: initialModule }: { module: string }
                     {field("reason", t("Decision reason"))}
                   </>
                 );
+              if (a === "account_coordinator") {
+                const chosen: string[] = form.account_ids || [];
+                return (
+                  <>
+                    <p className="footnote">
+                      {chosen.length === 1
+                        ? (d.accounts || []).find((c: Row) => c.id === chosen[0])?.label
+                        : t("{v0} accounts", { v0: chosen.length })}
+                    </p>
+                    {choice(
+                      "coordinator_id",
+                      t("Coordinator"),
+                      [
+                        { value: "", label: t("Nobody (unassign)") },
+                        ...staff
+                          .filter((u: Row) => {
+                            const held = Array.isArray(u.roles) ? u.roles : JSON.parse(u.roles || "[]");
+                            // A supervisor chooses within their own team.
+                            const team: string[] | null = d.teamCoordinators ?? null;
+                            return u.active !== false && u.active !== 0 && held.includes("Operations Coordinator") && (!team || team.includes(u.id));
+                          })
+                          .map((u: Row) => ({ value: u.id, label: u.name })),
+                      ],
+                      false,
+                    )}
+                  </>
+                );
+              }
               if (a === "account_topup") {
                 const acc = (d.accounts || []).find((c: Row) => c.id === form.id);
                 return (

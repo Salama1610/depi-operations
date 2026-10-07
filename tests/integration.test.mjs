@@ -3048,3 +3048,37 @@ test("demo accounts work on the demo groups only, and nobody else sees them", as
     current = { id: "owner", email: "owner@example.com" };
   }
 });
+
+test("supervisors assign client accounts to coordinators; the owner column stays with its keeper", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  const sara = await dbRow("SELECT id FROM users WHERE email='staff-sara@example.invalid'");
+  const nour = await dbRow("SELECT id FROM users WHERE email='staff-nour@example.invalid'");
+  for (const [id, platform] of [["ACC-T1", "Kafeel"], ["ACC-T2", "Nafezly"]])
+    await dbExec(
+      "INSERT INTO accounts(id,platform,label,status,credits,pending_credits,owner_name,comments) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",
+      id, platform, id.toLowerCase() + "@example.com", "Available", 10, 2, "Owner From Sheet", "note",
+    );
+  // A supervisor assigns, within their own team.
+  current = { id: "supervisor-login", email: "staff-nour@example.invalid" };
+  const view = await (await api.GET()).json();
+  assert.ok(view.accounts.some((a) => a.id === "ACC-T1"), "supervisors see the pool to assign it");
+  assert.ok(view.accounts.every((a) => !("owner_name" in a)), "the owner is not theirs to read");
+  const team = view.teamCoordinators;
+  const target = team === null ? sara.id : team[0];
+  if (target) {
+    await check("account_coordinator", { id: "ACC-T1", account_ids: ["ACC-T1"], coordinator_id: target });
+    assert.equal((await dbRow("SELECT coordinator_id FROM accounts WHERE id='ACC-T1'")).coordinator_id, target);
+  }
+  // A coordinator cannot assign, and sees only the accounts assigned to them.
+  current = { id: "coordinator", email: "staff-sara@example.invalid" };
+  assert.match((await post("account_coordinator", { id: "ACC-T2", account_ids: ["ACC-T2"], coordinator_id: sara.id })).error, /permit|role/i);
+  await dbExec("UPDATE accounts SET coordinator_id=? WHERE id='ACC-T2'", sara.id);
+  const mine = await (await api.GET()).json();
+  assert.ok(mine.accounts.every((a) => a.coordinator_id === sara.id));
+  assert.ok(mine.accounts.some((a) => a.id === "ACC-T2"));
+  // The keeper of the list (the "account-owner" scope) reads the owner.
+  current = { id: "owner", email: "owner@example.com" };
+  const admin = await (await api.GET()).json();
+  assert.equal(admin.accounts.find((a) => a.id === "ACC-T1").owner_name, "Owner From Sheet");
+  void nour;
+});

@@ -21,6 +21,7 @@ import {
   rateLimit,
   provisionStaffLogin,
   provisionDemoLogin,
+  teamCoordinators,
 } from "@/lib/server";
 import { demoPeople, demoPlan, demoStudentEmail, isDemo, sameSide } from "@/lib/demo";
 import {
@@ -1673,6 +1674,27 @@ export async function POST(req: Request) {
             t,
           ),
         );
+        break;
+      }
+      case "account_coordinator": {
+        // Supervisors (and Taha, who is one) assign client accounts to the
+        // coordinators who work them; a supervisor only to their own team.
+        permit(u, ["Team Supervisor"]);
+        const accountIds: string[] = Array.isArray(x.account_ids) ? x.account_ids.map(String) : [String(id)];
+        ensure(accountIds.length > 0 && accountIds.length <= 600, "Choose between 1 and 600 accounts.");
+        const marks = accountIds.map(() => "?").join(",");
+        const found = await all(`SELECT id,coordinator_id FROM accounts WHERE id IN (${marks})`, ...accountIds);
+        ensure(found.length === accountIds.length, "One or more accounts were not found.");
+        const coordinatorId = x.coordinator_id ? String(x.coordinator_id) : null;
+        if (coordinatorId) {
+          const person: any = await stmt("SELECT id,roles FROM users WHERE id=? AND active=1", coordinatorId).first();
+          ensure(person && JSON.parse(person.roles).includes("Operations Coordinator"), "Choose an active coordinator.");
+          const team = await teamCoordinators(u);
+          ensure(!team || team.includes(coordinatorId), "Choose a coordinator from your own team.");
+        }
+        auditPrevious = Object.fromEntries(found.map((a: any) => [a.id, a.coordinator_id]));
+        auditValue = { account_ids: accountIds, coordinator_id: coordinatorId };
+        jobs.push(stmt(`UPDATE accounts SET coordinator_id=? WHERE id IN (${marks})`, coordinatorId, ...accountIds));
         break;
       }
       case "account_topup": {

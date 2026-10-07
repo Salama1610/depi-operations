@@ -163,6 +163,13 @@ export const accounts = sqliteTable("accounts", {
   credits: real("credits").notNull(),
   secretRef: text("secret_ref"),
   activeAssignment: text("active_assignment"),
+  // The coordinator the accounts sheet names as owner: a recorded value, read
+  // only by the keeper of the accounts list and administrators.
+  ownerName: text("owner_name"),
+  // The coordinator a supervisor has assigned the account to.
+  coordinatorId: text("coordinator_id").references(() => users.id),
+  pendingCredits: real("pending_credits").notNull().default(0),
+  comments: text("comments"),
 });
 
 // Marketplace credentials held by the programme, encrypted at rest with a

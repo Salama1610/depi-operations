@@ -103,7 +103,11 @@
     "status": "text",
     "credits": "numeric(14,2)",
     "secret_ref": "text",
-    "active_assignment": "text"
+    "active_assignment": "text",
+    "owner_name": "text",
+    "coordinator_id": "text",
+    "pending_credits": "numeric(14,2)",
+    "comments": "text"
   },
   "account_requests": {
     "id": "text",

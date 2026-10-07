@@ -201,6 +201,15 @@ export async function provisionDemoLogin(email: string, name: string) {
   return existing ? "reset" : "created";
 }
 
+/**
+ * Who reads the account owners written in the accounts sheet: the keeper of
+ * that list (the "account-owner" scope) and administrators.
+ */
+export function seesAccountOwner(u: any) {
+  const scopes = Array.isArray(u?.scopes) ? u.scopes : [];
+  return can(u.roles, ["Operations Systems / Admin"]) || scopes.includes("account-owner");
+}
+
 /** Demo sign-ins try things out on demo records; this is real work. */
 export function refuseDemo(u: any) {
   ensure(!isDemo(u), "This is not available in the demo. Demo accounts work on the demo groups only.");
@@ -555,11 +564,17 @@ export async function loadData(u: any) {
       `SELECT x.* FROM evidence_package_items x JOIN evidence_packages p ON p.id=x.package_id JOIN evidence e ON e.id=p.evidence_id JOIN students s ON s.id=e.student_id JOIN groups g ON g.id=s.group_id WHERE ${q.sql} ORDER BY x.created_at`,
       ...q.args,
     ),
-    can(u.roles, [
-      "Higher Board",
-      "Project Operations",
-      "Operations Systems / Admin",
-    ]) || keepsAccounts(u) ? all(`SELECT id,label,platform,status,credits FROM accounts WHERE ${sameSide(u, "id")}`) : none,
+    // The client accounts: the whole pool for the leaders, the people who keep
+    // the accounts and the supervisors who assign them; a coordinator sees the
+    // accounts assigned to them. The owner column only for its keeper.
+    (() => {
+      const columns = `id,label,platform,status,credits,pending_credits,comments,coordinator_id${seesAccountOwner(u) ? ",owner_name" : ""}`;
+      if (can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin", "Team Supervisor"]) || keepsAccounts(u))
+        return all(`SELECT ${columns} FROM accounts WHERE ${sameSide(u, "id")}`);
+      if (can(u.roles, ["Operations Coordinator"]))
+        return all(`SELECT ${columns} FROM accounts WHERE coordinator_id=? AND ${sameSide(u, "id")}`, u.id);
+      return none;
+    })(),
     // Everyone sees who their colleagues are and how to reach them; the
     // national ID is a first password, so only an administrator sees it.
     all(
