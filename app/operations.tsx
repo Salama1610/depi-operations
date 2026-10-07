@@ -1080,6 +1080,11 @@ export default function Operations({ module: initialModule }: { module: string }
     evidence: opsRoles,
     task: [...opsRoles, "Team Supervisor", "Coach", "Coach Operations"],
   };
+  // "Session 2 of 8", in the reader's language.
+  const sessionName = (title: any) => {
+    const m = String(title || "").match(/^Session (\d+) of (\d+)$/);
+    return m ? t("Session {v0} of {v1}", { v0: m[1], v1: m[2] }) : String(title || "");
+  };
   // The automatic link check's sentences, in the reader's language.
   const checkText = (text: any) => {
     const s = String(text || "");
@@ -1995,11 +2000,11 @@ export default function Operations({ module: initialModule }: { module: string }
             render: (r) =>
               takesAttendance(r) ? (
                 <button className="text-link session-open" onClick={() => openAttendance(r)} title={t("Take attendance")}>
-                  <strong>{r.title}</strong>
+                  <strong>{sessionName(r.title)}</strong>
                   <small className="table-subline">{t("Attendance: {v0}/{v1}", { v0: attendance.filter((a) => a.session_id === r.id).length, v1: rosterOf(r).length })}</small>
                 </button>
               ) : (
-                <strong>{r.title}</strong>
+                <strong>{sessionName(r.title)}</strong>
               ),
           },
           { key: "group_id", label: t("Group") },
@@ -2012,7 +2017,7 @@ export default function Operations({ module: initialModule }: { module: string }
           {
             key: "duration_minutes",
             label: t("Duration"),
-            render: (r) => `${r.duration_minutes || 180} min`,
+            render: (r) => t("{v0} min", { v0: r.duration_minutes || 180 }),
           },
           statusCol,
           {
@@ -4419,7 +4424,7 @@ export default function Operations({ module: initialModule }: { module: string }
               <DialogHeader>
                 <DialogTitle>{t("Session feedback")}</DialogTitle>
                 <DialogDescription>
-                  {r ? `${r.title} · ${r.group_id} · ${owner(r.coach_id)} · ${t("{v0} responses", { v0: rows.length })}` : ""}
+                  {r ? `${sessionName(r.title)} · ${r.group_id} · ${owner(r.coach_id)} · ${t("{v0} responses", { v0: rows.length })}` : ""}
                 </DialogDescription>
               </DialogHeader>
               {r && (
@@ -5149,10 +5154,10 @@ export default function Operations({ module: initialModule }: { module: string }
                         value=""
                         onChange={(comment) => setForm({ ...form, comment })}
                         options={[
-                          { value: "The link does not open the submitted service page. Send the direct public service URL.", label: t("Direct link required") },
-                          { value: "The service owner could not be matched to your student record. Confirm the seller profile and resubmit.", label: t("Owner mismatch") },
-                          { value: "The service is unavailable, paused or deleted. Submit an active public service.", label: t("Service unavailable") },
-                          { value: "The service category or title does not match your assigned track. Submit a track-relevant service.", label: t("Track mismatch") },
+                          { value: t("The link does not open the submitted service page. Send the direct public service URL."), label: t("Direct link required") },
+                          { value: t("The service owner could not be matched to your student record. Confirm the seller profile and resubmit."), label: t("Owner mismatch") },
+                          { value: t("The service is unavailable, paused or deleted. Submit an active public service."), label: t("Service unavailable") },
+                          { value: t("The service category or title does not match your assigned track. Submit a track-relevant service."), label: t("Track mismatch") },
                         ]}
                       />
                     )}

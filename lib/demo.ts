@@ -79,7 +79,7 @@ export function demoPlan(nowMs: number): Statement[] {
 
   const groups = [
     { id: "DEMO-G1", track: "Software Development", coach: "DEMO-COACH", start: iso(now - 10 * day).slice(0, 10), students: [1, 2, 3, 4, 5, 6, 7, 8] },
-    { id: "DEMO-G2", track: "Data Analytics", coach: "DEMO-COACH2", start: iso(now + 3 * day).slice(0, 10), students: [9, 10, 11, 12, 13] },
+    { id: "DEMO-G2", track: "Data Analytics", coach: "DEMO-COACH2", start: iso(now - 7 * day).slice(0, 10), students: [9, 10, 11, 12, 13] },
   ];
   for (const g of groups) {
     plan.push([
@@ -102,7 +102,9 @@ export function demoPlan(nowMs: number): Statement[] {
   // a day, so each group has its own.
   const sessionRows = [
     ...Array.from({ length: 8 }, (_, i) => ({ group: "DEMO-G1", week: i + 1, at: now - 30 * 60000 + (i - 1) * 7 * day, confirmed: i <= 1 })),
-    ...Array.from({ length: 8 }, (_, i) => ({ group: "DEMO-G2", week: i + 1, at: now + 3 * hour + i * 7 * day, confirmed: false })),
+    // Group 2: last week's session was weak (low ratings, register not taken);
+    // this week's starts in three hours and is not confirmed yet.
+    ...Array.from({ length: 8 }, (_, i) => ({ group: "DEMO-G2", week: i + 1, at: i === 0 ? now - 6 * day + 3 * hour : now + 3 * hour + (i - 1) * 7 * day, confirmed: i === 0 })),
   ];
   for (const s of sessionRows)
     plan.push([
@@ -129,13 +131,23 @@ export function demoPlan(nowMs: number): Statement[] {
       `${session}-CHK-${item}`, session, item, "DEMO-COORD", iso(at),
     ]);
   for (const [n, satisfaction, clarity, usefulness, searched, liked, comments] of [
-    [4, 5, 5, 4, 1, "The live examples", "More practice time please"],
-    [2, 4, 3, 4, 0, "Clear steps", "The pace was fast"],
-    [3, 3, 4, 3, 1, null, "Audio cut out twice"],
+    [4, 5, 5, 4, 1, "الأمثلة العملية", "نحتاج وقتًا أطول للتطبيق"],
+    [2, 4, 3, 4, 0, "الخطوات كانت واضحة", "السرعة كانت عالية"],
+    [3, 3, 4, 3, 1, null, "الصوت انقطع مرتين"],
   ] as [number, number, number, number, number, string | null, string][])
     plan.push([
       "INSERT INTO session_feedback(id,session_id,student_id,satisfaction,clarity,searched_gig,usefulness,liked,comments,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
       `${lastWeek}-SFB-${n}`, lastWeek, `DEMO-S0${n}`, satisfaction, clarity, searched, usefulness, liked, comments, iso(now - 7 * day + 4 * hour),
+    ]);
+  // Group 2's weak session: a red flag waiting for Coach Operations.
+  for (const [n, satisfaction, clarity, usefulness, comments] of [
+    [9, 2, 2, 2, "لم أفهم الشرح، وكان المدرب متأخرًا"],
+    [10, 3, 2, 2, "الجلسة بدأت متأخرة ولم نكمل التطبيق"],
+    [11, 2, 1, 2, "الصوت كان سيئًا طوال الجلسة"],
+  ] as [number, number, number, number, string][])
+    plan.push([
+      "INSERT INTO session_feedback(id,session_id,student_id,satisfaction,clarity,searched_gig,usefulness,liked,comments,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+      `DEMO-G2-W1-SFB-${n}`, "DEMO-G2-W1", `DEMO-S${String(n).padStart(2, "0")}`, satisfaction, clarity, 0, usefulness, null, comments, iso(now - 6 * day + 7 * hour),
     ]);
 
   // Services in every state the quality team meets.
@@ -169,8 +181,8 @@ export function demoPlan(nowMs: number): Statement[] {
 
   // Follow-ups waiting for the coordinator.
   for (const [n, title, due] of [
-    [5, "Call about last week's absence", now + 4 * hour],
-    [7, "Welcome call: first contact", now - hour],
+    [5, "اتصال بخصوص غياب الأسبوع الماضي", now + 4 * hour],
+    [7, "مكالمة ترحيب: أول تواصل", now - hour],
   ] as [number, string, number][])
     plan.push([
       "INSERT INTO tasks(id,student_id,title,owner,due,category,priority,status,source,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",

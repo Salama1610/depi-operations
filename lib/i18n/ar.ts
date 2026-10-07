@@ -1776,6 +1776,8 @@ export const ar: Record<string, string> = {
   "Enter a complete HTTPS service URL.": "أدخل رابط خدمة كاملًا يبدأ بـ HTTPS.",
   "Valid URL format required": "مطلوب رابط بصيغة صحيحة",
   "Khamsat": "خمسات",
+  "Session {v0} of {v1}": "الجلسة {v0} من {v1}",
+  "{v0} min": "{v0} دقيقة",
   "Search…": "بحث…",
   "No matches": "لا توجد نتائج",
   "Choose": "اختر",
