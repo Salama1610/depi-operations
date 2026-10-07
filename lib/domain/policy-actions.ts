@@ -12,7 +12,7 @@ export function planPolicyActions(data:any,at=Date.now()):PolicyAction[]{
  }
  for(const e of data.evidence||[]){const s=data.students.find((s:any)=>s.id===e.student_id);if(!s||s.lifecycle!=='Active')continue;const p=e.applied_policy||s.policy||baseline;const hours=e.status==='Coach Review'?p.coachHours:e.status==='Coordinator L1'?p.l1Hours:e.status==='Quality Review'?p.qualityHours:null;if(hours===null||at-Date.parse(e.stage_at)<=hours*3600000)continue;
  const source=`policy-sla:${e.id}:${e.status}:${e.stage_at}`;if(tasks.some((t:any)=>t.source===source))continue;
- const role=e.status==='Coach Review'?'Coach Operations':e.status==='Quality Review'?'Quality Lead':null;
+ const role=e.status==='Coordinator L1'?'Team Supervisor':e.status==='Quality Review'?'Quality Lead':null;
  const lead=role?(data.staff||[]).filter((u:any)=>u.active&&JSON.parse(u.roles).includes(role)).sort((a:any,b:any)=>a.id.localeCompare(b.id))[0]:null;
  planned.push({kind:'task',student_id:s.id,owner:lead?.id||s.supervisor,title:`Escalate ${e.status} SLA breach: ${e.id}`,category:'SLA escalation',priority:'Urgent',due:due(24),source});
  }

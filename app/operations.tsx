@@ -484,7 +484,7 @@ export default function Operations({ module: initialModule }: { module: string }
   const graduates = students.filter((s) => s.graduation.includes("Graduate"));
   const accepted = evidence.filter((e) => e.status === "Accepted");
   const reviews = evidence.filter((e) =>
-    ["Coach Review", "Coordinator L1", "Quality Review", "L3 Review"].includes(
+    ["Coordinator L1", "Quality Review", "L3 Review"].includes(
       e.status,
     ),
   );
@@ -1274,7 +1274,6 @@ export default function Operations({ module: initialModule }: { module: string }
         : module === "quality" || module === "gigs"
           ? [
               "All",
-              "Coach Review",
               "Coordinator L1",
               "Quality Review",
               "Rejected",
@@ -1904,12 +1903,12 @@ export default function Operations({ module: initialModule }: { module: string }
               {
                 evidence.filter(
                   (item) =>
-                    item.status === "Coach Review" &&
+                    item.status === "Coordinator L1" &&
                     Date.now() - Date.parse(item.stage_at) > 24 * 3600000,
                 ).length
               }
             </strong>
-            {t("Coach evidence >24h")}
+            {t("Coordinator checks >24h")}
           </span>
           <span>
             <strong>{coverageGaps.length}</strong>

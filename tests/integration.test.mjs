@@ -369,18 +369,16 @@ test("full seeded backend workflow and permission gates", async () => {
     payment_proof_id: "PROOF-2",
     source: "WhatsApp",
   });
-  // Whoever recorded the gig reviews none of it; a quality reviewer cannot
-  // take the first check.
+  // Whoever recorded the gig reviews none of it; neither a quality reviewer
+  // nor a coach takes the coordinator check.
   r = await post("review", { id: "EV1", notes: "Looks complete" });
   assert.match(r.error, /You recorded this gig/);
   current = { id: "quality-login", email: "staff-quality@example.invalid" };
   r = await post("review", { id: "EV1", notes: "Looks complete" });
-  assert.ok(r.error, "a quality reviewer does not take the first check");
+  assert.ok(r.error, "a quality reviewer does not take the coordinator check");
   current = { id: "coach-login", email: "staff-coach@example.invalid" };
-  await check("review", { id: "EV1", notes: "Coach confirms delivery" });
-  // The coach who took the first check cannot take the second.
-  r = await post("review", { id: "EV1", notes: "Completeness checked" });
-  assert.ok(r.error, "one person, one step");
+  r = await post("review", { id: "EV1", notes: "Coach confirms delivery" });
+  assert.ok(r.error, "coaches no longer check services");
   current = { id: "supervisor-login", email: "staff-nour@example.invalid" };
   await check("review", { id: "EV1", notes: "Completeness checked" });
   current = { id: "coach-login", email: "staff-coach@example.invalid" };
@@ -1978,7 +1976,7 @@ test("a gig is recorded once, paid, with its delivery and payment proof going st
   assert.equal((await dbRow("SELECT paid_on FROM gigs WHERE id='GIG-1'")).paid_on.slice(0, 10), today);
   assert.equal((await dbRow("SELECT status FROM gigs WHERE id='GIG-1'")).status, "Paid");
   const evidence = await dbRow("SELECT * FROM evidence WHERE gig_id='GIG-1'");
-  assert.equal(evidence.status, "Coach Review", "the proof enters review at once");
+  assert.equal(evidence.status, "Coordinator L1", "the proof goes straight to the coordinator check");
   assert.equal(evidence.proof_id, "GIG-DELIVERY");
   const items = await dbRows(
     "SELECT i.item_type, i.attachment_id FROM evidence_package_items i JOIN evidence_packages p ON p.id=i.package_id WHERE p.evidence_id=? ORDER BY i.item_type",
@@ -1996,13 +1994,10 @@ test("a gig is recorded once, paid, with its delivery and payment proof going st
   // Its evidence is already in review; a second submission is refused.
   assert.match((await post("evidence", { gig_id: "GIG-1", source: "Form", proof_id: "GIG-DELIVERY", payment_proof_id: "GIG-PAYMENT" })).error, /already has its evidence/);
 
-  // The chain: three different people, the last of them from the QC team.
+  // The chain: the coordinator side checks, then the QC team decides.
   const evidenceId = evidence.id;
-  current = { id: "coordinator-login", email: "staff-sara@example.invalid" };
-  assert.ok((await post("review", { id: evidenceId, notes: "Delivered" })).error, "a coordinator does not take the first check");
   current = { id: "coach-ops-login", email: "staff-coach-ops@example.invalid" };
-  await check("review", { id: evidenceId, notes: "Delivery confirmed" });
-  assert.match((await post("review", { id: evidenceId, notes: "Complete" })).error, /already acted on an earlier step/);
+  assert.ok((await post("review", { id: evidenceId, notes: "Delivery confirmed" })).error, "Coach Operations no longer checks services");
   current = { id: "supervisor-login", email: "staff-nour@example.invalid" };
   await check("review", { id: evidenceId, notes: "Complete and consistent" });
   const atQuality = await dbRow("SELECT status, qc_actor FROM evidence WHERE id=?", evidenceId);

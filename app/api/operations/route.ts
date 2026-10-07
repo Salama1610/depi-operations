@@ -174,7 +174,7 @@ async function leastLoadedEvidenceReviewer(): Promise<string | null> {
 
 /**
  * Everything that puts a paid gig's proof into review: the evidence record at
- * Coach Review, its first package holding the delivery and the payment proof
+ * the coordinator check, its first package holding the delivery and the payment proof
  * (Quality acceptance requires both in the latest package), and the context of
  * both screenshots. The caller has already checked the gig is paid and that
  * both proofs are separate uploads belonging to the student.
@@ -185,7 +185,7 @@ function evidenceIntake(u: any, g: any, policyId: string, x: any, t: string, evi
   return [
     stmt(
       "INSERT INTO evidence(id,student_id,gig_id,proof_id,source,status,recorder,stage_at,created_at,policy_id) VALUES(?,?,?,?,?,?,?,?,?,?)",
-      evidenceId, g.student_id, g.id, x.proof_id, source, "Coach Review", u.id, t, t, policyId,
+      evidenceId, g.student_id, g.id, x.proof_id, source, "Coordinator L1", u.id, t, t, policyId,
     ),
     stmt(
       "INSERT INTO evidence_packages(id,evidence_id,revision,status,created_by,created_at) VALUES(?,?,1,'Submitted',?,?)",
@@ -2071,7 +2071,7 @@ export async function POST(req: Request) {
         // Each decision is a different person's: not the one who recorded the
         // gig, and not anyone who already acted on this package. A correction
         // starts a new cycle, so the reviewer who asked for it may judge it.
-        if (["Coach Review", "Coordinator L1", "Quality Review", "L3 Review"].includes(e.status)) {
+        if (["Coordinator L1", "Quality Review", "L3 Review"].includes(e.status)) {
           ensure(e.recorder !== u.id, "You recorded this gig, so another person must review it.");
           const cycle = (await all(
             "SELECT actor, decision FROM evidence_reviews WHERE evidence_id=? ORDER BY created_at, id",
@@ -2083,32 +2083,13 @@ export async function POST(req: Request) {
             "You already acted on an earlier step of this evidence, so another person must take this one.",
           );
         }
-        if (e.status === "Coach Review") {
-          // The first check: an onboarded coach of the group, the group's
-          // supervisor, Project Operations or Coach Operations.
-          const configured: any = await stmt(
-            "SELECT count(*) n FROM group_coaches WHERE group_id=? AND status='Active'",
-            st.group_id,
-          ).first();
-          const assigned = await stmt(
-            "SELECT id FROM group_coaches WHERE group_id=? AND user_id=? AND status='Active' AND onboarding_status='Complete'",
-            st.group_id,
-            u.id,
-          ).first();
+        if (e.status === "Coordinator L1") {
+          // The coordinator check, before Quality: the group's coordinator, its
+          // supervisor or Project Operations, never the person who recorded it.
+          // Coaches no longer check services.
           ensure(
-            assigned ||
-              (!configured?.n && st.coach === u.id) ||
-              st.supervisor === u.id ||
-              can(u.roles, ["Project Operations", "Coach Operations", "Operations Systems / Admin"]),
-            "The first check is done by the group's coach, its supervisor, Project Operations or Coach Operations.",
-          );
-          next = "Coordinator L1";
-        } else if (e.status === "Coordinator L1") {
-          // The second check: the group's supervisor, Project Operations, or a
-          // coordinator who did not record it.
-          ensure(
-            st.supervisor === u.id || can(u.roles, [...ops, "Operations Systems / Admin"]),
-            "The second check is done by the group's supervisor or Project Operations.",
+            st.coordinator === u.id || st.supervisor === u.id || can(u.roles, ["Project Operations", "Operations Systems / Admin"]),
+            "The coordinator check is done by the group's coordinator, its supervisor or Project Operations.",
           );
           next = "Quality Review";
         } else if (e.status === "Quality Review") {
