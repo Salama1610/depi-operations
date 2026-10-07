@@ -3095,8 +3095,6 @@ export default function Operations({ module: initialModule }: { module: string }
         )}
       </>
     );
-  } else if (module === "portal") {
-    content = <PortalView staffName={owner} />;
   } else if (module === "cases") {
     content = panel(
       t("Incident & intervention register"),
