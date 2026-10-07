@@ -142,9 +142,9 @@ export function demoPlan(nowMs: number): Statement[] {
   const links: [string, number, string, string, string | null][] = [
     ["DEMO-S01", 1, "Kafiil", "Pending", null],
     ["DEMO-S01", 2, "Nafezly", "Pending", null],
-    ["DEMO-S01", 3, "Kafiil", "Needs Correction", "This opens your profile, not the service page. Paste the address of the service itself."],
+    ["DEMO-S01", 3, "Kafiil", "Needs Correction", "هذا الرابط يفتح ملفك الشخصي وليس صفحة الخدمة. الصق رابط صفحة الخدمة نفسها."],
     ["DEMO-S02", 1, "Kafiil", "Locked", null],
-    ["DEMO-S02", 2, "Nafezly", "Needs Correction", "The service title does not match the track. Rename it and resubmit."],
+    ["DEMO-S02", 2, "Nafezly", "Needs Correction", "عنوان الخدمة لا يناسب المسار. عدّل العنوان ثم أرسلها من جديد."],
     ["DEMO-S03", 1, "Kafiil", "Locked", null],
     ["DEMO-S03", 2, "Nafezly", "Locked", null],
     ["DEMO-S03", 3, "Kafiil", "Locked", null],
