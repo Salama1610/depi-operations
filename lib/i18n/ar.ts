@@ -1815,6 +1815,7 @@ export const ar: Record<string, string> = {
   "Assessment results": "نتائج التقييمات",
   "Withdrawals": "الانسحابات",
   "Post-programme outcomes": "نتائج ما بعد البرنامج",
+  "Notifications": "الإشعارات",
   "Search…": "بحث…",
   "No matches": "لا توجد نتائج",
   "Choose": "اختر",

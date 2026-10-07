@@ -3946,7 +3946,7 @@ export default function Operations({ module: initialModule }: { module: string }
           </span>
         </footer>
       </SidebarInset>
-      <Toaster richColors position="bottom-right" />
+      <Toaster richColors position="bottom-right" containerAriaLabel={t("Notifications")} />
       <Sheet open={!!selected} onOpenChange={(v) => !v && setSelected(null)}>
         <SheetContent className="student-sheet sm:max-w-[800px] overflow-y-auto" side={dir === "rtl" ? "left" : "right"}>
           <SheetHeader>
