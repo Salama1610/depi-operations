@@ -538,6 +538,8 @@ export default function Operations({ module: initialModule }: { module: string }
   const canTransfer = can(user.roles, dataTransferRoles);
   // Coach Operations follows every student, group and coach, but not how the
   // coordinators, supervisors or quality reviewers themselves are performing.
+  // Someone whose only role is Coach: services are not theirs to see.
+  const onlyCoach = heldRoles(user).length > 0 && heldRoles(user).every((role) => role === "Coach");
   const coachesOnly =
     can(user.roles, ["Coach Operations"]) &&
     !can(user.roles, ["Project Operations", "Operations Systems / Admin", "Higher Board", "Team Supervisor"]);
@@ -551,6 +553,8 @@ export default function Operations({ module: initialModule }: { module: string }
       ? m === "quality" || (m === "portal" && !demoAccount)
       : m === "administration"
         ? can(user.roles, ["Operations Systems / Admin"])
+        : m === "gigs" && onlyCoach
+          ? false
         : m === "portal"
           ? // The portal sheets hold real students, so demo sign-ins do not open them.
             !demoAccount && can(user.roles, [
@@ -3985,8 +3989,8 @@ export default function Operations({ module: initialModule }: { module: string }
                     "contacts",
                     "tasks",
                     "sessions",
-                    "gigs",
-                    "services",
+                    // Services are not a coach's to see.
+                    ...(onlyCoach ? [] : ["gigs", "services"]),
                     ...(groups.find((g) => g.id === selectedStudent.group_id)?.supervisor_team === "Service Team" ? ["accounts"] : []),
                     "cases",
                     "timeline",

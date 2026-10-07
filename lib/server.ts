@@ -766,6 +766,23 @@ export async function loadData(u: any) {
     "Team Supervisor",
     "Quality Lead",
   ]);
+  // A coach's title is the kind of coach they are on their groups (Outcome
+  // Coach, Support Coach), read from the assignments rather than typed in.
+  const coachTypes = new Map<string, Set<string>>();
+  for (const c of await all("SELECT user_id,coach_type FROM group_coaches WHERE status='Active'")) {
+    if (!c.coach_type) continue;
+    const set = coachTypes.get(c.user_id) || new Set<string>();
+    set.add(String(c.coach_type));
+    coachTypes.set(c.user_id, set);
+  }
+  const coachTitle = (person: any) => {
+    const types = coachTypes.get(person.id);
+    if (!types?.size) return person.title;
+    const held = Array.isArray(person.roles) ? person.roles : JSON.parse(person.roles || "[]");
+    return held.includes("Coach") ? [...types].sort().join(" · ") : person.title;
+  };
+  for (const person of staff) person.title = coachTitle(person);
+  u.title = coachTitle(u);
   let visibleStaff = staff;
   if (frontline) {
     const known = new Set<string>([u.id]);

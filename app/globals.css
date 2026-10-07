@@ -1006,3 +1006,13 @@ input:focus-visible {
 .join-footer{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;flex-wrap:wrap}
 .access-btn.is-missing-login{color:#9a6f22;background:#fff5dd;border-color:#f0dcae;cursor:help}
 
+/* Inner tabs on every page: at the top, side by side, as large clear buttons;
+   the active one is filled. */
+[data-slot=tabs]{gap:0}
+[data-slot=tabs-list]{display:flex!important;flex-wrap:wrap;gap:8px;height:auto!important;width:100%;justify-content:flex-start;background:transparent!important;padding:0!important;margin-bottom:20px;border-bottom:1px solid #e2e7f0;padding-bottom:12px!important;border-radius:0}
+[data-slot=tabs-trigger]{flex:0 0 auto!important;min-height:42px;padding:9px 18px!important;font-size:14px!important;font-weight:600;color:#53627d!important;background:#fff!important;border:1px solid #dfe5ef!important;border-radius:8px!important;box-shadow:none!important;gap:8px}
+[data-slot=tabs-trigger]:hover{border-color:#8ba5f5!important;color:#315ce8!important;background:#f4f6ff!important}
+[data-slot=tabs-trigger][data-state=active]{background:#315ce8!important;border-color:#315ce8!important;color:#fff!important}
+[data-slot=tabs-trigger][data-state=active] .count{background:#ffffff33;border-color:transparent;color:#fff}
+@media(max-width:767px){[data-slot=tabs-list]{flex-wrap:nowrap;overflow-x:auto}[data-slot=tabs-trigger]{white-space:nowrap}}
+
