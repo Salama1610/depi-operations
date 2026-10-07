@@ -105,7 +105,8 @@ async function programData(u: any) {
     ...q.args,
   );
   for (const s of students) hideNationalId(u, s);
-  const applications = can(u.roles, [
+  // Applicants are real people outside any group, so never shown to a demo account.
+  const applications = !isDemo(u) && can(u.roles, [
     ...operations,
     "Team Supervisor",
     "Operations Systems / Admin",
@@ -340,8 +341,8 @@ async function programData(u: any) {
     closures,
     staff,
     attachments,
-    reportDefinitions: definitions,
-    reportRuns,
+    reportDefinitions: isDemo(u) ? [] : definitions,
+    reportRuns: isDemo(u) ? [] : reportRuns,
     reportFields: Object.keys(reportFields),
     readiness,
     counts: {

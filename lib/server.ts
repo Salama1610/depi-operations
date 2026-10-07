@@ -297,6 +297,29 @@ export async function proof(u: any, id: string, sid: string) {
   await student(u, sid);
   return a;
 }
+/**
+ * A copy of an audited value without what must never be kept or shown in the
+ * history: national IDs (they are first passwords) and any password, secret
+ * or key. Nested rows are cleaned too.
+ */
+const secretKey = /national_id|password|secret|^iv$|token/i;
+export function scrubAudit(value: any): any {
+  if (Array.isArray(value)) return value.map(scrubAudit);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value).filter(([k]) => !secretKey.test(k)).map(([k, v]) => [k, scrubAudit(v)]),
+  );
+}
+/** The same cleaning for a stored JSON text, for rows written before it existed. */
+function scrubAuditText(text: any) {
+  if (typeof text !== "string" || !secretKey.test(text)) return text;
+  try {
+    return JSON.stringify(scrubAudit(JSON.parse(text)));
+  } catch {
+    return null;
+  }
+}
+
 export function auditStmt(
   u: any,
   action: string,
@@ -312,8 +335,8 @@ export function auditStmt(
     u.id,
     action,
     entity,
-    previous ? JSON.stringify(previous) : null,
-    JSON.stringify(value),
+    previous ? JSON.stringify(scrubAudit(previous)) : null,
+    JSON.stringify(scrubAudit(value)),
     reason,
     requestId,
     now(),
@@ -630,6 +653,11 @@ export async function loadData(u: any) {
     "student_id",
   );
   const studentsByGroup = bucket(students, "group_id");
+  // History written before the cleaning existed is cleaned on the way out.
+  for (const row of logs) {
+    row.previous = scrubAuditText(row.previous);
+    row.value = scrubAuditText(row.value);
+  }
   for (const s of students) {
     // A student's national ID is their first password: only an administrator
     // sees it. Everyone else learns only whether one is on record.

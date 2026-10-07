@@ -2340,11 +2340,24 @@ export async function POST(req: Request) {
           x.title?.trim() && x.owner && Date.parse(x.due),
           "Case title, owner and due date are required.",
         );
+        ensure(String(x.title).length <= 200 && String(x.notes || "").length <= 2000, "Keep the title under 200 characters and the notes under 2,000.");
+        // A case names its group when it has one, so it stays with that group's
+        // people; one about the whole programme has neither student nor group,
+        // and a demo account may not open those.
+        let caseGroup: string | null = s?.group_id || null;
+        if (!caseGroup && x.group_id) {
+          const scope = scopeSql(u, "g", null);
+          const g: any = await stmt(`SELECT g.id FROM groups g WHERE g.id=? AND ${scope.sql}`, x.group_id, ...scope.args).first();
+          ensure(g, "Group not found within your assigned scope.");
+          caseGroup = g.id;
+        }
+        if (isDemo(u)) ensure(caseGroup && caseGroup.startsWith("DEMO-"), "In the demo, a case is about a demo student or group.");
         jobs.push(
           stmt(
-            "INSERT INTO cases(id,student_id,title,type,severity,status,owner,due,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO cases(id,student_id,group_id,title,type,severity,status,owner,due,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
             id,
             sid || null,
+            caseGroup,
             x.title,
             x.type || "Student",
             x.severity || "S3 Standard",

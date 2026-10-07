@@ -3082,3 +3082,33 @@ test("supervisors assign client accounts to coordinators; the owner column stays
   assert.equal(admin.accounts.find((a) => a.id === "ACC-T1").owner_name, "Owner From Sheet");
   void nour;
 });
+
+test("the audit history never keeps or shows a national ID", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  const s = await dbRow("SELECT id FROM students WHERE id NOT LIKE 'DEMO-%' LIMIT 1");
+  await dbExec("INSERT INTO audit_events(id,actor,action,entity_id,previous,value,reason,request_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+    "AUD-old-nid", "owner", "Old row", s.id, JSON.stringify({ national_id: "29001011234567", name: "x" }), JSON.stringify({ ok: 1 }), null, "REQ-old-nid", new Date().toISOString());
+  await check("engagement", { student_id: s.id, engagement: "At Risk", reason: "Checking the history cleaning" }).catch(() => {});
+  const view = await (await api.GET()).json();
+  const text = JSON.stringify(view.logs || view.audit || []);
+  assert.ok(text.includes("AUD-old-nid"), "the old row is in the feed");
+  assert.ok(!text.includes("29001011234567"), "an old row is cleaned on the way out");
+  const stored = await dbRows("SELECT previous,value FROM audit_events WHERE actor='owner' ORDER BY created_at DESC LIMIT 20");
+  assert.ok(stored.filter((r) => r.previous !== null && !String(r.previous).includes("29001011234567")).every((r) => !/national_id/.test(String(r.previous) + String(r.value))), "new rows are written without it");
+});
+
+test("a demo account cannot open a programme-wide case or read real applicants", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  await check("demo_refresh");
+  current = { id: "demo-auth-po", email: "demo.projectops@example.com" };
+  const due = new Date(Date.now() + 86400000).toISOString();
+  assert.match((await post("case", { title: "Planted", owner: "DEMO-PO", due, group_id: "DEMO-G1" })).error ?? "", /^$/);
+  const planted = await dbRow("SELECT group_id FROM cases WHERE title='Planted'");
+  assert.equal(planted.group_id, "DEMO-G1", "the case stays with the demo group");
+  assert.ok((await post("case", { title: "Global", owner: "DEMO-PO", due })).error, "no programme-wide case from the demo");
+  const program = await (await programApi.GET(new Request("https://test.local/api/program"))).json();
+  assert.deepEqual(program.applications || [], []);
+  current = { id: "owner", email: "owner@example.com" };
+  const real = await (await api.GET()).json();
+  assert.ok(!real.cases.some((c) => c.title === "Planted"), "real users never see the demo case");
+});
