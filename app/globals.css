@@ -1129,3 +1129,14 @@ input:focus-visible {
 .searchable-select>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .searchable-select-list [cmdk-item]{white-space:normal;overflow-wrap:anywhere;height:auto}
 .field input.searchable-select-proxy,.searchable-select-required input.searchable-select-proxy{width:1px}
+
+/* Fit on every screen: toolbars wrap, pickers in tables and the search
+   dialog stay inside their box, long codes break. */
+.toolbar-right{flex-wrap:wrap}
+td .searchable-select,td .pick-inline{max-width:240px;min-width:0}
+.notification-list button small{overflow-wrap:anywhere}
+.notification-list button{max-width:100%;min-width:0}
+.profile{min-width:0}
+.profile>div{min-width:0;overflow:hidden}
+.profile small{max-width:100%}
+

@@ -343,8 +343,48 @@ function moduleFromPath(pathname: string) {
   return segment && nav.some(([id]) => id === segment) ? segment : "home";
 }
 
+/** Readable names for the policy settings. */
+const policyLabels: Record<string, string> = {
+  contactDays: "Contact interval (days)",
+  coachHours: "Coach review SLA (hours)",
+  l1Hours: "Coordinator L1 SLA (hours)",
+  qualityHours: "Quality review SLA (hours)",
+  correctionDays: "Correction window (days)",
+  failedAttempts: "Failed contact attempts",
+  failedWindowDays: "Attempt window (days)",
+  target: "Graduation target (%)",
+  minGig: "Minimum service value (USD)",
+  gigCount: "Qualifying service count",
+  minTotal: "Minimum total (USD)",
+  largeGig: "Large-service threshold (USD)",
+  riskAttendance: "At Risk attendance (%)",
+  criticalAttendance: "Critical attendance (%)",
+  journeyDelayedLag: "Delayed journey lag",
+  journeyCriticalLag: "Critical journey lag",
+  milestoneWeek1: "Week 1 milestone",
+  milestoneWeek2: "Week 2 milestone",
+  milestoneWeek3: "Week 3 milestone",
+  milestoneWeek4: "Week 4 milestone",
+  milestoneWeek5: "Week 5 milestone",
+  milestoneWeek6: "Week 6 milestone",
+  milestoneWeek7: "Week 7 milestone",
+  milestoneWeek8: "Week 8 milestone",
+  regularSessionCount:
+  "Regular session count",
+  industrySessionCount:
+  "Industry session count",
+  sessionMinutes:
+  "Session duration (minutes)",
+};
 /** Modules whose existing records a spreadsheet may modify (see /api/import). */
 const updatableModules = ["students", "groups", "accounts"];
+/** The sheets the import takes, by name a person reads. */
+const importKinds: Record<string, string> = {
+  staff: "Staff", students: "Students", groups: "Groups", contacts: "Contacts", tasks: "Tasks", sessions: "Sessions",
+  attendance: "Attendance", task_bank: "Approved tasks", accounts: "Client accounts", requests: "Client account requests",
+  gigs: "Paid services", evidence: "Service proof", cases: "Cases", applications: "Applications", assessments: "Assessments",
+  assessment_results: "Assessment results", withdrawals: "Withdrawals", post_program_outcomes: "Post-programme outcomes",
+};
 
 export default function Operations({ module: initialModule }: { module: string }) {
   const t = useT();
@@ -502,7 +542,7 @@ export default function Operations({ module: initialModule }: { module: string }
   const name = (id: string) =>
     students.find((s) => s.id === id)?.name || id || "—";
   const owner = (id: string) =>
-    staff.find((s: Row) => s.id === id)?.name || "Unassigned";
+    staff.find((s: Row) => s.id === id)?.name || t("Unassigned");
   // Published services are reviewed by the quality team. Everyone else with a
   // stake — the coordinator of the group, their supervisor, Project Operations
   // — watches the queue and the coverage without deciding on it.
@@ -926,7 +966,7 @@ export default function Operations({ module: initialModule }: { module: string }
           <article className="task-row" key={task.id}>
             <button
               className="complete"
-              aria-label={"Complete " + task.title}
+              aria-label={t("Complete {v0}", { v0: task.title })}
               disabled={busy}
               onClick={() => quick("complete_task", { id: task.id })}
             >
@@ -942,7 +982,7 @@ export default function Operations({ module: initialModule }: { module: string }
                   )
                 }
               >
-                {name(task.student_id)} <span>· {task.category}</span>
+                {name(task.student_id)} <span>· {t(task.category)}</span>
               </button>
             </div>
             <span className="task-owner">{owner(task.owner)}</span>
@@ -1082,6 +1122,28 @@ export default function Operations({ module: initialModule }: { module: string }
     gig_transition: opsRoles,
     evidence: opsRoles,
     task: [...opsRoles, "Team Supervisor", "Coach", "Coach Operations"],
+  };
+  // The risk reasons and group trajectory sentences the server writes in English.
+  const riskReason = (text: string) => {
+    let m = text.match(/^Attendance (\d+)%$/);
+    if (m) return t("Attendance {v0}%", { v0: m[1] });
+    m = text.match(/^No valid contact in (\d+) days$/);
+    if (m) return t("No valid contact in {v0} days", { v0: m[1] });
+    m = text.match(/^(\d+) milestones? behind$/);
+    if (m) return t("{v0} milestones behind", { v0: m[1] });
+    m = text.match(/^(\d+) failed attempts in (\d+) days$/);
+    if (m) return t("{v0} failed attempts in {v1} days", { v0: m[1], v1: m[2] });
+    return t(text);
+  };
+  const trajectoryReason = (text: any) => {
+    const s = String(text || "");
+    let m = s.match(/^([\d.]+) milestones behind the Week (\d+) expectation$/);
+    if (m) return t("{v0} milestones behind the Week {v1} expectation", { v0: m[1], v1: m[2] });
+    m = s.match(/^([\d.]+) milestones ahead of expectation$/);
+    if (m) return t("{v0} milestones ahead of expectation", { v0: m[1] });
+    m = s.match(/^At the Week (\d+) expected milestone$/);
+    if (m) return t("At the Week {v0} expected milestone", { v0: m[1] });
+    return t(s);
   };
   // "Session 2 of 8", in the reader's language.
   const sessionName = (title: any) => {
@@ -1632,7 +1694,7 @@ export default function Operations({ module: initialModule }: { module: string }
           ))}
         </div>
         {panel(
-          filter === "All" ? t("Open actions") : filter,
+          filter === "All" ? t("Open actions") : t(filter),
           paginate(
             rows.sort((a, b) => a.due.localeCompare(b.due)),
             taskRows,
@@ -1661,7 +1723,7 @@ export default function Operations({ module: initialModule }: { module: string }
               <p>
                 {t("{v0} pathway · Week {v1}", { v0: t(g.pathway), v1: g.week })}
               </p>
-              <p className="footnote">{g.trajectory_reason}</p>
+              <p className="footnote">{trajectoryReason(g.trajectory_reason)}</p>
               <div className="group-metrics">
                 <span>
                   <strong>{ss.length}</strong> {t("Students")}
@@ -1763,7 +1825,7 @@ export default function Operations({ module: initialModule }: { module: string }
     const sessionDay = (s: Row) =>
       new Date(s.starts_at).toLocaleDateString("en-US", { weekday: "long", timeZone: "Africa/Cairo" });
     const sessionTime = (s: Row) =>
-      new Date(s.starts_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" });
+      new Date(s.starts_at).toLocaleTimeString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" });
     const weekdays = ["Saturday", "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
     const times = Array.from(new Set(sessions.map(sessionTime))).sort();
     const sessionRows = sessions
@@ -2421,7 +2483,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     {
                       key: "created_at",
                       label: t("Date"),
-                      render: (e) => <span>{fmt(e.created_at)}<small className="table-subline">{new Date(e.created_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" })}</small></span>,
+                      render: (e) => <span>{fmt(e.created_at)}<small className="table-subline">{new Date(e.created_at).toLocaleTimeString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" })}</small></span>,
                     },
                     {
                       key: "account_id",
@@ -2622,7 +2684,7 @@ export default function Operations({ module: initialModule }: { module: string }
                             )}
                             {hold && stage === "Reserved" && (
                               <small className="table-subline">
-                                {t("Held until {v0}", { v0: new Date(hold.expires_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" }) })}
+                                {t("Held until {v0}", { v0: new Date(hold.expires_at).toLocaleTimeString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" }) })}
                               </small>
                             )}
                           </span>
@@ -3023,7 +3085,7 @@ export default function Operations({ module: initialModule }: { module: string }
                   { key: "auto_status", label: t("Automatic check"), render: (r) => <Badge value={r.auto_status} /> },
                   { key: "reviewer_name", label: t("Reviewer"), render: (r) => isQualityLead && r.qc_status !== "Locked"
                       ? <SearchableSelect className="pick-inline" label={t("Assign this student to a reviewer")} placeholder={t("Waiting for a reviewer")} value={r.qc_actor || ""} onChange={(v) => !busy && v && quick("service_qc_assign", { student_id: r.student_id, reviewer_id: v })} options={qualityReviewers.map((q) => ({ value: q.id, label: `${q.name} (${reviewerStudents.get(q.id) || 0})` }))} />
-                      : <span>{owner(r.qc_actor) === "Unassigned" ? t("Waiting for a reviewer") : owner(r.qc_actor)}<small className="table-subline">{owner(r.coordinator)}</small></span> },
+                      : <span>{!r.qc_actor || !staff.some((s: Row) => s.id === r.qc_actor) ? t("Waiting for a reviewer") : owner(r.qc_actor)}<small className="table-subline">{owner(r.coordinator)}</small></span> },
                   { key: "qc_status", label: t("Review state"), render: (r) => <span><Badge value={qcState(r.qc_status)} />{resubmitted(r) && <Badge value={t("Resubmitted")} />}<small className="table-subline">{Math.round((Date.now() - Date.parse(r.updated_at)) / 3600000)}{t("h · revision")}{" "}{r.revision}</small></span> },
                 ],
                 (r) => <div className="detail-actions">{canDecideServiceLinks && (r.qc_actor === user.id || isQualityLead) && <button className="small-btn" onClick={() => open("service_qc_review", { ...r, service_id: r.id, student_id: r.student_id, decision: r.qc_status === "Needs Correction" ? "Lock" : "" })}>{t("Review")}</button>}</div>,
@@ -3338,7 +3400,7 @@ export default function Operations({ module: initialModule }: { module: string }
             {Object.entries(JSON.parse(d.policies?.[0]?.config || "{}")).map(
               ([k, v]) => (
                 <span key={k}>
-                  {k}
+                  {t(policyLabels[k] || k)}
                   <strong>{String(v)}</strong>
                 </span>
               ),
@@ -3385,10 +3447,10 @@ export default function Operations({ module: initialModule }: { module: string }
               {
                 key: "created_at",
                 label: t("When"),
-                render: (r) => new Date(r.created_at).toLocaleString(),
+                render: (r) => new Date(r.created_at).toLocaleString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB"),
               },
               { key: "actor", label: t("Actor"), render: (r) => owner(r.actor) },
-              { key: "action", label: t("Action") },
+              { key: "action", label: t("Action"), render: (r) => t(r.action) },
               { key: "entity_id", label: t("Record") },
               { key: "reason", label: t("Reason") },
             ]),
@@ -3546,7 +3608,7 @@ export default function Operations({ module: initialModule }: { module: string }
             <span className="avatar navy">{user.name?.slice(0, 1) || "A"}</span>
             <div>
               <strong>{user.name}</strong>
-              <small>{user.title ? String(user.title).split(" · ").map((part: string) => t(part)).join(" · ") : user.roles?.[0] || t("Workspace setup")}</small>
+              <small>{user.title ? String(user.title).split(" · ").map((part: string) => t(part)).join(" · ") : user.roles?.[0] ? t(user.roles[0]) : t("Workspace setup")}</small>
             </div>
             <a className="profile-signout" href="/api/auth/logout" title={t("Sign out")} aria-label={t("Sign out")}>
               <LogOut size={17} />
@@ -3613,7 +3675,7 @@ export default function Operations({ module: initialModule }: { module: string }
                 </button>
               )}
               <span className="banner-date">
-                {new Date().toLocaleDateString("en-GB", {
+                {new Date().toLocaleDateString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", {
                   day: "numeric",
                   month: "long",
                   year: "numeric",
@@ -3960,7 +4022,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     .sort((a, b) => a.starts_at.localeCompare(b.starts_at))[0];
                   const link = groups.find((g) => g.id === selectedStudent.group_id)?.session_link;
                   const options: [string, "reminder" | "absence" | "congratulations", Row][] = [
-                    [t("Session reminder"), "reminder", { name: selectedStudent.name, title: next?.title || "", when: next ? fmt(next.starts_at) + " " + new Date(next.starts_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" }) : "", link: link || "" }],
+                    [t("Session reminder"), "reminder", { name: selectedStudent.name, title: next?.title || "", when: next ? fmt(next.starts_at) + " " + new Date(next.starts_at).toLocaleTimeString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" }) : "", link: link || "" }],
                     [t("Absence follow-up"), "absence", { name: selectedStudent.name }],
                     [t("First-service congratulations"), "congratulations", { name: selectedStudent.name }],
                   ];
@@ -4011,10 +4073,10 @@ export default function Operations({ module: initialModule }: { module: string }
                     <AlertTriangle size={20} />
                     <div>
                       <strong>
-                        {t("System recommendation:")}{" "}{selectedStudent.risk.status}
+                        {t("System recommendation:")}{" "}{t(selectedStudent.risk.status)}
                       </strong>
                       <p>
-                        {selectedStudent.risk.reasons.join(" · ") ||
+                        {selectedStudent.risk.reasons.map(riskReason).join(" · ") ||
                           t("No active risk triggers")}
                       </p>
                     </div>
@@ -4028,7 +4090,7 @@ export default function Operations({ module: initialModule }: { module: string }
                       ["Supervisor", owner(selectedStudent.supervisor)],
                       ["Coach", owner(selectedStudent.coach)],
                       ["Journey", t("Week {v0}", { v0: selectedStudent.week })],
-                      ["Pathway", selectedStudent.pathway],
+                      ["Pathway", t(selectedStudent.pathway || "Not recorded")],
                       ["Last valid contact", fmt(selectedStudent.last_contact)],
                       [
                         "Attendance",
@@ -4053,8 +4115,8 @@ export default function Operations({ module: initialModule }: { module: string }
                     <p>
                       {selectedStudent.next_task
                         ? owner(selectedStudent.next_task.owner) +
-                          " · Due " +
-                          fmt(selectedStudent.next_task.due)
+                          " · " +
+                          t("Due {v0}", { v0: fmt(selectedStudent.next_task.due) })
                         : t("Create an action with an owner and due date.")}
                     </p>
                   </div>
@@ -5265,7 +5327,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     </div>
                     <div className="review-checks">
                       {roles.map((r) => (
-                        <label className="check" key={r}>
+                        <label className="check" key={r} title={r}>
                           <Checkbox
                             checked={form.roles?.includes(r) || false}
                             onCheckedChange={(v) =>
@@ -5361,40 +5423,7 @@ export default function Operations({ module: initialModule }: { module: string }
                         ([key, defaultValue]) => (
                           <label className="field" key={key}>
                             {t(
-                              (
-                                {
-                                  contactDays: "Contact interval (days)",
-                                  coachHours: "Coach review SLA (hours)",
-                                  l1Hours: "Coordinator L1 SLA (hours)",
-                                  qualityHours: "Quality review SLA (hours)",
-                                  correctionDays: "Correction window (days)",
-                                  failedAttempts: "Failed contact attempts",
-                                  failedWindowDays: "Attempt window (days)",
-                                  target: "Graduation target (%)",
-                                  minGig: "Minimum service value (USD)",
-                                  gigCount: "Qualifying service count",
-                                  minTotal: "Minimum total (USD)",
-                                  largeGig: "Large-service threshold (USD)",
-                                  riskAttendance: "At Risk attendance (%)",
-                                  criticalAttendance: "Critical attendance (%)",
-                                  journeyDelayedLag: "Delayed journey lag",
-                                  journeyCriticalLag: "Critical journey lag",
-                                  milestoneWeek1: "Week 1 milestone",
-                                  milestoneWeek2: "Week 2 milestone",
-                                  milestoneWeek3: "Week 3 milestone",
-                                  milestoneWeek4: "Week 4 milestone",
-                                  milestoneWeek5: "Week 5 milestone",
-                                  milestoneWeek6: "Week 6 milestone",
-                                  milestoneWeek7: "Week 7 milestone",
-                                  milestoneWeek8: "Week 8 milestone",
-                                  regularSessionCount:
-                                    "Regular session count",
-                                  industrySessionCount:
-                                    "Industry session count",
-                                  sessionMinutes:
-                                    "Session duration (minutes)",
-                                } as Row
-                              )[key] || key,
+                              policyLabels[key] || key,
                             )}
                             <input
                               required
@@ -5629,8 +5658,7 @@ export default function Operations({ module: initialModule }: { module: string }
               setImportRows([]);
               setSheetHeaders([]);
             }}
-            options={
-              importMode === "update"
+            options={(importMode === "update"
                 ? updatableModules
                 : [
                     "staff",
@@ -5651,7 +5679,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     "assessment_results",
                     "withdrawals",
                     "post_program_outcomes",
-                  ]
+                  ]).map((m) => ({ value: m, label: t(importKinds[m] || m) }))
             }
           />
           <div className="import-tools">

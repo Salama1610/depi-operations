@@ -1,5 +1,7 @@
 "use client";
-import { useT } from "@/lib/i18n/context";
+import { useLocale, useT } from "@/lib/i18n/context";
+/** What a search result is, by name a person reads. */
+const searchKinds: Record<string, string> = { student: "Student", group: "Group", gig: "Paid service", evidence: "Service proof", case: "Case", account: "Client account", application: "Application", certificate: "Certificate", outcome: "Post-programme outcome" };
 import { SearchableSelect } from "@/components/searchable-select";
 import { useState, useEffect } from "react";
 import { Download, LockKeyhole, RefreshCw, Search } from "lucide-react";
@@ -242,7 +244,7 @@ export function ReportsPanel({ canExport = false, showStaff = true }: { canExpor
               {data.graduation_scenarios.with_all_pending_evidence_accepted}{" "}
               {t("would qualify if every pending review in the scenario were accepted.")}
             </p>
-            <p>{data.graduation_scenarios.description}</p>
+            <p>{t(data.graduation_scenarios.description)}</p>
             <h3>{t("Student service-link QC")}</h3>
             <div className="mini-stats">
               <span><strong>{data.service_links.submitted_percent}%</strong>{t("Submitted")}</span>
@@ -384,6 +386,7 @@ export function NotificationCenter({
   onStudent: (id: string) => void;
 }) {
   const t = useT();
+  const locale = useLocale();
   const [items, setItems] = useState<any[]>([]),
     [error, setError] = useState("");
   useEffect(() => {
@@ -421,7 +424,7 @@ export function NotificationCenter({
               {n.title}
             </strong>
             <small>
-              {n.severity} · {new Date(n.created_at).toLocaleString()}
+              {t(n.severity)} · {new Date(n.created_at).toLocaleString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB")}
             </small>
           </span>
         </button>
@@ -520,7 +523,7 @@ export function GlobalSearch({
                 <span>
                   <strong>{r.label}</strong>
                   <small>
-                    {r.type} · {r.id} · {r.detail}
+                    {t(searchKinds[r.type] || r.type)} · {r.id} · {r.detail}
                   </small>
                 </span>
               </button>
@@ -578,11 +581,11 @@ export function RetentionPanel() {
       <div className="form-grid">
         <label className="field">
           {t("Data scope")}
-          <SearchableSelect label={t("Data scope")} value={form.scope} onChange={(scope) => setForm({ ...form, scope })} options={["audit_events", "attachments", "notifications", "automation_runs", "imports", "exports"]} />
+          <SearchableSelect label={t("Data scope")} value={form.scope} onChange={(scope) => setForm({ ...form, scope })} options={["audit_events", "attachments", "notifications", "automation_runs", "imports", "exports"].map((v) => ({ value: v, label: t(v) }))} />
         </label>
         <label className="field">
           {t("Approved action")}
-          <SearchableSelect label={t("Approved action")} value={form.retention_action} onChange={(retention_action) => setForm({ ...form, retention_action })} options={["archive", "anonymize", "secure_delete"]} />
+          <SearchableSelect label={t("Approved action")} value={form.retention_action} onChange={(retention_action) => setForm({ ...form, retention_action })} options={["archive", "anonymize", "secure_delete"].map((v) => ({ value: v, label: t(v) }))} />
         </label>
         <label className="field">
           {t("Retention days")}
