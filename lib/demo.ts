@@ -106,8 +106,8 @@ export function demoPlan(nowMs: number): Statement[] {
   ];
   for (const s of sessionRows)
     plan.push([
-      "INSERT INTO sessions(id,group_id,coach_id,title,starts_at,session_day,duration_minutes,status,week,confirmed_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-      `${s.group}-W${s.week}`, s.group, s.group === "DEMO-G1" ? "DEMO-COACH" : "DEMO-COACH2", `Session ${s.week} of 8`, iso(s.at), iso(s.at).slice(0, 10), 180, "Scheduled", s.week,
+      "INSERT INTO sessions(id,group_id,coach_id,coordinator_id,title,starts_at,session_day,duration_minutes,status,week,confirmed_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+      `${s.group}-W${s.week}`, s.group, s.group === "DEMO-G1" ? "DEMO-COACH" : "DEMO-COACH2", "DEMO-COORD", `Session ${s.week} of 8`, iso(s.at), iso(s.at).slice(0, 10), 180, "Scheduled", s.week,
       s.confirmed ? iso(s.at - 2 * day) : null, iso(now),
     ]);
 
