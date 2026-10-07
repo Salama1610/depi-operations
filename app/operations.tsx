@@ -617,10 +617,13 @@ export default function Operations({ module: initialModule }: { module: string }
   // address either.
   const allowedModules = shownNav.map(([m]) => String(m));
   useEffect(() => {
+    // Only once the person is known: before that every role-limited page looks
+    // forbidden, and a refresh or a shared link would bounce to Overview.
     // The quality team starts on their review queue.
+    if (!data?.user) return;
     if (allowedModules.length && !allowedModules.includes(module)) goTo(qualityOnly ? "quality" : allowedModules[0]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [module, allowedModules.join(",")]);
+  }, [module, allowedModules.join(","), Boolean(data?.user)]);
   function open(action: string, row: Row = {}) {
     setModal({ action, ...row });
     setForm({
