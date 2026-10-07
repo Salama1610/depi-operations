@@ -281,24 +281,27 @@ function Pick({
   onChange,
   options,
   label,
+  bare = false,
 }: {
   value: string;
   onChange: (s: string) => void;
   options: (string | { value: string; label: string })[];
   label: string;
+  /** Inside a form field that already shows the label. */
+  bare?: boolean;
 }) {
   const t = useT();
   // The name of the filter is always visible. With only the chosen value
   // shown, a row of filters all read "All" and nobody could tell which was
-  // which.
+  // which. A form field has its own label, so it shows none here.
   return (
     <span className="pick-field">
-      <span className="pick-label">{label}</span>
+      {!bare && <span className="pick-label">{label}</span>}
       <SearchableSelect
         value={value}
         onChange={onChange}
         label={label}
-        placeholder={label}
+        placeholder={bare ? t("Choose") : label}
         className="pick"
         options={options.map((o) => {
           const a = typeof o === "string" ? { value: o, label: o } : o;
@@ -754,6 +757,7 @@ export default function Operations({ module: initialModule }: { module: string }
         {t(label)}
         {required ? " *" : ""}
         <Pick
+          bare
           label={t(label)}
           value={form[key] || ""}
           onChange={(v) => setForm({ ...form, [key]: v })}
@@ -1064,6 +1068,17 @@ export default function Operations({ module: initialModule }: { module: string }
     gig_transition: opsRoles,
     evidence: opsRoles,
     task: [...opsRoles, "Team Supervisor", "Coach", "Coach Operations"],
+  };
+  // The automatic link check's sentences, in the reader's language.
+  const checkText = (text: any) => {
+    const s = String(text || "");
+    let m = s.match(/^Numeric service ID (\d+) and slug detected$/);
+    if (m) return t("Numeric service ID {v0} and slug detected", { v0: m[1] });
+    m = s.match(/^(\w+) is accepted$/);
+    if (m) return t("{v0} is accepted", { v0: t(m[1]) });
+    m = s.match(/^Only (.+) service links are accepted$/);
+    if (m) return t("Only {v0} service links are accepted", { v0: m[1] });
+    return t(s);
   };
   const may = (action: string) => can(user.roles, ["Operations Systems / Admin", ...(actionRoles[action] || [])]);
   // A service's proof, at its current step: the coordinator check for the
@@ -4167,7 +4182,7 @@ export default function Operations({ module: initialModule }: { module: string }
                           <article key={link.id}>
                             <div className="detail-actions"><Badge value={serviceLabel(link.platform)} /><Badge value={qcState(link.qc_status)} /><Badge value={link.auto_status} /></div>
                             <h3><a className="text-link" href={link.url} target="_blank" rel="noreferrer">{link.platform} <ExternalLink size={14} /></a></h3>
-                            <p>{(() => { try { return JSON.parse(link.auto_result || "{}").message; } catch { return t("Automatic details unavailable."); } })()}</p>
+                            <p>{(() => { try { return checkText(JSON.parse(link.auto_result || "{}").message); } catch { return t("Automatic details unavailable."); } })()}</p>
                             <small>{t("Revision")}{" "}{link.revision} {t("· submitted")}{" "}{new Date(link.submitted_at).toLocaleString()}{link.qc_at ? t(" · reviewed {v0} by {v1}", { v0: new Date(link.qc_at).toLocaleString(), v1: link.reviewer_name || owner(link.qc_actor) }) : ""}</small>
                             {serviceLinkReviews.filter((review) => review.service_link_id === link.id).map((review) => (
                               <div className="info-box" key={review.id}><Badge value={review.decision} /><span>{review.comment}</span><small>{new Date(review.reviewed_at).toLocaleString()} · {review.reviewer_name}</small></div>
@@ -5153,7 +5168,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     {(() => {
                       try {
                         const automatic = JSON.parse(modal!.auto_result || "{}");
-                        return <div className="info-box"><strong>{automatic.message}</strong>{(automatic.checks || []).map((check: string) => <small key={check}>{check}</small>)}</div>;
+                        return <div className="info-box"><strong>{checkText(automatic.message)}</strong>{(automatic.checks || []).map((check: string) => <small key={check}>{checkText(check)}</small>)}</div>;
                       } catch { return null; }
                     })()}
                     {choice("decision", t("Review decision"), [

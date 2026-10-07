@@ -157,7 +157,7 @@ export function demoPlan(nowMs: number): Statement[] {
     plan.push([
       "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,account_id,submitted_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET url=excluded.url,normalized_url=excluded.normalized_url,platform=excluded.platform,qc_status=excluded.qc_status,qc_comment=excluded.qc_comment,qc_actor=excluded.qc_actor,qc_at=excluded.qc_at,revision=excluded.revision,submitted_at=excluded.submitted_at,updated_at=excluded.updated_at",
       `${studentId}-LNK-${slot}`, studentId, slot, url, url, platform, "Needs Review",
-      JSON.stringify({ status: "Needs Review", platform, message: "Demo link. Format verified.", checks: ["Secure HTTPS link", `${platform} is accepted`] }),
+      JSON.stringify({ status: "Needs Review", platform, message: "Format verified. QC still confirms availability, ownership, category and track fit.", checks: ["Secure HTTPS link", "Direct public URL", `${platform} is accepted`] }),
       iso(now - 2 * day), status, comment, "DEMO-QC", decided ? iso(now - day) : null, 1, null, iso(now - 2 * day), iso(now - (decided ? day : 2 * day)),
     ]);
   }
