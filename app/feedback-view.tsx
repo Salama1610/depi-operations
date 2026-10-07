@@ -267,7 +267,12 @@ function HandleDialog({ target, responses, onClose, onDone }: { target: Row | nu
         <DialogHeader>
           <DialogTitle>{t("Handle a red flag")}</DialogTitle>
           <DialogDescription>
-            {target ? `${target.group_id} · ${t("Week {v0}", { v0: target.week })} · ${target.coach_name || t("No coach")} · ${day(target.starts_at)}` : ""}
+            {/* Each part isolated, so codes and names keep their order on an Arabic page. */}
+            {target ? (
+              <>
+                <bdi>{target.group_id}</bdi> · <bdi>{t("Week {v0}", { v0: target.week })}</bdi> · <bdi>{target.coach_name || t("No coach")}</bdi> · <bdi>{day(target.starts_at)}</bdi>
+              </>
+            ) : null}
           </DialogDescription>
         </DialogHeader>
         {target && (
@@ -305,7 +310,7 @@ function HandleDialog({ target, responses, onClose, onDone }: { target: Row | nu
                 </label>
               </>
             )}
-            {error && <div className="form-error" role="alert">{error}</div>}
+            {error && <div className="form-error" role="alert">{t(error)}</div>}
             <div className="detail-actions">
               <button type="button" className="small-btn" onClick={onClose}>{t("Cancel")}</button>
               <button type="submit" className="primary" disabled={busy || note.trim().length < 5}>{busy ? t("Saving…") : t("Mark as handled")}</button>
@@ -378,7 +383,7 @@ export function FeedbackView() {
   if (error && !data)
     return (
       <div className="error-panel" role="alert">
-        <p>{error}</p>
+        <p>{t(error)}</p>
         <button className="primary" onClick={load}>{t("Try again")}</button>
       </div>
     );

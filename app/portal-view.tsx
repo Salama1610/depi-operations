@@ -8,7 +8,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ExternalLink, FileUp, RefreshCw } from "lucide-react";
-import { useT } from "@/lib/i18n/context";
+import { useLocale, useT } from "@/lib/i18n/context";
 import { SearchableSelect } from "@/components/searchable-select";
 import { readSheet } from "@/lib/spreadsheet";
 import { guessPortalMapping, mappingProblems, type PortalSheet } from "@/lib/domain/portal-sheets";
@@ -29,6 +29,8 @@ async function call(body: Row, failed: string) {
 
 export function PortalView({ staffName }: { staffName: (id: string) => string }) {
   const t = useT();
+  // Dates in the page's language, with Latin digits like the rest of the app.
+  const tag = useLocale() === "ar" ? "ar-EG-u-nu-latn" : "en-GB";
   const [data, setData] = useState<Row | null>(null);
   const [error, setError] = useState("");
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -151,7 +153,7 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
     setShown(100);
   }
 
-  const when = (iso?: string) => (iso ? new Date(iso).toLocaleString("en-GB", { timeZone: "Africa/Cairo", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "—");
+  const when = (iso?: string) => (iso ? new Date(iso).toLocaleString(tag, { timeZone: "Africa/Cairo", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "—");
   const problems = draft ? mappingProblems(draft.sheet, draft.mapping) : [];
 
   if (!data && !error) return <div className="panel"><RefreshCw className="spin" size={18} /> {t("Loading the portal sheets…")}</div>;
@@ -236,7 +238,7 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
         </div>
       )}
       {notice && <div className="info-box portal-notice">{notice}</div>}
-      {error && <div className="form-error" role="alert">{error}</div>}
+      {error && <div className="form-error" role="alert">{t(error)}</div>}
 
       <div className="mini-stats">
         <span><strong>{students.length}</strong>{t("Students in the portal")}</span>
@@ -332,13 +334,15 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
 
 function PortalRow({ s, c, open, gigs, error, onToggle }: { s: Row; c?: Row; open: boolean; gigs?: Row[]; error?: string; onToggle: () => void }) {
   const t = useT();
+  // Dates in the page's language, with Latin digits like the rest of the app.
+  const tag = useLocale() === "ar" ? "ar-EG-u-nu-latn" : "en-GB";
   const tone = (v?: string) => (/Graduat|Approved/.test(v || "") ? "green" : /Reject|Not/.test(v || "") ? "red" : /Pending|Started/.test(v || "") ? "amber" : "neutral");
   return (
     <>
       <tr className={open ? "is-open" : ""}>
         <td><strong>{s.full_name}</strong><small className="table-subline">{s.email || s.phone}</small></td>
         <td>{s.round_code}<small className="table-subline">{s.provider}</small></td>
-        <td><span className={"badge " + tone(s.final_status)}>{s.final_status || "—"}</span></td>
+        <td><span className={"badge " + tone(s.final_status)}>{s.final_status ? t(s.final_status) : "—"}</span></td>
         <td>{s.graduate_type || "—"}</td>
         <td>
           {c ? `${c.approved}/${c.total}` : `${s.approved_gigs ?? 0}/${s.total_gigs ?? 0}`}
@@ -358,7 +362,7 @@ function PortalRow({ s, c, open, gigs, error, onToggle }: { s: Row; c?: Row; ope
         <tr className="portal-gigs-row">
           <td colSpan={8}>
             {error ? (
-              <small role="alert">{error}</small>
+              <small role="alert">{t(error)}</small>
             ) : !gigs ? (
               <small>{t("Loading…")}</small>
             ) : !gigs.length ? (
@@ -371,11 +375,11 @@ function PortalRow({ s, c, open, gigs, error, onToggle }: { s: Row; c?: Row; ope
                 <tbody>
                   {gigs.map((g) => (
                     <tr key={g.id}>
-                      <td><strong>{g.title}</strong><small className="table-subline">{g.category} · {g.created_on ? new Date(g.created_on).toLocaleDateString("en-GB") : ""}</small></td>
+                      <td><strong>{g.title}</strong><small className="table-subline">{g.category} · {g.created_on ? new Date(g.created_on).toLocaleDateString(tag) : ""}</small></td>
                       <td>{g.organization}</td>
                       <td>{g.price != null ? "$" + g.price : "—"}</td>
-                      <td><span className={"badge " + tone(g.status)}>{g.status}</span></td>
-                      <td><span className={"badge " + tone(g.auditor_status)}>{g.auditor_status}</span><small className="table-subline">{g.action_by}</small></td>
+                      <td><span className={"badge " + tone(g.status)}>{g.status ? t(g.status) : "—"}</span></td>
+                      <td><span className={"badge " + tone(g.auditor_status)}>{g.auditor_status ? t(g.auditor_status) : "—"}</span><small className="table-subline">{g.action_by}</small></td>
                       <td><small>{g.comment}</small></td>
                       <td>
                         {g.url && <a className="text-link" href={g.url} target="_blank" rel="noreferrer">{t("Gig")} <ExternalLink size={12} /></a>}

@@ -72,7 +72,7 @@ export function CoachProgress() {
   if (error && !data)
     return (
       <div className="error-panel" role="alert">
-        <p>{error}</p>
+        <p>{t(error)}</p>
         <button className="primary" onClick={load}>{t("Try again")}</button>
       </div>
     );
@@ -113,7 +113,7 @@ export function CoachProgress() {
                 </span>
                 <span className="coach-progress-total">{usd(s.total_usd)}</span>
                 <span className={"cue " + portalTone(s.portal?.final_status)} title={t("Status on the ministry portal")}>
-                  {s.portal?.final_status || t("Not on the portal yet")}
+                  {s.portal?.final_status ? t(s.portal.final_status) : t("Not on the portal yet")}
                 </span>
               </summary>
               <div className="coach-progress-detail">
@@ -127,7 +127,7 @@ export function CoachProgress() {
                         const word = reviewWords[g.review_status] || { label: g.review_status ? g.review_status : "Not submitted yet", tone: "is-info" };
                         return (
                           <li key={g.id}>
-                            <span>{g.platform} · {usd(g.usd)} · {day(g.date)}</span>
+                            <span><bdi>{g.platform}</bdi> · <bdi>{usd(g.usd)}</bdi> · <bdi>{day(g.date)}</bdi></span>
                             <span className={"cue " + word.tone}>{t(word.label)}</span>
                           </li>
                         );
@@ -143,10 +143,10 @@ export function CoachProgress() {
                     <ul>
                       {s.portal.gigs.map((g: Row) => (
                         <li key={g.id}>
-                          <span>{g.title || t("Untitled gig")} · {usd(g.price)} · {day(g.date)}</span>
+                          <span><bdi>{g.title || t("Untitled gig")}</bdi> · <bdi>{usd(g.price)}</bdi> · <bdi>{day(g.date)}</bdi></span>
                           <span className="coach-progress-portal">
-                            <span className={"cue " + portalTone(g.status)} title={t("Portal status")}>{g.status || "—"}</span>
-                            <span className={"cue " + portalTone(g.auditor_status)} title={t("Auditor")}>{g.auditor_status || "—"}</span>
+                            <span className={"cue " + portalTone(g.status)} title={t("Portal status")}>{g.status ? t(g.status) : "—"}</span>
+                            <span className={"cue " + portalTone(g.auditor_status)} title={t("Auditor")}>{g.auditor_status ? t(g.auditor_status) : "—"}</span>
                           </span>
                         </li>
                       ))}

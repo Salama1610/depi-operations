@@ -32,6 +32,24 @@ import {
 
 type Row = Record<string, any>;
 
+/** The report's column keys, as people read them. */
+const columnLabels: Record<string, string> = {
+  student_id: "Student ID",
+  name: "Name",
+  email: "Email",
+  phone: "Phone",
+  track: "Track",
+  group: "Group",
+  lifecycle: "Lifecycle",
+  engagement: "Engagement",
+  coaching: "Coaching",
+  milestone: "Milestone",
+  graduation: "Graduation",
+  certificate_status: "Certificate status",
+  final_assessment: "Final assessment",
+  post_program_outcome: "Post-program outcome",
+};
+
 /**
  * Date-time inputs show and take the reader's own clock. Their value has no
  * time zone, and the server reads a zone-less value as UTC, so a time typed in
@@ -284,7 +302,7 @@ export function ProgramFlow() {
       />
     </label>
   );
-  const checklist = (key: string, options: string[]) => (
+  const checklist = (key: string, options: string[], label: (option: string) => string = (option) => option) => (
     <div className="review-checks">
       {options.map((option) => (
         <label className="check" key={option}>
@@ -299,7 +317,7 @@ export function ProgramFlow() {
               })
             }
           />
-          {t(option)}
+          {t(label(option))}
         </label>
       ))}
     </div>
@@ -487,7 +505,7 @@ export function ProgramFlow() {
                       </span>
                       {assigned.map((c: Row) => (
                         <small key={c.id}>
-                          {c.coach_type}: {c.coach_name} · {c.onboarding_status}
+                          {t(c.coach_type)}: <bdi>{c.coach_name}</bdi> · {t(c.onboarding_status)}
                         </small>
                       ))}
                       {!assigned.length && (
@@ -803,9 +821,9 @@ export function ProgramFlow() {
               </div>
               {d.readiness.map((r: Row) => (
                 <div className="info-box" key={r.key}>
-                  <strong>{r.label}</strong>
+                  <strong>{t(r.label)}</strong>
                   <Badge value={r.status} />
-                  <small>{r.detail}</small>
+                  <small>{t(r.detail)}</small>
                 </div>
               ))}
             </section>
@@ -1155,7 +1173,7 @@ export function ProgramFlow() {
             {modal?.action === "report_definition" && (
               <>
                 {field("name", t("Ministry report format name"))}
-                {checklist("columns", d.reportFields || [])}
+                {checklist("columns", d.reportFields || [], (key) => columnLabels[key] || key)}
                 {field("reason", t("Authority / change reason"))}
               </>
             )}

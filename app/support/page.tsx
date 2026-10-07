@@ -154,7 +154,7 @@ export default function SupportPage() {
 
         {loadError && !data ? (
           <div className="form-error" role="alert">
-            {loadError}{" "}
+            {t(loadError)}{" "}
             {/sign in/i.test(loadError) ? <a href="/login">{t("Sign in")}</a> : <button className="small-btn" onClick={load}>{t("Try again")}</button>}
           </div>
         ) : !data ? (
@@ -231,7 +231,7 @@ export default function SupportPage() {
                 </label>
               )}
             </div>
-            {error && <div className="form-error" role="alert">{error}</div>}
+            {error && <div className="form-error" role="alert">{t(error)}</div>}
             <div className="detail-actions">
               <button type="submit" className="primary" disabled={!ready || busy}><Send size={16} /> {busy ? t("Sending…") : t("Send report")}</button>
             </div>
@@ -350,7 +350,7 @@ function ReportItem({ report, onSaved, when }: { report: Row; onSaved: () => voi
           {t("What was done")}
           <textarea rows={2} maxLength={2000} value={resolution} onChange={(e) => setResolution(e.target.value)} />
         </label>
-        {error && <div className="form-error" role="alert">{error}</div>}
+        {error && <div className="form-error" role="alert">{t(error)}</div>}
         <button type="button" className="primary small" disabled={busy || (status === report.status && resolution === (report.resolution || ""))} onClick={save}>
           {busy ? t("Saving…") : t("Save")}
         </button>

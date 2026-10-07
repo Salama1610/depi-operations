@@ -32,9 +32,10 @@ export default function LoginForm({ configured }: { configured: boolean }) {
       }
       // A gateway error page is HTML; it must not surface as a parser message.
       const value = await response.json().catch(() => null);
-      if (!response.ok || !value || value.error) throw new Error(value?.error || t("Unable to continue."));
+      // The sign-in service answers in English; ar.ts carries its sentences.
+      if (!response.ok || !value || value.error) throw new Error(value?.error ? t(value.error) : t("Unable to continue."));
       if (mode === "login") window.location.assign(value.redirect || "/");
-      else setMessage(value.message || t("If this email is registered, a reset link is on its way."));
+      else setMessage(t(value.message || "If this email is registered, a reset link is on its way."));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : t("Unable to continue."));
     } finally {

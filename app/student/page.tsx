@@ -1,5 +1,6 @@
 "use client";
 import { LanguageToggle, useLocale, useT } from "@/lib/i18n/context";
+import type { Translate } from "@/lib/i18n";
 
 import { useEffect, useState } from "react";
 import { Check, ExternalLink, LockKeyhole, Plus, RefreshCw, Send, ShieldCheck, X } from "lucide-react";
@@ -88,7 +89,31 @@ function statusTone(status?: string) {
  * that cannot help them.
  */
 function needsSignIn(message: string) {
-  return /sign in|not been linked|no longer be updated|staff workspace/i.test(message);
+  // A closed record ("can no longer be updated") is not a sign-in problem:
+  // signing in again would not help that student.
+  return /sign in|not been linked|staff workspace/i.test(message);
+}
+
+/**
+ * A message from the service or the link check, in the student's language.
+ * Most are fixed sentences in ar.ts; these few carry a number or a name.
+ */
+function say(t: Translate, message: string) {
+  let m = message.match(/^Answer "(.+)" from 1 to 5\.$/);
+  if (m) return t('Answer "{v0}" from 1 to 5.', { v0: t(m[1]) });
+  m = message.match(/^Answer "(.+)"$/);
+  if (m) return t('Answer "{v0}"', { v0: t(m[1]) });
+  m = message.match(/^Link (\d+) is already submitted by another student\. Each student submits their own services\.$/);
+  if (m) return t("Link {v0} is already submitted by another student. Each student submits their own services.", { v0: m[1] });
+  m = message.match(/^Submit at most (\d+) service links\.$/);
+  if (m) return t("Submit at most {v0} service links.", { v0: m[1] });
+  m = message.match(/^At most (\d+) (\w+) links can be submitted; this has (\d+)\.$/);
+  if (m) return t("At most {v0} {v1} links can be submitted; this has {v2}.", { v0: m[1], v1: t(m[2]), v2: m[3] });
+  m = message.match(/^Add at least (\d+) Kafiil or Nafezly links, in any mix\. Links on other sites do not count toward them\.$/);
+  if (m) return t("Add at least {v0} Kafiil or Nafezly links, in any mix. Links on other sites do not count toward them.", { v0: m[1] });
+  m = message.match(/^Only (.+) service links are accepted$/);
+  if (m) return t("Only {v0} service links are accepted", { v0: m[1] });
+  return t(message);
 }
 
 type FeedbackSession = { id: string; title: string; week: number; starts_at: string; coach_name: string | null; given: boolean };
@@ -197,7 +222,7 @@ function SessionFeedback({ sessions, onSent }: { sessions: FeedbackSession[]; on
                     {t("Any comments or support needed?")}
                     <textarea rows={2} value={answers.comments || ""} onChange={(e) => setAnswers({ ...answers, comments: e.target.value })} />
                   </label>
-                  {error && <p className="student-form-error" role="alert">{error}</p>}
+                  {error && <p className="student-form-error" role="alert">{say(t, error)}</p>}
                   <div className="student-actions">
                     <button type="button" className="student-secondary" onClick={() => setOpenId(null)}>{t("Cancel")}</button>
                     <button type="submit" className="student-primary" disabled={!complete || busy}><Send size={16} />{busy ? t("Sending…") : t("Send feedback")}</button>
@@ -287,7 +312,7 @@ export default function StudentServicesPage() {
   function problem(category: ServiceCategory, url: string) {
     if (!url.trim()) return "";
     const check = verifyServiceLink(url, { open: true });
-    if (check.status === "Failed") return check.message;
+    if (check.status === "Failed") return say(t, check.message);
     const belongs = serviceCategory(check.platform);
     if (belongs !== category)
       return category === "Other"
@@ -364,7 +389,7 @@ export default function StudentServicesPage() {
           <ShieldCheck size={24} />
           <div>
             <h1>{needsSignIn(error) ? t("Student sign-in required") : t("We could not load your service links")}</h1>
-            <p>{error}</p>
+            <p>{say(t, error)}</p>
           </div>
           <div className="student-actions">
             {needsSignIn(error) ? <a className="student-primary" href="/login">{t("Sign in")}</a> : null}
@@ -462,7 +487,7 @@ export default function StudentServicesPage() {
                   </div>
                 );
               })}
-              {submitError && <p className="student-form-error" role="alert">{submitError}</p>}
+              {submitError && <p className="student-form-error" role="alert">{say(t, submitError)}</p>}
               {saved && <p className="student-saved"><Check size={17} /> {t("Saved. The quality team can now review your links.")}</p>}
               {(!complete || awaitingFix) && (
                 <div className="student-form-footer">

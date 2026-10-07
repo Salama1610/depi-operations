@@ -25,7 +25,7 @@ export default function PasswordForm({ first = false }: { first?: boolean }) {
       }
       // A gateway error page is HTML; it must not surface as a parser message.
       const value = await response.json().catch(() => null);
-      if (!response.ok || !value || value.error) throw new Error(value?.error || t("Unable to update your password."));
+      if (!response.ok || !value || value.error) throw new Error(value?.error ? t(value.error) : t("Unable to update your password."));
       window.location.assign("/");
     } catch (reason) {
       // Whatever failed, the button must not stay stuck on "Updating…".
