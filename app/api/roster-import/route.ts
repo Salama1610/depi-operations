@@ -94,6 +94,8 @@ async function importMetadata(x: any) {
       ),
     );
   }
+  // A re-run refreshes a group's description, never its status, pathway or
+  // people: a closed group stays closed and a Support group stays Support.
   for (const group of x.groups) {
     const id = requiredText(group.id, "Group ID", 80);
     ensure(/^[A-Za-z0-9_-]+$/.test(id), "Group ID is invalid.");
@@ -101,7 +103,7 @@ async function importMetadata(x: any) {
     ensure(delivery === "Regular", "Group delivery model must be Regular.");
     jobs.push(
       stmt(
-        "INSERT INTO groups(id,name,track,provider,coordinator,supervisor,coach,pathway,delivery_model,start_date,status,policy_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,track=excluded.track,provider=excluded.provider,pathway=excluded.pathway,delivery_model=excluded.delivery_model,start_date=excluded.start_date,status=excluded.status",
+        "INSERT INTO groups(id,name,track,provider,coordinator,supervisor,coach,pathway,delivery_model,start_date,status,policy_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,track=excluded.track,provider=excluded.provider,delivery_model=excluded.delivery_model,start_date=excluded.start_date",
         id,
         requiredText(group.name, "Group name", 160),
         requiredText(group.track, "Group track", 160),
@@ -153,9 +155,12 @@ async function importStudents(x: any) {
       if (["source_row", "milestone"].includes(column)) return Number(value || 0);
       return optionalText(value, column === "name_ar" ? 300 : 500);
     });
+    // A re-run refreshes who the student is, never where they stand: their
+    // group, lifecycle, engagement and coaching change through their own audited
+    // actions, and a re-run would silently undo withdrawals and transfers.
     jobs.push(
       stmt(
-        `INSERT INTO students(${studentColumns.join(",")}) VALUES(${studentColumns.map(() => "?").join(",")}) ON CONFLICT(id) DO UPDATE SET tp_id=excluded.tp_id,national_id=excluded.national_id,name=excluded.name,name_ar=excluded.name_ar,group_id=excluded.group_id,email=excluded.email,phone=excluded.phone,job_profile=excluded.job_profile,student_type=excluded.student_type,source_status=excluded.source_status,serial=excluded.serial,round_1=excluded.round_1,source_row=excluded.source_row,lifecycle=excluded.lifecycle,engagement=excluded.engagement,coaching=excluded.coaching,created_at=excluded.created_at`,
+        `INSERT INTO students(${studentColumns.join(",")}) VALUES(${studentColumns.map(() => "?").join(",")}) ON CONFLICT(id) DO UPDATE SET tp_id=excluded.tp_id,national_id=excluded.national_id,name=excluded.name,name_ar=excluded.name_ar,email=excluded.email,phone=excluded.phone,job_profile=excluded.job_profile,student_type=excluded.student_type,source_status=excluded.source_status,serial=excluded.serial,round_1=excluded.round_1,source_row=excluded.source_row`,
         ...values,
       ),
     );
@@ -190,7 +195,12 @@ async function finalizeImport(x: any, user: any) {
   const importId = requiredText(x.import_id, "Import ID", 80);
   const batch: any = await stmt("SELECT * FROM roster_imports WHERE id=? AND status='Importing'", importId).first();
   ensure(batch, "Roster import is not open.");
-  const students: any = await stmt("SELECT count(*) n,count(DISTINCT lower(email)) emails FROM students").first();
+  // This import's students only: the table also holds students admitted or
+  // added since, and the demo groups.
+  const students: any = await stmt(
+    "SELECT count(*) n,count(DISTINCT lower(email)) emails FROM students WHERE id IN (SELECT student_id FROM roster_source_rows WHERE import_id=?)",
+    importId,
+  ).first();
   const sources: any = await stmt("SELECT count(*) n,sum(CASE WHEN disposition='Duplicate merged' THEN 1 ELSE 0 END) duplicates FROM roster_source_rows WHERE import_id=?", importId).first();
   const groups: any = await stmt("SELECT count(*) n FROM groups").first();
   ensure(Number(students.n) === Number(batch.canonical_students), "Student reconciliation count does not match.");

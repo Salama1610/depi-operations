@@ -16,15 +16,24 @@ export default function PasswordForm({ first = false }: { first?: boolean }) {
     if (password !== confirmation) return setError(t("Passwords do not match."));
     setBusy(true);
     setError("");
-    const response = await fetch("/api/auth/update-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
-    const value = await response.json();
-    if (!response.ok || value.error) {
-      setError(value.error || t("Unable to update your password."));
+    try {
+      let response: Response;
+      try {
+        response = await fetch("/api/auth/update-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
+      } catch {
+        throw new Error(t("Check your connection and try again."));
+      }
+      // A gateway error page is HTML; it must not surface as a parser message.
+      const value = await response.json().catch(() => null);
+      if (!response.ok || !value || value.error) throw new Error(value?.error || t("Unable to update your password."));
+      window.location.assign("/");
+    } catch (reason) {
+      // Whatever failed, the button must not stay stuck on "Updating…".
+      setError(reason instanceof Error ? reason.message : t("Unable to update your password."));
       setBusy(false);
-      return;
     }
-    window.location.assign("/");
   }
+  const mismatch = confirmation.length > 0 && !password.startsWith(confirmation) && password !== confirmation;
 
   return (
     <main className="auth-shell auth-single">
@@ -39,6 +48,7 @@ export default function PasswordForm({ first = false }: { first?: boolean }) {
           <form className="auth-form" onSubmit={submit}>
             <label><span>{t("New password")}</span><div className="auth-input"><LockKeyhole size={18} /><input type="password" autoComplete="new-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} /></div></label>
             <label><span>{t("Confirm password")}</span><div className="auth-input"><LockKeyhole size={18} /><input type="password" autoComplete="new-password" minLength={8} required value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></div></label>
+            {mismatch && !error && <div className="auth-error" role="status">{t("Passwords do not match.")}</div>}
             {error && <div className="auth-error" role="alert">{error}</div>}
             <button className="auth-submit" disabled={busy}>{busy ? t("Updating…") : t("Update password")}<ArrowRight size={18} /></button>
           </form>

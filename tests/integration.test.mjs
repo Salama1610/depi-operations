@@ -3107,3 +3107,183 @@ test("a demo account cannot open a programme-wide case or read real applicants",
   const real = await (await api.GET()).json();
   assert.ok(!real.cases.some((c) => c.title === "Planted"), "real users never see the demo case");
 });
+
+test("a session rated below 3 is a red flag that Coach Operations handles, and each role sees only its own groups", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const groups = await dbRows(
+    "SELECT g.id,u.id uid,u.email FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.status='Active' AND g.id NOT LIKE 'DEMO-%' AND EXISTS (SELECT 1 FROM students s WHERE s.group_id=g.id AND s.lifecycle='Active') AND g.id NOT IN (SELECT group_id FROM sessions WHERE week=6) ORDER BY g.id",
+  );
+  const a = groups[0];
+  const b = groups.find((g) => g.uid !== a.uid);
+  assert.ok(a && b, "two groups with different coordinators");
+  const started = new Date(Date.now() - 6 * 3600000).toISOString();
+  await check("session", { id: "SES-FLAG-A", group_id: a.id, title: "Week 6 coaching", starts_at: started, week: 6, duration_minutes: 180 });
+  await check("session", { id: "SES-FLAG-B", group_id: b.id, title: "Week 6 coaching", starts_at: started, week: 6, duration_minutes: 180 });
+  const rate = async (session, group, ratings) => {
+    const learners = await dbRows("SELECT id FROM students WHERE group_id=? AND lifecycle='Active' ORDER BY id LIMIT ?", group, ratings.length);
+    for (const [i, [s, c, u]] of ratings.entries())
+      await dbExec(
+        "INSERT INTO session_feedback(id,session_id,student_id,satisfaction,clarity,searched_gig,usefulness,liked,comments,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        `SFB-${session}-${i}`, session, learners[i].id, s, c, 1, u, null, i ? null : "Too fast", new Date().toISOString(),
+      );
+  };
+  await rate("SES-FLAG-A", a.id, [[2, 2, 3], [3, 2, 2]]); // 2.3: a red flag
+  await rate("SES-FLAG-B", b.id, [[5, 4, 4]]); // 4.3: good
+  const feedbackApi = await route("feedback");
+  const get = async (query = "") => (await feedbackApi.GET(new Request("https://test.local/api/feedback" + query))).json();
+  const handle = async (body) =>
+    (
+      await feedbackApi.POST(
+        new Request("https://test.local/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "handle_flag", ...body }) }),
+      )
+    ).json();
+  try {
+    // A coordinator reads their own group's feedback and no one else's, and cannot handle flags.
+    current = { id: a.uid, email: a.email };
+    let view = await get();
+    assert.equal(view.error, undefined, view.error);
+    assert.ok(view.sessions.some((s) => s.id === "SES-FLAG-A"));
+    assert.ok(!view.sessions.some((s) => s.id === "SES-FLAG-B"), "another team's session stays hidden");
+    assert.ok(view.responses.every((r) => r.session_id !== "SES-FLAG-B"));
+    assert.equal(view.handles, false);
+    assert.match((await handle({ session_id: "SES-FLAG-A", note: "Spoke to the coach" })).error, /role does not permit/);
+    // Coaches do not see students' feedback at all.
+    const coach = await dbRow(`SELECT id,email FROM users WHERE roles LIKE '%"Coach"%' AND roles NOT LIKE '%Operations%' AND active=1 LIMIT 1`);
+    if (coach) {
+      current = { id: coach.id, email: coach.email };
+      assert.match((await get()).error, /role does not permit/);
+    }
+    // Coach Operations sees the open flag, handles it once, and may open a case.
+    current = { id: "staff-coach-ops", email: "staff-coach-ops@example.invalid" };
+    const summary = await get("?summary=1");
+    assert.equal(summary.handles, true);
+    assert.ok(summary.open >= 1);
+    assert.match((await handle({ session_id: "SES-FLAG-B", note: "Nothing to fix here" })).error, /below 3 out of 5/);
+    assert.match((await handle({ session_id: "SES-FLAG-A", note: "ok" })).error, /5 to 2,000/);
+    const done = await handle({ session_id: "SES-FLAG-A", note: "Called the coach; agreed a slower pace next week.", open_case: true });
+    assert.equal(done.error, undefined, done.error);
+    const kase = await dbRow("SELECT * FROM cases WHERE id=?", done.case_id);
+    assert.equal(kase.group_id, a.id, "the case belongs to the group, not the whole programme");
+    assert.equal(kase.status, "Open");
+    assert.equal((await get("?summary=1")).open, summary.open - 1);
+    assert.match((await handle({ session_id: "SES-FLAG-A", note: "Second attempt at it" })).error, /already handled/);
+    const flag = (await get()).handled.find((h) => h.session_id === "SES-FLAG-A");
+    assert.equal(Number(flag.score), 2.3);
+    assert.equal(flag.case_id, done.case_id);
+    assert.equal(flag.handled_by, "staff-coach-ops");
+  } finally {
+    current = { id: "owner", email: "owner@example.com" };
+  }
+});
+
+test("a coach sees their own students' progress, and nothing about how a gig was paid for", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const progressApi = await route("coach-progress");
+  const get = async () => (await progressApi.GET(new Request("https://test.local/api/coach-progress"))).json();
+  const learner = await dbRow(
+    "SELECT s.id,s.group_id FROM students s JOIN groups g ON g.id=s.group_id WHERE g.coach='staff-coach' AND s.lifecycle='Active' AND g.id NOT LIKE 'DEMO-%' ORDER BY s.id LIMIT 1",
+  );
+  const at = new Date().toISOString();
+  await dbExec(
+    "INSERT INTO gigs(id,student_id,platform,title,value,currency,order_ref,status,due,created_at,paid_by_account) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+    "GIG-COACHVIEW", learner.id, "Kafeel", "Bought through ACC-SECRET", 12, "USD", "ORD-COACHVIEW", "Paid", at, at, "ACC-SECRET",
+  );
+  try {
+    current = { id: "staff-coach", email: "staff-coach@example.invalid" };
+    const view = await get();
+    assert.equal(view.error, undefined, view.error);
+    const coached = new Set(
+      (
+        await dbRows(
+          "SELECT g.id FROM groups g WHERE g.coach='staff-coach' OR EXISTS (SELECT 1 FROM group_coaches gc WHERE gc.group_id=g.id AND gc.user_id='staff-coach' AND gc.status='Active' AND gc.coach_type IN ('Outcome Coach','Support Coach'))",
+        )
+      ).map((g) => g.id),
+    );
+    assert.ok(view.students.length > 0);
+    assert.ok(view.students.every((s) => coached.has(s.group_id)), "only the groups this person coaches");
+    const gig = view.students.find((s) => s.id === learner.id).gigs.find((g) => g.id === "GIG-COACHVIEW");
+    assert.ok(gig, "the gig is listed");
+    assert.equal(gig.usd, 12);
+    assert.equal(gig.review_status, null, "not yet submitted for review");
+    const text = JSON.stringify(view);
+    for (const hidden of ["ACC-SECRET", "paid_by_account", "account_id", "Bought through", "gig_status", "client_name", "organization"])
+      assert.ok(!text.includes(hidden), `the coach view never carries ${hidden}`);
+    // A coordinator is not a coach.
+    const coordinator = await dbRow(`SELECT id,email FROM users WHERE roles LIKE '%Operations Coordinator%' AND roles NOT LIKE '%"Coach"%' AND roles NOT LIKE '%Admin%' AND active=1 LIMIT 1`);
+    current = { id: coordinator.id, email: coordinator.email };
+    assert.match((await get()).error, /role does not permit/);
+  } finally {
+    current = { id: "owner", email: "owner@example.com" };
+    await dbExec("DELETE FROM gigs WHERE id='GIG-COACHVIEW'").catch(() => {});
+  }
+});
+
+test("staff report technical problems with a screenshot, and the system owner works them to resolved", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  const objects = new Map();
+  const previous = globalThis.__testEnv.BUCKET;
+  globalThis.__testEnv.BUCKET = {
+    put: async (key, value) => void objects.set(key, Buffer.from(value)),
+    get: async (key) => (objects.has(key) ? { body: new Blob([objects.get(key)]).stream() } : null),
+    delete: async (key) => void objects.delete(key),
+  };
+  const supportApi = await route("support");
+  const png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13]);
+  const report = async (fields, file) => {
+    const body = new FormData();
+    for (const [key, value] of Object.entries(fields)) body.set(key, value);
+    if (file) body.set("screenshot", new File([file], "shot.png", { type: "image/png" }));
+    return (await supportApi.POST(new Request("https://test.local/api/support", { method: "POST", body }))).json();
+  };
+  const update = async (x) =>
+    (
+      await supportApi.POST(
+        new Request("https://test.local/api/support", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "update", ...x }) }),
+      )
+    ).json();
+  const list = (query = "") => supportApi.GET(new Request("https://test.local/api/support" + query));
+  try {
+    const coordinator = await dbRow(`SELECT id,email FROM users WHERE roles LIKE '%Operations Coordinator%' AND roles NOT LIKE '%Admin%' AND id NOT LIKE 'DEMO-%' AND active=1 LIMIT 1`);
+    current = { id: coordinator.id, email: coordinator.email };
+    const base = { category: "Bug", severity: "Major", page: "Sessions", action: "Opened week 3 and pressed Take attendance", happened: "The window closed without saving" };
+    assert.match((await report({ ...base, category: "Question" })).error, /kind of problem/);
+    assert.match((await report(base, Uint8Array.from([1, 2, 3, 4, 5]))).error, /PNG or JPEG/);
+    const sent = await report(base, png);
+    assert.equal(sent.error, undefined, sent.error);
+    const row = await dbRow("SELECT * FROM support_reports WHERE id=?", sent.id);
+    assert.equal(row.reporter, coordinator.id);
+    assert.equal(row.status, "Open");
+    assert.ok(row.screenshot_key.startsWith("support/") && objects.has(row.screenshot_key));
+    assert.ok((await dbRow("SELECT count(*) n FROM notifications WHERE entity_type='support' AND entity_id=?", sent.id)).n >= 1, "the system owner is told");
+    let view = await (await list()).json();
+    assert.equal(view.admin, false);
+    assert.ok(view.reports.some((r) => r.id === sent.id));
+    assert.equal((await list("?screenshot=" + sent.id)).status, 200);
+    assert.match((await update({ id: sent.id, status: "Resolved", resolution: "Fixed" })).error, /role does not permit/);
+    // Another member of staff sees neither the report nor its screenshot.
+    const other = await dbRow(`SELECT id,email FROM users WHERE roles NOT LIKE '%Admin%' AND id NOT LIKE 'DEMO-%' AND id<>? AND active=1 LIMIT 1`, coordinator.id);
+    current = { id: other.id, email: other.email };
+    view = await (await list()).json();
+    assert.ok(!view.reports.some((r) => r.id === sent.id));
+    assert.match((await (await list("?screenshot=" + sent.id)).json()).error, /not found/);
+    // The system owner sees every report and closes it with what was done.
+    current = { id: "owner", email: "owner@example.com" };
+    view = await (await list()).json();
+    assert.equal(view.admin, true);
+    assert.ok(view.reports.some((r) => r.id === sent.id));
+    assert.match((await update({ id: sent.id, status: "Resolved" })).error, /what was done/);
+    assert.equal((await update({ id: sent.id, status: "Resolved", resolution: "Saved marks now persist." })).error, undefined);
+    assert.equal((await dbRow("SELECT status FROM support_reports WHERE id=?", sent.id)).status, "Resolved");
+    // Demo sign-ins cannot send reports.
+    const demo = await dbRow("SELECT id,email FROM users WHERE id LIKE 'DEMO-%' AND active=1 LIMIT 1");
+    if (demo) {
+      current = { id: demo.id, email: demo.email };
+      assert.match((await report(base)).error, /not available in the demo/);
+    }
+  } finally {
+    globalThis.__testEnv.BUCKET = previous;
+    current = { id: "owner", email: "owner@example.com" };
+  }
+});

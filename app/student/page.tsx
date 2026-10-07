@@ -1,5 +1,5 @@
 "use client";
-import { LanguageToggle, useT } from "@/lib/i18n/context";
+import { LanguageToggle, useLocale, useT } from "@/lib/i18n/context";
 
 import { useEffect, useState } from "react";
 import { Check, ExternalLink, LockKeyhole, Plus, RefreshCw, Send, ShieldCheck, X } from "lucide-react";
@@ -40,11 +40,40 @@ const empty = (): Service[] => [];
 const reviewLabel: Record<string, string> = {
   Locked: "Approved",
   "Needs Correction": "Rejected",
-  "Pending QC": "With your coordinator",
+  "Pending QC": "With the quality team",
   "In Progress": "Add more links",
-  Pending: "With your coordinator",
+  Pending: "With the quality team",
 };
 const label = (status?: string) => (status ? reviewLabel[status] || status : "");
+
+/**
+ * Dates in the page's language, on Cairo time with Latin digits, the same way
+ * the staff workspace shows them, so a student and their reviewer see one time.
+ */
+function useDates() {
+  const tag = useLocale() === "ar" ? "ar-EG-u-nu-latn" : "en-GB";
+  const zone = { timeZone: "Africa/Cairo" } as const;
+  return {
+    day: (value: string) => new Date(value).toLocaleDateString(tag, { ...zone, day: "numeric", month: "short" }),
+    moment: (value: string) => new Date(value).toLocaleString(tag, { ...zone, day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }),
+  };
+}
+
+/**
+ * Reads a JSON reply from the service. A gateway's HTML error page or a lost
+ * connection becomes the caller's own sentence, never a parser message.
+ */
+async function serviceCall(input: string, init: RequestInit | undefined, failed: string, offline: string) {
+  let response: Response;
+  try {
+    response = await fetch(input, init);
+  } catch {
+    throw new Error(offline);
+  }
+  const value = await response.json().catch(() => null);
+  if (!response.ok || !value || value.error) throw new Error(value?.error || failed);
+  return value;
+}
 
 function statusTone(status?: string) {
   if (status === "Locked" || status === "Verified" || status === "Complete") return "student-status success";
@@ -78,6 +107,7 @@ const ratingQuestions: { key: "satisfaction" | "clarity" | "usefulness"; text: s
  */
 function SessionFeedback({ sessions, onSent }: { sessions: FeedbackSession[]; onSent: (s: FeedbackSession[]) => void }) {
   const t = useT();
+  const dates = useDates();
   const [openId, setOpenId] = useState<string | null>(null);
   const [answers, setAnswers] = useState<FeedbackAnswers>({});
   const [busy, setBusy] = useState(false);
@@ -89,13 +119,16 @@ function SessionFeedback({ sessions, onSent }: { sessions: FeedbackSession[]; on
     setBusy(true);
     setError("");
     try {
-      const response = await fetch("/api/student-services", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "session_feedback", session_id: sessionId, ...answers }),
-      });
-      const value = await response.json();
-      if (!response.ok || value.error) throw new Error(value.error || t("Unable to send your feedback."));
+      const value = await serviceCall(
+        "/api/student-services",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "session_feedback", session_id: sessionId, ...answers }),
+        },
+        t("Unable to send your feedback."),
+        t("Check your connection and try again."),
+      );
       onSent(value.sessions || []);
       setOpenId(null);
       setAnswers({});
@@ -107,7 +140,7 @@ function SessionFeedback({ sessions, onSent }: { sessions: FeedbackSession[]; on
   }
   if (!sessions.length) return null;
   return (
-    <section className="student-card" aria-labelledby="feedback-title">
+    <section className="student-card" id="feedback" aria-labelledby="feedback-title">
       <div className="student-card-heading">
         <div>
           <h2 id="feedback-title">{t("Session feedback")}</h2>
@@ -120,7 +153,7 @@ function SessionFeedback({ sessions, onSent }: { sessions: FeedbackSession[]; on
           <article className="student-service-row feedback-row" key={s.id}>
             <div className="student-slot">
               <span>{t("Week {v0}", { v0: s.week })}</span>
-              <strong>{new Date(s.starts_at).toLocaleDateString()}</strong>
+              <strong>{dates.day(s.starts_at)}</strong>
             </div>
             <div>
               <div className="feedback-head">
@@ -133,6 +166,7 @@ function SessionFeedback({ sessions, onSent }: { sessions: FeedbackSession[]; on
               </div>
               {openId === s.id && (
                 <form className="feedback-form" onSubmit={(e) => { e.preventDefault(); if (complete) send(s.id); }}>
+                  <p className="feedback-scale-hint">{t("1 = poor, 5 = excellent")}</p>
                   {ratingQuestions.map((q) => (
                     <fieldset key={q.key}>
                       <legend>{t(q.text)}</legend>
@@ -175,10 +209,14 @@ function SessionFeedback({ sessions, onSent }: { sessions: FeedbackSession[]; on
 
 export default function StudentServicesPage() {
   const t = useT();
+  const dates = useDates();
   const [student, setStudent] = useState<{ id: string; name: string; email?: string } | null>(null);
   const [services, setServices] = useState<Service[]>(empty());
   const [submission, setSubmission] = useState<any>(null);
+  // A failed load replaces the page; a failed submit is shown under the form,
+  // which keeps everything the student typed.
   const [error, setError] = useState("");
+  const [submitError, setSubmitError] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -195,15 +233,24 @@ export default function StudentServicesPage() {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/student-services", { cache: "no-store" });
-      const value = await response.json();
-      if (!response.ok || value.error) throw new Error(value.error || t("Unable to load your services."));
+      const value = await serviceCall(
+        "/api/student-services",
+        { cache: "no-store" },
+        t("Unable to load your services."),
+        t("Check your connection and try again."),
+      );
       setStudent(value.student);
       setFeedbackSessions(value.feedback_sessions || []);
       setServices(value.services || empty());
       setSubmission(value.submission);
       setReviews(value.reviews || []);
       setLastReviewedAt(value.last_reviewed_at || null);
+      // Blank fields invite a first submission only; a student whose links are
+      // already in adds one with the "Add a link" buttons. Anything typed is kept.
+      if ((value.services || []).length)
+        setDrafts((current) =>
+          Object.values(current).flat().some((url) => url.trim()) ? current : { Nafezly: [], Kafiil: [], Other: [] },
+        );
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -224,6 +271,10 @@ export default function StudentServicesPage() {
   const savedProgress = serviceProgress(services.map((service) => service.platform || ""));
   const lockedRequired = services.filter((service) => service.qc_status === "Locked" && serviceCategory(service.platform || "") !== "Other").length;
   const complete = submission?.status === "Complete" || lockedRequired >= minServiceLinks;
+  // An approved student can still have an extra link sent back; its fix must
+  // stay sendable even though nothing more is required.
+  const awaitingFix = services.some((service) => service.qc_status === "Needs Correction");
+  const feedbackDue = feedbackSessions.filter((s) => !s.given).length;
   const inSection = (category: ServiceCategory) =>
     services.filter((service) => serviceCategory(service.platform || "") === category);
 
@@ -261,15 +312,18 @@ export default function StudentServicesPage() {
     setConfirmOpen(false);
     setBusy(true);
     setSaved(false);
-    setError("");
+    setSubmitError("");
     try {
-      const response = await fetch("/api/student-services", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "submit_services", services: [...corrected, ...newLinks] }),
-      });
-      const value = await response.json();
-      if (!response.ok || value.error) throw new Error(value.error || t("Unable to submit your links."));
+      const value = await serviceCall(
+        "/api/student-services",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "submit_services", services: [...corrected, ...newLinks] }),
+        },
+        t("Unable to submit your links."),
+        t("Check your connection and try again."),
+      );
       setServices(value.services || empty());
       setSubmission(value.submission);
       setReviews(value.reviews || []);
@@ -278,7 +332,7 @@ export default function StudentServicesPage() {
       setFixes({});
       setSaved(true);
     } catch (e: any) {
-      setError(e.message);
+      setSubmitError(e.message);
     } finally {
       setBusy(false);
     }
@@ -318,16 +372,24 @@ export default function StudentServicesPage() {
             <div>
               <span className="student-kicker">{t("SERVICE LINKS / ROUND 5")}</span>
               <h1>{student?.name ? t("Hi {v0}, submit your services.", { v0: student.name.split(" ")[0] }) : t("Submit your services.")}</h1>
-              <p>{t("Add at least three links on Kafiil and Nafezly, in any mix: three on one, or two and one. Links on other sites are optional. Each link is checked automatically, then reviewed by your coordinator.")}</p>
+              <p>{t("Add at least three links on Kafiil and Nafezly, in any mix: three on one, or two and one. Links on other sites are optional. Each link is checked automatically, then reviewed by the quality team.")}</p>
             </div>
             <div className="student-progress"><strong>{Math.min(progress.required, minServiceLinks)}/{minServiceLinks}</strong><span>{t("Kafiil + Nafezly")}</span></div>
           </section>
+
+          {feedbackDue > 0 && (
+            <a className="student-banner" href="#feedback">
+              <Send size={16} />
+              <span>{t("You have {v0} session feedback forms waiting.", { v0: feedbackDue })}</span>
+              <strong>{t("Give feedback now")}</strong>
+            </a>
+          )}
 
           <section className="student-card">
             <div className="student-card-heading">
               <div>
                 <h2>{t("Your services")}</h2>
-                <p>{complete ? t("Your services are approved. Nothing more is needed.") : savedProgress.met ? t("You have the links you need. Your coordinator is reviewing them.") : t("{v0} of {v1} Kafiil or Nafezly links.", { v0: Math.min(progress.required, minServiceLinks), v1: minServiceLinks })}</p>
+                <p>{complete ? t("Your services are approved. Nothing more is needed.") : savedProgress.met ? t("You have the links you need. The quality team is reviewing them.") : t("{v0} of {v1} Kafiil or Nafezly links.", { v0: Math.min(progress.required, minServiceLinks), v1: minServiceLinks })}</p>
               </div>
               {submission && <span className={statusTone(submission.status)}>{t(label(submission.status))}</span>}
             </div>
@@ -336,15 +398,17 @@ export default function StudentServicesPage() {
             </div>
             {submission && (
               <div className="student-meta student-submission-meta">
-                <span>{t("Submitted")}{" "}{new Date(submission.submitted_at).toLocaleString()}</span>
-                <span>{t("Last reviewed")}{" "}{lastReviewedAt ? new Date(lastReviewedAt).toLocaleString() : t("Not reviewed yet")}</span>
+                <span>{t("Submitted")}{" "}{dates.moment(submission.submitted_at)}</span>
+                <span>{t("Last reviewed")}{" "}{lastReviewedAt ? dates.moment(lastReviewedAt) : t("Not reviewed yet")}</span>
               </div>
             )}
 
             <form onSubmit={(e) => { e.preventDefault(); if (canSubmit) setConfirmOpen(true); }}>
               {sections.map(({ category, title, hint, example }) => {
                 const existing = inSection(category);
-                const room = maxLinksPerPlatform - existing.length - drafts[category].length;
+                const room = complete ? 0 : maxLinksPerPlatform - existing.length - drafts[category].length;
+                // Once approved, an empty optional section is just noise.
+                if (complete && !existing.length) return null;
                 return (
                   <div className="student-section" key={category}>
                     <div className="student-section-heading">
@@ -371,7 +435,7 @@ export default function StudentServicesPage() {
                                 {fix.trim() && problem(serviceCategory(platformOf(fix)), fix) && <div className="student-qc-note">{problem(serviceCategory(platformOf(fix)), fix)}</div>}
                               </>
                             )}
-                            {locked && <div className="student-locked-note"><LockKeyhole size={15} /> {t("Approved by your coordinator")}{service.qc_comment ? ` · ${service.qc_comment}` : ""}</div>}
+                            {locked && <div className="student-locked-note"><LockKeyhole size={15} /> {t("Approved by the quality team")}{service.qc_comment ? ` · ${service.qc_comment}` : ""}</div>}
                           </div>
                         </article>
                       );
@@ -393,18 +457,22 @@ export default function StudentServicesPage() {
                   </div>
                 );
               })}
-              {error && <p className="student-form-error" role="alert">{error}</p>}
-              {saved && <p className="student-saved"><Check size={17} /> {t("Saved. Your coordinator can now review your links.")}</p>}
-              <div className="student-form-footer">
-                <span>
-                  {progress.met
-                    ? t("Ready to submit.")
-                    : minServiceLinks - progress.required === 1
-                      ? t("Add 1 more Kafiil or Nafezly link to submit.")
-                      : t("Add {v0} more Kafiil or Nafezly links to submit.", { v0: minServiceLinks - progress.required })}
-                </span>
-                <button className="student-primary" disabled={!canSubmit} type="submit"><Send size={16} />{busy ? t("Submitting…") : t("Submit")}</button>
-              </div>
+              {submitError && <p className="student-form-error" role="alert">{submitError}</p>}
+              {saved && <p className="student-saved"><Check size={17} /> {t("Saved. The quality team can now review your links.")}</p>}
+              {(!complete || awaitingFix) && (
+                <div className="student-form-footer">
+                  <span>
+                    {!progress.met
+                      ? minServiceLinks - progress.required === 1
+                        ? t("Add 1 more Kafiil or Nafezly link to submit.")
+                        : t("Add {v0} more Kafiil or Nafezly links to submit.", { v0: minServiceLinks - progress.required })
+                      : changed
+                        ? t("Ready to submit.")
+                        : t("Nothing new to send. Add a link or fix one to submit again.")}
+                  </span>
+                  <button className="student-primary" disabled={!canSubmit} type="submit"><Send size={16} />{busy ? t("Submitting…") : t("Submit")}</button>
+                </div>
+              )}
             </form>
           </section>
           <SessionFeedback sessions={feedbackSessions} onSent={setFeedbackSessions} />
@@ -415,7 +483,7 @@ export default function StudentServicesPage() {
                 {reviews.map((review) => (
                   <article className="student-service-row" key={review.id}>
                     <div className="student-slot"><span>0{review.slot}</span><strong>{t("Service")}{" "}{review.slot}</strong></div>
-                    <div><span className={statusTone(review.decision)}>{t(label(review.decision))}</span><p>{review.comment}</p><small>{new Date(review.reviewed_at).toLocaleString()} {t("· revision")}{" "}{review.revision}</small></div>
+                    <div><span className={statusTone(review.decision)}>{t(label(review.decision))}</span><p>{review.comment}</p><small>{dates.moment(review.reviewed_at)} {t("· revision")}{" "}{review.revision}</small></div>
                   </article>
                 ))}
               </div>
@@ -428,7 +496,7 @@ export default function StudentServicesPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("Submit your service links?")}</DialogTitle>
-            <DialogDescription>{t("They go to your coordinator for review and cannot be changed until they respond.")}</DialogDescription>
+            <DialogDescription>{t("They go to the quality team for review and cannot be changed until they respond.")}</DialogDescription>
           </DialogHeader>
           <ol className="student-confirm-list">
             {[...services.filter((service) => fixes[service.slot]?.trim()).map((service) => fixes[service.slot].trim()), ...newLinks].map((url) => (

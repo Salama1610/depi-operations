@@ -620,11 +620,16 @@ export async function loadData(u: any) {
       `SELECT c.* FROM session_checks c JOIN sessions t ON t.id=c.session_id JOIN groups g ON g.id=t.group_id WHERE ${qg.sql}`,
       ...qg.args,
     ),
-    // Students' feedback after their sessions, for the people who run the group.
-    all(
-      `SELECT f.* FROM session_feedback f JOIN sessions t ON t.id=f.session_id JOIN groups g ON g.id=t.group_id WHERE ${qg.sql}`,
-      ...qg.args,
-    ),
+    // Students' feedback after their sessions, for the people who run the
+    // group: Coach Operations, its coordinator, its supervisor and Project
+    // Operations (the same list as /api/feedback). Coaches and the quality
+    // team do not receive it.
+    can(u.roles, ["Coach Operations", "Operations Coordinator", "Team Supervisor", "Project Operations", "Operations Systems / Admin"])
+      ? all(
+          `SELECT f.* FROM session_feedback f JOIN sessions t ON t.id=f.session_id JOIN groups g ON g.id=t.group_id WHERE ${qg.sql}`,
+          ...qg.args,
+        )
+      : none,
     // Which session logins are stored: names and dates only, never the login itself.
     isDemo(u)
       ? none

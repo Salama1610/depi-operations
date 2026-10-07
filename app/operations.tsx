@@ -15,6 +15,9 @@ import { PortalView } from "./portal-view";
 import { SearchableSelect } from "@/components/searchable-select";
 import { Progress } from "@/components/ui/progress";
 import { GraduationDots } from "./today";
+import { FeedbackAlertCard, FeedbackScore, FeedbackView } from "./feedback-view";
+import { CoachProgress } from "./coach-progress";
+import { scoreOf } from "@/lib/domain/feedback";
 import { coachPayout, coachRates } from "@/lib/domain/payouts";
 import { checklistState, sessionChecklist, type ChecklistItem } from "@/lib/domain/session-checklist";
 import { useState, useEffect } from "react";
@@ -115,6 +118,7 @@ const nav = [
   ["work", "My work", CheckCheck],
   ["weekly", "Weekly progress", CalendarRange],
   ["students", "Students", Users],
+  ["progress", "Student progress", GraduationCap],
   ["groups", "Groups", Layers],
   ["sessions", "Sessions", CalendarDays],
   ["accounts", "Accounts", WalletCards],
@@ -254,7 +258,6 @@ function Cue({ tone, children, title }: { tone: "ok" | "warn" | "bad" | "info"; 
 /** A percentage: 80% and up is good, 60-79% to watch, below 60% a problem. */
 const rateTone = (pct: number | null) => (pct === null ? "info" : pct >= 80 ? "ok" : pct >= 60 ? "warn" : "bad");
 /** A 1-5 rating average: 4 and up is good, 3 to 3.9 to watch, below 3 a problem. */
-const scoreTone = (avg: string) => (avg === "—" ? "info" : Number(avg) >= 4 ? "ok" : Number(avg) >= 3 ? "warn" : "bad");
 const pctOf = (a: number, b: number) => (b ? Math.round((100 * a) / b) : null);
 
 function Badge({ value }: { value: any }) {
@@ -400,10 +403,10 @@ export default function Operations({ module: initialModule }: { module: string }
     [saved, setSaved] = useState<string[]>([]),
     [checklistFor, setChecklistFor] = useState<string | null>(null),
     [feedbackFor, setFeedbackFor] = useState<string | null>(null),
+    [sessionTab, setSessionTab] = useState("schedule"),
     [accountFilters, setAccountFilters] = useState<Row>({ platform: "All", status: "All", request: "Open", ledger: "All", coordinator: "All", owner: "All" }),
     [insightFilters, setInsightFilters] = useState<Row>({
       group: "All", coach: "All", from: "", to: "", absentOnly: false,
-      rating: "All", searched: "All", commentsOnly: false,
       month: new Date().toISOString().slice(0, 7), payee: "Coaches",
     }),
     [sessionFilters, setSessionFilters] = useState<Row>({ day: "All", time: "All" }),
@@ -543,6 +546,11 @@ export default function Operations({ module: initialModule }: { module: string }
   // coordinators, supervisors or quality reviewers themselves are performing.
   // Someone whose only role is Coach: services are not theirs to see.
   const onlyCoach = heldRoles(user).length > 0 && heldRoles(user).every((role) => role === "Coach");
+  // Students' feedback after their sessions: Coach Operations follows it and
+  // handles the red flags; the group's coordinator, its supervisor and Project
+  // Operations read their own groups'. Coaches and the quality team do not see
+  // it (the server applies the same list in /api/feedback and loadData).
+  const readsFeedback = can(user.roles, ["Coach Operations", "Operations Coordinator", "Team Supervisor", "Project Operations", "Operations Systems / Admin"]);
   const coachesOnly =
     can(user.roles, ["Coach Operations"]) &&
     !can(user.roles, ["Project Operations", "Operations Systems / Admin", "Higher Board", "Team Supervisor"]);
@@ -570,6 +578,9 @@ export default function Operations({ module: initialModule }: { module: string }
               "Operations Systems / Admin",
               "Operations Coordinator",
             ])
+        : m === "progress"
+          ? // A coach's read-only view of their own students' gigs.
+            can(user.roles, ["Coach"])
         : m === "program"
           ? can(user.roles, ["Project Operations", "Coach Operations", "Operations Systems / Admin"])
         : m === "weekly"
@@ -1352,6 +1363,15 @@ export default function Operations({ module: initialModule }: { module: string }
     ];
     content = (
       <>
+        {/* Sessions students rated below 3 of 5, until someone handles each one. */}
+        {can(user.roles, ["Coach Operations"]) && (
+          <FeedbackAlertCard
+            onOpen={() => {
+              setSessionTab("feedback");
+              goTo("sessions");
+            }}
+          />
+        )}
         <div className="greeting">
           <div>
             <div className="eyebrow">{t("ROUND 5 / OPERATIONS OVERVIEW")}</div>
@@ -1792,22 +1812,6 @@ export default function Operations({ module: initialModule }: { module: string }
         .sort((a, b) => b.absent - a.absent || a.name.localeCompare(b.name));
     })();
 
-    // Feedback, filtered.
-    const feedbackRows = (d.sessionFeedback || [])
-      .map((f: Row) => ({ ...f, session: sessions.find((x) => x.id === f.session_id) }))
-      .filter((f: Row) => f.session && insightSessions.some((x) => x.id === f.session_id))
-      .filter((f: Row) => insightFilters.rating === "All" || (insightFilters.rating === "Low" ? Number(f.satisfaction) <= 2 : Number(f.satisfaction) >= 4))
-      .filter((f: Row) => insightFilters.searched === "All" || (insightFilters.searched === "Yes") === (Number(f.searched_gig) === 1 || f.searched_gig === true))
-      .filter((f: Row) => !insightFilters.commentsOnly || f.liked || f.comments)
-      .sort((a: Row, b: Row) => String(b.created_at).localeCompare(String(a.created_at)));
-    const byCoach = Object.values(
-      feedbackRows.reduce((out: Row, f: Row) => {
-        const id = f.session.coach_id || "none";
-        (out[id] ||= { coach: id, rows: [] as Row[] }).rows.push(f);
-        return out;
-      }, {} as Row),
-    ) as Row[];
-
     // Sessions held, for paying coaches and coordinators: each session counts
     // for the coach and coordinator it had when it was held.
     const payMonth = insightFilters.month;
@@ -1896,11 +1900,11 @@ export default function Operations({ module: initialModule }: { module: string }
     const egp = (v: number) => "EGP " + Math.round(v).toLocaleString("en-US");
 
     content = (
-      <Tabs defaultValue="schedule">
+      <Tabs value={sessionTab} onValueChange={setSessionTab}>
         <TabsList>
           <TabsTrigger value="schedule">{t("Schedule")}</TabsTrigger>
           <TabsTrigger value="attendance">{t("Attendance")}</TabsTrigger>
-          <TabsTrigger value="feedback">{t("Feedback")} <span className="count">{(d.sessionFeedback || []).length}</span></TabsTrigger>
+          {readsFeedback && <TabsTrigger value="feedback">{t("Feedback")} <span className="count">{(d.sessionFeedback || []).length}</span></TabsTrigger>}
           {paysPeople && <TabsTrigger value="pay">{t("Sessions held")}</TabsTrigger>}
         </TabsList>
         <TabsContent value="schedule">
@@ -2048,20 +2052,24 @@ export default function Operations({ module: initialModule }: { module: string }
               );
             },
           },
-          {
-            key: "feedback",
-            label: t("Feedback"),
-            render: (r) => {
-              const given = feedbackOf(r.id);
-              if (!given.length) return Date.parse(r.starts_at) <= Date.now() && r.status !== "Cancelled" ? <small>{t("None yet")}</small> : "—";
-              return (
-                <button className="text-link" onClick={() => setFeedbackFor(r.id)}>
-                  ★ {average(given, "satisfaction")}
-                  <small className="table-subline">{t("{v0} responses", { v0: given.length })}</small>
-                </button>
-              );
-            },
-          },
+          ...(readsFeedback
+            ? [
+                {
+                  key: "feedback",
+                  label: t("Feedback"),
+                  render: (r: Row) => {
+                    const given = feedbackOf(r.id);
+                    if (!given.length) return Date.parse(r.starts_at) <= Date.now() && r.status !== "Cancelled" ? <small>{t("None yet")}</small> : "—";
+                    return (
+                      <button className="text-link" onClick={() => setFeedbackFor(r.id)}>
+                        <FeedbackScore score={scoreOf(given)} />
+                        <small className="table-subline">{t("{v0} responses", { v0: given.length })}</small>
+                      </button>
+                    );
+                  },
+                },
+              ]
+            : []),
           {
             key: "link",
             label: t("Link"),
@@ -2206,58 +2214,11 @@ export default function Operations({ module: initialModule }: { module: string }
               : <Empty title={t("No attendance to show")} />,
           )}
         </TabsContent>
-        <TabsContent value="feedback">
-          {insightFilterRow}
-          <div className="filter-row">
-            <Pick label={t("Satisfaction")} value={insightFilters.rating} onChange={(rating) => setInsightFilters({ ...insightFilters, rating })} options={[{ value: "All", label: t("Any rating") }, { value: "Low", label: t("Low (1–2)") }, { value: "High", label: t("High (4–5)") }]} />
-            <Pick label={t("Searched for work on the platforms")} value={insightFilters.searched} onChange={(searched) => setInsightFilters({ ...insightFilters, searched })} options={[{ value: "All", label: t("Either") }, { value: "Yes", label: t("Yes") }, { value: "No", label: t("No") }]} />
-            <label className="check"><Checkbox checked={insightFilters.commentsOnly} onCheckedChange={(v) => setInsightFilters({ ...insightFilters, commentsOnly: v === true })} />{t("Only with written comments")}</label>
-          </div>
-          <div className="mini-stats">
-            <span><strong>{feedbackRows.length}</strong>{t("Responses")}</span>
-            <span className={"cue-stat is-" + scoreTone(average(feedbackRows, "satisfaction"))}><strong>{average(feedbackRows, "satisfaction")}</strong>{t("Satisfaction")}</span>
-            <span className={"cue-stat is-" + scoreTone(average(feedbackRows, "clarity"))}><strong>{average(feedbackRows, "clarity")}</strong>{t("Coach's clarity")}</span>
-            <span className={"cue-stat is-" + scoreTone(average(feedbackRows, "usefulness"))}><strong>{average(feedbackRows, "usefulness")}</strong>{t("Mentorship usefulness")}</span>
-            <span><strong>{feedbackRows.length ? Math.round((100 * feedbackRows.filter((f: Row) => Number(f.searched_gig) === 1 || f.searched_gig === true).length) / feedbackRows.length) : 0}%</strong>{t("Searched for work on the platforms")}</span>
-          </div>
-          {panel(
-            t("By coach"),
-            byCoach.length
-              ? generic(
-                  byCoach.sort((a, b) => b.rows.length - a.rows.length),
-                  [
-                    { key: "coach", label: t("Coach"), render: (r) => owner(r.coach) },
-                    { key: "sessions", label: t("Sessions"), render: (r) => new Set(r.rows.map((f: Row) => f.session_id)).size },
-                    { key: "responses", label: t("Responses"), render: (r) => r.rows.length },
-                    { key: "satisfaction", label: t("Satisfaction"), render: (r) => <Cue tone={scoreTone(average(r.rows, "satisfaction"))}>{average(r.rows, "satisfaction")}</Cue> },
-                    { key: "clarity", label: t("Coach's clarity"), render: (r) => <Cue tone={scoreTone(average(r.rows, "clarity"))}>{average(r.rows, "clarity")}</Cue> },
-                    { key: "usefulness", label: t("Mentorship usefulness"), render: (r) => <Cue tone={scoreTone(average(r.rows, "usefulness"))}>{average(r.rows, "usefulness")}</Cue> },
-                  ],
-                )
-              : <Empty title={t("No feedback in this view")} />,
-          )}
-          {panel(
-            t("Responses"),
-            feedbackRows.length
-              ? generic(
-                  feedbackRows.slice(0, 300),
-                  [
-                    { key: "created_at", label: t("Date"), render: (f) => <span>{fmt(f.session.starts_at)}<small className="table-subline">{f.session.group_id} · {t("Week {v0}", { v0: f.session.week })}</small></span> },
-                    { key: "coach", label: t("Coach"), render: (f) => owner(f.session.coach_id) },
-                    { key: "student_id", label: t("Student"), render: (f) => name(f.student_id) },
-                    { key: "ratings", label: t("Ratings"), render: (f) => (
-                      <span className="cue-row" title={t("Satisfaction · clarity · usefulness")}>
-                        {[f.satisfaction, f.clarity, f.usefulness].map((v, i) => <Cue key={i} tone={scoreTone(String(v))}>{v}</Cue>)}
-                      </span>
-                    ) },
-                    { key: "searched_gig", label: t("Searched for work on the platforms"), render: (f) => (Number(f.searched_gig) === 1 || f.searched_gig === true ? <Cue tone="ok">{t("Yes")}</Cue> : <Cue tone="info">{t("No")}</Cue>) },
-                    { key: "liked", label: t("Liked most"), render: (f) => <small>{f.liked || "—"}</small> },
-                    { key: "comments", label: t("Comments or support needed"), render: (f) => <small>{f.comments || "—"}</small> },
-                  ],
-                )
-              : <Empty title={t("No feedback in this view")} />,
-          )}
-        </TabsContent>
+        {readsFeedback && (
+          <TabsContent value="feedback">
+            <FeedbackView />
+          </TabsContent>
+        )}
         {paysPeople && (
           <TabsContent value="pay">
             <div className="filter-row">
@@ -2321,6 +2282,8 @@ export default function Operations({ module: initialModule }: { module: string }
         )}
       </Tabs>
     );
+  } else if (module === "progress") {
+    content = <CoachProgress />;
   } else if (module === "portal") {
     content = <PortalView staffName={owner} />;
   } else if (module === "accounts") {
@@ -3562,6 +3525,11 @@ export default function Operations({ module: initialModule }: { module: string }
           </SidebarGroup>
         </SidebarContent>
         <SidebarFooter>
+          {/* Bugs, access problems and error messages; how-to questions go to the team leader. */}
+          <a className="report-problem" href={"/support?from=" + encodeURIComponent(module)}>
+            <AlertTriangle size={16} aria-hidden="true" />
+            <span>{t("Report a technical problem")}</span>
+          </a>
           <div className="staff-only">
             <ShieldCheck size={17} />
             <span>{t("Staff-only workspace")}</span>

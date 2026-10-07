@@ -346,6 +346,12 @@ async function fetchIn(table: string, columns: string, field: string, values: st
   return rows;
 }
 
+/** A stored national ID as a reviewer outside administration sees it: its last three digits. */
+function maskNationalId(value: unknown) {
+  const id = String(value ?? "").trim();
+  return id ? "•".repeat(Math.max(0, id.length - 3)) + id.slice(-3) : "";
+}
+
 async function reviewUpdates(u: any, module: string, rawRows: any[], options: { mapping?: Record<string, string>; keyField?: string } = {}) {
   const spec = updatable[module];
   ensure(spec, "Update mode is available for students, groups and accounts.");
@@ -438,6 +444,7 @@ async function reviewUpdates(u: any, module: string, rawRows: any[], options: { 
   };
 
   // Pass 3: the review itself, entirely in memory.
+  const seesNationalIds = can(u.roles, ["Operations Systems / Admin"]);
   const claimed = new Map<string, string>(); // "field:value" -> record, for uniqueness inside the batch
   const touched = new Set<string>();
   const checked: any[] = [];
@@ -470,8 +477,13 @@ async function reviewUpdates(u: any, module: string, rawRows: any[], options: { 
     }
     if (touched.has(record.id)) errors.push({ row: line, field: keyField, value: clean[keyField], error: "The same record appears twice in this sheet", expected: "One row per record" });
     touched.add(record.id);
-    if (groupsInScope && !groupsInScope.has(record.group_id))
+    if (groupsInScope && !groupsInScope.has(record.group_id)) {
+      // Nothing about a student outside the caller's groups goes back to them:
+      // not their current values, not what is expected, not even their id.
       errors.push({ row: line, field: keyField, value: clean[keyField], error: "Student is outside your scope", expected: "A student in one of your groups" });
+      checked.push({ row: line, data: row, errors, changes: [], status: "Rejected" });
+      return;
+    }
     const changes: any[] = [];
     for (const [field, hint] of Object.entries(spec.protectedHints))
       if (clean[field] && !same(clean[field], record[field]))
@@ -502,7 +514,10 @@ async function reviewUpdates(u: any, module: string, rawRows: any[], options: { 
         module === "groups" && staffFields.includes(field)
           ? String(lookups.staffByRef.get(normalized.toLowerCase()))
           : normalized;
-      changes.push({ field, from: record[field] ?? "", to: normalized, stored });
+      // A national ID is also a first password: only an administrator sees
+      // the stored one; everyone else sees that it changes, not what it was.
+      const from = field === "national_id" && !seesNationalIds ? maskNationalId(record[field]) : record[field] ?? "";
+      changes.push({ field, from, to: normalized, stored });
     }
     checked.push({
       row: line,

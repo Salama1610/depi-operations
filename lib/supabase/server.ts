@@ -28,8 +28,15 @@ export async function createSupabaseServerClient() {
       },
       setAll(values) {
         try {
+          // The session never needs reading from the page (there is no browser
+          // Supabase client), so page scripts cannot read it either.
           values.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options),
+            cookieStore.set(name, value, {
+              ...options,
+              httpOnly: true,
+              sameSite: options?.sameSite ?? "lax",
+              secure: process.env.NODE_ENV === "production" ? true : options?.secure,
+            }),
           );
         } catch {
           // Server Components cannot write cookies. Route handlers refresh them.

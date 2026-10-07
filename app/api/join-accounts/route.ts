@@ -3,6 +3,7 @@ import { actor, auditStmt, db, now, permit, rateLimit, stmt, uid, refuseDemo } f
 import { can, ensure } from "@/lib/domain/rules";
 import { credentialKey, openCredential, sealCredential } from "@/lib/domain/account-secrets";
 import { joinAccountId, type JoinKind } from "@/lib/domain/join-accounts";
+import { resealLegacyCredentials } from "@/lib/credential-reseal";
 
 export const dynamic = "force-dynamic";
 
@@ -84,8 +85,10 @@ export async function POST(req: Request) {
         ? `No coach login is stored for this group. On ${group.provider} the coach joins with their own email.`
         : `No coordinator login is stored for ${group.provider}.`,
     );
-    const opened = await openCredential(await credentialKey(env.CREDENTIAL_ENCRYPTION_KEY), id, stored);
+    const key = await credentialKey(env.CREDENTIAL_ENCRYPTION_KEY);
+    const opened = await openCredential(key, id, stored);
     await auditStmt(u, "Join login shown", id, { kind, group_id: group.id, display_seconds: 60 }, null, uid("REQ"), null).run();
+    await resealLegacyCredentials(u, key);
     return Response.json(
       { username: opened.username, password: opened.password, expires_in: 60 },
       { headers: { "Cache-Control": "no-store", Pragma: "no-cache" } },

@@ -1016,3 +1016,109 @@ input:focus-visible {
 [data-slot=tabs-trigger][data-state=active] .count{background:#ffffff33;border-color:transparent;color:#fff}
 @media(max-width:767px){[data-slot=tabs-list]{flex-wrap:nowrap;overflow-x:auto}[data-slot=tabs-trigger]{white-space:nowrap}}
 
+/* Student portal: feedback reminder and rating scale hint */
+.student-banner{max-width:1060px;margin:0 auto 18px;display:flex;align-items:center;gap:10px;min-height:48px;padding:10px 16px;border:1px solid var(--border);border-inline-start:4px solid var(--primary);border-radius:10px;background:var(--card);color:var(--foreground);font-size:14px}
+.student-banner strong{margin-inline-start:auto;white-space:nowrap;text-decoration:underline;text-underline-offset:3px}
+.student-banner:hover{border-color:var(--primary)}
+.feedback-scale-hint{margin:0 0 4px;color:var(--muted-foreground);font-size:13px}
+@media(max-width:700px){.student-banner{flex-wrap:wrap}.student-banner strong{margin-inline-start:26px}}
+/* Session feedback (app/feedback-view.tsx): the red card on Coach Operations'
+   first screen, red flags, the two modes and their charts. */
+.feedback-alert{display:flex;align-items:center;gap:14px;margin:0 0 16px;padding:14px 16px;border:1px solid #f1cdc7;border-inline-start:6px solid #b0564e;border-radius:10px;background:#fdf0ee;color:#8f3d36}
+.feedback-alert strong{display:block;font-size:16px;color:#8f3d36}
+.feedback-alert p{margin:4px 0 0;font-size:13px;color:#8f3d36}
+.feedback-alert button{margin-inline-start:auto;min-height:40px;padding:8px 16px;border:0;border-radius:8px;background:#b0564e;color:#fff;font-weight:600;white-space:nowrap}
+.feedback-alert button:hover{background:#8f3d36}
+.feedback-view{display:flex;flex-direction:column;gap:14px;min-width:0}
+.feedback-view .filter-row .field{min-width:200px}
+.feedback-flags.is-urgent,.feedback-week.is-urgent{border-color:#f1cdc7;box-shadow:inset 4px 0 0 #b0564e}
+.feedback-flags .panel-heading h2{display:inline-flex;align-items:center;gap:8px}
+.feedback-score{gap:5px;white-space:nowrap}
+.feedback-score-word{font-weight:500;opacity:.85}
+.feedback-handled{display:block;font-size:13px}
+.feedback-only{display:inline-flex;gap:14px;flex-wrap:wrap}
+.feedback-ratings{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.feedback-week-summary{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;color:var(--muted-foreground)}
+.feedback-charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.feedback-charts .panel{min-width:0}
+.feedback-handle{display:flex;flex-direction:column;gap:12px}
+.feedback-handle-score{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--muted-foreground)}
+.feedback-handle-list{margin:0;padding:0;list-style:none;display:grid;gap:6px;max-height:220px;overflow:auto}
+.feedback-handle-list li{display:grid;gap:2px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;overflow-wrap:anywhere}
+.feedback-handle-list small{color:var(--muted-foreground)}
+.chart-box{position:relative;width:100%;min-width:0}
+.chart-box svg{display:block;overflow:visible}
+.chart-box svg:focus-visible,.chart-box g:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.chart-grid{stroke:var(--border);stroke-width:1}
+.chart-grid.is-threshold{stroke:#e0b04f}
+.chart-tick{fill:var(--muted-foreground);font-size:12px}
+.chart-value{fill:var(--foreground);font-size:12px;font-weight:600}
+.chart-line{fill:none;stroke:var(--primary);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.chart-dot{fill:var(--primary);stroke:var(--card);stroke-width:2}
+.chart-crosshair{stroke:var(--muted-foreground);stroke-width:1}
+.chart-bar{fill:var(--primary)}
+.chart-bar.is-active{opacity:.75}
+.chart-tip{position:absolute;transform:translate(-50%,-100%);display:grid;gap:1px;padding:6px 9px;border:1px solid var(--border);border-radius:6px;background:var(--popover);color:var(--popover-foreground);font-size:12px;white-space:nowrap;pointer-events:none;box-shadow:0 4px 12px rgba(15,23,42,.12);z-index:2}
+.chart-tip strong{font-size:15px}
+@media(max-width:700px){.feedback-alert{flex-wrap:wrap}.feedback-alert button{width:100%;margin:0}.feedback-view .filter-row .field{min-width:0;flex:1 1 100%}}
+/* A coach's read-only view of their students' progress (app/coach-progress.tsx). */
+.coach-progress{display:flex;flex-direction:column;gap:14px;min-width:0}
+.coach-progress .filter-row .field{min-width:200px}
+.coach-progress-list{padding:0;overflow:hidden}
+.coach-progress-row{border-bottom:1px solid var(--border)}
+.coach-progress-row:last-child{border-bottom:0}
+.coach-progress-row summary{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:12px;padding:12px 16px;cursor:pointer;list-style:none}
+.coach-progress-row summary::-webkit-details-marker{display:none}
+.coach-progress-row summary:hover{background:var(--muted)}
+.coach-progress-row[open] summary{background:var(--muted)}
+.coach-progress-name{display:grid;min-width:0}
+.coach-progress-name strong{overflow-wrap:anywhere}
+.coach-progress-name small{color:var(--muted-foreground);font-size:12px}
+.coach-progress-count{display:inline-flex;align-items:center;gap:8px;font-size:13px}
+.coach-progress-total{font-weight:600;font-variant-numeric:tabular-nums}
+.coach-progress-detail{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;padding:4px 16px 16px}
+.coach-progress-detail h3{margin:0 0 8px;font-size:14px}
+.coach-progress-detail ul{margin:0;padding:0;list-style:none;display:grid;gap:6px}
+.coach-progress-detail li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px}
+.coach-progress-detail li>span:first-child{min-width:0;overflow-wrap:anywhere}
+.coach-progress-portal{display:inline-flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+@media(max-width:700px){.coach-progress-row summary{grid-template-columns:1fr auto;}.coach-progress-count{grid-column:1}.coach-progress .filter-row .field{min-width:0;flex:1 1 100%}.coach-progress-detail li{flex-direction:column;align-items:flex-start}}
+/* Report a technical problem (/support) and its link in the sidebar. */
+.support-shell{min-height:100vh;max-width:860px;margin:0 auto;padding:20px 16px 48px;display:flex;flex-direction:column;gap:16px;background:var(--background);color:var(--foreground)}
+.support-header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.support-back{display:inline-flex;align-items:center;gap:6px;font-size:14px;color:var(--foreground)}
+.support-card h1{display:inline-flex;align-items:center;gap:8px;font-size:22px;margin:0}
+.support-scope{margin:0 0 12px;padding:10px 12px;border:1px solid var(--border);border-inline-start:4px solid #e0b04f;border-radius:8px;background:var(--card);font-size:14px}
+.support-meta{margin:0;font-size:13px;color:var(--muted-foreground)}
+.support-form{display:flex;flex-direction:column;gap:14px}
+.support-form fieldset{border:0;margin:0;padding:0;display:grid;gap:8px}
+.support-form legend{font-weight:600;font-size:14px;margin-bottom:6px}
+.support-choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px}
+.support-choice{display:flex;align-items:center;gap:8px;min-height:44px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);cursor:pointer;font-size:14px}
+.support-choice.is-on{border-color:var(--primary);box-shadow:inset 0 0 0 1px var(--primary)}
+.support-choice input{accent-color:var(--primary)}
+.support-drop{display:flex;align-items:center;gap:10px;min-height:56px;padding:10px 14px;border:1px dashed var(--border);border-radius:8px;cursor:pointer;font-size:13px;color:var(--muted-foreground)}
+.support-drop:hover{border-color:var(--primary)}
+.support-shot{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap}
+.support-shot img{max-width:min(100%,360px);max-height:240px;border:1px solid var(--border);border-radius:8px}
+.support-sent{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 14px;border:1px solid #bfe5d8;border-radius:10px;background:#e8f6f1;color:#2f7a6d}
+.support-sent p{margin:2px 0 0;font-size:13px}
+.support-sent .small-btn{margin-inline-start:auto}
+.support-list{margin:0;padding:0;list-style:none;display:grid;gap:6px}
+.support-list li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px}
+.support-list li>span:first-child{display:grid;gap:2px;min-width:0;overflow-wrap:anywhere}
+.support-list small{color:var(--muted-foreground)}
+.support-counts{display:inline-flex;gap:6px;flex-wrap:wrap}
+.support-counts .small-btn.is-active{border-color:var(--primary);color:var(--primary);font-weight:600}
+.support-item{border-top:1px solid var(--border)}
+.support-item summary{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:10px 4px;cursor:pointer;list-style:none}
+.support-item summary::-webkit-details-marker{display:none}
+.support-item-title{display:grid;min-width:0}
+.support-item-title small{color:var(--muted-foreground);font-size:12px}
+.support-detail{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:6px 14px;margin:4px 4px 12px;font-size:13px}
+.support-detail dt{color:var(--muted-foreground)}
+.support-detail dd{margin:0;overflow-wrap:anywhere;white-space:pre-wrap}
+.support-update{display:grid;grid-template-columns:minmax(160px,220px) minmax(0,1fr) auto;align-items:end;gap:10px;margin:0 4px 14px}
+.report-problem{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;font-size:13px;color:inherit;opacity:.9}
+.report-problem:hover{opacity:1;background:rgba(255,255,255,.08)}
+@media(max-width:700px){.support-update{grid-template-columns:1fr}.support-detail{grid-template-columns:1fr}.support-item summary{grid-template-columns:1fr auto}}

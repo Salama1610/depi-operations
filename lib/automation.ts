@@ -8,10 +8,45 @@ export function notify(recipient: string, title: string, entityType: string, ent
   );
 }
 
+const DISMISSED = "automation:dismissed";
+
+/**
+ * Follow-ups cleared on purpose (the test data removed in October 2026) stay
+ * cleared while the situation that raised them lasts: a recovery plan while
+ * the student is still At Risk, a session check until the session starts. A
+ * new episode, such as the student falling behind again after recovering, is
+ * followed as usual. Keys are `recovery:<student id>` and `session:<session id>`.
+ */
+async function readDismissed() {
+  const row: any = await stmt("SELECT value FROM system_configuration WHERE key=?", DISMISSED).first();
+  if (!row) return { keys: [] as string[], writable: false };
+  try {
+    const value = typeof row.value === "string" ? JSON.parse(row.value) : row.value;
+    if (!Array.isArray(value)) throw new Error("not a list");
+    return { keys: value.filter((key: unknown): key is string => typeof key === "string"), writable: true };
+  } catch {
+    // A damaged setting must not stop every follow-up in the programme.
+    console.warn(`${DISMISSED} is not a JSON list of keys; ignoring it.`);
+    return { keys: [] as string[], writable: false };
+  }
+}
+
 export async function policyChecks(u: any, requestId: string) {
   permit(u, ["Project Operations", "Team Supervisor", "Operations Systems / Admin"]);
   const snapshot = await loadData(u);
-  const plan = planPolicyActions(snapshot);
+  const stored = await readDismissed();
+  // An episode is judged over only on what this run can see: a supervisor's
+  // run covers their groups and leaves everyone else's keys alone.
+  const atRisk = new Map<string, boolean>(snapshot.students.map((student: any) => [student.id, student.risk?.status === "At Risk"]));
+  const started = new Map<string, boolean>(snapshot.sessions.map((session: any) => [session.id, Date.parse(session.starts_at) <= Date.now()]));
+  const kept = stored.keys.filter((key) => {
+    const [kind, id] = [key.slice(0, key.indexOf(":")), key.slice(key.indexOf(":") + 1)];
+    if (kind === "recovery" && atRisk.has(id)) return atRisk.get(id);
+    if (kind === "session" && started.has(id)) return !started.get(id);
+    return true;
+  });
+  const dismissed = new Set(kept);
+  const plan = planPolicyActions(snapshot).filter((action) => !(action.category === "Recovery" && dismissed.has(`recovery:${action.student_id}`)));
   const batch = plan.slice(0, 100);
   const jobs = [];
   for (const action of batch) {
@@ -50,7 +85,8 @@ export async function policyChecks(u: any, requestId: string) {
   const unconfirmed = snapshot.sessions.filter(
     (session: any) => session.status === "Scheduled" && Date.parse(session.starts_at) > Date.now() && Date.parse(session.starts_at) <= soon && groupsById.get(session.group_id)?.coordinator,
   );
-  for (const session of unconfirmed.slice(0, 100)) {
+  const sessionCases = unconfirmed.filter((session: any) => !dismissed.has(`session:${session.id}`));
+  for (const session of sessionCases.slice(0, 100)) {
     const group = groupsById.get(session.group_id);
     jobs.push(stmt(
       "INSERT OR IGNORE INTO cases(id,student_id,title,type,severity,status,owner,due,source,created_at,group_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
@@ -59,7 +95,7 @@ export async function policyChecks(u: any, requestId: string) {
   }
 
   const summary = {
-    session_cases: Math.min(unconfirmed.length, 100),
+    session_cases: Math.min(sessionCases.length, 100),
     planned: plan.length,
     processed: batch.length,
     remaining: Math.max(0, plan.length - batch.length),
@@ -69,6 +105,8 @@ export async function policyChecks(u: any, requestId: string) {
     notifications_remaining: Math.max(0, due.length - 100) + Math.max(0, overdueServiceLinks.length - 100),
     overdue_service_links: overdueServiceLinks.length,
   };
+  if (stored.writable && kept.length !== stored.keys.length)
+    jobs.push(stmt("UPDATE system_configuration SET value=?,updated_by=?,updated_at=? WHERE key=?", JSON.stringify(kept), u.id, now(), DISMISSED));
   jobs.push(auditStmt(u, "policy_check", "workspace", summary, null, requestId));
   await db().batch(jobs);
   return summary;

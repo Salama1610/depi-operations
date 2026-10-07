@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import {
   credentialKey,
   credentialKeyConfigured,
+  needsReseal,
   openCredential,
   sealCredential,
 } from "../lib/domain/account-secrets.ts";
@@ -63,4 +64,31 @@ test("unicode credentials survive the round trip", async () => {
   const password = "كلمة-المرور-٩٩";
   const sealed = await sealCredential(key, "ACC-9", username, password);
   assert.deepEqual(await openCredential(key, "ACC-9", sealed), { username, password });
+});
+
+test("the username and the password each get their own IV, so one never gives away the other", async () => {
+  const key = await credentialKey(KEY);
+  const sealed = await sealCredential(key, "ACC-7", "user@example.invalid", "a-secret-password");
+  const [usernameIv, secretIv] = sealed.iv.split(".");
+  assert.ok(usernameIv && secretIv, "two IVs, stored together");
+  assert.notEqual(usernameIv, secretIv);
+  assert.equal(needsReseal(sealed), false);
+  // With one shared IV, the two ciphertexts XOR to the XOR of the plaintexts.
+  const xor = (a, b) => Buffer.from(a, "base64").subarray(0, 8).map((byte, i) => byte ^ Buffer.from(b, "base64")[i]);
+  const plainXor = Buffer.from("user@exa").map((byte, i) => byte ^ Buffer.from("a-secret")[i]);
+  assert.notDeepEqual(xor(sealed.username, sealed.secret), plainXor);
+});
+
+test("a login sealed in the old shared-IV format still opens, and is marked for sealing again", async () => {
+  const key = await credentialKey(KEY);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const additionalData = new TextEncoder().encode("JOIN-1");
+  const encrypt = async (value) =>
+    Buffer.from(await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData }, key, new TextEncoder().encode(value))).toString("base64");
+  const legacy = { username: await encrypt("coach-login"), secret: await encrypt("old-password"), iv: Buffer.from(iv).toString("base64") };
+  assert.equal(needsReseal(legacy), true);
+  assert.deepEqual(await openCredential(key, "JOIN-1", legacy), { username: "coach-login", password: "old-password" });
+  const resealed = await sealCredential(key, "JOIN-1", "coach-login", "old-password");
+  assert.equal(needsReseal(resealed), false);
+  assert.deepEqual(await openCredential(key, "JOIN-1", resealed), { username: "coach-login", password: "old-password" });
 });

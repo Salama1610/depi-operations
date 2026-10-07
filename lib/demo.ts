@@ -62,7 +62,7 @@ export function demoPlan(nowMs: number): Statement[] {
   const plan: Statement[] = [];
 
   // Start clean: what the demo users did since the last refresh.
-  for (const table of ["attendance", "session_checks", "session_feedback"])
+  for (const table of ["attendance", "session_checks", "session_feedback", "feedback_flags"])
     plan.push([`DELETE FROM ${table} WHERE session_id LIKE 'DEMO-%'`]);
   plan.push(["DELETE FROM sessions WHERE group_id LIKE 'DEMO-%'"]);
   plan.push(["DELETE FROM tasks WHERE student_id LIKE 'DEMO-%'"]);

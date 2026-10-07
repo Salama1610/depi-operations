@@ -20,13 +20,19 @@ export default function LoginForm({ configured }: { configured: boolean }) {
     setError("");
     setMessage("");
     try {
-      const response = await fetch(mode === "login" ? "/api/auth/login" : "/api/auth/reset", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(mode === "login" ? { email, password } : { email }),
-      });
-      const value = await response.json();
-      if (!response.ok || value.error) throw new Error(value.error || t("Unable to continue."));
+      let response: Response;
+      try {
+        response = await fetch(mode === "login" ? "/api/auth/login" : "/api/auth/reset", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(mode === "login" ? { email, password } : { email }),
+        });
+      } catch {
+        throw new Error(t("Check your connection and try again."));
+      }
+      // A gateway error page is HTML; it must not surface as a parser message.
+      const value = await response.json().catch(() => null);
+      if (!response.ok || !value || value.error) throw new Error(value?.error || t("Unable to continue."));
       if (mode === "login") window.location.assign(value.redirect || "/");
       else setMessage(value.message || t("If this email is registered, a reset link is on its way."));
     } catch (reason) {

@@ -58,41 +58,59 @@ function fromBase64(value: string) {
 export interface SealedCredential {
   username: string;
   secret: string;
+  /** The username's IV and the password's, "<base64>.<base64>"; a single IV in rows sealed before October 2026. */
   iv: string;
 }
 
-/** Encrypts one account's username and password under a single random IV. */
+/**
+ * Encrypts one account's username and password, each under its own random IV.
+ *
+ * AES-GCM must never reuse an IV under one key: two values sealed with the same
+ * one XOR to the XOR of their plaintexts, so a known username gives away the
+ * password, and the authentication key leaks too. The two IVs are stored
+ * together in the one column; "." is not a base64 character.
+ */
 export async function sealCredential(
   key: CryptoKey,
   accountId: string,
   username: string,
   password: string,
 ): Promise<SealedCredential> {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
   const additionalData = encoder.encode(accountId);
-  const encrypt = async (value: string) =>
+  const encrypt = async (value: string, iv: Uint8Array) =>
     toBase64(
       new Uint8Array(
-        await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData }, key, encoder.encode(value)),
+        await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv as BufferSource, additionalData }, key, encoder.encode(value)),
       ),
     );
-  return { username: await encrypt(username), secret: await encrypt(password), iv: toBase64(iv) };
+  const usernameIv = crypto.getRandomValues(new Uint8Array(12));
+  const secretIv = crypto.getRandomValues(new Uint8Array(12));
+  return {
+    username: await encrypt(username, usernameIv),
+    secret: await encrypt(password, secretIv),
+    iv: `${toBase64(usernameIv)}.${toBase64(secretIv)}`,
+  };
 }
 
-/** Reverses `sealCredential`. Throws if the row was written for another account. */
+/** Whether a row still has the single shared IV of the old format and should be sealed again. */
+export function needsReseal(sealed: Pick<SealedCredential, "iv">) {
+  return !String(sealed.iv).includes(".");
+}
+
+/** Reverses `sealCredential`, old format included. Throws if the row was written for another account. */
 export async function openCredential(
   key: CryptoKey,
   accountId: string,
   sealed: SealedCredential,
 ): Promise<{ username: string; password: string }> {
-  const iv = fromBase64(sealed.iv);
+  const [usernameIv, secretIv = usernameIv] = String(sealed.iv).split(".").map(fromBase64);
   const additionalData = encoder.encode(accountId);
-  const decrypt = async (value: string) =>
+  const decrypt = async (value: string, iv: Uint8Array) =>
     decoder.decode(
-      await crypto.subtle.decrypt({ name: "AES-GCM", iv, additionalData }, key, fromBase64(value) as BufferSource),
+      await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv as BufferSource, additionalData }, key, fromBase64(value) as BufferSource),
     );
   try {
-    return { username: await decrypt(sealed.username), password: await decrypt(sealed.secret) };
+    return { username: await decrypt(sealed.username, usernameIv), password: await decrypt(sealed.secret, secretIv) };
   } catch {
     throw new Error("The stored credential could not be decrypted with the configured key.");
   }

@@ -2,6 +2,7 @@ import { env } from "@/lib/env";
 import { actor, permit, stmt, auditStmt, db, uid, now, rateLimit, scopeSql, refuseDemo } from "@/lib/server";
 import { can, ensure } from "@/lib/domain/rules";
 import { credentialKey, credentialKeyConfigured, openCredential, sealCredential } from "@/lib/domain/account-secrets";
+import { resealLegacyCredentials } from "@/lib/credential-reseal";
 
 export const dynamic = "force-dynamic";
 
@@ -121,12 +122,14 @@ export async function POST(req: Request) {
     // Preferred path: the credential this workspace holds, encrypted at rest.
     const stored: any = await stmt("SELECT * FROM account_secrets WHERE account_id=?", a.id).first();
     if (stored) {
-      const opened = await openCredential(await credentialKey(env.CREDENTIAL_ENCRYPTION_KEY), a.id, stored);
+      const key = await credentialKey(env.CREDENTIAL_ENCRYPTION_KEY);
+      const opened = await openCredential(key, a.id, stored);
       await auditStmt(u, "Credential access granted", a.id, {
         purpose: x.purpose,
         display_seconds: 30,
         source: "workspace",
       }).run();
+      await resealLegacyCredentials(u, key);
       return Response.json(
         { username: opened.username, password: opened.password, expires_in: 30 },
         { headers: { "Cache-Control": "no-store", Pragma: "no-cache" } },

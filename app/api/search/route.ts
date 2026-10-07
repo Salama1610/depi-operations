@@ -1,6 +1,6 @@
 import { actor, all, rateLimit, scopeSql } from "@/lib/server";
 import { can, ensure } from "@/lib/domain/rules";
-import { sameSide } from "@/lib/demo";
+import { isDemo, sameSide } from "@/lib/demo";
 
 export async function GET(req: Request) {
   try {
@@ -21,7 +21,8 @@ export async function GET(req: Request) {
         can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin"])
           ? all(`SELECT 'account' type,id,label,platform||' · '||status detail FROM accounts WHERE ${sameSide(u, "id")} AND (id LIKE ? ESCAPE '\\' OR label LIKE ? ESCAPE '\\') ORDER BY id LIMIT 5`, like, like)
           : Promise.resolve([]),
-        can(u.roles, ["Project Operations", "Operations Coordinator", "Team Supervisor", "Operations Systems / Admin"])
+        // Applicants are real people; a demo sign-in never searches them.
+        !isDemo(u) && can(u.roles, ["Project Operations", "Operations Coordinator", "Team Supervisor", "Operations Systems / Admin"])
           ? all(
               can(u.roles, ["Operations Coordinator"]) && !can(u.roles, ["Project Operations", "Team Supervisor", "Operations Systems / Admin"])
                 ? `SELECT 'application' type,id id,name label,preferred_track||' · '||status detail FROM applications WHERE owner=? AND (id LIKE ? ESCAPE '\\' OR name LIKE ? ESCAPE '\\' OR external_ref LIKE ? ESCAPE '\\') ORDER BY updated_at DESC LIMIT 5`

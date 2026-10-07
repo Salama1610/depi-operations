@@ -734,5 +734,34 @@
     "comment": "text",
     "action_by": "text",
     "proof_url": "text"
+  },
+  "feedback_flags": {
+    "session_id": "text",
+    "score": "numeric(3,1)",
+    "note": "text",
+    "case_id": "text",
+    "handled_by": "text",
+    "handled_at": "timestamptz"
+  },
+  "support_reports": {
+    "id": "text",
+    "reporter": "text",
+    "reporter_roles": "text",
+    "page": "text",
+    "url": "text",
+    "category": "text",
+    "severity": "text",
+    "action": "text",
+    "happened": "text",
+    "expected": "text",
+    "occurred_at": "timestamptz",
+    "browser": "text",
+    "screenshot_key": "text",
+    "screenshot_type": "text",
+    "status": "text",
+    "resolution": "text",
+    "handled_by": "text",
+    "handled_at": "timestamptz",
+    "created_at": "timestamptz"
   }
 }

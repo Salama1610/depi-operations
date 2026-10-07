@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
+import { SearchableSelect } from "@/components/searchable-select";
 import {
   Table,
   TableBody,
@@ -30,6 +31,17 @@ import {
 } from "@/components/ui/table";
 
 type Row = Record<string, any>;
+
+/**
+ * Date-time inputs show and take the reader's own clock. Their value has no
+ * time zone, and the server reads a zone-less value as UTC, so a time typed in
+ * Cairo was stored three hours late; it is sent with its zone instead.
+ */
+const localInput = (at: number) => {
+  const d = new Date(at);
+  return new Date(at - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+};
+const dateTimeFields = ["submitted_at", "due_at", "follow_up_at", "due"];
 
 const screeningChecks = [
   "Identity and registration record checked",
@@ -132,14 +144,12 @@ export function ProgramFlow() {
           : row.owner_type,
       max_score: 100,
       pass_score: 60,
-      submitted_at: new Date().toISOString().slice(0, 16),
-      decided_at: new Date().toISOString().slice(0, 10),
-      due_at: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 16),
-      due: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 16),
+      submitted_at: localInput(Date.now()),
+      decided_at: localInput(Date.now()).slice(0, 10),
+      due_at: localInput(Date.now() + 7 * 86400000),
+      due: localInput(Date.now() + 7 * 86400000),
       priority: "Normal",
-      follow_up_at: new Date(Date.now() + 30 * 86400000)
-        .toISOString()
-        .slice(0, 16),
+      follow_up_at: localInput(Date.now() + 30 * 86400000),
       criteria: [],
       checklist: [],
       columns: [
@@ -163,6 +173,10 @@ export function ProgramFlow() {
       for (const key of ["student_ids", "group_ids"]) {
         if (typeof payload[key] === "string")
           payload[key] = payload[key].split(/[\s,;]+/).filter(Boolean);
+      }
+      for (const key of dateTimeFields) {
+        if (typeof payload[key] === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(payload[key]))
+          payload[key] = new Date(payload[key]).toISOString();
       }
       const response = await fetch("/api/program", {
         method: "POST",
@@ -256,24 +270,18 @@ export function ProgramFlow() {
   ) => (
     <label className="field" key={key}>
       {t(label)}
-      <select
+      <SearchableSelect
         required
+        label={t(label)}
+        placeholder={t("Choose…")}
         value={form[key] || ""}
-        onChange={(e) => setForm({ ...form, [key]: e.target.value })}
-      >
-        <option value="">{t("Choose…")}</option>
-        {options.map((option) => {
-          const item =
-            typeof option === "string"
-              ? { value: option, label: option }
-              : option;
-          return (
-            <option value={item.value} key={item.value}>
-              {t(item.label)}
-            </option>
-          );
-        })}
-      </select>
+        onChange={(value) => setForm({ ...form, [key]: value })}
+        options={options.map((option) =>
+          typeof option === "string"
+            ? { value: option, label: t(option) }
+            : { value: option.value, label: t(option.label) },
+        )}
+      />
     </label>
   );
   const checklist = (key: string, options: string[]) => (

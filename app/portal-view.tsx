@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ExternalLink, FileUp, RefreshCw } from "lucide-react";
 import { useT } from "@/lib/i18n/context";
+import { SearchableSelect } from "@/components/searchable-select";
 import { readSheet } from "@/lib/spreadsheet";
 import { guessPortalMapping, mappingProblems, type PortalSheet } from "@/lib/domain/portal-sheets";
 
@@ -17,10 +18,12 @@ type Draft = { sheet: PortalSheet; fileName: string; headers: string[]; rows: Ro
 
 const CHUNK = 800;
 
-async function call(body: Row) {
+/** Posts to the portal API; `failed` is the caller's translated fallback. */
+async function call(body: Row, failed: string) {
   const r = await fetch("/api/portal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  const v = await r.json();
-  if (!r.ok || v.error) throw new Error(v.error || "The upload failed.");
+  // A gateway error page is HTML; it must not surface as a parser message.
+  const v = await r.json().catch(() => null);
+  if (!r.ok || !v || v.error) throw new Error(v?.error || failed);
   return v;
 }
 
@@ -35,14 +38,15 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
   const [filters, setFilters] = useState({ final: "All", type: "All", link: "All", provider: "All" });
   const [open, setOpen] = useState<string | null>(null);
   const [gigs, setGigs] = useState<Record<string, Row[]>>({});
+  const [gigErrors, setGigErrors] = useState<Record<string, string>>({});
   const [shown, setShown] = useState(100);
 
   async function load() {
     setError("");
     try {
       const r = await fetch("/api/portal", { cache: "no-store" });
-      const v = await r.json();
-      if (!r.ok || v.error) throw new Error(v.error || t("Unable to load the portal sheets."));
+      const v = await r.json().catch(() => null);
+      if (!r.ok || !v || v.error) throw new Error(v?.error || t("Unable to load the portal sheets."));
       setData(v);
     } catch (e: any) {
       setError(e.message);
@@ -78,14 +82,15 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
     const mapped = draft.rows.map((row) => Object.fromEntries(pairs.map(([h, f]) => [f, row[h] ?? ""])));
     setProgress({ sent: 0, total: mapped.length });
     setError("");
+    const failed = t("The upload failed.");
     let batch = "";
     try {
-      batch = (await call({ action: "begin", sheet: draft.sheet, mapping: draft.mapping, total: mapped.length, file_name: draft.fileName })).batch;
+      batch = (await call({ action: "begin", sheet: draft.sheet, mapping: draft.mapping, total: mapped.length, file_name: draft.fileName }, failed)).batch;
       for (let i = 0; i < mapped.length; i += CHUNK) {
-        await call({ action: "chunk", batch, rows: mapped.slice(i, i + CHUNK) });
+        await call({ action: "chunk", batch, rows: mapped.slice(i, i + CHUNK) }, failed);
         setProgress({ sent: Math.min(i + CHUNK, mapped.length), total: mapped.length });
       }
-      const done = await call({ action: "commit", batch });
+      const done = await call({ action: "commit", batch }, failed);
       setNotice(
         draft.sheet === "students"
           ? t("Students sheet updated: {v0} students, {v1} linked to our records.", { v0: done.rows, v1: done.linked })
@@ -96,7 +101,7 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
       await load();
     } catch (e: any) {
       setError(e.message);
-      if (batch) call({ action: "cancel", batch }).catch(() => {});
+      if (batch) call({ action: "cancel", batch }, failed).catch(() => {});
     } finally {
       setProgress(null);
     }
@@ -119,11 +124,31 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
   async function toggle(portalId: string) {
     if (open === portalId) return setOpen(null);
     setOpen(portalId);
-    if (!gigs[portalId]) {
-      const r = await fetch("/api/portal?student=" + encodeURIComponent(portalId), { cache: "no-store" });
-      const v = await r.json();
+    if (gigs[portalId]) return;
+    // Reopening a row after a failure is the retry.
+    setGigErrors((current) => {
+      const next = { ...current };
+      delete next[portalId];
+      return next;
+    });
+    try {
+      const r = await fetch("/api/portal?student=" + encodeURIComponent(portalId), { cache: "no-store" }).catch(() => {
+        throw new Error(t("Check your connection and try again."));
+      });
+      const v = await r.json().catch(() => null);
+      if (!r.ok || !v || v.error) throw new Error(v?.error || t("Unable to load this student's gigs."));
       setGigs((current) => ({ ...current, [portalId]: v.gigs || [] }));
+    } catch (e: any) {
+      // The failure stays on this student's row; whichever row is open now
+      // stays open, and the page-wide banner is left for the page's own errors.
+      setGigErrors((current) => ({ ...current, [portalId]: e?.message || t("Unable to load this student's gigs.") }));
     }
+  }
+  const filtered = !!query || Object.values(filters).some((v) => v !== "All");
+  function clearFilters() {
+    setQuery("");
+    setFilters({ final: "All", type: "All", link: "All", provider: "All" });
+    setShown(100);
   }
 
   const when = (iso?: string) => (iso ? new Date(iso).toLocaleString("en-GB", { timeZone: "Africa/Cairo", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "—");
@@ -174,22 +199,22 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
                   <td>{h}</td>
                   <td><small>{String(draft.rows.find((r) => String(r[h] ?? "").trim())?.[h] ?? "—").slice(0, 60)}</small></td>
                   <td>
-                    <select
+                    <SearchableSelect
                       className="pick-inline"
+                      label={h}
                       value={draft.mapping[h] || ""}
-                      onChange={(e) => {
+                      onChange={(value) => {
                         const next = { ...draft.mapping };
-                        for (const [k, v] of Object.entries(next)) if (v === e.target.value && k !== h) delete next[k];
-                        if (e.target.value) next[h] = e.target.value;
+                        for (const [k, v] of Object.entries(next)) if (v === value && k !== h) delete next[k];
+                        if (value) next[h] = value;
                         else delete next[h];
                         setDraft({ ...draft, mapping: next });
                       }}
-                    >
-                      <option value="">{t("Ignore this column")}</option>
-                      {(data?.fields?.[draft.sheet] || []).map((f: Row) => (
-                        <option key={f.field} value={f.field}>{t(f.label)}{f.required ? " *" : ""}</option>
-                      ))}
-                    </select>
+                      options={[
+                        { value: "", label: t("Ignore this column") },
+                        ...(data?.fields?.[draft.sheet] || []).map((f: Row) => ({ value: f.field, label: t(f.label) + (f.required ? " *" : "") })),
+                      ]}
+                    />
                   </td>
                 </tr>
               ))}
@@ -229,19 +254,30 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
         ].map(([key, label, column]) => (
           <label className="portal-filter" key={key}>
             <small>{t(label)}</small>
-            <select className="pick-inline" value={(filters as Row)[key]} onChange={(e) => { setFilters({ ...filters, [key]: e.target.value }); setShown(100); }}>
-              {options(column).map((o) => <option key={o} value={o}>{o === "All" ? t("All") : o}</option>)}
-            </select>
+            <SearchableSelect
+              className="pick-inline"
+              label={t(label)}
+              value={(filters as Row)[key]}
+              onChange={(value) => { setFilters({ ...filters, [key]: value }); setShown(100); }}
+              options={options(column).map((o) => ({ value: o, label: o === "All" ? t("All") : o }))}
+            />
           </label>
         ))}
         <label className="portal-filter">
           <small>{t("Our record")}</small>
-          <select className="pick-inline" value={filters.link} onChange={(e) => { setFilters({ ...filters, link: e.target.value }); setShown(100); }}>
-            <option value="All">{t("All")}</option>
-            <option value="Linked">{t("Linked")}</option>
-            <option value="Unlinked">{t("Not linked")}</option>
-          </select>
+          <SearchableSelect
+            className="pick-inline"
+            label={t("Our record")}
+            value={filters.link}
+            onChange={(value) => { setFilters({ ...filters, link: value }); setShown(100); }}
+            options={[
+              { value: "All", label: t("All") },
+              { value: "Linked", label: t("Linked") },
+              { value: "Unlinked", label: t("Not linked") },
+            ]}
+          />
         </label>
+        {filtered && <button className="small-btn" onClick={clearFilters}>{t("Clear filters")}</button>}
       </div>
       <div className="panel">
         <h3>{t("Cohort in the portal · {v0} students", { v0: rows.length })}</h3>
@@ -260,7 +296,7 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
                 {rows.slice(0, shown).map((s) => {
                   const c = counts.get(s.portal_id);
                   return (
-                    <PortalRow key={s.portal_id} s={s} c={c} open={open === s.portal_id} gigs={gigs[s.portal_id]} onToggle={() => toggle(s.portal_id)} />
+                    <PortalRow key={s.portal_id} s={s} c={c} open={open === s.portal_id} gigs={gigs[s.portal_id]} error={gigErrors[s.portal_id]} onToggle={() => toggle(s.portal_id)} />
                   );
                 })}
               </tbody>
@@ -294,7 +330,7 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
   );
 }
 
-function PortalRow({ s, c, open, gigs, onToggle }: { s: Row; c?: Row; open: boolean; gigs?: Row[]; onToggle: () => void }) {
+function PortalRow({ s, c, open, gigs, error, onToggle }: { s: Row; c?: Row; open: boolean; gigs?: Row[]; error?: string; onToggle: () => void }) {
   const t = useT();
   const tone = (v?: string) => (/Graduat|Approved/.test(v || "") ? "green" : /Reject|Not/.test(v || "") ? "red" : /Pending|Started/.test(v || "") ? "amber" : "neutral");
   return (
@@ -321,7 +357,9 @@ function PortalRow({ s, c, open, gigs, onToggle }: { s: Row; c?: Row; open: bool
       {open && (
         <tr className="portal-gigs-row">
           <td colSpan={8}>
-            {!gigs ? (
+            {error ? (
+              <small role="alert">{error}</small>
+            ) : !gigs ? (
               <small>{t("Loading…")}</small>
             ) : !gigs.length ? (
               <small>{t("No gigs for this student in the gigs sheet.")}</small>

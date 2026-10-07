@@ -1121,6 +1121,51 @@ export const sessionFeedback = sqliteTable(
     index("session_feedback_session_idx").on(t.sessionId),
   ],
 );
+// Technical problems staff report from /support. See migration 202610070027.
+export const supportReports = sqliteTable(
+  "support_reports",
+  {
+    id: text("id").primaryKey(),
+    reporter: text("reporter")
+      .notNull()
+      .references(() => users.id),
+    reporterRoles: text("reporter_roles").notNull(),
+    page: text("page").notNull(),
+    url: text("url"),
+    category: text("category").notNull(),
+    severity: text("severity").notNull(),
+    action: text("action").notNull(),
+    happened: text("happened").notNull(),
+    expected: text("expected"),
+    occurredAt: text("occurred_at").notNull(),
+    browser: text("browser"),
+    screenshotKey: text("screenshot_key"),
+    screenshotType: text("screenshot_type"),
+    status: text("status").notNull().default("Open"),
+    resolution: text("resolution"),
+    handledBy: text("handled_by").references(() => users.id),
+    handledAt: text("handled_at"),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    index("support_reports_status_idx").on(t.status, t.createdAt),
+    index("support_reports_reporter_idx").on(t.reporter, t.createdAt),
+  ],
+);
+// How a session students rated below 3 of 5 was handled. See
+// lib/domain/feedback.ts and migration 202610070025.
+export const feedbackFlags = sqliteTable("feedback_flags", {
+  sessionId: text("session_id")
+    .primaryKey()
+    .references(() => sessions.id),
+  score: real("score").notNull(),
+  note: text("note").notNull(),
+  caseId: text("case_id").references(() => cases.id),
+  handledBy: text("handled_by")
+    .notNull()
+    .references(() => users.id),
+  handledAt: text("handled_at").notNull(),
+});
 export const joinAccounts = sqliteTable("join_accounts", {
   id: text("id").primaryKey(),
   kind: text("kind").notNull(),
