@@ -111,7 +111,8 @@ export function demoPlan(nowMs: number): Statement[] {
       s.confirmed ? iso(s.at - 2 * day) : null, iso(now),
     ]);
 
-  // Last week's register, checklist and feedback.
+  // Last week's register, checklist and feedback. The demo student (S01) has
+  // not rated it yet, so the student page has a form waiting.
   const lastWeek = "DEMO-G1-W1";
   for (const n of [1, 2, 3, 4, 5, 6, 7, 8])
     plan.push([
@@ -128,7 +129,7 @@ export function demoPlan(nowMs: number): Statement[] {
       `${session}-CHK-${item}`, session, item, "DEMO-COORD", iso(at),
     ]);
   for (const [n, satisfaction, clarity, usefulness, searched, liked, comments] of [
-    [1, 5, 5, 4, 1, "The live examples", "More practice time please"],
+    [4, 5, 5, 4, 1, "The live examples", "More practice time please"],
     [2, 4, 3, 4, 0, "Clear steps", "The pace was fast"],
     [3, 3, 4, 3, 1, null, "Audio cut out twice"],
   ] as [number, number, number, number, number, string | null, string][])
@@ -141,7 +142,7 @@ export function demoPlan(nowMs: number): Statement[] {
   const links: [string, number, string, string, string | null][] = [
     ["DEMO-S01", 1, "Kafiil", "Pending", null],
     ["DEMO-S01", 2, "Nafezly", "Pending", null],
-    ["DEMO-S01", 3, "Kafiil", "Pending", null],
+    ["DEMO-S01", 3, "Kafiil", "Needs Correction", "This opens your profile, not the service page. Paste the address of the service itself."],
     ["DEMO-S02", 1, "Kafiil", "Locked", null],
     ["DEMO-S02", 2, "Nafezly", "Needs Correction", "The service title does not match the track. Rename it and resubmit."],
     ["DEMO-S03", 1, "Kafiil", "Locked", null],
@@ -160,7 +161,7 @@ export function demoPlan(nowMs: number): Statement[] {
       iso(now - 2 * day), status, comment, "DEMO-QC", decided ? iso(now - day) : null, 1, null, iso(now - 2 * day), iso(now - (decided ? day : 2 * day)),
     ]);
   }
-  for (const [studentId, status] of [["DEMO-S01", "Pending QC"], ["DEMO-S02", "Needs Correction"], ["DEMO-S03", "Complete"], ["DEMO-S04", "In Progress"]])
+  for (const [studentId, status] of [["DEMO-S01", "Needs Correction"], ["DEMO-S02", "Needs Correction"], ["DEMO-S03", "Complete"], ["DEMO-S04", "In Progress"]])
     plan.push([
       "INSERT INTO service_submissions(id,student_id,status,submitted_at,updated_at,qc_completed_at) VALUES(?,?,?,?,?,?) ON CONFLICT(student_id) DO UPDATE SET status=excluded.status,submitted_at=excluded.submitted_at,updated_at=excluded.updated_at,qc_completed_at=excluded.qc_completed_at",
       `${studentId}-SUB`, studentId, status, iso(now - 2 * day), iso(now - day), status === "Complete" ? iso(now - day) : null,
