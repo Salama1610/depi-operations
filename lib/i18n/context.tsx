@@ -2,6 +2,7 @@
 
 import { createContext, useContext, type ReactNode } from "react";
 import { Languages } from "lucide-react";
+import { DirectionProvider } from "@/components/ui/direction";
 import {
   LOCALE_COOKIE,
   LOCALE_COOKIE_MAX_AGE,
@@ -16,7 +17,14 @@ import {
 const LocaleContext = createContext<Locale>(defaultLocale);
 
 export function LocaleProvider({ locale, children }: { locale: Locale; children: ReactNode }) {
-  return <LocaleContext.Provider value={locale}>{children}</LocaleContext.Provider>;
+  // Radix components (tabs, menus, popovers) read their direction from this
+  // provider, not from the page: without it they lay out left to right even
+  // on an Arabic page.
+  return (
+    <LocaleContext.Provider value={locale}>
+      <DirectionProvider dir={dirFor(locale)}>{children}</DirectionProvider>
+    </LocaleContext.Provider>
+  );
 }
 
 export function useLocale(): Locale {

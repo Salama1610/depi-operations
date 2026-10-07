@@ -784,7 +784,7 @@ input:focus-visible {
 .student-section-heading h3{font-size:16px;color:#263d60;display:flex;align-items:baseline;gap:8px}
 .student-section-heading h3 small{font-size:12px;color:#8a98ad;font-weight:500}
 .student-section-heading p{font-size:13px;color:#8998ae;margin:3px 0 10px}
-.student-section .student-service-row{grid-template-columns:minmax(0,1fr);padding:12px 0}
+.student-section .student-service-row{grid-template-columns:minmax(0,1fr);padding-block:12px}
 .student-new-link{margin:8px 0}
 .student-add-link{display:inline-flex;align-items:center;gap:6px;border:1px dashed #b9c8ee;background:#f7f9ff;color:#315ce8;border-radius:8px;padding:8px 12px;font-size:13px;margin:6px 0 10px}
 .student-add-link:hover{background:#edf2ff}
@@ -1121,4 +1121,11 @@ input:focus-visible {
 .support-update{display:grid;grid-template-columns:minmax(160px,220px) minmax(0,1fr) auto;align-items:end;gap:10px;margin:0 4px 14px}
 .report-problem{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;font-size:13px;color:inherit;opacity:.9}
 .report-problem:hover{opacity:1;background:rgba(255,255,255,.08)}
-@media(max-width:700px){.support-update{grid-template-columns:1fr}.support-detail{grid-template-columns:1fr}.support-item summary{grid-template-columns:1fr auto}}
+@media(max-width:700px){.support-update{grid-template-columns:1fr}.support-detail{grid-template-columns:1fr}}
+/* Shared dropdown: a long value ends in an ellipsis on the button and wraps
+   in the list, and the hidden helper behind a required one never widens a
+   form (.field input{width:100%} used to win over its 1px). */
+.searchable-select{min-width:0}
+.searchable-select>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.searchable-select-list [cmdk-item]{white-space:normal;overflow-wrap:anywhere;height:auto}
+.field input.searchable-select-proxy,.searchable-select-required input.searchable-select-proxy{width:1px}

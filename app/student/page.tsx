@@ -108,6 +108,11 @@ const ratingQuestions: { key: "satisfaction" | "clarity" | "usefulness"; text: s
 function SessionFeedback({ sessions, onSent }: { sessions: FeedbackSession[]; onSent: (s: FeedbackSession[]) => void }) {
   const t = useT();
   const dates = useDates();
+  // "Session 2 of 8", in the student's language; any other title as written.
+  const sessionName = (title: string) => {
+    const m = String(title || "").match(/^Session (\d+) of (\d+)$/);
+    return m ? t("Session {v0} of {v1}", { v0: m[1], v1: m[2] }) : title;
+  };
   const [openId, setOpenId] = useState<string | null>(null);
   const [answers, setAnswers] = useState<FeedbackAnswers>({});
   const [busy, setBusy] = useState(false);
@@ -157,7 +162,7 @@ function SessionFeedback({ sessions, onSent }: { sessions: FeedbackSession[]; on
             </div>
             <div>
               <div className="feedback-head">
-                <span><strong>{s.title}</strong>{s.coach_name ? <small> · {s.coach_name}</small> : null}</span>
+                <span><strong>{sessionName(s.title)}</strong>{s.coach_name ? <small> · {s.coach_name}</small> : null}</span>
                 {s.given ? (
                   <span className="student-status success"><Check size={13} /> {t("Feedback sent")}</span>
                 ) : openId !== s.id ? (
