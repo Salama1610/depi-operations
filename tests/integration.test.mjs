@@ -3302,3 +3302,16 @@ test("a demo reset lets the same demo link be reviewed again", async () => {
   await check("service_qc_review", { service_id: "DEMO-S01-LNK-1", decision: "Lock", comment: "" });
   current = { id: "owner", email: "owner@example.com" };
 });
+
+test("a demo supervisor assigns demo accounts only", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  await check("demo_refresh");
+  current = { id: "demo-auth-sup", email: "demo.supervisor@example.com" };
+  await check("account_coordinator", { id: "DEMO-ACC-2", account_ids: ["DEMO-ACC-2"], coordinator_id: "DEMO-COORD" });
+  assert.equal((await dbRow("SELECT coordinator_id FROM accounts WHERE id='DEMO-ACC-2'")).coordinator_id, "DEMO-COORD");
+  await check("account_coordinator", { id: "", account_ids: ["DEMO-ACC-2", "DEMO-ACC-3"], coordinator_id: "DEMO-COORD" });
+  await dbExec("INSERT INTO accounts(id,platform,label,status,credits) VALUES('ACC-REAL-X','Kafeel','real@example.com','Available',0) ON CONFLICT(id) DO NOTHING");
+  assert.match((await post("account_coordinator", { id: "", account_ids: ["DEMO-ACC-2", "ACC-REAL-X"], coordinator_id: "DEMO-COORD" })).error, /demo/i);
+  assert.equal((await dbRow("SELECT coordinator_id FROM accounts WHERE id='ACC-REAL-X'")).coordinator_id, null);
+  current = { id: "owner", email: "owner@example.com" };
+});

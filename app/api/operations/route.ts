@@ -96,6 +96,7 @@ const demoActions = new Set([
   "case", "case_transition", "complete_task", "contact", "engagement", "milestone", "lifecycle", "task", "saved_view",
   "service_qc_assign", "service_qc_review", "group_contact", "account_topup",
   "gig", "gig_transition", "evidence", "review", "transfer", "account_request", "student",
+  "account_coordinator",
   "session", "session_attendance", "session_cancel", "session_check", "session_coach", "session_confirm",
   "session_reschedule", "session_unavailable",
 ]);
@@ -108,9 +109,12 @@ async function demoGuard(x: any) {
   const elsewhere = "This is not available in the demo. Demo accounts work on the demo groups only.";
   ensure(demoActions.has(x.action), elsewhere);
   ensure(!x.new_email, "Adding a new coach is not available in the demo. Choose the demo coach.");
-  for (const person of [x.coach_id, x.reviewer_id])
+  for (const person of [x.coach_id, x.reviewer_id, x.coordinator_id])
     if (person) ensure(String(person).startsWith("DEMO-"), "Choose someone from the demo team.");
-  const touched: string[] = [];
+  // Several accounts at once: every one of them must be a demo account.
+  if (Array.isArray(x.account_ids))
+    ensure(x.account_ids.length > 0 && x.account_ids.every((a: any) => String(a).startsWith("DEMO-")), elsewhere);
+  const touched: string[] = Array.isArray(x.account_ids) ? x.account_ids.map(String) : [];
   if (x.group_id) touched.push(String(x.group_id));
   if (x.student_id) {
     const row: any = await stmt("SELECT group_id FROM students WHERE id=?", x.student_id).first();
