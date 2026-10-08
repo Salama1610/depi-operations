@@ -12,6 +12,8 @@ import { ProgramFlow } from "./program-flow";
 import { WeeklyProgress } from "./weekly-progress";
 import { acceptedServicePlatforms } from "@/lib/domain/service-links";
 import { PortalView } from "./portal-view";
+// The dashboard and its charts load only when someone opens it.
+const Dashboard = lazy(() => import("./dashboard").then((m) => ({ default: m.Dashboard })));
 import { SearchableSelect } from "@/components/searchable-select";
 import { Progress } from "@/components/ui/progress";
 import { GraduationDots } from "./today";
@@ -20,7 +22,7 @@ import { CoachProgress } from "./coach-progress";
 import { scoreOf } from "@/lib/domain/feedback";
 import { coachPayout, coachRates } from "@/lib/domain/payouts";
 import { checklistState, sessionChecklist, type ChecklistItem } from "@/lib/domain/session-checklist";
-import { useState, useEffect } from "react";
+import { Suspense, lazy, useState, useEffect } from "react";
 import {
   Home,
   CheckCheck,
@@ -59,6 +61,7 @@ import {
   RefreshCw,
   LockKeyhole,
   Check,
+  LayoutDashboard,
 } from "lucide-react";
 import {
   SidebarProvider,
@@ -114,6 +117,7 @@ import { guessKeyColumn, guessMapping } from "@/lib/domain/sheet-mapping";
 type Row = Record<string, any>;
 const nav = [
   ["home", "Overview", Home],
+  ["dashboard", "Dashboard", LayoutDashboard],
   ["program", "Program flow", Flag],
   ["work", "My work", CheckCheck],
   ["weekly", "Weekly progress", CalendarRange],
@@ -602,6 +606,9 @@ export default function Operations({ module: initialModule }: { module: string }
   const shownNav = nav.filter(([m]) =>
     qualityOnly
       ? m === "quality" || (m === "portal" && !demoAccount)
+      : m === "dashboard"
+        ? // Every tracker and what everyone did: the administrator's view.
+          can(user.roles, ["Operations Systems / Admin"]) && !demoAccount
       : m === "administration"
         ? can(user.roles, ["Operations Systems / Admin"])
         : m === "gigs" && onlyCoach
@@ -2351,6 +2358,12 @@ export default function Operations({ module: initialModule }: { module: string }
           </TabsContent>
         )}
       </Tabs>
+    );
+  } else if (module === "dashboard") {
+    content = (
+      <Suspense fallback={<div className="dash-loading">{t("Loading the dashboard…")}</div>}>
+        <Dashboard />
+      </Suspense>
     );
   } else if (module === "progress") {
     content = <CoachProgress />;

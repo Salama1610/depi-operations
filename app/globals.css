@@ -1140,3 +1140,45 @@ td .searchable-select,td .pick-inline{max-width:240px;min-width:0}
 .profile>div{min-width:0;overflow:hidden}
 .profile small{max-width:100%}
 
+
+/* Administrator dashboard (app/dashboard.tsx): slicers in one row, KPI tiles,
+   chart cards on a two-column grid, dense tables, BI-report style. */
+.dash{display:flex;flex-direction:column;gap:14px}
+.dash-slicers{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:#fff;border:1px solid #e4e8f0;border-radius:10px;padding:10px 12px;position:sticky;top:0;z-index:5}
+.dash-slicers .dash-slicer{width:auto;min-width:150px;max-width:220px;min-height:38px;font-size:13px}
+.dash-slicers input[type=date]{min-height:38px;border:1px solid #dfe5ef;border-radius:8px;padding:0 8px;font-size:13px}
+.dash-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.dash-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid #cdd8fb;background:#f4f6ff;color:#315ce8;border-radius:999px;padding:4px 10px;font-size:12px;font-weight:600}
+.dash-scope{font-size:12px;color:#7c879d;margin:0}
+.dash-kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:14px}
+.dash-kpi{background:#fff;border:1px solid #e4e8f0;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:4px;border-top:4px solid #c9d4e4;min-width:0}
+.dash-kpi span{font-size:12px;color:#6a7891}
+.dash-kpi strong{font-size:26px;line-height:1.15;color:#20304d;font-weight:700}
+.dash-kpi small{font-size:12px;color:#8793a9}
+/* SVG text anchors flip under right-to-left; the charts mirror their axes themselves. */
+.dash .recharts-wrapper{direction:ltr}
+.dash-kpi.is-good{border-top-color:#2f7a6d}.dash-kpi.is-warn{border-top-color:#c98500}.dash-kpi.is-bad{border-top-color:#c0453a}
+.dash-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.dash-card{background:#fff;border:1px solid #e4e8f0;border-radius:10px;padding:12px 14px;min-width:0}
+.dash-card.is-wide{grid-column:1 / -1}
+.dash-card header{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px}
+.dash-card h3{font-size:14px;color:#2b4165;margin:0}
+.dash-table-wrap{overflow:auto;max-height:520px}
+.dash-table-wrap.is-short{max-height:340px}
+.dash-table{width:100%;border-collapse:collapse;font-size:13px}
+.dash-table th{position:sticky;top:0;background:#fbfcff;color:#6a7891;font-weight:600;text-align:start;padding:8px 10px;border-bottom:1px solid #e6eaf1;white-space:nowrap}
+.dash-table td{padding:8px 10px;border-bottom:1px solid #f0f2f7;color:#42506b;text-align:start}
+.dash-table td small{display:block;color:#8793a9;font-size:12px}
+.dash-table tbody tr{cursor:pointer}
+.dash-table tbody tr:hover{background:#f6f8fe}
+.dash-table tr.is-picked{background:#eef2fb}
+.dash-table td.is-zero{color:#b4bccb}
+.dash-table td.is-late{color:#c0453a;font-weight:600}
+.dash-empty{color:#8793a9;font-size:13px;padding:18px 0;text-align:center}
+.dash-error{border:1px solid #efc5bd;background:#fff2f0;padding:12px;border-radius:8px;color:#ae584e}
+.dash-loading{padding:40px;text-align:center;color:#7c879d}
+.dash-toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.dash-toolbar .dash-slicer{width:auto;min-width:180px}
+.spin{animation:dash-spin 1s linear infinite}
+@keyframes dash-spin{to{transform:rotate(360deg)}}
+@media(max-width:900px){.dash-grid{grid-template-columns:1fr}.dash-kpis{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}.dash-slicers{position:static}.dash-slicers .dash-slicer{min-width:0;flex:1 1 140px;max-width:none}}

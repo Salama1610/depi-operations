@@ -3315,3 +3315,24 @@ test("a demo supervisor assigns demo accounts only", async () => {
   assert.equal((await dbRow("SELECT coordinator_id FROM accounts WHERE id='ACC-REAL-X'")).coordinator_id, null);
   current = { id: "owner", email: "owner@example.com" };
 });
+
+test("the dashboard is for administrators, without national IDs or demo records", async () => {
+  const dashboard = await route("dashboard");
+  current = { id: "owner", email: "owner@example.com" };
+  await check("demo_refresh");
+  const res = await dashboard.GET();
+  const body = await res.json();
+  assert.equal(body.error, undefined, body.error);
+  for (const key of ["staff", "groups", "students", "sessions", "attendance", "contacts", "tasks", "cases", "links", "reviews", "feedback", "accounts", "audit"])
+    assert.ok(Array.isArray(body[key]), key);
+  assert.ok(body.students.length > 0);
+  const text = JSON.stringify(body);
+  assert.ok(!/national_id|"phone"|"secret"|"password"/.test(text), "no national IDs, phones or secrets");
+  assert.ok(!body.groups.some((g) => g.id.startsWith("DEMO-")) && !body.staff.some((p) => p.id.startsWith("DEMO-")), "no demo records");
+  assert.ok(body.audit.every((e) => !("previous" in e) && !("value" in e)), "only who did what and when");
+  current = { id: "coordinator", email: "staff-sara@example.invalid" };
+  assert.equal((await dashboard.GET()).status, 403);
+  current = { id: "demo-auth-po", email: "demo.projectops@example.com" };
+  assert.equal((await dashboard.GET()).status, 403);
+  current = { id: "owner", email: "owner@example.com" };
+});
