@@ -3336,3 +3336,59 @@ test("the dashboard is for administrators, without national IDs or demo records"
   assert.equal((await dashboard.GET()).status, 403);
   current = { id: "owner", email: "owner@example.com" };
 });
+
+test("Service Team coordinators post job opportunities, which a track's students and the leaders see", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const api2 = await route("opportunities");
+  const get = async () => (await api2.GET()).json();
+  const send = async (body) =>
+    (await api2.POST(new Request("https://test.local/api/opportunities", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }))).json();
+  const group = await dbRow(
+    "SELECT g.id,g.track,u.id uid,u.email,u.team FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.status='Active' AND g.id NOT LIKE 'DEMO-%' AND EXISTS (SELECT 1 FROM students s WHERE s.group_id=g.id AND s.lifecycle='Active' AND s.email IS NOT NULL) ORDER BY g.id LIMIT 1",
+  );
+  const other = await dbRow("SELECT s.id,s.email FROM students s JOIN groups g ON g.id=s.group_id WHERE g.track<>? AND s.lifecycle='Active' AND s.email IS NOT NULL AND g.id NOT LIKE 'DEMO-%' LIMIT 1", group.track);
+  const learner = await dbRow("SELECT id,email FROM students WHERE group_id=? AND lifecycle='Active' AND email IS NOT NULL LIMIT 1", group.id);
+  const job = { action: "post", url: "https://khamsat.com/community/requests/123", title: "Logo for a coffee shop", track: group.track, platform: "Khamsat", posted_on: new Date().toISOString().slice(0, 10) };
+  try {
+    // A coordinator outside the Service Team reads nothing and posts nothing.
+    await dbExec("UPDATE users SET team='Target Team' WHERE id=?", group.uid);
+    current = { id: group.uid, email: group.email };
+    assert.match((await get()).error, /Service Team/);
+    assert.match((await send(job)).error, /Service Team/);
+    // On the Service Team they post, with a real link, a known track and a date that has come.
+    await dbExec("UPDATE users SET team='Service Team' WHERE id=?", group.uid);
+    assert.match((await send({ ...job, url: "http://khamsat.com/x" })).error, /https/);
+    assert.match((await send({ ...job, track: "No such track" })).error, /track/);
+    assert.match((await send({ ...job, posted_on: "2999-01-01" })).error, /future/);
+    const made = await send(job);
+    assert.equal(made.error, undefined, made.error);
+    assert.match((await send(job)).error, /already posted/);
+    const mine = await get();
+    assert.equal(mine.posts, true);
+    assert.ok(mine.opportunities.some((o) => o.id === made.id));
+    // A student of that track sees it; a student of another track does not.
+    current = { id: learner.id, email: learner.email };
+    const theirs = await get();
+    assert.ok(theirs.opportunities.some((o) => o.id === made.id && o.platform === "Khamsat"));
+    assert.ok(!("created_by" in theirs.opportunities[0]), "students are not told who posted it");
+    assert.match((await send(job)).error, /staff workspace/);
+    if (other) {
+      current = { id: other.id, email: other.email };
+      assert.ok(!(await get()).opportunities.some((o) => o.id === made.id));
+    }
+    // A supervisor sees every post and can remove one; it then leaves the student's page.
+    const supervisor = await dbRow(`SELECT id,email FROM users WHERE roles LIKE '%Team Supervisor%' AND roles NOT LIKE '%Admin%' AND id NOT LIKE 'DEMO-%' AND active=1 LIMIT 1`);
+    current = { id: supervisor.id, email: supervisor.email };
+    const all = await get();
+    assert.equal(all.posts, false);
+    assert.ok(all.opportunities.some((o) => o.id === made.id));
+    assert.match((await send(job)).error, /Service Team/);
+    assert.equal((await send({ action: "remove", id: made.id })).error, undefined);
+    current = { id: learner.id, email: learner.email };
+    assert.ok(!(await get()).opportunities.some((o) => o.id === made.id));
+  } finally {
+    current = { id: "owner", email: "owner@example.com" };
+    await dbExec("UPDATE users SET team=? WHERE id=?", group.team, group.uid);
+  }
+});

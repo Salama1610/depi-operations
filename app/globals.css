@@ -1182,3 +1182,15 @@ td .searchable-select,td .pick-inline{max-width:240px;min-width:0}
 .spin{animation:dash-spin 1s linear infinite}
 @keyframes dash-spin{to{transform:rotate(360deg)}}
 @media(max-width:900px){.dash-grid{grid-template-columns:1fr}.dash-kpis{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}.dash-slicers{position:static}.dash-slicers .dash-slicer{min-width:0;flex:1 1 140px;max-width:none}}
+/* Opportunities: jobs the Service Team's coordinators share with a track. */
+.opportunities{display:flex;flex-direction:column;gap:14px;min-width:0}
+.opportunities .filter-row .field{min-width:200px}
+.opportunity-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.opportunity-wide{grid-column:1/-1}
+.opportunity-list{margin:0;padding:0;list-style:none;display:grid;gap:8px}
+.opportunity-list li{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid var(--border);border-radius:8px}
+.opportunity-main{display:grid;gap:3px;min-width:0}
+.opportunity-main a{font-weight:600;overflow-wrap:anywhere}
+.opportunity-main a svg{display:inline;vertical-align:-2px}
+.opportunity-main small{color:var(--muted-foreground);font-size:13px;overflow-wrap:anywhere}
+@media(max-width:700px){.opportunities .filter-row .field{min-width:0;flex:1 1 100%}.opportunity-list li{flex-direction:column;align-items:flex-start}}

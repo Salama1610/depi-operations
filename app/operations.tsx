@@ -19,6 +19,7 @@ import { Progress } from "@/components/ui/progress";
 import { GraduationDots } from "./today";
 import { FeedbackAlertCard, FeedbackScore, FeedbackView } from "./feedback-view";
 import { CoachProgress } from "./coach-progress";
+import { Opportunities } from "./opportunities";
 import { scoreOf } from "@/lib/domain/feedback";
 import { coachPayout, coachRates } from "@/lib/domain/payouts";
 import { checklistState, sessionChecklist, type ChecklistItem } from "@/lib/domain/session-checklist";
@@ -127,6 +128,7 @@ const nav = [
   ["sessions", "Sessions", CalendarDays],
   ["accounts", "Accounts", WalletCards],
   ["gigs", "Services", BriefcaseBusiness],
+  ["opportunities", "Opportunities", ExternalLink],
   ["portal", "Gigs portal view", Files],
   ["quality", "Quality review", ShieldCheck],
   ["cases", "Cases", Flag],
@@ -625,6 +627,10 @@ export default function Operations({ module: initialModule }: { module: string }
               "Operations Systems / Admin",
               "Operations Coordinator",
             ])
+        : m === "opportunities"
+          ? // Jobs the Service Team's coordinators find for a track's students.
+            can(user.roles, ["Team Supervisor", "Project Operations", "Operations Systems / Admin"]) ||
+            (can(user.roles, ["Operations Coordinator"]) && user.team === "Service Team")
         : m === "progress"
           ? // A coach's read-only view of their own students' gigs.
             can(user.roles, ["Coach"])
@@ -2365,6 +2371,8 @@ export default function Operations({ module: initialModule }: { module: string }
         <Dashboard />
       </Suspense>
     );
+  } else if (module === "opportunities") {
+    content = <Opportunities />;
   } else if (module === "progress") {
     content = <CoachProgress />;
   } else if (module === "portal") {

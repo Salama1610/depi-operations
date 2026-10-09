@@ -763,5 +763,18 @@
     "handled_by": "text",
     "handled_at": "timestamptz",
     "created_at": "timestamptz"
+  },
+  "opportunities": {
+    "id": "text",
+    "url": "text",
+    "title": "text",
+    "track": "text",
+    "platform": "text",
+    "posted_on": "date",
+    "status": "text",
+    "created_by": "text",
+    "created_at": "timestamptz",
+    "removed_by": "text",
+    "removed_at": "timestamptz"
   }
 }

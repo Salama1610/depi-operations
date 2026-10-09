@@ -1,6 +1,7 @@
 "use client";
 import { LanguageToggle, useLocale, useT } from "@/lib/i18n/context";
 import type { Translate } from "@/lib/i18n";
+import { StudentOpportunities } from "../opportunities";
 
 import { useEffect, useState } from "react";
 import { Check, ExternalLink, LockKeyhole, Plus, RefreshCw, Send, ShieldCheck, X } from "lucide-react";
@@ -505,6 +506,7 @@ export default function StudentServicesPage() {
               )}
             </form>
           </section>
+          <StudentOpportunities />
           <SessionFeedback sessions={feedbackSessions} onSent={setFeedbackSessions} />
           {reviews.length > 0 && (
             <section className="student-card" aria-labelledby="review-history-title">

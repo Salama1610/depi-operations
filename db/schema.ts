@@ -1121,6 +1121,26 @@ export const sessionFeedback = sqliteTable(
     index("session_feedback_session_idx").on(t.sessionId),
   ],
 );
+// Job postings Service Team coordinators share with a track. See migration 202610090031.
+export const opportunities = sqliteTable(
+  "opportunities",
+  {
+    id: text("id").primaryKey(),
+    url: text("url").notNull(),
+    title: text("title").notNull(),
+    track: text("track").notNull(),
+    platform: text("platform").notNull(),
+    postedOn: text("posted_on").notNull(),
+    status: text("status").notNull().default("Active"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: text("created_at").notNull(),
+    removedBy: text("removed_by").references(() => users.id),
+    removedAt: text("removed_at"),
+  },
+  (t) => [index("opportunities_track_idx").on(t.track, t.status, t.postedOn)],
+);
 // Technical problems staff report from /support. See migration 202610070027.
 export const supportReports = sqliteTable(
   "support_reports",
