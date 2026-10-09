@@ -117,7 +117,17 @@ function say(t: Translate, message: string) {
   return t(message);
 }
 
-type FeedbackSession = { id: string; title: string; week: number; starts_at: string; coach_name: string | null; given: boolean };
+type FeedbackSession = {
+  id: string;
+  title: string;
+  week: number;
+  starts_at: string;
+  coach_name: string | null;
+  given: boolean;
+  /** The student's own answers, once given. */
+  mine?: { satisfaction: number; clarity: number; usefulness: number; searched_gig: number | boolean; liked?: string | null; comments?: string | null; at?: string } | null;
+};
+type ClientOrder = { id: string; task: string; platform: string; status: string; assigned_at?: string };
 type FeedbackAnswers = { satisfaction?: number; clarity?: number; searched_gig?: boolean; usefulness?: number; liked?: string; comments?: string };
 
 /** The questions students answer after each session, about it and its coach. */
@@ -195,6 +205,35 @@ function SessionFeedback({ sessions, onSent }: { sessions: FeedbackSession[]; on
                   <button type="button" className="student-secondary" onClick={() => { setOpenId(s.id); setAnswers({}); setError(""); }}>{t("Give feedback")}</button>
                 ) : null}
               </div>
+              {s.given && s.mine && (
+                <details className="feedback-mine">
+                  <summary>{t("Your answers")}</summary>
+                  <dl>
+                    {ratingQuestions.map((q) => (
+                      <div key={q.key}>
+                        <dt>{t(q.text)}</dt>
+                        <dd>{t("{v0} of 5", { v0: s.mine![q.key] })}</dd>
+                      </div>
+                    ))}
+                    <div>
+                      <dt>{t("Did you search for a gig through platforms?")}</dt>
+                      <dd>{s.mine.searched_gig === true || Number(s.mine.searched_gig) === 1 ? t("Yes") : t("No")}</dd>
+                    </div>
+                    {s.mine.liked && (
+                      <div>
+                        <dt>{t("What did you like most about today's session?")}</dt>
+                        <dd><bdi>{s.mine.liked}</bdi></dd>
+                      </div>
+                    )}
+                    {s.mine.comments && (
+                      <div>
+                        <dt>{t("Any comments or support needed?")}</dt>
+                        <dd><bdi>{s.mine.comments}</bdi></dd>
+                      </div>
+                    )}
+                  </dl>
+                </details>
+              )}
               {openId === s.id && (
                 <form className="feedback-form" onSubmit={(e) => { e.preventDefault(); if (complete) send(s.id); }}>
                   <p className="feedback-scale-hint">{t("1 = poor, 5 = excellent")}</p>
@@ -253,6 +292,7 @@ export default function StudentServicesPage() {
   const [saved, setSaved] = useState(false);
   const [reviews, setReviews] = useState<any[]>([]);
   const [feedbackSessions, setFeedbackSessions] = useState<FeedbackSession[]>([]);
+  const [clientOrders, setClientOrders] = useState<ClientOrder[]>([]);
   const [lastReviewedAt, setLastReviewedAt] = useState<string | null>(null);
   // New links typed into each section, corrections to links sent back, and
   // whether the student is confirming the submission.
@@ -272,6 +312,7 @@ export default function StudentServicesPage() {
       );
       setStudent(value.student);
       setFeedbackSessions(value.feedback_sessions || []);
+      setClientOrders(value.client_orders || []);
       setServices(value.services || empty());
       setSubmission(value.submission);
       setReviews(value.reviews || []);
@@ -506,6 +547,26 @@ export default function StudentServicesPage() {
               )}
             </form>
           </section>
+          {clientOrders.length > 0 && (
+            <section className="student-card" aria-labelledby="orders-title">
+              <div className="student-card-heading">
+                <div>
+                  <h2 id="orders-title">{t("A client will order your service")}</h2>
+                  <p>{t("Your coordinator will place the order on the platform within two days. Keep the service published and answer the client quickly.")}</p>
+                </div>
+              </div>
+              <ul className="opportunity-list">
+                {clientOrders.map((o) => (
+                  <li key={o.id}>
+                    <div className="opportunity-main">
+                      <strong><bdi>{o.task}</bdi></strong>
+                      <small><bdi>{t(o.platform)}</bdi>{o.assigned_at ? <> · {dates.day(o.assigned_at)}</> : null}</small>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           <StudentOpportunities />
           <SessionFeedback sessions={feedbackSessions} onSent={setFeedbackSessions} />
           {reviews.length > 0 && (

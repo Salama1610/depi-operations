@@ -277,10 +277,18 @@ export function ReportsPanel({ canExport = false, showStaff = true }: { canExpor
     </section>
   );
 }
-export function CredentialPanel({ account }: { account: string }) {
+/**
+ * An account's sign-in. Anyone allowed opens it for 30 seconds with a stated
+ * purpose; the people who keep the accounts also save a new email and
+ * password here (encrypted before it is stored). The external vault
+ * reference is an administrator's setting.
+ */
+export function CredentialPanel({ account, canStore = false, showReference = false }: { account: string; canStore?: boolean; showReference?: boolean }) {
   const t = useT();
   const [purpose, setPurpose] = useState(""),
     [reference, setReference] = useState(""),
+    [username, setUsername] = useState(""),
+    [password, setPassword] = useState(""),
     [secret, setSecret] = useState<any>(null),
     [message, setMessage] = useState(""),
     [busy, setBusy] = useState(false);
@@ -305,15 +313,22 @@ export function CredentialPanel({ account }: { account: string }) {
           account_id: account,
           purpose,
           reference,
+          ...(action === "set_credential" ? { username, password } : {}),
         }),
       });
       const x = await r.json();
       if (x.error) throw Error(x.error);
       if (action === "reveal") setSecret(x);
+      if (action === "set_credential") {
+        setUsername("");
+        setPassword("");
+      }
       setMessage(
         action === "reveal"
           ? t("Credentials hide after 30 seconds.")
-          : t("Recorded in the audit history."),
+          : action === "set_credential"
+            ? t("Saved, encrypted. Recorded in the audit history.")
+            : t("Recorded in the audit history."),
       );
     } catch (e: any) {
       setMessage(e.message);
@@ -361,22 +376,47 @@ export function CredentialPanel({ account }: { account: string }) {
         </div>
       )}
       <p role="status">{message}</p>
-      <label className="field">
-        {t("Approved vault reference")}
-        <input
-          value={reference}
-          onChange={(e) => setReference(e.target.value)}
-          placeholder={t("depi/client-account-101")}
-        />
-      </label>
-      <button
-        type="button"
-        disabled={busy || !reference || purpose.trim().length < 10}
-        className="small-btn"
-        onClick={() => act("set_reference")}
-      >
-        {t("Save reference")}
-      </button>
+      {canStore && (
+        <div className="credential-store">
+          <h3>{t("Save a new email and password")}</h3>
+          <label className="field">
+            {t("Email or username")}
+            <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" dir="ltr" />
+          </label>
+          <label className="field">
+            {t("Password")}
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" dir="ltr" />
+          </label>
+          <button
+            type="button"
+            disabled={busy || username.trim().length < 3 || password.length < 6 || purpose.trim().length < 10}
+            className="small-btn"
+            onClick={() => act("set_credential")}
+          >
+            {t("Save sign-in")}
+          </button>
+        </div>
+      )}
+      {showReference && (
+        <>
+          <label className="field">
+            {t("Approved vault reference")}
+            <input
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+              placeholder={t("depi/client-account-101")}
+            />
+          </label>
+          <button
+            type="button"
+            disabled={busy || !reference || purpose.trim().length < 10}
+            className="small-btn"
+            onClick={() => act("set_reference")}
+          >
+            {t("Save reference")}
+          </button>
+        </>
+      )}
     </div>
   );
 }

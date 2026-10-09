@@ -43,6 +43,10 @@ import {
   ArrowUpRight,
   ArrowRight,
   ChevronRight,
+  ChevronLeft,
+  Phone,
+  Mail,
+  MessageCircle,
   CalendarRange,
   WalletCards,
   GraduationCap,
@@ -190,10 +194,13 @@ const titles: Row = {
   group_close: "Close group",
   service_qc_review: "Review student service link",
   bulk_group_owner: "Change coordinator",
+  group_whatsapp: "WhatsApp group link",
 };
 const actionCopy: Row = {
-  contact: "Screenshot proof, an outcome and a next action are required.",
-  allocate: "Eligibility and account reuse are checked before allocation.",
+  contact: "Record a conversation that already happened, with a screenshot as proof, its outcome and the next step.",
+  task: "A follow-up step you commit to do for this student, with an owner and a due date. Nothing has happened yet.",
+  allocate: "Eligibility and account reuse are checked before allocation. Once assigned, the group's coordinator gets a task to place the order within two days, and the student's page shows that a client will order the service.",
+  task_bank: "An approved task is a ready-made service order (platform, what to order and its value) that coordinators pick when they request a client account, so every request matches something Project Operations approved.",
   review: "Record a decision and clear correction guidance.",
   gig_transition:
     "Attach a screenshot of this activity before progressing the service.",
@@ -212,6 +219,8 @@ const actionCopy: Row = {
     "One link at a time. Approve a correct link, or reject it with a clear comment for the student.",
   bulk_group_owner:
     "The group and its students move to the coordinator you choose. The change is audited.",
+  group_whatsapp:
+    "Paste the group's WhatsApp invite link (WhatsApp → group info → Invite via link). It then opens in one tap from the group, its sessions and each student's profile.",
 };
 const formatDay = (v: string, locale = "en-GB") =>
   new Date(v).toLocaleDateString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", {
@@ -477,6 +486,11 @@ export default function Operations({ module: initialModule }: { module: string }
     [moreFilters, setMoreFilters] = useState<Row>({}),
     [saved, setSaved] = useState<string[]>([]),
     [checklistFor, setChecklistFor] = useState<string | null>(null),
+    [signinFor, setSigninFor] = useState<Row | null>(null),
+    // A ready message for the group's WhatsApp: the session confirmation or
+    // the feedback request. The app cannot post to WhatsApp, so the
+    // coordinator copies it and opens the group.
+    [groupMessage, setGroupMessage] = useState<Row | null>(null),
     [feedbackFor, setFeedbackFor] = useState<string | null>(null),
     [sessionTab, setSessionTab] = useState("schedule"),
     [accountFilters, setAccountFilters] = useState<Row>({ platform: "All", status: "All", request: "Open", ledger: "All", coordinator: "All", owner: "All" }),
@@ -485,6 +499,8 @@ export default function Operations({ module: initialModule }: { module: string }
       month: new Date().toISOString().slice(0, 7), payee: "Coaches",
     }),
     [sessionFilters, setSessionFilters] = useState<Row>({ day: "All", time: "All" }),
+    // The schedule shows one programme week at a time: 0 is this week.
+    [sessionWeek, setSessionWeek] = useState(0),
     [joinLogin, setJoinLogin] = useState<Row | null>(null),
     [joinLeft, setJoinLeft] = useState(0),
     [joinShowPassword, setJoinShowPassword] = useState(false),
@@ -629,10 +645,11 @@ export default function Operations({ module: initialModule }: { module: string }
   const coachesOnly =
     can(user.roles, ["Coach Operations"]) &&
     !can(user.roles, ["Project Operations", "Operations Systems / Admin", "Higher Board", "Team Supervisor"]);
-  // The people who top up client accounts: the Service Team's supervisor,
-  // Higher Board and administrators (the server checks the same).
+  // The people who keep the client accounts (top-ups and status changes): the
+  // Service Team's supervisor, Project Operations, Higher Board and
+  // administrators (the server checks the same).
   const keepsAccounts =
-    can(user.roles, ["Higher Board", "Operations Systems / Admin"]) ||
+    can(user.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin"]) ||
     (can(user.roles, ["Team Supervisor"]) && user.team === "Service Team");
   const shownNav = nav.filter(([m]) =>
     qualityOnly
@@ -657,9 +674,10 @@ export default function Operations({ module: initialModule }: { module: string }
               "Operations Coordinator",
             ])
         : m === "opportunities"
-          ? // Jobs the Service Team's coordinators find for a track's students.
-            can(user.roles, ["Team Supervisor", "Project Operations", "Operations Systems / Admin"]) ||
-            (can(user.roles, ["Operations Coordinator"]) && user.team === "Service Team")
+          ? // Jobs the Target Team finds for a track's students: its coordinators
+            // and supervisors and Project Operations post and read them.
+            can(user.roles, ["Project Operations", "Operations Systems / Admin"]) ||
+            (can(user.roles, ["Team Supervisor", "Operations Coordinator"]) && user.team === "Target Team")
         : m === "progress"
           ? // A coach's read-only view of their own students' gigs.
             can(user.roles, ["Coach"])
@@ -695,6 +713,12 @@ export default function Operations({ module: initialModule }: { module: string }
                   (d.accounts || []).some((a: Row) => a.coordinator_id === user.id)))
             : true,
   );
+  // The service-link list lives on the quality page. Its reviewers call it
+  // Quality review; for everyone else following their students' links
+  // (coordinators, supervisors, Project Operations) it is "Service links".
+  const reviewsQuality = can(user.roles, ["Quality Member", "Quality Lead"]);
+  const pageName = (id: string) =>
+    id === "quality" && !reviewsQuality ? "Service links" : String(nav.find((n) => n[0] === id)?.[1] || "");
   // A module nobody showed them is not a module they can open by typing its
   // address either.
   const allowedModules = shownNav.map(([m]) => String(m));
@@ -778,8 +802,10 @@ export default function Operations({ module: initialModule }: { module: string }
           : t("Updated"),
       );
       await refresh();
+      return true;
     } catch (e: any) {
       toast.error(e.message);
+      return false;
     } finally {
       setBusy(false);
     }
@@ -1289,6 +1315,57 @@ export default function Operations({ module: initialModule }: { module: string }
           : e.gig_id
             ? "Refund"
             : "Top-up";
+  // A staff member's phone as a call link and a WhatsApp link (Egyptian
+  // mobile numbers; anything else is offered as a call only).
+  const reachOf = (personId?: string | null) => {
+    const raw = String(staff.find((s: Row) => s.id === personId)?.phone || "").split("/")[0].trim();
+    const digits = raw.replace(/D/g, "");
+    if (!digits) return null;
+    const local = /^01d{9}$/.test(digits) ? digits : /^201d{9}$/.test(digits) ? digits.slice(1) : "";
+    return { shown: raw, tel: "tel:" + raw.replace(/[^d+]/g, ""), wa: local ? "https://wa.me/2" + local : null };
+  };
+  // Ready messages for a session's WhatsApp group, in the reader's language.
+  const sessionWhen = (r: Row) =>
+    new Date(r.starts_at).toLocaleString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", {
+      timeZone: "Africa/Cairo", weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit",
+    });
+  const confirmMessage = (r: Row): Row => {
+    const g = sessionGroupOf(r);
+    const name = sessionName(r.title);
+    const link = g?.session_link || "";
+    return {
+      kind: "confirm",
+      session: r,
+      link: g?.whatsapp_link || "",
+      text:
+        locale === "ar"
+          ? `أهلاً بالجميع 👋
+نؤكد جلسة ${name} يوم ${sessionWhen(r)} (بتوقيت القاهرة).${link ? `
+رابط الدخول: ${link}` : ""}
+نراكم هناك!`
+          : `Hello everyone 👋
+Confirming ${name} on ${sessionWhen(r)} (Cairo time).${link ? `
+Join here: ${link}` : ""}
+See you there!`,
+    };
+  };
+  const feedbackMessage = (r: Row): Row => {
+    const g = sessionGroupOf(r);
+    const portal = (typeof window !== "undefined" ? window.location.origin : "") + "/student#feedback";
+    return {
+      kind: "feedback",
+      session: r,
+      link: g?.whatsapp_link || "",
+      text:
+        locale === "ar"
+          ? `شكراً لحضوركم جلسة اليوم 🙏
+من فضلكم قيّموا الجلسة من صفحتكم على بوابة ديبي، تأخذ دقيقة واحدة:
+${portal}`
+          : `Thank you for joining today's session 🙏
+Please rate it on your DEPI page, it takes a minute:
+${portal}`,
+    };
+  };
   // A WhatsApp link to a student with a ready message, in the reader's language.
   const whatsapp = (phone: string, template: "reminder" | "absence" | "congratulations", v: Row) => {
     const digits = String(phone || "").split(" / ")[0].replace(/\D/g, "");
@@ -1378,7 +1455,7 @@ export default function Operations({ module: initialModule }: { module: string }
   const ticksStep = (r: Row, item: ChecklistItem) =>
     r.status !== "Cancelled" &&
     item.owner !== "auto" &&
-    (plansSession(r) || (item.owner === "coordinator" ? answersAsCoordinator(r) : answersAsCoach(r)));
+    (plansSession(r) || (item.owner === "coordinator" ? answersAsCoordinator(r) : item.owner === "coach" ? answersAsCoach(r) : false));
   const canAttend = (r: Row) =>
     r.status === "Scheduled" &&
     ((answersAsCoach(r) && !r.coach_confirmed_at) || (answersAsCoordinator(r) && !r.coordinator_confirmed_at));
@@ -1561,6 +1638,49 @@ export default function Operations({ module: initialModule }: { module: string }
                 ))}
               </div>
             </section>
+            {(() => {
+              // Session follow-ups that are someone's turn now: the coordinator
+              // asks the group for feedback once a session has ended, and Coach
+              // Operations checks the day's sessions in the morning.
+              const over = (s: Row) => Date.parse(s.starts_at) + Number(s.duration_minutes || 180) * 60000 <= Date.now();
+              const feedbackDue = sessions
+                .filter((s) => s.status !== "Cancelled" && over(s) && Date.now() - Date.parse(s.starts_at) < 3 * 86400000)
+                .filter((s) => answersAsCoordinator(s) && !checklistOf(s).feedback_requested?.done)
+                .sort((a, b) => b.starts_at.localeCompare(a.starts_at));
+              const morningChecks = can(user.roles, ["Coach Operations"])
+                ? sessions
+                    .filter((s) => s.status !== "Cancelled" && programDay(new Date(s.starts_at)) === programDay() && !checklistOf(s).coach_ops_checked?.done)
+                    .sort((a, b) => a.starts_at.localeCompare(b.starts_at))
+                : [];
+              if (!feedbackDue.length && !morningChecks.length) return null;
+              const line = (s: Row) => `${s.group_id} · ${t("Week {v0}", { v0: s.week })} · ${new Date(s.starts_at).toLocaleTimeString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" })}`;
+              return panel(
+                t("Session follow-ups"),
+                <div className="followup-list">
+                  {feedbackDue.map((s) => (
+                    <div className="task-row" key={"fb-" + s.id}>
+                      <MessageCircle size={16} />
+                      <div className="task-main">
+                        <strong>{t("Ask the group for feedback")}</strong>
+                        <small>{line(s)}</small>
+                      </div>
+                      <button className="small-btn" onClick={() => setGroupMessage(feedbackMessage(s))}>{t("Message")}</button>
+                    </div>
+                  ))}
+                  {morningChecks.map((s) => (
+                    <div className="task-row" key={"co-" + s.id}>
+                      <CheckCheck size={16} />
+                      <div className="task-main">
+                        <strong>{t("Check today's session")}</strong>
+                        <small>{line(s)} · {owner(s.coach_id)}</small>
+                      </div>
+                      <button className="small-btn" disabled={busy} onClick={() => quick("session_check", { id: s.id, item: "coach_ops_checked", done: true })}>{t("Mark done")}</button>
+                    </div>
+                  ))}
+                </div>,
+                <span className="count">{feedbackDue.length + morningChecks.length}</span>,
+              );
+            })()}
             {panel(
               t("Next actions"),
               taskRows([...overdue, ...dueToday].slice(0, 5)),
@@ -1809,6 +1929,16 @@ export default function Operations({ module: initialModule }: { module: string }
                     <ExternalLink size={14} /> {t("Session link")}
                   </a>
                 )}
+                {g.whatsapp_link && (
+                  <a className="small-btn wa-btn" href={g.whatsapp_link} target="_blank" rel="noreferrer">
+                    <MessageCircle size={14} /> {t("WhatsApp group")}
+                  </a>
+                )}
+                {(can(user.roles, ["Project Operations", "Operations Systems / Admin"]) || g.coordinator === user.id || g.supervisor === user.id) && (
+                  <button className="small-btn" onClick={() => open("group_whatsapp", { id: g.id, whatsapp_link: g.whatsapp_link || "" })}>
+                    {g.whatsapp_link ? t("Change WhatsApp link") : t("Add WhatsApp group link")}
+                  </button>
+                )}
                 <button
                   className="group-link"
                   onClick={() => {
@@ -1870,8 +2000,25 @@ export default function Operations({ module: initialModule }: { module: string }
       new Date(s.starts_at).toLocaleTimeString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" });
     const weekdays = ["Saturday", "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
     const times = Array.from(new Set(sessions.map(sessionTime))).sort();
+    // One week at a time, Saturday to Friday in Cairo (the programme's week),
+    // with arrows to step back and forward.
+    const weekStart = (() => {
+      const today = new Date(programDay() + "T00:00:00Z");
+      const back = (today.getUTCDay() + 1) % 7; // days since Saturday
+      return new Date(today.getTime() - back * 86400000 + sessionWeek * 7 * 86400000);
+    })();
+    const weekEnd = new Date(weekStart.getTime() + 7 * 86400000);
+    const inShownWeek = (s: Row) => {
+      const day = programDay(new Date(s.starts_at));
+      return day >= weekStart.toISOString().slice(0, 10) && day < weekEnd.toISOString().slice(0, 10);
+    };
+    const weekLabel = (() => {
+      const f = (d: Date) => d.toLocaleDateString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+      return `${f(weekStart)} – ${f(new Date(weekEnd.getTime() - 86400000))}`;
+    })();
     const sessionRows = sessions
       .filter(qMatch)
+      .filter(inShownWeek)
       .filter((session) => filter === "All" || session.status === filter)
       .filter((session) => sessionFilters.day === "All" || sessionDay(session) === sessionFilters.day)
       .filter((session) => sessionFilters.time === "All" || sessionTime(session) === sessionFilters.time)
@@ -2067,6 +2214,21 @@ export default function Operations({ module: initialModule }: { module: string }
           </span>
         </div>
         <div className="filter-row">
+          <div className="week-nav" role="group" aria-label={t("Week")}>
+            <button type="button" className="small-btn" onClick={() => setSessionWeek(sessionWeek - 1)} aria-label={t("Previous week")}>
+              {dir === "rtl" ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+            </button>
+            <span className="week-nav-label">
+              <strong>{weekLabel}</strong>
+              <small>{sessionWeek === 0 ? t("This week") : sessionWeek === -1 ? t("Last week") : sessionWeek === 1 ? t("Next week") : sessionWeek > 0 ? t("In {v0} weeks", { v0: sessionWeek }) : t("{v0} weeks ago", { v0: -sessionWeek })}</small>
+            </span>
+            <button type="button" className="small-btn" onClick={() => setSessionWeek(sessionWeek + 1)} aria-label={t("Next week")}>
+              {dir === "rtl" ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+            </button>
+            {sessionWeek !== 0 && (
+              <button type="button" className="small-btn" onClick={() => setSessionWeek(0)}>{t("This week")}</button>
+            )}
+          </div>
           <Pick
             label={t("Day")}
             value={sessionFilters.day}
@@ -2115,10 +2277,49 @@ export default function Operations({ module: initialModule }: { module: string }
               ),
           },
           { key: "group_id", label: t("Group") },
+          // Supervisors and the leaders follow up with the coordinator directly.
+          ...(can(user.roles, ["Team Supervisor", "Project Operations", "Coach Operations", "Operations Systems / Admin", "Higher Board"])
+            ? [
+                {
+                  key: "coordinator_id",
+                  label: t("Coordinator"),
+                  render: (r: Row) => {
+                    const id = r.coordinator_id || groups.find((g) => g.id === r.group_id)?.coordinator;
+                    const reach = reachOf(id);
+                    return (
+                      <span>
+                        {owner(id)}
+                        {reach && (
+                          <small className="table-subline reach-links">
+                            <a href={reach.tel} dir="ltr" title={t("Call")}><Phone size={12} /> {reach.shown}</a>
+                            {reach.wa && <a href={reach.wa} target="_blank" rel="noreferrer" title="WhatsApp"><MessageCircle size={12} /></a>}
+                          </small>
+                        )}
+                      </span>
+                    );
+                  },
+                },
+              ]
+            : []),
           {
             key: "coach_id",
             label: t("Coach"),
-            render: (r) => owner(r.coach_id),
+            // The coach's phone and WhatsApp, to reach them fast before or during the session.
+            render: (r) => {
+              const id = r.coach_id || groups.find((g) => g.id === r.group_id)?.coach;
+              const reach = id && id !== user.id ? reachOf(id) : null;
+              return (
+                <span>
+                  {owner(r.coach_id || id)}
+                  {reach && (
+                    <small className="table-subline reach-links">
+                      <a href={reach.tel} dir="ltr" title={t("Call the coach")}><Phone size={12} /> {reach.shown}</a>
+                      {reach.wa && <a href={reach.wa} target="_blank" rel="noreferrer" title={t("WhatsApp the coach")}><MessageCircle size={12} /></a>}
+                    </small>
+                  )}
+                </span>
+              );
+            },
           },
           { key: "week", label: t("Week") },
           {
@@ -2196,6 +2397,11 @@ export default function Operations({ module: initialModule }: { module: string }
                   ) : (
                     <span className="access-btn is-missing">{t("No link yet")}</span>
                   )}
+                  {sessionGroupOf(r)?.whatsapp_link && !onlyCoach && (
+                    <a className="access-btn is-whatsapp" href={sessionGroupOf(r)!.whatsapp_link} target="_blank" rel="noreferrer">
+                      <MessageCircle size={14} /> {t("WhatsApp group")}
+                    </a>
+                  )}
                   {!demoAccount && seesCoachLogin(r) &&
                     (storedLogin("coach", r) ? (
                       <button type="button" className="access-btn is-coach" disabled={busy} onClick={() => showJoinLogin(r, "coach")}>
@@ -2230,11 +2436,34 @@ export default function Operations({ module: initialModule }: { module: string }
               <button
                 className="small-btn"
                 disabled={busy}
-                onClick={() => quick("session_confirm", { id: r.id })}
+                title={
+                  answersAsCoordinator(r) && !r.coordinator_confirmed_at
+                    ? t("Recorded in the app. You then get a ready message to paste in the group's WhatsApp.")
+                    : t("Recorded in the app for the coordinator and Coach Operations. Nobody is messaged.")
+                }
+                onClick={async () => {
+                  const asCoordinator = answersAsCoordinator(r) && !r.coordinator_confirmed_at;
+                  if ((await quick("session_confirm", { id: r.id })) && asCoordinator) setGroupMessage(confirmMessage(r));
+                }}
               >
-                {t("Attending")}
+                {answersAsCoordinator(r) && !r.coordinator_confirmed_at ? t("Confirm · then message the group") : t("Attending")}
               </button>
             )}
+            {/* The coordinator can send the group its confirmation again, or ask for feedback once it ended. */}
+            {answersAsCoordinator(r) && r.status === "Confirmed" && Date.parse(r.starts_at) > Date.now() && (
+              <button className="small-btn" onClick={() => setGroupMessage(confirmMessage(r))}>
+                <MessageCircle size={14} /> {t("Message the group")}
+              </button>
+            )}
+            {(answersAsCoordinator(r) || plansSession(r)) &&
+              r.status !== "Cancelled" &&
+              Date.parse(r.starts_at) + Number(r.duration_minutes || 180) * 60000 <= Date.now() &&
+              Date.now() - Date.parse(r.starts_at) < 7 * 86400000 &&
+              !checklistOf(r).feedback_requested?.done && (
+                <button className="small-btn" onClick={() => setGroupMessage(feedbackMessage(r))}>
+                  <MessageCircle size={14} /> {t("Ask for feedback")}
+                </button>
+              )}
             {canDecline(r) && (
               <button
                 className="small-btn"
@@ -2416,7 +2645,8 @@ export default function Operations({ module: initialModule }: { module: string }
         (z: Row) => z.request_id === requestId && z.status === "Active" && z.expires_at > new Date().toISOString(),
       );
     const requestStage = (r: Row) => (r.status === "Submitted" && activeReservation(r.id) ? "Reserved" : r.status);
-    const managesAccounts = can(user.roles, ["Higher Board", "Operations Systems / Admin"]);
+    // Status changes, unblocking included, belong to the people who keep the accounts.
+    const managesAccounts = keepsAccounts;
     // Supervisors (Taha among them) assign accounts to coordinators.
     const assignsAccounts = can(user.roles, ["Team Supervisor", "Operations Systems / Admin"]);
     // The owner written in the accounts sheet reaches only its keeper and administrators.
@@ -2438,7 +2668,7 @@ export default function Operations({ module: initialModule }: { module: string }
           ? true
           : accountFilters.coordinator === "None"
             ? !r.coordinator_id
-            : r.coordinator_id === accountFilters.coordinator,
+            : r.coordinator_id === accountFilters.coordinator || r.coordinator_2_id === accountFilters.coordinator,
       )
       .filter((r) => !seesOwner || accountFilters.owner === "All" || (accountFilters.owner === "None" ? !r.owner_name : r.owner_name === accountFilters.owner))
       .filter((r) =>
@@ -2597,7 +2827,7 @@ export default function Operations({ module: initialModule }: { module: string }
                 options={[
                   { value: "All", label: t("Every coordinator") },
                   { value: "None", label: t("Not assigned yet") },
-                  ...[...new Set(accounts.map((a) => a.coordinator_id).filter(Boolean))].map((id) => ({ value: String(id), label: owner(String(id)) })),
+                  ...[...new Set(accounts.flatMap((a) => [a.coordinator_id, a.coordinator_2_id]).filter(Boolean))].map((id) => ({ value: String(id), label: owner(String(id)) })),
                 ]}
               />
               {seesOwner && (
@@ -2631,7 +2861,12 @@ export default function Operations({ module: initialModule }: { module: string }
                     {
                       key: "coordinator_id",
                       label: t("Coordinator"),
-                      render: (r) => (r.coordinator_id ? owner(r.coordinator_id) : <Cue tone="info">{t("Not assigned yet")}</Cue>),
+                      render: (r) =>
+                        r.coordinator_id ? (
+                          <span>{owner(r.coordinator_id)}{r.coordinator_2_id && <small className="table-subline">{t("with {v0}", { v0: owner(r.coordinator_2_id) })}</small>}</span>
+                        ) : (
+                          <Cue tone="info">{t("Not assigned yet")}</Cue>
+                        ),
                     },
                     ...(seesOwner ? [{ key: "owner_name", label: t("Owner"), render: (r: Row) => r.owner_name || "—" }] : []),
                     { key: "status", label: t("State"), render: (r) => <Badge value={r.status} /> },
@@ -2660,9 +2895,19 @@ export default function Operations({ module: initialModule }: { module: string }
                         {keepsAccounts && (
                           <button className="small-btn" onClick={() => open("account_topup", { id: r.id })}>{t("Top up")}</button>
                         )}
+                        {!demoAccount && (
+                          <button className="small-btn" onClick={() => setSigninFor(r)} title={t("Show the account's email and password")}>
+                            <LockKeyhole size={14} /> {t("Sign-in")}
+                          </button>
+                        )}
                         {assignsAccounts && (
-                          <button className="small-btn" onClick={() => open("account_coordinator", { id: r.id, account_ids: [r.id], coordinator_id: r.coordinator_id || "" })}>
+                          <button className="small-btn" onClick={() => open("account_coordinator", { id: r.id, account_ids: [r.id], coordinator_id: r.coordinator_id || "", slot: "first" })}>
                             {r.coordinator_id ? t("Reassign") : t("Assign")}
+                          </button>
+                        )}
+                        {assignsAccounts && r.coordinator_id && (
+                          <button className="small-btn" onClick={() => open("account_coordinator", { id: r.id, account_ids: [r.id], coordinator_id: r.coordinator_2_id || "", slot: "second" })}>
+                            {r.coordinator_2_id ? t("Change second coordinator") : t("Add a second coordinator")}
                           </button>
                         )}
                         {managesAccounts && (
@@ -2675,13 +2920,43 @@ export default function Operations({ module: initialModule }: { module: string }
                 <Empty title={accounts.length ? t("No account matches these filters") : t("No client accounts yet. Higher Board adds each account with its opening credit; top-ups are then recorded on the Credit tracker.")} />
               ),
               <div className="detail-actions">
-                {can(user.roles, ["Higher Board"]) && (
+                {keepsAccounts && (
                   <button className="primary small" onClick={() => open("account")}>
                     <Plus size={15} /> {t("Add account")}
                   </button>
                 )}
+                {keepsAccounts && canTransfer && (
+                  <>
+                    <button
+                      className="small-btn"
+                      onClick={() =>
+                        saveBlob(
+                          toXLSX([
+                            { id: "ACC-0001", label: "client.account@example.com", platform: "Khamsat", credits: 50 },
+                            { id: "ACC-0002", label: "second.account@example.com", platform: "Kafeel", credits: 0 },
+                          ]),
+                          "depi-accounts-template.xlsx",
+                          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        )
+                      }
+                      title={t("One row per account: id, label (the account's email), platform and opening credit in USD. Passwords are saved per account from Sign-in, never in a sheet.")}
+                    >
+                      <Download size={15} /> {t("Download import template")}
+                    </button>
+                    <button
+                      className="small-btn"
+                      onClick={() => {
+                        setImportMode("create");
+                        setImportModule("accounts");
+                        setImportOpen(true);
+                      }}
+                    >
+                      <Upload size={15} /> {t("Import accounts")}
+                    </button>
+                  </>
+                )}
                 {can(user.roles, ["Project Operations", "Operations Systems / Admin"]) && (
-                  <button className="small-btn" onClick={() => open("task_bank")}>{t("Add approved task")}</button>
+                  <button className="small-btn" onClick={() => open("task_bank")} title={t("A ready-made service order coordinators pick when they request a client account")}>{t("Add approved task")}</button>
                 )}
               </div>,
             )}
@@ -3414,6 +3689,13 @@ export default function Operations({ module: initialModule }: { module: string }
           generic(
             staff
               .filter((u: Row) => u.roles.includes("Operations Coordinator"))
+              // A supervisor's report covers their own groups, so only the
+              // coordinators of those groups; the programme-wide roles see all.
+              .filter(
+                (u: Row) =>
+                  can(user.roles, ["Project Operations", "Operations Systems / Admin", "Higher Board"]) ||
+                  groups.some((g) => g.coordinator === u.id),
+              )
               .map((u: Row) => {
                 const s = students.filter((s) => s.coordinator === u.id);
                 return {
@@ -3771,7 +4053,7 @@ export default function Operations({ module: initialModule }: { module: string }
                   <SidebarMenuButton asChild isActive={module === id}>
                     <a href={id === "home" ? "/" : "/" + id} onClick={(event) => goTo(id, event)}>
                       <Icon />
-                      <span>{t(label)}</span>
+                      <span>{t(id === "quality" ? pageName(id) : label)}</span>
                       {id === "work" && overdue.length > 0 && (
                         <b className="nav-count">{overdue.length}</b>
                       )}
@@ -3811,7 +4093,7 @@ export default function Operations({ module: initialModule }: { module: string }
             <span>{t("Workspace")}</span>
             <ChevronRight size={14} />
             <strong>
-              {t(nav.find((n) => n[0] === module)?.[1] || "Overview")}
+              {t(pageName(module) || "Overview")}
             </strong>
           </div>
           <div className="header-actions">
@@ -3942,7 +4224,7 @@ export default function Operations({ module: initialModule }: { module: string }
                         {t("ROUND 5 /")}{" "}
                         {module === "quality" ? t("ASSURANCE") : t("OPERATIONS")}
                       </div>
-                      <h1>{t(nav.find((n) => n[0] === module)?.[1] || "")}</h1>
+                      <h1>{t(pageName(module))}</h1>
                       <p>
                         {t(
                           (
@@ -4023,7 +4305,7 @@ export default function Operations({ module: initialModule }: { module: string }
                         <Search size={17} />
                         <input
                           placeholder={t("Search {v0}…", {
-                            v0: t(module === "work" ? "actions" : String(nav.find((n) => n[0] === module)?.[1] || module)),
+                            v0: t(module === "work" ? "actions" : pageName(module) || module),
                           })}
                           value={search}
                           onChange={(e) => setSearch(e.target.value)}
@@ -4159,6 +4441,25 @@ export default function Operations({ module: initialModule }: { module: string }
                     {selectedStudent.id} · {selectedStudent.group_id} ·{" "}
                     {selectedStudent.track}
                   </p>
+                  {/* How to reach the student directly: their phone (tap to call) and email. */}
+                  {!onlyCoach && (selectedStudent.phone || selectedStudent.email) && (
+                    <p className="contact-line">
+                      {String(selectedStudent.phone || "")
+                        .split("/")
+                        .map((n: string) => n.trim())
+                        .filter(Boolean)
+                        .map((n: string) => (
+                          <a key={n} className="text-link" href={`tel:${n.replace(/[^\d+]/g, "")}`} dir="ltr">
+                            <Phone size={13} /> {n}
+                          </a>
+                        ))}
+                      {selectedStudent.email && (
+                        <a className="text-link" href={`mailto:${selectedStudent.email}`} dir="ltr">
+                          <Mail size={13} /> {selectedStudent.email}
+                        </a>
+                      )}
+                    </p>
+                  )}
                   <p className="next-action-line">
                     <strong>{t("Next action")}:</strong>{" "}
                     {selectedStudent.next_task
@@ -4189,6 +4490,7 @@ export default function Operations({ module: initialModule }: { module: string }
                 {may("contact") && (
                   <button
                     className="primary"
+                    title={t("Record a conversation that already happened, with proof")}
                     onClick={() =>
                       open("contact", { student_id: selectedStudent.id })
                     }
@@ -4198,6 +4500,7 @@ export default function Operations({ module: initialModule }: { module: string }
                 )}
                 <button
                   className="small-btn"
+                  title={t("Plan the follow-up step you commit to do")}
                   onClick={() =>
                     open("task", { student_id: selectedStudent.id })
                   }
@@ -4226,6 +4529,11 @@ export default function Operations({ module: initialModule }: { module: string }
                     </details>
                   ) : null;
                 })()}
+                {!onlyCoach && groups.find((g) => g.id === selectedStudent.group_id)?.whatsapp_link && (
+                  <a className="small-btn wa-btn" href={groups.find((g) => g.id === selectedStudent.group_id)!.whatsapp_link} target="_blank" rel="noreferrer">
+                    <MessageCircle size={14} /> {t("WhatsApp group")}
+                  </a>
+                )}
                 {may("engagement") && (
                   <button
                     className="small-btn"
@@ -4237,6 +4545,10 @@ export default function Operations({ module: initialModule }: { module: string }
                   </button>
                 )}
               </div>
+              <p className="action-help">
+                <strong>{t("Log contact")}</strong>: {t("a conversation that already happened, with a screenshot as proof.")}{" "}
+                <strong>{t("Next action")}</strong>: {t("the follow-up step you commit to do next, with a due date.")}
+              </p>
               <Tabs defaultValue="overview">
                 <TabsList className="detail-tabs">
                   {[
@@ -4587,6 +4899,78 @@ export default function Operations({ module: initialModule }: { module: string }
           )}
         </DialogContent>
       </Dialog>
+      {/* A ready message for the group's WhatsApp chat: copy it, open the group, paste. */}
+      <Dialog open={!!groupMessage} onOpenChange={(v) => !v && setGroupMessage(null)}>
+        <DialogContent className="action-dialog sm:max-w-[560px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{groupMessage?.kind === "feedback" ? t("Ask the group for feedback") : t("Tell the group the session is confirmed")}</DialogTitle>
+            <DialogDescription>
+              {groupMessage?.kind === "feedback"
+                ? t("Students rate the session on their own DEPI page. Send them this message in the group's WhatsApp.")
+                : t("Your confirmation is recorded in the app. The app cannot post into WhatsApp, so copy this message into the group's chat.")}
+            </DialogDescription>
+          </DialogHeader>
+          {groupMessage && (
+            <div className="group-message">
+              <textarea
+                rows={6}
+                value={groupMessage.text}
+                onChange={(e) => setGroupMessage({ ...groupMessage, text: e.target.value })}
+                aria-label={t("Message")}
+              />
+              <div className="detail-actions">
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(groupMessage.text);
+                      toast.success(t("Copied. Paste it in the group's chat."));
+                    } catch {
+                      toast.error(t("Copy did not work. Select the text and copy it."));
+                    }
+                  }}
+                >
+                  <Copy size={15} /> {t("Copy message")}
+                </button>
+                {groupMessage.link ? (
+                  <a className="small-btn wa-btn" href={groupMessage.link} target="_blank" rel="noreferrer">
+                    <MessageCircle size={15} /> {t("Open the WhatsApp group")}
+                  </a>
+                ) : (
+                  <small className="footnote">{t("This group has no WhatsApp link yet. Add it from the Groups page so it opens in one tap.")}</small>
+                )}
+                {groupMessage.kind === "feedback" && ticksStep(groupMessage.session, sessionChecklist.find((i) => i.key === "feedback_requested")!) && (
+                  <button
+                    type="button"
+                    className="small-btn"
+                    disabled={busy}
+                    onClick={async () => {
+                      if (await quick("session_check", { id: groupMessage.session.id, item: "feedback_requested", done: true })) setGroupMessage(null);
+                    }}
+                  >
+                    <Check size={15} /> {t("Mark as sent")}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+      {/* A client account's email and password, one tap from its row. */}
+      <Dialog open={!!signinFor} onOpenChange={(v) => !v && setSigninFor(null)}>
+        <DialogContent className="action-dialog sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{t("Account sign-in")}</DialogTitle>
+            <DialogDescription>{signinFor ? `${signinFor.label} · ${signinFor.platform}` : ""}</DialogDescription>
+          </DialogHeader>
+          <div className="info-box">
+            <LockKeyhole size={16} />
+            <span>{t("Passwords are kept encrypted in the app's credential vault, never in a sheet or the account list. They open here for the people who keep the accounts (the Service Team's supervisor, Project Operations, Higher Board, administrators), the account's coordinators, and the coordinator and supervisor of a group using it. Each opening is recorded with its purpose.")}</span>
+          </div>
+          {signinFor && <CredentialPanel account={signinFor.id} canStore={keepsAccounts} showReference={can(user.roles, ["Operations Systems / Admin"])} />}
+        </DialogContent>
+      </Dialog>
       {(() => {
         const r = checklistFor ? (d.sessions || []).find((x: Row) => x.id === checklistFor) : null;
         const state = r ? checklistOf(r) : {};
@@ -4622,11 +5006,13 @@ export default function Operations({ module: initialModule }: { module: string }
                         const st = state[item.key];
                         const editable = ticksStep(r, item);
                         const stage = item.stage === "Before" ? t("Before the session") : item.stage === "During" ? t("During the session") : t("After the session");
+                        // Whose step it is and when it comes, so each party sees what is theirs.
+                        const whose = item.owner === "coach_ops" ? t("Coach Operations' step") : item.owner === "coordinator" ? t("Coordinator's step") : item.owner === "coach" ? t("Coach's step") : t("Automatic");
                         return (
                           <li key={item.key} className={st.flagged ? "is-flagged" : st.done ? "is-done" : ""}>
                             <span className="checklist-marker">{st.flagged ? "!" : st.done ? <Check size={14} /> : index + 1}</span>
                             <div className="checklist-body">
-                              <small className="checklist-stage-name">{stage}</small>
+                              <small className="checklist-stage-name">{stage} · <span className={"checklist-owner is-" + item.owner}>{whose}</span>{item.when ? " · " + t(item.when) : ""}</small>
                               <strong>{t(item.label)}</strong>
                               <small className="table-subline">
                                 {st.flagged
@@ -4637,7 +5023,11 @@ export default function Operations({ module: initialModule }: { module: string }
                                       : `${st.by ? owner(st.by) : t("The coach confirmed")}${st.at ? " · " + when(st.at) : ""}`
                                     : item.owner === "auto"
                                       ? t("Ticks itself once every student is marked")
-                                      : t("The group's coordinator ticks this")}
+                                      : item.owner === "coach_ops"
+                                        ? t("Coach Operations ticks this after checking the day's sessions")
+                                        : item.key === "feedback_requested"
+                                          ? t("Send the group the feedback message, then mark it done")
+                                          : t("The group's coordinator ticks this")}
                               </small>
                             </div>
                             <div className="checklist-action">
@@ -4646,14 +5036,21 @@ export default function Operations({ module: initialModule }: { module: string }
                                   <button type="button" className="small-btn" onClick={() => { setChecklistFor(null); openAttendance(r); }}>{t("Take attendance")}</button>
                                 ) : null
                               ) : editable ? (
-                                <button
-                                  type="button"
-                                  className={st.done ? "small-btn" : "primary small"}
-                                  disabled={busy}
-                                  onClick={() => quick("session_check", { id: r.id, item: item.key, done: !st.done })}
-                                >
-                                  {st.done ? t("Undo") : t("Mark done")}
-                                </button>
+                                <span className="checklist-buttons">
+                                  {item.key === "feedback_requested" && !st.done && (
+                                    <button type="button" className="small-btn" onClick={() => { setChecklistFor(null); setGroupMessage(feedbackMessage(r)); }}>
+                                      <MessageCircle size={14} /> {t("Message")}
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    className={st.done ? "small-btn" : "primary small"}
+                                    disabled={busy}
+                                    onClick={() => quick("session_check", { id: r.id, item: item.key, done: !st.done })}
+                                  >
+                                    {st.done ? t("Undo") : t("Mark done")}
+                                  </button>
+                                </span>
                               ) : null}
                             </div>
                           </li>
@@ -5674,11 +6071,14 @@ export default function Operations({ module: initialModule }: { module: string }
                         ? (d.accounts || []).find((c: Row) => c.id === chosen[0])?.label
                         : t("{v0} accounts", { v0: chosen.length })}
                     </p>
+                    {form.slot === "second" && (
+                      <p className="footnote">{t("A second coordinator shares the account with the first: both see it and can open its sign-in.")}</p>
+                    )}
                     {choice(
                       "coordinator_id",
-                      t("Coordinator"),
+                      form.slot === "second" ? t("Second coordinator") : t("Coordinator"),
                       [
-                        { value: "", label: t("Nobody (unassign)") },
+                        { value: "", label: form.slot === "second" ? t("No second coordinator") : t("Nobody (unassign)") },
                         ...staff
                           .filter((u: Row) => {
                             const held = Array.isArray(u.roles) ? u.roles : JSON.parse(u.roles || "[]");
@@ -5726,15 +6126,17 @@ export default function Operations({ module: initialModule }: { module: string }
                   </>
                 );
               }
+              if (a === "group_whatsapp")
+                return field("whatsapp_link", t("WhatsApp group link"), "url", false);
               if (a === "account_status") {
                 // The same moves the server allows from each state.
                 const flow: Record<string, string[]> = {
                   Available: ["Blocked", "Access Issue", "Funding Block", "Under Review", "Retired"],
                   Assigned: ["Cooldown", "Blocked", "Access Issue", "Under Review"],
                   Cooldown: ["Available", "Blocked", "Retired"],
-                  Blocked: ["Under Review", "Retired"],
-                  "Access Issue": ["Under Review", "Retired"],
-                  "Funding Block": ["Under Review", "Retired"],
+                  Blocked: ["Available", "Under Review", "Retired"],
+                  "Access Issue": ["Available", "Under Review", "Retired"],
+                  "Funding Block": ["Available", "Under Review", "Retired"],
                   "Under Review": ["Available", "Blocked", "Retired"],
                 };
                 const moves = flow[modal!.status] || [];
@@ -5750,7 +6152,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     </div>
                     {moves.length ? (
                       <>
-                        {choice("status", t("Move the account to"), moves.map((m) => ({ value: m, label: t(m) })))}
+                        {choice("status", t("Move the account to"), moves.map((m) => ({ value: m, label: m === "Available" && ["Blocked", "Access Issue", "Funding Block"].includes(modal!.status) ? t("Available (unblock)") : t(m) })))}
                         {field("reason", t("Reason"))}
                       </>
                     ) : (
@@ -5758,7 +6160,7 @@ export default function Operations({ module: initialModule }: { module: string }
                     )}
                     <details className="account-credentials">
                       <summary>{t("Sign-in details")}</summary>
-                      <CredentialPanel account={modal!.id} />
+                      <CredentialPanel account={modal!.id} canStore={keepsAccounts} showReference={can(user.roles, ["Operations Systems / Admin"])} />
                     </details>
                   </>
                 );

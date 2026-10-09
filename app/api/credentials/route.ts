@@ -1,5 +1,5 @@
 import { env } from "@/lib/env";
-import { actor, permit, stmt, auditStmt, db, uid, now, rateLimit, scopeSql, refuseDemo } from "@/lib/server";
+import { actor, keepsAccounts, permit, stmt, auditStmt, db, uid, now, rateLimit, scopeSql, refuseDemo } from "@/lib/server";
 import { can, ensure } from "@/lib/domain/rules";
 import { credentialKey, credentialKeyConfigured, openCredential, sealCredential } from "@/lib/domain/account-secrets";
 import { resealLegacyCredentials } from "@/lib/credential-reseal";
@@ -18,11 +18,13 @@ const custodians = ["Higher Board", "Operations Systems / Admin"];
  * coordinator cannot reach another team's accounts.
  */
 async function mayReveal(u: any, accountId: string) {
-  if (can(u.roles, custodians)) return true;
+  // Custodians, and the people who keep the accounts (the Service Team's
+  // supervisor and Project Operations), who also store the passwords.
+  if (can(u.roles, custodians) || keepsAccounts(u)) return true;
   if (!can(u.roles, ["Project Operations", "Operations Coordinator", "Team Supervisor"])) return false;
-  // The coordinator the account is assigned to works it, so may sign in to it.
+  // The coordinators the account is assigned to work it, so may sign in to it.
   if (can(u.roles, ["Operations Coordinator"])) {
-    const mine = await stmt("SELECT id FROM accounts WHERE id=? AND coordinator_id=?", accountId, u.id).first();
+    const mine = await stmt("SELECT id FROM accounts WHERE id=? AND (coordinator_id=? OR coordinator_2_id=?)", accountId, u.id, u.id).first();
     if (mine) return true;
   }
   const scope = scopeSql(u, "g", null);
@@ -67,7 +69,7 @@ export async function POST(req: Request) {
     // Store the marketplace login itself, encrypted. This is the path that
     // replaces the credential columns of the old operations spreadsheet.
     if (x.action === "set_credential") {
-      permit(u, custodians);
+      ensure(can(u.roles, custodians) || keepsAccounts(u), "Passwords are saved by the people who keep the accounts.");
       const username = String(x.username ?? "").trim();
       const password = String(x.password ?? "");
       ensure(username.length >= 3 && username.length <= 320, "Enter the marketplace username.");

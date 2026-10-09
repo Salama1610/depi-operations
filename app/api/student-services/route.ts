@@ -113,8 +113,9 @@ async function sessionsForFeedback(studentId: string) {
   if (!learner?.group_id) return [];
   const rows = await all(
     `SELECT t.id,t.title,t.week,t.starts_at,t.duration_minutes,u.name coach_name,
-            (SELECT f.id FROM session_feedback f WHERE f.session_id=t.id AND f.student_id=?) feedback_id
+            f.id feedback_id,f.satisfaction,f.clarity,f.usefulness,f.searched_gig,f.liked,f.comments,f.created_at feedback_at
      FROM sessions t LEFT JOIN users u ON u.id=t.coach_id
+     LEFT JOIN session_feedback f ON f.session_id=t.id AND f.student_id=?
      WHERE t.group_id=? AND t.status<>'Cancelled' AND t.starts_at<=?
      ORDER BY t.starts_at DESC LIMIT 20`,
     studentId,
@@ -130,7 +131,33 @@ async function sessionsForFeedback(studentId: string) {
       starts_at: r.starts_at,
       coach_name: r.coach_name && !/unassigned/i.test(r.coach_name) ? r.coach_name : null,
       given: Boolean(r.feedback_id),
+      // What the student answered, so they can look back at it.
+      mine: r.feedback_id
+        ? {
+            satisfaction: r.satisfaction,
+            clarity: r.clarity,
+            usefulness: r.usefulness,
+            searched_gig: r.searched_gig,
+            liked: r.liked,
+            comments: r.comments,
+            at: r.feedback_at,
+          }
+        : null,
     }));
+}
+
+/**
+ * Client accounts assigned to the student's requests: a client will order
+ * their service on that platform. Only what the student needs to know, never
+ * the account itself.
+ */
+async function clientOrders(studentId: string) {
+  return all(
+    `SELECT r.id,r.task,r.platform,r.status,n.created_at assigned_at
+     FROM account_requests r LEFT JOIN account_assignments n ON n.request_id=r.id
+     WHERE r.student_id=? AND r.status='Assigned' ORDER BY n.created_at DESC LIMIT 10`,
+    studentId,
+  );
 }
 
 const rating = (value: unknown, question: string) => {
@@ -180,6 +207,7 @@ export async function GET() {
       student: { id: s.id, name: s.name, email: s.email },
       ...(await studentView(s.id)),
       feedback_sessions: await sessionsForFeedback(s.id),
+      client_orders: await clientOrders(s.id),
     });
   } catch (e: any) {
     return Response.json({ error: e.message }, { status: 403 });

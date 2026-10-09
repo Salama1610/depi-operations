@@ -1,11 +1,13 @@
-// The coordinator's checklist for each session: before it, the coach is
-// confirmed; during it, the coach has entered; after it, attendance is
-// taken. The first two are the coordinator's ticks (the coach's own
-// confirmation also counts as the first); the last is worked out from the
-// attendance register and cannot be ticked by hand.
+// The checklist for each session, with whose step each one is:
+// - the day before, the coordinator confirms with the coach (the coach's own
+//   confirmation also counts);
+// - the morning of, Coach Operations checks the day's sessions;
+// - during it, the coordinator sees the coach enter;
+// - after it, attendance is taken (worked out from the register, never
+//   ticked by hand) and the coordinator asks the group for feedback.
 
 export type ChecklistStage = "Before" | "During" | "After";
-export type ChecklistOwner = "coordinator" | "coach" | "auto";
+export type ChecklistOwner = "coordinator" | "coach" | "coach_ops" | "auto";
 
 export type ChecklistItem = {
   key: string;
@@ -14,12 +16,16 @@ export type ChecklistItem = {
   owner: ChecklistOwner;
   /** The first session week the step applies to. */
   fromWeek?: number;
+  /** When it is due, in words, so each party knows when their step comes. */
+  when?: string;
 };
 
 export const sessionChecklist: ChecklistItem[] = [
-  { key: "instructor_confirmed", label: "Coach confirmed", stage: "Before", owner: "coordinator" },
+  { key: "instructor_confirmed", label: "Coach confirmed", stage: "Before", owner: "coordinator", when: "The day before" },
+  { key: "coach_ops_checked", label: "Coach Operations checked", stage: "Before", owner: "coach_ops", when: "The morning of the session" },
   { key: "instructor_entered", label: "Coach entered the session", stage: "During", owner: "coordinator" },
   { key: "attendance_taken", label: "Attendance taken", stage: "After", owner: "auto" },
+  { key: "feedback_requested", label: "Feedback requested from the group", stage: "After", owner: "coordinator", when: "Right after the session" },
 ];
 
 /** Steps cleared when a session moves: they were done for the old time. */

@@ -370,13 +370,14 @@ export async function teamCoordinators(u: any): Promise<string[] | null> {
 }
 
 /**
- * Who tops up the client accounts: the Service Team's supervisor, alongside
- * Higher Board and administrators. They see the account pool and its credit
- * history so they can record each top-up.
+ * Who keeps the client accounts: the Service Team's supervisor and Project
+ * Operations (Taha), alongside Higher Board and administrators. They see the
+ * account pool and its credit history, record each top-up and change an
+ * account's status, including unblocking it.
  */
 export function keepsAccounts(u: any) {
   return (
-    can(u.roles, ["Higher Board", "Operations Systems / Admin"]) ||
+    can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin"]) ||
     (can(u.roles, ["Team Supervisor"]) && u.team === "Service Team")
   );
 }
@@ -602,11 +603,11 @@ export async function loadData(u: any) {
     // the accounts and the supervisors who assign them; a coordinator sees the
     // accounts assigned to them. The owner column only for its keeper.
     (() => {
-      const columns = `id,label,platform,status,credits,pending_credits,comments,coordinator_id${seesAccountOwner(u) ? ",owner_name" : ""}`;
+      const columns = `id,label,platform,status,credits,pending_credits,comments,coordinator_id,coordinator_2_id${seesAccountOwner(u) ? ",owner_name" : ""}`;
       if (can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin", "Team Supervisor"]) || keepsAccounts(u))
         return all(`SELECT ${columns} FROM accounts WHERE ${sameSide(u, "id")}`);
       if (can(u.roles, ["Operations Coordinator"]))
-        return all(`SELECT ${columns} FROM accounts WHERE coordinator_id=? AND ${sameSide(u, "id")}`, u.id);
+        return all(`SELECT ${columns} FROM accounts WHERE (coordinator_id=? OR coordinator_2_id=?) AND ${sameSide(u, "id")}`, u.id, u.id);
       return none;
     })(),
     // Everyone sees who their colleagues are and how to reach them; the

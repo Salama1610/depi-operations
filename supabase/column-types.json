@@ -35,7 +35,8 @@
     "status": "text",
     "policy_id": "text",
     "account_manager": "text",
-    "session_link": "text"
+    "session_link": "text",
+    "whatsapp_link": "text"
   },
   "students": {
     "id": "text",
@@ -107,7 +108,8 @@
     "owner_name": "text",
     "coordinator_id": "text",
     "pending_credits": "numeric(14,2)",
-    "comments": "text"
+    "comments": "text",
+    "coordinator_2_id": "text"
   },
   "account_requests": {
     "id": "text",

@@ -60,6 +60,8 @@ export const groups = sqliteTable("groups", {
   accountManager: text("account_manager").references(() => users.id),
   // The standing Teams or LMS link the group meets on.
   sessionLink: text("session_link"),
+  // The group's WhatsApp chat, opened by its coordinator in one tap.
+  whatsappLink: text("whatsapp_link"),
 });
 export const students = sqliteTable(
   "students",
@@ -170,6 +172,8 @@ export const accounts = sqliteTable("accounts", {
   coordinatorId: text("coordinator_id").references(() => users.id),
   pendingCredits: real("pending_credits").notNull().default(0),
   comments: text("comments"),
+  // A second coordinator sharing the account; both see it and its sign-in.
+  coordinator2Id: text("coordinator_2_id").references(() => users.id),
 });
 
 // Marketplace credentials held by the programme, encrypted at rest with a

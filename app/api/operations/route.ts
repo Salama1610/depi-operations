@@ -1205,6 +1205,7 @@ export async function POST(req: Request) {
         ensure(appliesTo(item!, session), "This step starts from the second session.");
         const group: any = await stmt("SELECT * FROM groups WHERE id=?", session.group_id).first();
         if (!can(u.roles, sessionLeaders)) {
+          ensure(item!.owner !== "coach_ops", "Coach Operations ticks this step on the morning of the session.");
           if (item!.owner === "coordinator")
             ensure(
               can(u.roles, ["Operations Coordinator"]) && group?.coordinator === u.id,
@@ -1445,7 +1446,10 @@ export async function POST(req: Request) {
         break;
       }
       case "account": {
-        permit(u, ["Higher Board"]);
+        // A new client account with its opening credit, added by the people
+        // who keep the accounts (one at a time or from the import template).
+        permit(u, ["Team Supervisor", "Higher Board", "Project Operations", "Operations Systems / Admin"]);
+        ensure(keepsAccounts(u), "Accounts are added by the Service Team's supervisor, Project Operations or Higher Board.");
         ensure(
           x.label &&
             controlledPlatforms.includes(x.platform) &&
@@ -1678,6 +1682,55 @@ export async function POST(req: Request) {
             t,
           ),
         );
+        // What happens next: the group's coordinator places the order from
+        // the account within two days, so they get the task and a notice; a
+        // coordinator the account is assigned to hears about it too. The
+        // student's page shows that a client will order their service.
+        {
+          const group: any = await stmt("SELECT coordinator FROM groups WHERE id=?", r.group_id).first();
+          const account: any = await stmt("SELECT label,coordinator_id,coordinator_2_id FROM accounts WHERE id=?", a.account_id).first();
+          const title = `Order "${r.task}" on ${a.platform} from client account ${account?.label || a.account_id}`;
+          if (group?.coordinator)
+            jobs.push(
+              stmt(
+                "INSERT OR IGNORE INTO tasks VALUES(?,?,?,?,?,?,?,?,?,?)",
+                uid("TSK"),
+                r.student_id,
+                title,
+                group.coordinator,
+                new Date(Date.now() + 2 * 86400000).toISOString(),
+                "Account",
+                "High",
+                "Open",
+                "account-assigned:" + r.id,
+                t,
+              ),
+            );
+          for (const person of new Set([group?.coordinator, account?.coordinator_id, account?.coordinator_2_id].filter(Boolean)))
+            if (person !== u.id)
+              jobs.push(notify(String(person), `Client account assigned: ${title}`, "student", r.student_id, "Action Required", `account-assigned:${r.id}:${person}`));
+        }
+        break;
+      }
+      case "group_whatsapp": {
+        // The link to the group's WhatsApp chat, so its coordinator opens it
+        // in one tap. Set by the group's coordinator or supervisor, Project
+        // Operations or an administrator; an empty link clears it.
+        permit(u, ["Operations Coordinator", "Team Supervisor", "Project Operations", "Operations Systems / Admin"]);
+        const group: any = await stmt(`SELECT * FROM groups WHERE id=? AND ${sameSide(u, "id")}`, id).first();
+        ensure(group, "Group not found.");
+        ensure(
+          can(u.roles, ["Project Operations", "Operations Systems / Admin"]) || group.coordinator === u.id || group.supervisor === u.id,
+          "Only the group's coordinator or supervisor, or Project Operations, sets its WhatsApp link.",
+        );
+        const link = String(x.whatsapp_link || "").trim();
+        ensure(
+          !link || (link.length <= 300 && /^https:\/\/(chat\.whatsapp\.com\/[A-Za-z0-9]{10,}|wa\.me\/[\w/?=&%+-]+)$/.test(link)),
+          "Paste the group's invite link, starting with https://chat.whatsapp.com/",
+        );
+        auditPrevious = { whatsapp_link: group.whatsapp_link };
+        auditValue = { group_id: id, whatsapp_link: link || null };
+        jobs.push(stmt("UPDATE groups SET whatsapp_link=? WHERE id=?", link || null, id));
         break;
       }
       case "account_coordinator": {
@@ -1687,18 +1740,33 @@ export async function POST(req: Request) {
         const accountIds: string[] = Array.isArray(x.account_ids) ? x.account_ids.map(String) : [String(id)];
         ensure(accountIds.length > 0 && accountIds.length <= 600, "Choose between 1 and 600 accounts.");
         const marks = accountIds.map(() => "?").join(",");
-        const found = await all(`SELECT id,coordinator_id FROM accounts WHERE id IN (${marks})`, ...accountIds);
+        const found = await all(`SELECT id,coordinator_id,coordinator_2_id FROM accounts WHERE id IN (${marks})`, ...accountIds);
         ensure(found.length === accountIds.length, "One or more accounts were not found.");
+        // An account can be shared by two coordinators: "second" sets the one
+        // working it alongside the first.
+        const second = x.slot === "second";
         const coordinatorId = x.coordinator_id ? String(x.coordinator_id) : null;
         if (coordinatorId) {
           const person: any = await stmt("SELECT id,roles FROM users WHERE id=? AND active=1", coordinatorId).first();
           ensure(person && JSON.parse(person.roles).includes("Operations Coordinator"), "Choose an active coordinator.");
           const team = await teamCoordinators(u);
           ensure(!team || team.includes(coordinatorId), "Choose a coordinator from your own team.");
+          ensure(
+            found.every((a: any) => (second ? a.coordinator_id : a.coordinator_2_id) !== coordinatorId),
+            "That coordinator already works this account. Choose a different one.",
+          );
+          if (second) ensure(found.every((a: any) => a.coordinator_id), "Assign the first coordinator before a second one.");
         }
-        auditPrevious = Object.fromEntries(found.map((a: any) => [a.id, a.coordinator_id]));
-        auditValue = { account_ids: accountIds, coordinator_id: coordinatorId };
-        jobs.push(stmt(`UPDATE accounts SET coordinator_id=? WHERE id IN (${marks})`, coordinatorId, ...accountIds));
+        const column = second ? "coordinator_2_id" : "coordinator_id";
+        auditPrevious = Object.fromEntries(found.map((a: any) => [a.id, { coordinator_id: a.coordinator_id, coordinator_2_id: a.coordinator_2_id }]));
+        auditValue = { account_ids: accountIds, [column]: coordinatorId };
+        // Removing the first coordinator moves the second one up, so an
+        // account is never shared by a second coordinator alone.
+        jobs.push(
+          !second && !coordinatorId
+            ? stmt(`UPDATE accounts SET coordinator_id=coordinator_2_id,coordinator_2_id=NULL WHERE id IN (${marks})`, ...accountIds)
+            : stmt(`UPDATE accounts SET ${column}=? WHERE id IN (${marks})`, coordinatorId, ...accountIds),
+        );
         break;
       }
       case "account_topup": {
@@ -1706,8 +1774,8 @@ export async function POST(req: Request) {
         // supervisor records it (Higher Board and administrators can too),
         // with the receipt or transfer reference. Each one is a new row in
         // the credit history; nothing earlier is edited.
-        permit(u, ["Team Supervisor", "Higher Board"]);
-        ensure(keepsAccounts(u), "Top-ups are recorded by the Service Team's supervisor or Higher Board.");
+        permit(u, ["Team Supervisor", "Higher Board", "Project Operations", "Operations Systems / Admin"]);
+        ensure(keepsAccounts(u), "Top-ups are recorded by the Service Team's supervisor, Project Operations or Higher Board.");
         const a: any = await stmt("SELECT * FROM accounts WHERE id=?", id).first();
         ensure(a && a.status !== "Retired", "Choose an active client account.");
         const amount = Math.round(Number(x.amount) * 100) / 100;
@@ -1733,7 +1801,10 @@ export async function POST(req: Request) {
         break;
       }
       case "account_status": {
-        permit(u, ["Higher Board"]);
+        // The people who keep the accounts change their status, unblocking
+        // included; every change needs a reason and is audited.
+        permit(u, ["Team Supervisor", "Higher Board", "Project Operations", "Operations Systems / Admin"]);
+        ensure(keepsAccounts(u), "Account status is changed by the Service Team's supervisor, Project Operations or Higher Board.");
         const a: any = await stmt(
           "SELECT * FROM accounts WHERE id=?",
           id,
@@ -1752,9 +1823,10 @@ export async function POST(req: Request) {
           ],
           Assigned: ["Cooldown", "Blocked", "Access Issue", "Under Review"],
           Cooldown: ["Available", "Blocked", "Retired"],
-          Blocked: ["Under Review", "Retired"],
-          "Access Issue": ["Under Review", "Retired"],
-          "Funding Block": ["Under Review", "Retired"],
+          // Unblocking: straight back to Available once the problem is fixed.
+          Blocked: ["Available", "Under Review", "Retired"],
+          "Access Issue": ["Available", "Under Review", "Retired"],
+          "Funding Block": ["Available", "Under Review", "Retired"],
           "Under Review": ["Available", "Blocked", "Retired"],
         };
         ensure(

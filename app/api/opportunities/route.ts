@@ -4,19 +4,20 @@ import { sameSide } from "@/lib/demo";
 
 export const dynamic = "force-dynamic";
 
-// Work opportunities the Service Team's coordinators find on the freelance
-// platforms. They post the link, what the job is, the track it suits, the
-// platform and the day it was posted there. Supervisors, Project Operations
-// and the Service Team's coordinators see every post; a student sees the
-// active ones for their own track.
+// Work opportunities the Target Team finds on the freelance platforms. Its
+// coordinators and supervisors, and Project Operations, post the link, what
+// the job is, the track it suits, the platform and the day it was posted
+// there, one at a time, and all of them see every post. A student sees the
+// active ones for their own track. (Decided after the 9 October 2026 meeting.)
 
-const leaders = ["Team Supervisor", "Project Operations", "Operations Systems / Admin"];
 const noStore = { headers: { "Cache-Control": "no-store" } };
 
-/** Service Team coordinators post; administrators may too. */
-const posts = (u: any) =>
-  can(u.roles, ["Operations Systems / Admin"]) || (can(u.roles, ["Operations Coordinator"]) && u.team === "Service Team");
-const reads = (u: any) => posts(u) || can(u.roles, leaders);
+/** The Target Team's supervisors, Project Operations and administrators: they also remove anyone's post. */
+const leads = (u: any) =>
+  can(u.roles, ["Project Operations", "Operations Systems / Admin"]) || (can(u.roles, ["Team Supervisor"]) && u.team === "Target Team");
+/** Those leaders and the Target Team's coordinators post and read. */
+const posts = (u: any) => leads(u) || (can(u.roles, ["Operations Coordinator"]) && u.team === "Target Team");
+const reads = posts;
 
 /** The tracks a post can be for: the tracks of the groups on the caller's side. */
 async function tracksFor(u: any) {
@@ -35,14 +36,14 @@ export async function GET() {
       // Not on the staff: a student, or nobody.
     }
     if (staff) {
-      ensure(reads(staff), "Opportunities are for the Service Team's coordinators, the supervisors and Project Operations.");
+      ensure(reads(staff), "Opportunities are for the Target Team and Project Operations.");
       await rateLimit("opportunities:" + staff.id, 60, 60);
       const opportunities = await all(
         `SELECT o.id,o.url,o.title,o.track,o.platform,o.posted_on,o.status,o.created_by,p.name created_by_name,o.created_at
          FROM opportunities o LEFT JOIN users p ON p.id=o.created_by
          WHERE o.status='Active' AND ${sameSide(staff, "o.created_by")} ORDER BY o.posted_on DESC,o.created_at DESC LIMIT 1000`,
       );
-      return Response.json({ opportunities, tracks: await tracksFor(staff), posts: posts(staff), leads: can(staff.roles, leaders), me: staff.id }, noStore);
+      return Response.json({ opportunities, tracks: await tracksFor(staff), posts: posts(staff), leads: leads(staff), me: staff.id }, noStore);
     }
     const s: any = await currentStudent();
     await rateLimit("opportunities-student:" + s.id, 60, 60);
@@ -72,7 +73,7 @@ export async function POST(req: Request) {
     if (x.action === "remove") {
       const row: any = await stmt(`SELECT id,created_by FROM opportunities WHERE id=? AND status='Active' AND ${sameSide(u, "created_by")}`, String(x.id || "")).first();
       ensure(row, "Opportunity not found.");
-      ensure(row.created_by === u.id || can(u.roles, leaders), "Only the person who posted it, a supervisor or Project Operations removes an opportunity.");
+      ensure(row.created_by === u.id || leads(u), "Only the person who posted it, a Target Team supervisor or Project Operations removes an opportunity.");
       await db().batch([
         stmt("UPDATE opportunities SET status='Removed',removed_by=?,removed_at=? WHERE id=?", u.id, now(), row.id),
         auditStmt(u, "Opportunity removed", row.id, { status: "Removed" }, null, uid("REQ")),
@@ -81,7 +82,7 @@ export async function POST(req: Request) {
     }
 
     ensure(x.action === "post", "Choose an opportunity action.");
-    ensure(posts(u), "Only the Service Team's coordinators post opportunities.");
+    ensure(posts(u), "Only the Target Team and Project Operations post opportunities.");
     const title = String(x.title ?? "").trim();
     const platform = String(x.platform ?? "").trim();
     const track = String(x.track ?? "").trim();

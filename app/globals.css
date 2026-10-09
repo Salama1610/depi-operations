@@ -1241,3 +1241,30 @@ td .searchable-select,td .pick-inline{max-width:240px;min-width:0}
 .opportunity-main a svg{display:inline;vertical-align:-2px}
 .opportunity-main small{color:var(--muted-foreground);font-size:13px;overflow-wrap:anywhere}
 @media(max-width:700px){.opportunities .filter-row .field{min-width:0;flex:1 1 100%}.opportunity-list li{flex-direction:column;align-items:flex-start}}
+/* 9 October 2026 meeting: contact lines, week browsing, group messages. */
+.contact-line{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:6px}
+.contact-line .text-link{font-size:13px;overflow-wrap:anywhere}
+.action-help{font-size:12px;color:#7c8aa0;line-height:1.7;margin:-10px 0 18px}
+.week-nav{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
+.week-nav-label{display:flex;flex-direction:column;min-width:130px;text-align:center}
+.week-nav-label strong{font-size:14px;color:#33496d}
+.week-nav-label small{font-size:11px}
+.reach-links{display:flex!important;align-items:center;gap:8px;margin-top:3px}
+.reach-links a{display:inline-flex;align-items:center;gap:4px;color:#4265ce}
+.reach-links a:last-child:not(:first-child){color:#1f7a4d}
+.access-btn.is-whatsapp{color:#1f7a4d;background:#effaf4;border-color:#cfeedd}
+.group-message textarea{width:100%;border:1px solid #dae2ef;border-radius:8px;padding:11px;font:inherit;font-size:14px;line-height:1.7;color:#344a6b;resize:vertical}
+.group-message .detail-actions{align-items:center;margin:14px 0 0}
+.checklist-owner{font-weight:600}
+.checklist-owner.is-coach_ops{color:#7a4fc0}
+.checklist-owner.is-coordinator{color:#315ce8}
+.checklist-buttons{display:inline-flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.followup-list .task-row svg:first-child{color:#5a75c9}
+.credential-store{border-top:1px solid #edf1f6;margin-top:16px;padding-top:14px;display:flex;flex-direction:column;gap:12px}
+.credential-store h3{font-size:14px}
+.feedback-mine{margin-top:10px;font-size:13px;color:#5d7292}
+.feedback-mine summary{cursor:pointer;color:#315ce8;font-weight:600;width:max-content}
+.feedback-mine dl{display:grid;gap:8px;margin:10px 0 0}
+.feedback-mine dt{color:#8a99ad;font-size:12px}
+.feedback-mine dd{margin:2px 0 0;color:#344a6b;overflow-wrap:anywhere}
+@media(max-width:620px){.week-nav{width:100%;justify-content:space-between}.week-nav-label{flex:1}}

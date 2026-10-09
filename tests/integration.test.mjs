@@ -335,6 +335,11 @@ test("full seeded backend workflow and permission gates", async () => {
       .status,
     "Assigned",
   );
+  // What happens next: the group's coordinator gets a task to place the order.
+  const handover = await dbRow("SELECT t.owner,t.status,g.coordinator FROM tasks t JOIN students s ON s.id=t.student_id JOIN groups g ON g.id=s.group_id WHERE t.source='account-assigned:REQ1'");
+  assert.ok(handover, "the coordinator gets a task once an account is assigned");
+  assert.equal(handover.owner, handover.coordinator);
+  assert.equal(handover.status, "Open");
   await check("account_request", {
     id: "REQ2",
     student_id: "S10002",
@@ -2321,7 +2326,8 @@ test("vault access is role restricted and never logs returned credentials", asyn
       password: "stored-secret-never-log",
     })
   ).json();
-  assert.match(result.error, /role/);
+  // Passwords are saved by the people who keep the accounts, not a coordinator.
+  assert.match(result.error, /keep the accounts/);
   current = { id: "owner", email: "owner@example.com" };
   await call({
     action: "set_reference",
@@ -2804,6 +2810,45 @@ test("the Service Team supervisor records account top-ups, each a new row in the
   assert.ok(data.accounts.some((a) => a.id === "ACC-TOPUP-1"));
   assert.ok(data.creditLedger.some((e) => e.account_id === "ACC-TOPUP-1"));
   await dbExec("UPDATE users SET title=? WHERE id='staff-nour'", supervisor.title);
+  current = { id: "owner", email: "owner@example.com" };
+});
+
+test("groups keep a WhatsApp link, accounts can have a second coordinator, and the keepers unblock them", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  await dbExec("DELETE FROM rate_limits");
+  const group = await dbRow("SELECT g.id,g.coordinator,u.email FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.status='Active' LIMIT 1");
+  assert.match((await post("group_whatsapp", { id: group.id, whatsapp_link: "https://example.com/not-whatsapp" })).error, /invite link/);
+  await check("group_whatsapp", { id: group.id, whatsapp_link: "https://chat.whatsapp.com/AbCdEfGhIjKlMnOp" });
+  assert.equal((await dbRow("SELECT whatsapp_link FROM groups WHERE id=?", group.id)).whatsapp_link, "https://chat.whatsapp.com/AbCdEfGhIjKlMnOp");
+  const other = await dbRow("SELECT id,email FROM users WHERE roles LIKE '%Operations Coordinator%' AND roles NOT LIKE '%Admin%' AND id<>? AND active=1 LIMIT 1", group.coordinator);
+  current = { id: "other-login", email: other.email };
+  assert.match((await post("group_whatsapp", { id: group.id, whatsapp_link: "" })).error, /coordinator or supervisor/);
+  current = { id: "coordinator-login", email: group.email };
+  await check("group_whatsapp", { id: group.id, whatsapp_link: "" });
+  assert.equal((await dbRow("SELECT whatsapp_link FROM groups WHERE id=?", group.id)).whatsapp_link, null, "an empty link clears it");
+
+  // Two coordinators share one account; both see it.
+  current = { id: "owner", email: "owner@example.com" };
+  await check("account", { id: "ACC-SHARE-1", label: "shared.client@example.com", platform: "Kafeel", credits: 20 });
+  await check("account_coordinator", { id: "ACC-SHARE-1", account_ids: ["ACC-SHARE-1"], coordinator_id: group.coordinator });
+  assert.match((await post("account_coordinator", { id: "ACC-SHARE-1", account_ids: ["ACC-SHARE-1"], coordinator_id: group.coordinator, slot: "second" })).error, /already works/);
+  await check("account_coordinator", { id: "ACC-SHARE-1", account_ids: ["ACC-SHARE-1"], coordinator_id: other.id, slot: "second" });
+  current = { id: "other-login", email: other.email };
+  assert.ok((await (await api.GET()).json()).accounts.some((a) => a.id === "ACC-SHARE-1"), "the second coordinator sees the account");
+  current = { id: "owner", email: "owner@example.com" };
+  await check("account_coordinator", { id: "ACC-SHARE-1", account_ids: ["ACC-SHARE-1"], coordinator_id: "" });
+  const shared = await dbRow("SELECT coordinator_id,coordinator_2_id FROM accounts WHERE id='ACC-SHARE-1'");
+  assert.deepEqual([shared.coordinator_id, shared.coordinator_2_id], [other.id, null], "removing the first moves the second up");
+
+  // Project Operations (Taha) tops up and unblocks; a coordinator cannot.
+  await check("staff", { name: "Accounts Keeper", email: "keeper@example.com", roles: ["Project Operations", "Team Supervisor"], reason: "Probe the account keepers" });
+  current = { id: "keeper-login", email: "keeper@example.com" };
+  await check("account_topup", { id: "ACC-SHARE-1", amount: 5, reference: "TRX-2001" });
+  await check("account_status", { id: "ACC-SHARE-1", status: "Blocked", reason: "The platform suspended it" });
+  await check("account_status", { id: "ACC-SHARE-1", status: "Available", reason: "The platform restored it" });
+  assert.equal((await dbRow("SELECT status FROM accounts WHERE id='ACC-SHARE-1'")).status, "Available");
+  current = { id: "other-login", email: other.email };
+  assert.match((await post("account_status", { id: "ACC-SHARE-1", status: "Blocked", reason: "Trying without the right" })).error, /role|Project Operations/);
   current = { id: "owner", email: "owner@example.com" };
 });
 
@@ -3337,7 +3382,7 @@ test("the dashboard is for administrators, without national IDs or demo records"
   current = { id: "owner", email: "owner@example.com" };
 });
 
-test("Service Team coordinators post job opportunities, which a track's students and the leaders see", async () => {
+test("the Target Team posts job opportunities, which a track's students and the Target Team's leaders see", async () => {
   await dbExec("DELETE FROM rate_limits");
   current = { id: "owner", email: "owner@example.com" };
   const api2 = await route("opportunities");
@@ -3351,13 +3396,13 @@ test("Service Team coordinators post job opportunities, which a track's students
   const learner = await dbRow("SELECT id,email FROM students WHERE group_id=? AND lifecycle='Active' AND email IS NOT NULL LIMIT 1", group.id);
   const job = { action: "post", url: "https://khamsat.com/community/requests/123", title: "Logo for a coffee shop", track: group.track, platform: "Khamsat", posted_on: new Date().toISOString().slice(0, 10) };
   try {
-    // A coordinator outside the Service Team reads nothing and posts nothing.
-    await dbExec("UPDATE users SET team='Target Team' WHERE id=?", group.uid);
-    current = { id: group.uid, email: group.email };
-    assert.match((await get()).error, /Service Team/);
-    assert.match((await send(job)).error, /Service Team/);
-    // On the Service Team they post, with a real link, a known track and a date that has come.
+    // A coordinator outside the Target Team reads nothing and posts nothing.
     await dbExec("UPDATE users SET team='Service Team' WHERE id=?", group.uid);
+    current = { id: group.uid, email: group.email };
+    assert.match((await get()).error, /Target Team/);
+    assert.match((await send(job)).error, /Target Team/);
+    // On the Target Team they post, with a real link, a known track and a date that has come.
+    await dbExec("UPDATE users SET team='Target Team' WHERE id=?", group.uid);
     assert.match((await send({ ...job, url: "http://khamsat.com/x" })).error, /https/);
     assert.match((await send({ ...job, track: "No such track" })).error, /track/);
     assert.match((await send({ ...job, posted_on: "2999-01-01" })).error, /future/);
@@ -3377,16 +3422,25 @@ test("Service Team coordinators post job opportunities, which a track's students
       current = { id: other.id, email: other.email };
       assert.ok(!(await get()).opportunities.some((o) => o.id === made.id));
     }
-    // A supervisor sees every post and can remove one; it then leaves the student's page.
-    const supervisor = await dbRow(`SELECT id,email FROM users WHERE roles LIKE '%Team Supervisor%' AND roles NOT LIKE '%Admin%' AND id NOT LIKE 'DEMO-%' AND active=1 LIMIT 1`);
-    current = { id: supervisor.id, email: supervisor.email };
-    const all = await get();
-    assert.equal(all.posts, false);
-    assert.ok(all.opportunities.some((o) => o.id === made.id));
-    assert.match((await send(job)).error, /Service Team/);
-    assert.equal((await send({ action: "remove", id: made.id })).error, undefined);
-    current = { id: learner.id, email: learner.email };
-    assert.ok(!(await get()).opportunities.some((o) => o.id === made.id));
+    // The Service Team's supervisor does not see them; the Target Team's
+    // supervisor sees every post, posts too and removes one, which then
+    // leaves the student's page.
+    const supervisor = await dbRow(`SELECT id,email,team FROM users WHERE roles LIKE '%Team Supervisor%' AND roles NOT LIKE '%Admin%' AND roles NOT LIKE '%Project Operations%' AND id NOT LIKE 'DEMO-%' AND active=1 LIMIT 1`);
+    try {
+      current = { id: supervisor.id, email: supervisor.email };
+      await dbExec("UPDATE users SET team='Service Team' WHERE id=?", supervisor.id);
+      assert.match((await get()).error, /Target Team/);
+      await dbExec("UPDATE users SET team='Target Team' WHERE id=?", supervisor.id);
+      const all = await get();
+      assert.equal(all.posts, true);
+      assert.equal(all.leads, true);
+      assert.ok(all.opportunities.some((o) => o.id === made.id));
+      assert.equal((await send({ action: "remove", id: made.id })).error, undefined);
+      current = { id: learner.id, email: learner.email };
+      assert.ok(!(await get()).opportunities.some((o) => o.id === made.id));
+    } finally {
+      await dbExec("UPDATE users SET team=? WHERE id=?", supervisor.team, supervisor.id);
+    }
   } finally {
     current = { id: "owner", email: "owner@example.com" };
     await dbExec("UPDATE users SET team=? WHERE id=?", group.team, group.uid);

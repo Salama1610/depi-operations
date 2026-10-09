@@ -1,9 +1,8 @@
 "use client";
 
-// Work opportunities the Service Team's coordinators find on the freelance
-// platforms (see app/api/opportunities). The staff tab lists every post and,
-// for those coordinators, takes new ones; a student's page shows the active
-// posts for their own track.
+// Work opportunities the Target Team finds on the freelance platforms (see
+// app/api/opportunities). The staff tab lists every post and takes new ones,
+// one at a time; a student's page shows the active posts for their own track.
 
 import { useEffect, useMemo, useState } from "react";
 import { ExternalLink, Plus, RefreshCw } from "lucide-react";
@@ -115,7 +114,7 @@ export function Opportunities() {
 
   return (
     <div className="opportunities">
-      <p className="footnote">{t("Jobs the Service Team's coordinators found on the platforms. Each one shows to the students of its track on their own page.")}</p>
+      <p className="footnote">{t("Jobs the Target Team found on the platforms. Each one shows to the students of its track on their own page.")}</p>
 
       {data?.posts && (
         <section className="panel">
