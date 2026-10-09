@@ -496,7 +496,7 @@ export async function loadData(u: any) {
     ),
     qualityScope
       ? all(
-          `SELECT l.*,s.name student_name,s.email student_email,s.group_id,g.track,g.coordinator,
+          `SELECT l.*,s.name student_name,s.email student_email,s.group_id,g.track,g.coordinator,g.supervisor,
                   ss.status submission_status,ss.submitted_at submission_submitted_at,
                   ss.qc_completed_at,u.name reviewer_name,
                   (SELECT count(*) FROM service_link_reviews r WHERE r.service_link_id=l.id) correction_count

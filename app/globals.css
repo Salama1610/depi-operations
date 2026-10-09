@@ -425,6 +425,53 @@ input:focus-visible {
   }
 }
 
+/* Services page: the counts double as quick filters, and the extra filters fold away. */
+.mini-stats .mini-stat-btn {
+  display: block;
+  text-align: start;
+  font: inherit;
+  font-size: 12px;
+  color: #8394ae;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 6px 10px;
+  margin: -7px 0;
+  margin-inline-end: 12px;
+  min-width: 0;
+}
+.mini-stats .mini-stat-btn:hover {
+  background: #f4f6ff;
+}
+.mini-stats .mini-stat-btn[aria-pressed="true"] {
+  border-color: #8ba5f5;
+  background: #edf1ff;
+  color: #315ce8;
+}
+.filter-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.filter-date {
+  height: 38px;
+  border: 1px solid #dfe5ef;
+  border-radius: 6px;
+  background: #fff;
+  padding: 0 10px;
+  font-size: 13px;
+  color: #394966;
+}
+@media (max-width: 620px) {
+  .filter-tools {
+    width: 100%;
+  }
+  .filter-date {
+    width: 100%;
+  }
+}
+
 .qc-lead-actions {
   align-items: center;
   margin: 0 0 14px;

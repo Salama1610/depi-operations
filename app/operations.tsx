@@ -52,6 +52,7 @@ import {
   EyeOff,
   CheckCircle2,
   XCircle,
+  X,
   AlertTriangle,
   Upload,
   Download,
@@ -285,6 +286,33 @@ function Badge({ value }: { value: any }) {
     </span>
   );
 }
+// Filters on the Services page. "Uploaded" is when the student last sent the
+// link (a corrected link counts from its new upload).
+const serviceFilterDefaults: Row = { state: "Pending", platform: "All", track: "All", group: "All", coordinator: "All", supervisor: "All", reviewer: "All", age: "All", automatic: "All", corrections: "All", uploaded: "All", from: "", to: "", sort: "waiting" };
+const submissionFilterDefaults: Row = { state: "All", track: "All", group: "All", coordinator: "All", supervisor: "All", approved: "All", platform: "All", lifecycle: "All", uploaded: "All", from: "", to: "", sort: "follow-up" };
+/** How many filters narrow the list, for the "Clear filters" button. */
+const narrowing = (value: Row, defaults: Row) =>
+  Object.keys(defaults).filter((k) => !["sort", "from", "to"].includes(k) && value[k] !== defaults[k]).length;
+/** The viewer's calendar day for a time, as YYYY-MM-DD. */
+const localDay = (at: string | number) => {
+  const d = new Date(at);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+};
+/** Whether an upload falls in the chosen period. Nothing uploaded never matches a period. */
+function uploadedIn(at: string | undefined, f: Row) {
+  if (f.uploaded === "All") return true;
+  if (!at || Number.isNaN(Date.parse(at))) return false;
+  const day = localDay(at);
+  if (f.uploaded === "custom") return (!f.from || day >= f.from) && (!f.to || day <= f.to);
+  return day >= localDay(Date.now() - Number(f.uploaded) * 86400000);
+}
+const uploadedOptions = [
+  { value: "All", label: "Any time" },
+  { value: "0", label: "Today" },
+  { value: "6", label: "Last 7 days" },
+  { value: "29", label: "Last 30 days" },
+  { value: "custom", label: "Choose dates" },
+];
 function Pick({
   value,
   onChange,
@@ -444,8 +472,9 @@ export default function Operations({ module: initialModule }: { module: string }
     [importRows, setImportRows] = useState<Row[]>([]),
     [preview, setPreview] = useState<Row | null>(null),
     [importId, setImportId] = useState(""),
-    [serviceFilters, setServiceFilters] = useState<Row>({ state: "Pending", platform: "All", track: "All", group: "All", coordinator: "All", reviewer: "All", age: "All", automatic: "All", corrections: "All" }),
-    [submissionFilters, setSubmissionFilters] = useState<Row>({ state: "All", track: "All", group: "All", coordinator: "All" }),
+    [serviceFilters, setServiceFilters] = useState<Row>(serviceFilterDefaults),
+    [submissionFilters, setSubmissionFilters] = useState<Row>(submissionFilterDefaults),
+    [moreFilters, setMoreFilters] = useState<Row>({}),
     [saved, setSaved] = useState<string[]>([]),
     [checklistFor, setChecklistFor] = useState<string | null>(null),
     [feedbackFor, setFeedbackFor] = useState<string | null>(null),
@@ -525,7 +554,7 @@ export default function Operations({ module: initialModule }: { module: string }
   const studentsById = new Map<string, Row>((d.students || []).map((s: Row) => [s.id, s]));
   const serviceSubmissionStatus: Row[] = (d.serviceSubmissionStatus || []).map((r: Row) => {
     const s = studentsById.get(r.student_id) || {};
-    return { ...r, student_name: s.name, group_id: s.group_id, lifecycle: s.lifecycle, track: s.track, coordinator: s.coordinator, coordinator_name: s.coordinator_name };
+    return { ...r, student_name: s.name, group_id: s.group_id, lifecycle: s.lifecycle, track: s.track, coordinator: s.coordinator, coordinator_name: s.coordinator_name, supervisor: s.supervisor };
   });
   const openTasks = tasks.filter((t) => t.status === "Open");
   const overdue = openTasks.filter((t) => t.due < new Date().toISOString());
@@ -2882,14 +2911,23 @@ export default function Operations({ module: initialModule }: { module: string }
       .filter(qMatch)
       .filter((e) => filter === "All" || e.status === filter)
       .sort((a, b) => a.stage_at.localeCompare(b.stage_at));
+    // "All" is everything still open; "Every" adds the approved links, so the
+    // people following a group can also see what has already passed.
     const serviceQueue = serviceLinks
-      .filter((r) => r.qc_status !== "Locked")
-      .filter((r) => serviceFilters.state === "All" || r.qc_status === serviceFilters.state)
+      .filter((r) =>
+        serviceFilters.state === "Every"
+          ? true
+          : serviceFilters.state === "All"
+            ? r.qc_status !== "Locked"
+            : r.qc_status === serviceFilters.state,
+      )
       .filter(qMatch)
       .filter((r) => serviceFilters.platform === "All" || r.platform === serviceFilters.platform)
       .filter((r) => serviceFilters.track === "All" || r.track === serviceFilters.track)
       .filter((r) => serviceFilters.group === "All" || r.group_id === serviceFilters.group)
       .filter((r) => serviceFilters.coordinator === "All" || r.coordinator === serviceFilters.coordinator)
+      .filter((r) => serviceFilters.supervisor === "All" || r.supervisor === serviceFilters.supervisor)
+      .filter((r) => uploadedIn(r.submitted_at, serviceFilters))
       .filter((r) =>
         serviceFilters.reviewer === "All"
           ? true
@@ -2911,7 +2949,19 @@ export default function Operations({ module: initialModule }: { module: string }
     // A link the student corrected is new work for its reviewer, so it comes first.
     const resubmitted = (r: Row) => r.qc_status === "Pending" && Number(r.revision) > 1;
     const studentResubmitted = new Set(serviceQueue.filter(resubmitted).map((r) => r.student_id));
-    serviceQueue.sort(
+    // Other orders keep a student's links together too.
+    const bySlot = (a: Row, b: Row) => String(a.student_id).localeCompare(String(b.student_id)) || Number(a.slot) - Number(b.slot);
+    const latestUpload = serviceQueue.reduce((out: Row, r: Row) => {
+      out[r.student_id] = String(r.submitted_at) > String(out[r.student_id] || "") ? r.submitted_at : out[r.student_id];
+      return out;
+    }, {} as Row);
+    if (serviceFilters.sort === "newest" || serviceFilters.sort === "oldest")
+      serviceQueue.sort((a, b) => (serviceFilters.sort === "newest" ? -1 : 1) * String(latestUpload[a.student_id]).localeCompare(String(latestUpload[b.student_id])) || bySlot(a, b));
+    else if (serviceFilters.sort === "name")
+      serviceQueue.sort((a, b) => String(a.student_name).localeCompare(String(b.student_name)) || bySlot(a, b));
+    else if (serviceFilters.sort === "group")
+      serviceQueue.sort((a, b) => String(a.group_id).localeCompare(String(b.group_id)) || String(a.student_name).localeCompare(String(b.student_name)) || bySlot(a, b));
+    else serviceQueue.sort(
       (a, b) =>
         Number(studentResubmitted.has(b.student_id)) - Number(studentResubmitted.has(a.student_id)) ||
         String(waitingSince[a.student_id]).localeCompare(String(waitingSince[b.student_id])) ||
@@ -2951,28 +3001,120 @@ export default function Operations({ module: initialModule }: { module: string }
       .filter((r) => submissionFilters.track === "All" || r.track === submissionFilters.track)
       .filter((r) => submissionFilters.group === "All" || r.group_id === submissionFilters.group)
       .filter((r) => submissionFilters.coordinator === "All" || r.coordinator === submissionFilters.coordinator)
-      .sort(
-        (a, b) =>
-          ["Not submitted", "Incomplete", "Rejected, waiting on the student", "Awaiting QC", "Complete"].indexOf(a.follow_up) -
-            ["Not submitted", "Incomplete", "Rejected, waiting on the student", "Awaiting QC", "Complete"].indexOf(b.follow_up) ||
-          String(a.student_name).localeCompare(String(b.student_name)),
+      .filter((r) => submissionFilters.supervisor === "All" || r.supervisor === submissionFilters.supervisor)
+      .filter((r) => submissionFilters.lifecycle === "All" || r.lifecycle === submissionFilters.lifecycle)
+      .filter((r) => submissionFilters.approved === "All" || Math.min(3, Number(r.links_locked)) === Number(submissionFilters.approved))
+      .filter((r) => submissionFilters.platform === "All" || Number(r["links_" + submissionFilters.platform.toLowerCase()]) > 0)
+      .filter((r) => uploadedIn(r.submitted_at, submissionFilters))
+      .sort((a, b) => {
+        const byName = String(a.student_name).localeCompare(String(b.student_name));
+        const order = ["Not submitted", "Incomplete", "Rejected, waiting on the student", "Awaiting QC", "Complete"];
+        // Students who never uploaded have no date and go last in a date order.
+        const when = (r: Row) => String(r.submitted_at || "");
+        switch (submissionFilters.sort) {
+          case "newest": return (when(a) ? 0 : 1) - (when(b) ? 0 : 1) || when(b).localeCompare(when(a)) || byName;
+          case "oldest": return (when(a) ? 0 : 1) - (when(b) ? 0 : 1) || when(a).localeCompare(when(b)) || byName;
+          case "name": return byName;
+          case "group": return String(a.group_id).localeCompare(String(b.group_id)) || byName;
+          default: return order.indexOf(a.follow_up) - order.indexOf(b.follow_up) || byName;
+        }
+      });
+    const exportRows = (rows: Row[], file: string, shape: (r: Row) => Row) => {
+      const data = toWorkbook([{ name: "Services", rows: rows.length ? rows.map(shape) : [{ Note: "Nothing matches these filters" }] }]);
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([data as BlobPart], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+      a.download = `${file}-${today()}.xlsx`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    };
+    // The period filter offers two dates when "Choose dates" is picked.
+    const periodFields = (f: Row, set: (f: Row) => void) =>
+      f.uploaded === "custom" && (
+        <>
+          <label className="pick-field">
+            <span className="pick-label">{t("From")}</span>
+            <input type="date" className="filter-date" value={f.from} max={f.to || undefined} onChange={(e) => set({ ...f, from: e.target.value })} />
+          </label>
+          <label className="pick-field">
+            <span className="pick-label">{t("To")}</span>
+            <input type="date" className="filter-date" value={f.to} min={f.from || undefined} onChange={(e) => set({ ...f, to: e.target.value })} />
+          </label>
+        </>
       );
+    // A filter that is set always stays visible, even with the extra filters folded away.
+    const filterTools = (key: string, f: Row, defaults: Row, set: (f: Row) => void, download?: () => void) => {
+      const count = narrowing(f, defaults);
+      return (
+        <div className="filter-tools">
+          <button type="button" className="small-btn" aria-expanded={!!moreFilters[key]} onClick={() => setMoreFilters((m) => ({ ...m, [key]: !m[key] }))}>
+            <Filter size={14} /> {moreFilters[key] ? t("Fewer filters") : t("More filters")}
+          </button>
+          {count > 0 && (
+            <button type="button" className="small-btn" onClick={() => { set({ ...defaults }); setPage(1); }}>
+              <X size={14} /> {t("Clear filters ({v0})", { v0: count })}
+            </button>
+          )}
+          {download && canTransfer && (
+            <button type="button" className="small-btn" onClick={download}>
+              <Download size={14} /> {t("Download this list (Excel)")}
+            </button>
+          )}
+        </div>
+      );
+    };
+    const setService = (f: Row) => { setServiceFilters(f); setPage(1); };
+    const setSubmission = (f: Row) => { setSubmissionFilters(f); setPage(1); };
+    const supervisorOptions = (rows: Row[]) => [{ value: "All", label: t("All supervisors") }, ...Array.from(new Set(rows.map((r) => r.supervisor).filter(Boolean))).map((id) => ({ value: id, label: owner(id) })).sort((a, b) => a.label.localeCompare(b.label))];
     const submissionCount = (state: string) =>
       serviceSubmissionStatus.filter((r) => submissionState(r) === state).length;
     const submissionPanel = serviceSubmissionStatus.length > 0 && (
       <>
         <div className="mini-stats service-qc-stats">
-          <span><strong>{submissionCount("Not submitted")}</strong>{t("Not submitted")}</span>
-          <span><strong>{submissionCount("Awaiting QC")}</strong>{t("Awaiting QC")}</span>
-          <span><strong>{submissionCount("Rejected, waiting on the student")}</strong>{t("Rejected, waiting on the student")}</span>
-          <span><strong>{submissionCount("Incomplete")}</strong>{t("Incomplete")}</span>
-          <span><strong>{submissionCount("Complete")}</strong>{t("Complete")}</span>
+          {["Not submitted", "Awaiting QC", "Rejected, waiting on the student", "Incomplete", "Complete"].map((state) => (
+            <button
+              key={state}
+              type="button"
+              className="mini-stat-btn"
+              aria-pressed={submissionFilters.state === state}
+              title={t("Show only these students")}
+              onClick={() => setSubmission({ ...submissionFilters, state: submissionFilters.state === state ? "All" : state })}
+            >
+              <strong>{submissionCount(state)}</strong>{t(state)}
+            </button>
+          ))}
         </div>
         <div className="filter-row service-qc-filters">
-          <Pick label={t("Follow-up")} value={submissionFilters.state} onChange={(state) => setSubmissionFilters({ ...submissionFilters, state })} options={["All", "Not submitted", "Incomplete", "Rejected, waiting on the student", "Awaiting QC", "Complete"]} />
-          <Pick label={t("Track")} value={submissionFilters.track} onChange={(track) => setSubmissionFilters({ ...submissionFilters, track })} options={["All", ...Array.from(new Set(serviceSubmissionStatus.map((r) => r.track).filter(Boolean)))]} />
-          <Pick label={t("Group")} value={submissionFilters.group} onChange={(group) => setSubmissionFilters({ ...submissionFilters, group })} options={["All", ...Array.from(new Set(serviceSubmissionStatus.map((r) => r.group_id).filter(Boolean)))]} />
-          <Pick label={t("Coordinator")} value={submissionFilters.coordinator} onChange={(coordinator) => setSubmissionFilters({ ...submissionFilters, coordinator })} options={[{ value: "All", label: t("All coordinators") }, ...Array.from(new Set(serviceSubmissionStatus.map((r) => r.coordinator).filter(Boolean))).map((id) => ({ value: id, label: owner(id) }))]} />
+          <Pick label={t("Follow-up")} value={submissionFilters.state} onChange={(state) => setSubmission({ ...submissionFilters, state })} options={["All", "Not submitted", "Incomplete", "Rejected, waiting on the student", "Awaiting QC", "Complete"]} />
+          <Pick label={t("Track")} value={submissionFilters.track} onChange={(track) => setSubmission({ ...submissionFilters, track })} options={["All", ...Array.from(new Set(serviceSubmissionStatus.map((r) => r.track).filter(Boolean)))]} />
+          <Pick label={t("Group")} value={submissionFilters.group} onChange={(group) => setSubmission({ ...submissionFilters, group })} options={["All", ...Array.from(new Set(serviceSubmissionStatus.map((r) => r.group_id).filter(Boolean))).sort()]} />
+          <Pick label={t("Coordinator")} value={submissionFilters.coordinator} onChange={(coordinator) => setSubmission({ ...submissionFilters, coordinator })} options={[{ value: "All", label: t("All coordinators") }, ...Array.from(new Set(serviceSubmissionStatus.map((r) => r.coordinator).filter(Boolean))).map((id) => ({ value: id, label: owner(id) }))]} />
+          <Pick label={t("Uploaded")} value={submissionFilters.uploaded} onChange={(uploaded) => setSubmission({ ...submissionFilters, uploaded })} options={uploadedOptions} />
+          {periodFields(submissionFilters, setSubmission)}
+          <Pick label={t("Sort by")} value={submissionFilters.sort} onChange={(sort) => setSubmission({ ...submissionFilters, sort })} options={[{ value: "follow-up", label: "Who needs follow-up first" }, { value: "newest", label: "Latest upload first" }, { value: "oldest", label: "Earliest upload first" }, { value: "name", label: "Student name" }, { value: "group", label: "Group" }]} />
+          {(moreFilters.submission || submissionFilters.supervisor !== "All") && <Pick label={t("Supervisor")} value={submissionFilters.supervisor} onChange={(supervisor) => setSubmission({ ...submissionFilters, supervisor })} options={supervisorOptions(serviceSubmissionStatus)} />}
+          {(moreFilters.submission || submissionFilters.approved !== "All") && <Pick label={t("Approved links")} value={submissionFilters.approved} onChange={(approved) => setSubmission({ ...submissionFilters, approved })} options={[{ value: "All", label: "Any number" }, { value: "0", label: "None approved" }, { value: "1", label: "1 of 3" }, { value: "2", label: "2 of 3" }, { value: "3", label: "All 3" }]} />}
+          {(moreFilters.submission || submissionFilters.platform !== "All") && <Pick label={t("Has a link on")} value={submissionFilters.platform} onChange={(platform) => setSubmission({ ...submissionFilters, platform })} options={[{ value: "All", label: "Any platform" }, ...acceptedServicePlatforms.map((p) => ({ value: p, label: p }))]} />}
+          {(moreFilters.submission || submissionFilters.lifecycle !== "All") && <Pick label={t("Student status")} value={submissionFilters.lifecycle} onChange={(lifecycle) => setSubmission({ ...submissionFilters, lifecycle })} options={["All", ...Array.from(new Set(serviceSubmissionStatus.map((r) => r.lifecycle).filter(Boolean))).sort()]} />}
+          {filterTools("submission", submissionFilters, submissionFilterDefaults, setSubmission, () =>
+            exportRows(submissionRows, "service-uploads-by-student", (r) => ({
+              Student: r.student_name,
+              "Student ID": r.student_id,
+              Group: r.group_id,
+              Track: r.track,
+              Coordinator: owner(r.coordinator),
+              Supervisor: r.supervisor ? owner(r.supervisor) : "",
+              "Student status": r.lifecycle,
+              "Follow-up": r.follow_up,
+              "Links uploaded": Number(r.links_submitted),
+              Approved: Number(r.links_locked),
+              "Awaiting QC": Number(r.links_pending),
+              Rejected: Number(r.links_need_correction),
+              Khamsat: Number(r.links_khamsat),
+              Kafiil: Number(r.links_kafiil),
+              Nafezly: Number(r.links_nafezly),
+              "Last upload": r.submitted_at || "",
+            })),
+          )}
         </div>
         {panel(
           t("Service-link submission status · {v0} matching", { v0: submissionRows.length }),
@@ -2997,8 +3139,9 @@ export default function Operations({ module: initialModule }: { module: string }
             {canSeeServiceQueue && (
             <>
             <div className="mini-stats service-qc-stats">
-              <span><strong>{serviceLinks.filter((r) => r.qc_status === "Pending").length}</strong>{t("Awaiting review")}</span>
-              <span><strong>{serviceLinks.filter((r) => r.qc_status === "Needs Correction").length}</strong>{t("Rejected, waiting on the student")}</span>
+              <button type="button" className="mini-stat-btn" aria-pressed={serviceFilters.state === "Pending"} title={t("Show only these links")} onClick={() => setService({ ...serviceFilters, state: "Pending" })}><strong>{serviceLinks.filter((r) => r.qc_status === "Pending").length}</strong>{t("Awaiting review")}</button>
+              <button type="button" className="mini-stat-btn" aria-pressed={serviceFilters.state === "Needs Correction"} title={t("Show only these links")} onClick={() => setService({ ...serviceFilters, state: "Needs Correction" })}><strong>{serviceLinks.filter((r) => r.qc_status === "Needs Correction").length}</strong>{t("Rejected, waiting on the student")}</button>
+              <button type="button" className="mini-stat-btn" aria-pressed={serviceFilters.state === "Locked"} title={t("Show only these links")} onClick={() => setService({ ...serviceFilters, state: "Locked" })}><strong>{serviceLinks.filter((r) => r.qc_status === "Locked").length}</strong>{t("Approved")}</button>
               <span><strong>{serviceLinks.filter((r) => r.auto_status === "Failed").length}</strong>{t("Automatic check failed")}</span>
               <span><strong>{serviceLinks.filter((r) => r.qc_status === "Pending" && Date.now() - Date.parse(r.updated_at) > 48 * 3600000).length}</strong>{t("Past 48-hour SLA")}</span>
             </div>
@@ -3006,21 +3149,23 @@ export default function Operations({ module: initialModule }: { module: string }
               <Pick
                 label={t("Showing")}
                 value={serviceFilters.state}
-                onChange={(state) => setServiceFilters({ ...serviceFilters, state })}
+                onChange={(state) => setService({ ...serviceFilters, state })}
                 options={[
                   { value: "Pending", label: t("Waiting for review") },
                   { value: "Needs Correction", label: t("Rejected, waiting on the student") },
                   { value: "All", label: t("Both") },
+                  { value: "Locked", label: t("Approved") },
+                  { value: "Every", label: t("Every upload") },
                 ]}
               />
-              <Pick label={t("Platform")} value={serviceFilters.platform} onChange={(platform) => setServiceFilters({ ...serviceFilters, platform })} options={["All", ...acceptedServicePlatforms, "External service"]} />
-              <Pick label={t("Track")} value={serviceFilters.track} onChange={(track) => setServiceFilters({ ...serviceFilters, track })} options={["All", ...Array.from(new Set(serviceLinks.map((r) => r.track).filter(Boolean)))]} />
-              <Pick label={t("Group")} value={serviceFilters.group} onChange={(group) => setServiceFilters({ ...serviceFilters, group })} options={["All", ...Array.from(new Set(serviceLinks.map((r) => r.group_id).filter(Boolean)))]} />
+              <Pick label={t("Track")} value={serviceFilters.track} onChange={(track) => setService({ ...serviceFilters, track })} options={["All", ...Array.from(new Set(serviceLinks.map((r) => r.track).filter(Boolean)))]} />
+              <Pick label={t("Group")} value={serviceFilters.group} onChange={(group) => setService({ ...serviceFilters, group })} options={["All", ...Array.from(new Set(serviceLinks.map((r) => r.group_id).filter(Boolean))).sort()]} />
+              <Pick label={t("Coordinator")} value={serviceFilters.coordinator} onChange={(coordinator) => setService({ ...serviceFilters, coordinator })} options={[{ value: "All", label: t("All coordinators") }, ...Array.from(new Set(serviceLinks.map((r) => r.coordinator).filter(Boolean))).map((id) => ({ value: id, label: owner(id) }))]} />
               {canDecideServiceLinks && (
                 <Pick
                   label={t("Assigned to")}
                   value={serviceFilters.reviewer}
-                  onChange={(reviewer) => setServiceFilters({ ...serviceFilters, reviewer })}
+                  onChange={(reviewer) => setService({ ...serviceFilters, reviewer })}
                   options={[
                     { value: "All", label: t("Anyone") },
                     { value: user.id, label: t("Me") },
@@ -3029,10 +3174,31 @@ export default function Operations({ module: initialModule }: { module: string }
                   ]}
                 />
               )}
-              <Pick label={t("Coordinator")} value={serviceFilters.coordinator} onChange={(coordinator) => setServiceFilters({ ...serviceFilters, coordinator })} options={[{ value: "All", label: t("All coordinators") }, ...Array.from(new Set(serviceLinks.map((r) => r.coordinator).filter(Boolean))).map((id) => ({ value: id, label: owner(id) }))]} />
-              <Pick label={t("Submission age")} value={serviceFilters.age} onChange={(age) => setServiceFilters({ ...serviceFilters, age })} options={[{ value: "All", label: t("Any age") }, { value: "24", label: t("24+ hours") }, { value: "48", label: t("48+ hours") }, { value: "168", label: t("7+ days") }]} />
-              <Pick label={t("Automatic check")} value={serviceFilters.automatic} onChange={(automatic) => setServiceFilters({ ...serviceFilters, automatic })} options={["All", "Needs Review", "Failed"]} />
-              <Pick label={t("Corrections")} value={serviceFilters.corrections} onChange={(corrections) => setServiceFilters({ ...serviceFilters, corrections })} options={[{ value: "All", label: t("Any revision") }, { value: "0", label: t("No prior review") }, { value: "1", label: t("One review") }, { value: "Repeated", label: t("Repeated corrections") }]} />
+              <Pick label={t("Uploaded")} value={serviceFilters.uploaded} onChange={(uploaded) => setService({ ...serviceFilters, uploaded })} options={uploadedOptions} />
+              {periodFields(serviceFilters, setService)}
+              <Pick label={t("Sort by")} value={serviceFilters.sort} onChange={(sort) => setService({ ...serviceFilters, sort })} options={[{ value: "waiting", label: "Waiting longest first" }, { value: "newest", label: "Latest upload first" }, { value: "oldest", label: "Earliest upload first" }, { value: "name", label: "Student name" }, { value: "group", label: "Group" }]} />
+              {(moreFilters.service || serviceFilters.platform !== "All") && <Pick label={t("Platform")} value={serviceFilters.platform} onChange={(platform) => setService({ ...serviceFilters, platform })} options={["All", ...acceptedServicePlatforms, "External service"]} />}
+              {(moreFilters.service || serviceFilters.supervisor !== "All") && <Pick label={t("Supervisor")} value={serviceFilters.supervisor} onChange={(supervisor) => setService({ ...serviceFilters, supervisor })} options={supervisorOptions(serviceLinks)} />}
+              {(moreFilters.service || serviceFilters.age !== "All") && <Pick label={t("Submission age")} value={serviceFilters.age} onChange={(age) => setService({ ...serviceFilters, age })} options={[{ value: "All", label: t("Any age") }, { value: "24", label: t("24+ hours") }, { value: "48", label: t("48+ hours") }, { value: "168", label: t("7+ days") }]} />}
+              {(moreFilters.service || serviceFilters.automatic !== "All") && <Pick label={t("Automatic check")} value={serviceFilters.automatic} onChange={(automatic) => setService({ ...serviceFilters, automatic })} options={["All", "Needs Review", "Failed"]} />}
+              {(moreFilters.service || serviceFilters.corrections !== "All") && <Pick label={t("Corrections")} value={serviceFilters.corrections} onChange={(corrections) => setService({ ...serviceFilters, corrections })} options={[{ value: "All", label: t("Any revision") }, { value: "0", label: t("No prior review") }, { value: "1", label: t("One review") }, { value: "Repeated", label: t("Repeated corrections") }]} />}
+              {filterTools("service", serviceFilters, serviceFilterDefaults, setService, () =>
+                exportRows(serviceQueue, "service-uploads", (r) => ({
+                  Student: r.student_name,
+                  "Student ID": r.student_id,
+                  Group: r.group_id,
+                  Track: r.track,
+                  Coordinator: owner(r.coordinator),
+                  Supervisor: r.supervisor ? owner(r.supervisor) : "",
+                  Platform: r.platform,
+                  Link: r.url,
+                  "Uploaded at": r.submitted_at,
+                  Revision: Number(r.revision),
+                  "Review state": r.qc_status === "Locked" ? "Approved" : r.qc_status === "Needs Correction" ? "Rejected" : "Waiting for review",
+                  Reviewer: r.qc_actor ? owner(r.qc_actor) : "",
+                  "Automatic check": r.auto_status,
+                })),
+              )}
             </div>
             {isQualityLead && (
               <div className="detail-actions qc-lead-actions">
@@ -3096,11 +3262,12 @@ export default function Operations({ module: initialModule }: { module: string }
               paginate(serviceQueue, (pageRows) => generic(
                 pageRows,
                 [
-                  { key: "student_name", label: t("Student"), render: (r) => { const own = serviceLinks.filter((l) => l.student_id === r.student_id); const decided = own.filter((l) => l.qc_status !== "Pending").length; return <span><strong>{r.student_name}</strong><small className="table-subline">{r.student_id} · {decided}/{own.length} {t("reviewed")}</small></span>; } },
+                  { key: "student_name", label: t("Student"), render: (r) => { const own = serviceLinks.filter((l) => l.student_id === r.student_id); const decided = own.filter((l) => l.qc_status !== "Pending").length; return <span><strong>{r.student_name}</strong><small className="table-subline">{r.student_id} · <bdi>{r.group_id}</bdi> · {decided}/{own.length} {t("reviewed")}</small></span>; } },
                   { key: "slot", label: t("Service"), render: (r) => (
                       <a className="text-link service-open" href={r.url} target="_blank" rel="noreferrer" title={t("Open the student's service")}>
                         <strong>{serviceLabel(r.platform)}</strong> <ExternalLink size={14} />
                         <small className="table-subline service-url">{r.url}</small>
+                        {r.submitted_at && <small className="table-subline">{t("Uploaded {v0}", { v0: new Date(r.submitted_at).toLocaleString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) })}</small>}
                       </a>
                     ) },
                   { key: "auto_status", label: t("Automatic check"), render: (r) => <Badge value={r.auto_status} /> },
@@ -3109,7 +3276,7 @@ export default function Operations({ module: initialModule }: { module: string }
                       : <span>{!r.qc_actor || !staff.some((s: Row) => s.id === r.qc_actor) ? t("Waiting for a reviewer") : owner(r.qc_actor)}<small className="table-subline">{owner(r.coordinator)}</small></span> },
                   { key: "qc_status", label: t("Review state"), render: (r) => <span><Badge value={qcState(r.qc_status)} />{resubmitted(r) && <Badge value={t("Resubmitted")} />}<small className="table-subline">{Math.round((Date.now() - Date.parse(r.updated_at)) / 3600000)}{t("h · revision")}{" "}{r.revision}</small></span> },
                 ],
-                (r) => <div className="detail-actions">{canDecideServiceLinks && (r.qc_actor === user.id || isQualityLead) && <button className="small-btn" onClick={() => open("service_qc_review", { ...r, service_id: r.id, student_id: r.student_id, decision: r.qc_status === "Needs Correction" ? "Lock" : "" })}>{t("Review")}</button>}</div>,
+                (r) => <div className="detail-actions">{canDecideServiceLinks && r.qc_status !== "Locked" && (r.qc_actor === user.id || isQualityLead) && <button className="small-btn" onClick={() => open("service_qc_review", { ...r, service_id: r.id, student_id: r.student_id, decision: r.qc_status === "Needs Correction" ? "Lock" : "" })}>{t("Review")}</button>}</div>,
               )),
             )}
             {panel(t("Reviewer activity"), reviewerWorkload.length ? <div className="mini-stats">{reviewerWorkload.map(([reviewer, count]: any) => <span key={reviewer}><strong>{count}</strong>{reviewer}</span>)}</div> : <Empty title={t("No service-link reviews yet")} />)}
