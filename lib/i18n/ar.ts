@@ -2427,4 +2427,5 @@ export const ar: Record<string, string> = {
   "Your staff role does not show account passwords.": "دورك لا يتيح عرض كلمات مرور الحسابات.",
   "Coordinator / coach": "المنسق / المدرب",
   "No client accounts yet. The people who keep the accounts add them one at a time or upload the accounts sheet; top-ups are then recorded on the Credit tracker.": "لا توجد حسابات عملاء بعد. يضيفها من يديرون الحسابات واحداً تلو الآخر أو برفع شيت الحسابات، ثم يُسجَّل الشحن في متتبع الرصيد.",
+  "Open the chat": "افتح المحادثة",
 };

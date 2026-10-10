@@ -120,7 +120,7 @@ import {
   dataTransferRoles,
 } from "@/lib/domain/rules";
 import { readSheet, toCSV, toWorkbook, toXLSX } from "@/lib/spreadsheet";
-import { guessKeyColumn, guessMapping } from "@/lib/domain/sheet-mapping";
+import { guessKeyColumn, guessMapping, normalizePhone } from "@/lib/domain/sheet-mapping";
 type Row = Record<string, any>;
 const nav = [
   ["home", "Overview", Home],
@@ -229,6 +229,15 @@ const formatDay = (v: string, locale = "en-GB") =>
     month: "short",
   });
 const today = () => new Date().toISOString().slice(0, 10);
+/**
+ * An Egyptian mobile as "01xxxxxxxxx", whether it was stored with the leading
+ * zero, without it (Excel drops it) or in the +20 form; the first number when
+ * a cell holds two. Null for anything that is not a mobile.
+ */
+const mobileOf = (phone: unknown) => {
+  const first = String(normalizePhone(phone)).split("/")[0].trim();
+  return /^01\d{9}$/.test(first) ? first : null;
+};
 const programDay = (value: Date = new Date()) => {
   const parts = new Intl.DateTimeFormat("en", {
     timeZone: "Africa/Cairo",
@@ -1342,10 +1351,9 @@ export default function Operations({ module: initialModule }: { module: string }
   // mobile numbers; anything else is offered as a call only).
   const reachOf = (personId?: string | null) => {
     const raw = String(staff.find((s: Row) => s.id === personId)?.phone || "").split("/")[0].trim();
-    const digits = raw.replace(/D/g, "");
-    if (!digits) return null;
-    const local = /^01d{9}$/.test(digits) ? digits : /^201d{9}$/.test(digits) ? digits.slice(1) : "";
-    return { shown: raw, tel: "tel:" + raw.replace(/[^d+]/g, ""), wa: local ? "https://wa.me/2" + local : null };
+    if (!raw.replace(/\D/g, "")) return null;
+    const local = mobileOf(raw);
+    return { shown: local || raw, tel: "tel:" + (local || raw.replace(/[^\d+]/g, "")), wa: local ? "https://wa.me/2" + local : null };
   };
   // Ready messages for a session's WhatsApp group, in the reader's language.
   const sessionWhen = (r: Row) =>
@@ -1373,9 +1381,11 @@ See you there!`,
     };
   };
   // A WhatsApp link to a student with a ready message, in the reader's language.
-  const whatsapp = (phone: string, template: "reminder" | "absence" | "congratulations", v: Row) => {
-    const digits = String(phone || "").split(" / ")[0].replace(/\D/g, "");
-    if (!/^01\d{9}$/.test(digits)) return null;
+  const whatsapp = (phone: string, template: "reminder" | "absence" | "congratulations" | "chat", v: Row) => {
+    const digits = mobileOf(phone);
+    if (!digits) return null;
+    // A plain chat with the student, with nothing typed for them.
+    if (template === "chat") return `https://wa.me/2${digits}`;
     const first = String(v.name || "").split(" ")[0];
     const text =
       locale === "ar"
@@ -2693,11 +2703,6 @@ See you there!`,
                     </a>
                   ) : (
                     <span className="access-btn is-missing">{t("No link yet")}</span>
-                  )}
-                  {sessionGroupOf(r)?.whatsapp_link && !onlyCoach && (
-                    <a className="access-btn is-whatsapp" href={sessionGroupOf(r)!.whatsapp_link} target="_blank" rel="noreferrer">
-                      <MessageCircle size={14} /> {t("WhatsApp group")}
-                    </a>
                   )}
                   {!demoAccount && seesCoachLogin(r) &&
                     (storedLogin("coach", r) ? (
@@ -4731,11 +4736,14 @@ See you there!`,
                         .split("/")
                         .map((n: string) => n.trim())
                         .filter(Boolean)
-                        .map((n: string) => (
-                          <a key={n} className="text-link" href={`tel:${n.replace(/[^\d+]/g, "")}`} dir="ltr">
-                            <Phone size={13} /> {n}
-                          </a>
-                        ))}
+                        .map((n: string) => {
+                          const mobile = mobileOf(n);
+                          return (
+                            <a key={n} className="text-link" href={`tel:${mobile || n.replace(/[^\d+]/g, "")}`} dir="ltr">
+                              <Phone size={13} /> {mobile || n}
+                            </a>
+                          );
+                        })}
                       {selectedStudent.email && (
                         <a className="text-link" href={`mailto:${selectedStudent.email}`} dir="ltr">
                           <Mail size={13} /> {selectedStudent.email}
@@ -4795,7 +4803,10 @@ See you there!`,
                     .filter((x) => x.group_id === selectedStudent.group_id && x.status !== "Cancelled" && Date.parse(x.starts_at) > Date.now())
                     .sort((a, b) => a.starts_at.localeCompare(b.starts_at))[0];
                   const link = groups.find((g) => g.id === selectedStudent.group_id)?.session_link;
-                  const options: [string, "reminder" | "absence" | "congratulations", Row][] = [
+                  // The student's own WhatsApp: a plain chat, or a ready message.
+                  // (The group's chat is on the Groups page.)
+                  const options: [string, "chat" | "reminder" | "absence" | "congratulations", Row][] = [
+                    [t("Open the chat"), "chat", {}],
                     [t("Session reminder"), "reminder", { name: selectedStudent.name, title: next?.title || "", when: next ? fmt(next.starts_at) + " " + new Date(next.starts_at).toLocaleTimeString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { hour: "numeric", hour12: true, minute: "2-digit", timeZone: "Africa/Cairo" }) : "", link: link || "" }],
                     [t("Absence follow-up"), "absence", { name: selectedStudent.name }],
                     [t("First-service congratulations"), "congratulations", { name: selectedStudent.name }],
@@ -4812,11 +4823,6 @@ See you there!`,
                     </details>
                   ) : null;
                 })()}
-                {!onlyCoach && groups.find((g) => g.id === selectedStudent.group_id)?.whatsapp_link && (
-                  <a className="small-btn wa-btn" href={groups.find((g) => g.id === selectedStudent.group_id)!.whatsapp_link} target="_blank" rel="noreferrer">
-                    <MessageCircle size={14} /> {t("WhatsApp group")}
-                  </a>
-                )}
                 {may("engagement") && (
                   <button
                     className="small-btn"
