@@ -19,6 +19,7 @@ import { Progress } from "@/components/ui/progress";
 import { GraduationDots } from "./today";
 import { FeedbackAlertCard, FeedbackScore, FeedbackView } from "./feedback-view";
 import { CoachProgress } from "./coach-progress";
+import { AccountsSheetUpload } from "./accounts-sheet";
 import { Opportunities } from "./opportunities";
 import { scoreOf } from "@/lib/domain/feedback";
 import { coachPayout, coachRates } from "@/lib/domain/payouts";
@@ -197,7 +198,7 @@ const titles: Row = {
   group_whatsapp: "WhatsApp group link",
 };
 const actionCopy: Row = {
-  contact: "Record a conversation that already happened, with a screenshot as proof, its outcome and the next step.",
+  contact: "Record a conversation that already happened this week: a short comment, its outcome and the next step. No screenshot needed.",
   task: "A follow-up step you commit to do for this student, with an owner and a due date. Nothing has happened yet.",
   allocate: "Eligibility and account reuse are checked before allocation. Once assigned, the group's coordinator gets a task to place the order within two days, and the student's page shows that a client will order the service.",
   task_bank: "An approved task is a ready-made service order (platform, what to order and its value) that coordinators pick when they request a client account, so every request matches something Project Operations approved.",
@@ -254,7 +255,7 @@ const weekDue = () => {
 const weeklyGateChecks = [
   "Current statuses recorded",
   "Next action and due date",
-  "Valid contact within 7 days",
+  "Contacted this week",
   "Account duplicate controls passed",
   "Rejected evidence has correction owner",
   "At Risk and Critical intervention owner",
@@ -462,6 +463,8 @@ export default function Operations({ module: initialModule }: { module: string }
     [search, setSearch] = useState(""),
     [filter, setFilter] = useState("All"),
     [page, setPage] = useState(1),
+    // The Service links page's second list (each student's status) pages on its own.
+    [statusPage, setStatusPage] = useState(1),
     [selected, setSelected] = useState<Row | null>(null),
     [modal, setModal] = useState<Row | null>(null),
     [form, setForm] = useState<Row>({}),
@@ -486,7 +489,8 @@ export default function Operations({ module: initialModule }: { module: string }
     [moreFilters, setMoreFilters] = useState<Row>({}),
     [saved, setSaved] = useState<string[]>([]),
     [checklistFor, setChecklistFor] = useState<string | null>(null),
-    [signinFor, setSigninFor] = useState<Row | null>(null),
+    // The passwords this person may see on the Accounts list, by account id.
+    [accountSecrets, setAccountSecrets] = useState<Record<string, { username: string; password: string }> | null>(null),
     // A ready message for the group's WhatsApp: the session confirmation or
     // the feedback request. The app cannot post to WhatsApp, so the
     // coordinator copies it and opens the group.
@@ -674,13 +678,14 @@ export default function Operations({ module: initialModule }: { module: string }
               "Operations Coordinator",
             ])
         : m === "opportunities"
-          ? // Jobs the Target Team finds for a track's students: its coordinators
-            // and supervisors and Project Operations post and read them.
-            can(user.roles, ["Project Operations", "Operations Systems / Admin"]) ||
-            (can(user.roles, ["Team Supervisor", "Operations Coordinator"]) && user.team === "Target Team")
+          ? // Jobs found for a track's students: the Target Team's coordinators,
+            // every supervisor, the coaches and Project Operations post and read them.
+            can(user.roles, ["Team Supervisor", "Coach", "Project Operations", "Operations Systems / Admin"]) ||
+            (can(user.roles, ["Operations Coordinator"]) && user.team === "Target Team")
         : m === "progress"
-          ? // A coach's read-only view of their own students' gigs.
-            can(user.roles, ["Coach"])
+          ? // A coach's read-only view of their own students' gigs. A coach-only
+            // account has it as its Students page instead.
+            can(user.roles, ["Coach"]) && !onlyCoach
         : m === "program"
           ? can(user.roles, ["Project Operations", "Coach Operations", "Operations Systems / Admin"])
         : m === "weekly"
@@ -719,6 +724,20 @@ export default function Operations({ module: initialModule }: { module: string }
   const reviewsQuality = can(user.roles, ["Quality Member", "Quality Lead"]);
   const pageName = (id: string) =>
     id === "quality" && !reviewsQuality ? "Service links" : String(nav.find((n) => n[0] === id)?.[1] || "");
+  // The Accounts list shows each password beside its email: load the ones
+  // this person may see when the tab opens, and again after a dialog closes
+  // (a keeper may just have saved a new password).
+  useEffect(() => {
+    if (module !== "accounts" || !data?.user || demoAccount || modal) return;
+    let live = true;
+    fetch("/api/credentials", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list" }) })
+      .then((r) => r.json())
+      .then((x) => live && setAccountSecrets(x.credentials || {}))
+      .catch(() => live && setAccountSecrets({}));
+    return () => {
+      live = false;
+    };
+  }, [module, data?.user, demoAccount, modal]);
   // A module nobody showed them is not a module they can open by typing its
   // address either.
   const allowedModules = shownNav.map(([m]) => String(m));
@@ -1098,24 +1117,28 @@ export default function Operations({ module: initialModule }: { module: string }
       </section>
     );
   }
-  function paginate(rows: Row[], render: (r: Row[]) => any) {
+  // 25 rows a page. A page with two lists passes each its own page number;
+  // a page past the end (after a filter shrank the list) shows the last one.
+  function paginate(rows: Row[], render: (r: Row[]) => any, pager: [number, (n: number) => void] = [page, setPage]) {
+    const [asked, setAsked] = pager;
+    const at = Math.max(1, Math.min(asked, Math.ceil(rows.length / 25) || 1));
     return (
       <>
-        {render(rows.slice((page - 1) * 25, page * 25))}
+        {render(rows.slice((at - 1) * 25, at * 25))}
         <div className="pagination">
           <span>
             {t("{v0} of {v1} records", {
-              v0: rows.length ? `${(page - 1) * 25 + 1}–${Math.min(page * 25, rows.length)}` : "0",
+              v0: rows.length ? `${(at - 1) * 25 + 1}–${Math.min(at * 25, rows.length)}` : "0",
               v1: rows.length,
             })}
           </span>
           <div>
-            <button disabled={page === 1} onClick={() => setPage(page - 1)}>
+            <button disabled={at === 1} onClick={() => setAsked(at - 1)}>
               {t("Previous")}
             </button>
             <button
-              disabled={page * 25 >= rows.length}
-              onClick={() => setPage(page + 1)}
+              disabled={at * 25 >= rows.length}
+              onClick={() => setAsked(at + 1)}
             >
               {t("Next")}
             </button>
@@ -1327,7 +1350,7 @@ export default function Operations({ module: initialModule }: { module: string }
   // Ready messages for a session's WhatsApp group, in the reader's language.
   const sessionWhen = (r: Row) =>
     new Date(r.starts_at).toLocaleString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", {
-      timeZone: "Africa/Cairo", weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit",
+      timeZone: "Africa/Cairo", weekday: "long", day: "numeric", month: "long", hour: "numeric", hour12: true, minute: "2-digit",
     });
   const confirmMessage = (r: Row): Row => {
     const g = sessionGroupOf(r);
@@ -1347,23 +1370,6 @@ export default function Operations({ module: initialModule }: { module: string }
 Confirming ${name} on ${sessionWhen(r)} (Cairo time).${link ? `
 Join here: ${link}` : ""}
 See you there!`,
-    };
-  };
-  const feedbackMessage = (r: Row): Row => {
-    const g = sessionGroupOf(r);
-    const portal = (typeof window !== "undefined" ? window.location.origin : "") + "/student#feedback";
-    return {
-      kind: "feedback",
-      session: r,
-      link: g?.whatsapp_link || "",
-      text:
-        locale === "ar"
-          ? `شكراً لحضوركم جلسة اليوم 🙏
-من فضلكم قيّموا الجلسة من صفحتكم على بوابة ديبي، تأخذ دقيقة واحدة:
-${portal}`
-          : `Thank you for joining today's session 🙏
-Please rate it on your DEPI page, it takes a minute:
-${portal}`,
     };
   };
   // A WhatsApp link to a student with a ready message, in the reader's language.
@@ -1396,10 +1402,12 @@ ${portal}`,
       .sort((a: Row, b: Row) => String(a.name).localeCompare(String(b.name)));
   // Attendance is taken from the session itself once it has started, by its
   // group's coordinator, its coach or a leader.
+  // The coordinator and the coach take attendance until the end of the
+  // session's day (Cairo); the session leaders can correct it later.
   const takesAttendance = (r: Row) =>
     r.status !== "Cancelled" &&
     Date.parse(r.starts_at) <= Date.now() &&
-    (plansSession(r) || answersAsCoordinator(r) || answersAsCoach(r));
+    (plansSession(r) || ((answersAsCoordinator(r) || answersAsCoach(r)) && programDay() <= programDay(new Date(r.starts_at))));
   // Everyone starts Present; the person taking the register taps the absent ones.
   const openAttendance = (r: Row) => {
     const marks: Row = {};
@@ -1492,7 +1500,7 @@ ${portal}`,
   };
   const filterOpts =
     module === "students"
-      ? ["All", "At risk in my groups", "No contact in 7 days", "Active", "At Risk", "Critical", "No Contact", "Graduated"]
+      ? ["All", "At risk in my groups", "No contact this week", "Active", "At Risk", "Critical", "No Contact", "Graduated"]
       : module === "work"
         ? [
             "All",
@@ -1518,8 +1526,300 @@ ${portal}`,
           : module === "sessions"
             ? ["All", "Scheduled", "Confirmed", "Completed", "Cancelled"]
           : ["All"];
+  // Role dashboards (10 Oct 2026): in place of the Overview, Project
+  // Operations, Coach Operations, the supervisors and the coaches each see what
+  // they review every day and every week. Coordinators keep the Overview,
+  // which is their daily work list. Weeks run Friday to Thursday in Cairo.
+  const dashboardRole: "project" | "coachOps" | "supervisor" | "coach" | null =
+    can(user.roles, ["Project Operations", "Operations Systems / Admin", "Higher Board"])
+      ? "project"
+      : can(user.roles, ["Coach Operations"])
+        ? "coachOps"
+        : can(user.roles, ["Team Supervisor"])
+          ? "supervisor"
+          : can(user.roles, ["Coach"]) && !can(user.roles, ["Operations Coordinator"])
+            ? "coach"
+            : null;
+  function roleDashboard(role: "project" | "coachOps" | "supervisor" | "coach") {
+    const todayDay = programDay();
+    const shift = (day: string, n: number) => {
+      const x = new Date(day + "T12:00:00Z");
+      x.setUTCDate(x.getUTCDate() + n);
+      return x.toISOString().slice(0, 10);
+    };
+    const weekFrom = shift(todayDay, -((new Date(todayDay + "T12:00:00Z").getUTCDay() - 5 + 7) % 7));
+    const weekTo = shift(weekFrom, 7);
+    const dayOf = (iso: string) => programDay(new Date(iso));
+    const live = sessions.filter((s) => s.status !== "Cancelled");
+    const mine = (s: Row) => role !== "coach" || s.coach_id === user.id || sessionGroupOf(s)?.coach === user.id;
+    const ended = (s: Row) => Date.parse(s.starts_at) + Number(s.duration_minutes || 180) * 60000 <= Date.now();
+    const today = live.filter((s) => mine(s) && dayOf(s.starts_at) === todayDay).sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+    const week = live.filter((s) => mine(s) && dayOf(s.starts_at) >= weekFrom && dayOf(s.starts_at) < weekTo);
+    const held = week.filter(ended);
+    const soon = live.filter(
+      (s) => mine(s) && s.status === "Scheduled" && !s.coach_confirmed_at && !s.coach_unavailable && Date.parse(s.starts_at) > Date.now() && Date.parse(s.starts_at) - Date.now() <= 27 * 3600000,
+    );
+    // Attendance of a set of held sessions: students marked present ÷ students on their registers.
+    const attendanceOf = (list: Row[]) => {
+      let present = 0;
+      let expected = 0;
+      for (const s of list) {
+        expected += rosterOf(s).length;
+        present += attendance.filter((a) => a.session_id === s.id && a.status !== "Absent").length;
+      }
+      return expected ? Math.round((100 * present) / expected) : null;
+    };
+    const feedbackIn = (list: Row[]) => list.flatMap((s) => feedbackOf(s.id));
+    const score = (rows: Row[]) => {
+      const v = scoreOf(rows as any);
+      return v === null ? "—" : v.toFixed(1);
+    };
+    const pct = (v: number | null) => (v === null ? "—" : v + "%");
+    const share = (n: number, of: number) => (of ? Math.round((100 * n) / of) + "%" : "—");
+    const active = students.filter((s) => s.lifecycle === "Active");
+    const contacted = active.filter((s) => !s.contact_due).length;
+    const submissions = serviceSubmissionStatus.filter((r) => r.lifecycle === "Active" || !r.lifecycle);
+    const linksIn = submissions.filter((r) => Number(r.links_submitted) > 0).length;
+    const linksDone = submissions.filter((r) => Number(r.links_locked) >= 3).length;
+    const openCases = (d.cases || []).filter((c: Row) => !["Closed", "Resolved"].includes(c.status));
+    const urgentCases = openCases.filter((c: Row) => /S1|S2/.test(String(c.severity)));
+    const time = (iso: string) =>
+      new Date(iso).toLocaleTimeString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { hour: "numeric", hour12: true, minute: "2-digit", timeZone: "Africa/Cairo" });
+    const weekLabel = `${formatDay(weekFrom + "T12:00:00Z", locale)} – ${formatDay(shift(weekTo, -1) + "T12:00:00Z", locale)}`;
+    const tile = (label: string, value: any, detail: string) => (
+      <div className="stat" key={label}>
+        <span>{t(label)}</span>
+        <strong>{value}</strong>
+        <small>{detail}</small>
+      </div>
+    );
+    const sessionList = (list: Row[], empty: string, extra?: (s: Row) => any) =>
+      list.length ? (
+        generic(
+          list,
+          [
+            { key: "starts_at", label: "Time", render: (s) => <span><strong>{time(s.starts_at)}</strong><small className="table-subline">{fmt(s.starts_at)}</small></span> },
+            { key: "group_id", label: "Group", render: (s) => <span>{s.group_id}<small className="table-subline">{t("Week {v0}", { v0: s.week })}</small></span> },
+            // Coordinator and coach in one narrow column, so the actions stay on screen.
+            {
+              key: "people",
+              label: role === "coach" ? "Coordinator" : "Coordinator / coach",
+              render: (s) => (
+                <span className="dash-people">
+                  <span>{owner(s.coordinator_id || sessionGroupOf(s)?.coordinator)}</span>
+                  {role !== "coach" && <small className="table-subline">{owner(s.coach_id || sessionGroupOf(s)?.coach)}</small>}
+                </span>
+              ),
+            },
+            {
+              key: "confirm",
+              label: "Responses",
+              render: (s) => (
+                <span className="confirm-pills">
+                  {answer(t("Coordinator"), s.coordinator_confirmed_at, s.coordinator_unavailable)}
+                  {answer(t("Coach"), s.coach_confirmed_at, s.coach_unavailable)}
+                </span>
+              ),
+            },
+            {
+              key: "attendance",
+              label: "Attendance",
+              render: (s) => (ended(s) || Date.parse(s.starts_at) <= Date.now() ? `${attendance.filter((a) => a.session_id === s.id).length}/${rosterOf(s).length}` : "—"),
+            },
+          ],
+          extra,
+        )
+      ) : (
+        <Empty title={t(empty)} text={t("Nothing needs your attention here right now.")} />
+      );
+    // One row per person who is responsible for some groups: their students,
+    // this week's contact, attendance and feedback, and their links.
+    const perPerson = (people: string[], groupsOf: (id: string) => Set<string>, label: string, withContact: boolean) =>
+      generic(
+        people
+          .map((id) => {
+            const gs = groupsOf(id);
+            const st = active.filter((s) => gs.has(s.group_id));
+            const ws = held.filter((s) => gs.has(s.group_id));
+            const sub = submissions.filter((r) => gs.has(r.group_id));
+            return {
+              id,
+              name: owner(id),
+              students: st.length,
+              contacted: share(st.filter((s) => !s.contact_due).length, st.length),
+              sessions: `${ws.length}/${week.filter((s) => gs.has(s.group_id)).length}`,
+              attendance: pct(attendanceOf(ws)),
+              feedback: score(feedbackIn(ws)),
+              links: share(sub.filter((r) => Number(r.links_submitted) > 0).length, sub.length),
+              overdue: overdue.filter((x) => x.owner === id).length,
+            };
+          })
+          .sort((a, b) => b.students - a.students),
+        [
+          { key: "name", label, render: (r) => <strong>{r.name}</strong> },
+          { key: "students", label: "Students" },
+          ...(withContact ? [{ key: "contacted", label: "Contacted this week" }] : []),
+          { key: "sessions", label: "Sessions held this week" },
+          { key: "attendance", label: "Attendance this week" },
+          ...(readsFeedback ? [{ key: "feedback", label: "Feedback this week" }] : []),
+          { key: "links", label: "Service links submitted" },
+          ...(withContact ? [{ key: "overdue", label: "Overdue actions" }] : []),
+        ],
+      );
+    const heading = (
+      <div className="page-heading">
+        <div>
+          <div className="eyebrow">{t("YOUR DASHBOARD")}</div>
+          <h1>{t(role === "project" ? "Programme today and this week" : role === "coachOps" ? "Coaching today and this week" : role === "supervisor" ? "Your team today and this week" : "Your sessions and students")}</h1>
+          <p>{t("This week: {v0}", { v0: weekLabel })}</p>
+        </div>
+      </div>
+    );
+    if (role === "coach") {
+      const myGroups = new Set(groups.filter((g) => g.coach === user.id || groupCoaches.some((c) => c.group_id === g.id && c.user_id === user.id && c.status === "Active")).map((g) => g.id));
+      const myStudents = active.filter((s) => myGroups.has(s.group_id));
+      return (
+        <>
+          {heading}
+          <div className="stats">
+            {tile("Sessions this week", week.length, t("{v0} held so far", { v0: held.length }))}
+            {tile("Waiting for your confirmation", week.filter((s) => s.status === "Scheduled" && !s.coach_confirmed_at && Date.parse(s.starts_at) > Date.now()).length, t("Confirm at least 27 hours before"))}
+            {tile("Attendance this week", pct(attendanceOf(held)), t("Students present at your sessions"))}
+            {tile("Your students", myStudents.length, t("{v0} graduated", { v0: myStudents.filter((s) => /Graduat/.test(s.graduation || "")).length }))}
+          </div>
+          {panel(t("Today"), sessionList(today, "No session today"))}
+          {panel(t("This week"), sessionList(week.sort((a, b) => a.starts_at.localeCompare(b.starts_at)), "No session this week", (s) => (
+            <div className="detail-actions">
+              {canAttend(s) && (
+                <button className="small-btn" disabled={busy} onClick={() => quick("session_confirm", { id: s.id })}>{t("Attending")}</button>
+              )}
+              {takesAttendance(s) && (
+                <button className="small-btn" onClick={() => openAttendance(s)}>{t("Take attendance")}</button>
+              )}
+            </div>
+          )))}
+        </>
+      );
+    }
+    if (role === "coachOps") {
+      const coaches = [...new Set(week.map((s) => s.coach_id || sessionGroupOf(s)?.coach).filter(Boolean))] as string[];
+      const lowFeedback = held.filter((s) => {
+        const v = scoreOf(feedbackOf(s.id) as any);
+        return v !== null && v < 3;
+      });
+      const away = week.filter((s) => s.coach_unavailable);
+      return (
+        <>
+          {heading}
+          <div className="stats">
+            {tile("Sessions today", today.length, t("{v0} checked this morning", { v0: today.filter((s) => checklistOf(s).coach_ops_checked?.done).length }))}
+            {tile("Coach not confirmed (27 hours)", soon.length, t("Coach Operations is notified"))}
+            {tile("Attendance this week", pct(attendanceOf(held)), t("{v0} sessions held", { v0: held.length }))}
+            {tile("Feedback this week", score(feedbackIn(held)), t("{v0} sessions under 3", { v0: lowFeedback.length }))}
+          </div>
+          {panel(t("Today's sessions to check"), sessionList(today, "No session today", (s) =>
+            checklistOf(s).coach_ops_checked?.done ? (
+              <Badge value={t("Checked")} />
+            ) : (
+              <button className="small-btn" disabled={busy} onClick={() => quick("session_check", { id: s.id, item: "coach_ops_checked", done: true })}>{t("Mark checked")}</button>
+            ),
+          ))}
+          {panel(t("Coach not confirmed within 27 hours"), sessionList(soon, "Every coach has confirmed"))}
+          {away.length > 0 && panel(t("Coaches who cannot attend this week"), sessionList(away, "Nobody reported"))}
+          {lowFeedback.length > 0 && panel(t("Sessions with low feedback this week"), sessionList(lowFeedback, "No low scores", (s) => (
+            <button className="text-link" onClick={() => setFeedbackFor(s.id)}><FeedbackScore score={scoreOf(feedbackOf(s.id) as any)} /></button>
+          )))}
+          {panel(
+            t("Coaches this week"),
+            coaches.length
+              ? generic(
+                  coaches.map((id) => {
+                    const theirs = week.filter((s) => (s.coach_id || sessionGroupOf(s)?.coach) === id);
+                    const done = theirs.filter(ended);
+                    return {
+                      id,
+                      name: owner(id),
+                      sessions: `${done.length}/${theirs.length}`,
+                      confirmed: share(theirs.filter((s) => s.coach_confirmed_at).length, theirs.length),
+                      attendance: pct(attendanceOf(done)),
+                      feedback: score(feedbackIn(done)),
+                    };
+                  }),
+                  [
+                    { key: "name", label: "Coach", render: (r) => <strong>{r.name}</strong> },
+                    { key: "sessions", label: "Sessions held this week" },
+                    { key: "confirmed", label: "Confirmed" },
+                    { key: "attendance", label: "Attendance this week" },
+                    { key: "feedback", label: "Feedback this week" },
+                  ],
+                )
+              : <Empty title={t("No session this week")} text={t("Nothing needs your attention here right now.")} />,
+          )}
+        </>
+      );
+    }
+    if (role === "supervisor") {
+      const coordinators = [...new Set(groups.map((g) => g.coordinator).filter(Boolean))] as string[];
+      return (
+        <>
+          {heading}
+          <div className="stats">
+            {tile("Contacted this week", share(contacted, active.length), t("{v0} of {v1} students", { v0: contacted, v1: active.length }))}
+            {tile("Attendance this week", pct(attendanceOf(held)), t("{v0} sessions held", { v0: held.length }))}
+            {readsFeedback ? tile("Feedback this week", score(feedbackIn(held)), t("Average of the three ratings")) : null}
+            {tile("Service links submitted", share(linksIn, submissions.length), t("{v0} students with 3 approved", { v0: linksDone }))}
+          </div>
+          {panel(t("Today's sessions"), sessionList(today, "No session today"))}
+          {soon.length > 0 && panel(t("Coach not confirmed within 27 hours"), sessionList(soon, "Every coach has confirmed"))}
+          {panel(t("Your coordinators this week"), perPerson(coordinators, (id) => new Set(groups.filter((g) => g.coordinator === id).map((g) => g.id)), "Coordinator", true))}
+          {openCases.length > 0 &&
+            panel(
+              t("Open cases in your groups"),
+              generic(openCases.slice(0, 15), [
+                { key: "title", label: "Case", render: (c) => <span><strong>{c.title}</strong><small className="table-subline">{c.group_id || c.student_id || ""}</small></span> },
+                { key: "severity", label: "Severity", render: (c) => <Badge value={c.severity} /> },
+                { key: "owner", label: "Owner", render: (c) => owner(c.owner) },
+                { key: "due", label: "Due", render: (c) => fmt(c.due) },
+              ]),
+            )}
+        </>
+      );
+    }
+    // Project Operations: the whole programme.
+    const supervisors = [...new Set(groups.map((g) => g.supervisor).filter(Boolean))] as string[];
+    return (
+      <>
+        {heading}
+        <div className="stats">
+          {tile("Active students", active.length, t("{v0} groups", { v0: groups.length }))}
+          {tile("Contacted this week", share(contacted, active.length), t("{v0} of {v1} students", { v0: contacted, v1: active.length }))}
+          {tile("Attendance this week", pct(attendanceOf(held)), t("{v0} of {v1} sessions held", { v0: held.length, v1: week.length }))}
+          {tile("Feedback this week", score(feedbackIn(held)), t("Average of the three ratings"))}
+          {tile("Service links submitted", share(linksIn, submissions.length), t("{v0} students with 3 approved", { v0: linksDone }))}
+          {tile("Graduated", graduates.length, t("{v0} at risk · {v1} critical", { v0: atRisk.length, v1: critical.length }))}
+          {tile("Coach not confirmed (27 hours)", soon.length, t("Sessions starting soon"))}
+          {tile("Urgent open cases", urgentCases.length, t("{v0} open in all", { v0: openCases.length }))}
+        </div>
+        {panel(t("Today's sessions"), sessionList(today, "No session today"))}
+        {soon.length > 0 && panel(t("Coach not confirmed within 27 hours"), sessionList(soon, "Every coach has confirmed"))}
+        {panel(t("Teams this week"), perPerson(supervisors, (id) => new Set(groups.filter((g) => g.supervisor === id).map((g) => g.id)), "Supervisor", true))}
+        {urgentCases.length > 0 &&
+          panel(
+            t("Urgent open cases"),
+            generic(urgentCases.slice(0, 15), [
+              { key: "title", label: "Case", render: (c) => <span><strong>{c.title}</strong><small className="table-subline">{c.group_id || c.student_id || ""}</small></span> },
+              { key: "severity", label: "Severity", render: (c) => <Badge value={c.severity} /> },
+              { key: "owner", label: "Owner", render: (c) => owner(c.owner) },
+              { key: "due", label: "Due", render: (c) => fmt(c.due) },
+            ]),
+          )}
+      </>
+    );
+  }
   let content: any;
-  if (module === "home") {
+  if (module === "home" && dashboardRole) {
+    content = roleDashboard(dashboardRole);
+  } else if (module === "home") {
     const stats = [
       {
         label: t("Active students"),
@@ -1639,34 +1939,17 @@ ${portal}`,
               </div>
             </section>
             {(() => {
-              // Session follow-ups that are someone's turn now: the coordinator
-              // asks the group for feedback once a session has ended, and Coach
-              // Operations checks the day's sessions in the morning.
-              const over = (s: Row) => Date.parse(s.starts_at) + Number(s.duration_minutes || 180) * 60000 <= Date.now();
-              const feedbackDue = sessions
-                .filter((s) => s.status !== "Cancelled" && over(s) && Date.now() - Date.parse(s.starts_at) < 3 * 86400000)
-                .filter((s) => answersAsCoordinator(s) && !checklistOf(s).feedback_requested?.done)
-                .sort((a, b) => b.starts_at.localeCompare(a.starts_at));
+              // Coach Operations checks the day's sessions in the morning.
               const morningChecks = can(user.roles, ["Coach Operations"])
                 ? sessions
                     .filter((s) => s.status !== "Cancelled" && programDay(new Date(s.starts_at)) === programDay() && !checklistOf(s).coach_ops_checked?.done)
                     .sort((a, b) => a.starts_at.localeCompare(b.starts_at))
                 : [];
-              if (!feedbackDue.length && !morningChecks.length) return null;
-              const line = (s: Row) => `${s.group_id} · ${t("Week {v0}", { v0: s.week })} · ${new Date(s.starts_at).toLocaleTimeString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" })}`;
+              if (!morningChecks.length) return null;
+              const line = (s: Row) => `${s.group_id} · ${t("Week {v0}", { v0: s.week })} · ${new Date(s.starts_at).toLocaleTimeString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { hour: "numeric", hour12: true, minute: "2-digit", timeZone: "Africa/Cairo" })}`;
               return panel(
                 t("Session follow-ups"),
                 <div className="followup-list">
-                  {feedbackDue.map((s) => (
-                    <div className="task-row" key={"fb-" + s.id}>
-                      <MessageCircle size={16} />
-                      <div className="task-main">
-                        <strong>{t("Ask the group for feedback")}</strong>
-                        <small>{line(s)}</small>
-                      </div>
-                      <button className="small-btn" onClick={() => setGroupMessage(feedbackMessage(s))}>{t("Message")}</button>
-                    </div>
-                  ))}
                   {morningChecks.map((s) => (
                     <div className="task-row" key={"co-" + s.id}>
                       <CheckCheck size={16} />
@@ -1678,7 +1961,7 @@ ${portal}`,
                     </div>
                   ))}
                 </div>,
-                <span className="count">{feedbackDue.length + morningChecks.length}</span>,
+                <span className="count">{morningChecks.length}</span>,
               );
             })()}
             {panel(
@@ -1754,7 +2037,7 @@ ${portal}`,
                       <strong>{s.group_id} {t("· Delivery clinic")}</strong>
                       <small>
                         {new Date(s.starts_at).toLocaleTimeString("en", {
-                          hour: "2-digit",
+                          hour: "numeric", hour12: true,
                           minute: "2-digit",
                         })}{" "}
                         {t("· Week")}{" "}{s.week}
@@ -1777,6 +2060,10 @@ ${portal}`,
     );
   } else if (module === "program") {
     content = <ProgramFlow />;
+  } else if (module === "students" && onlyCoach) {
+    // A coach's student table: graduation, the portal's accepted and rejected
+    // gigs, and each week's attendance. Contact follow-up is the coordinators'.
+    content = <CoachProgress />;
   } else if (module === "students") {
     const rows = students
       .filter(qMatch)
@@ -1784,7 +2071,7 @@ ${portal}`,
         (s) =>
           filter === "All" ||
           (filter === "At risk in my groups" && ["At Risk", "Critical"].includes(s.risk.status)) ||
-          (filter === "No contact in 7 days" && s.lifecycle === "Active" && (!s.last_contact || Date.now() - Date.parse(s.last_contact) > 7 * 86400000)) ||
+          (filter === "No contact this week" && s.contact_due) ||
           (filter === "No Contact" && noContact.includes(s)) ||
           (filter === "Graduated" && s.graduation.includes("Graduate")) ||
           s.risk.status === filter,
@@ -1870,6 +2157,9 @@ ${portal}`,
         {groups.filter(qMatch).map((g) => {
           const ss = students.filter((s) => s.group_id === g.id);
           const cc = ss.filter((s) => s.risk.status === "Critical").length;
+          // The group's job profile: the one most of its students are enrolled on.
+          const profiles = ss.reduce((out: Row, s) => (s.job_profile ? ((out[s.job_profile] = (out[s.job_profile] || 0) + 1), out) : out), {} as Row);
+          const jobProfile = Object.entries(profiles).sort((a: any, b: any) => b[1] - a[1])[0]?.[0];
           return (
             <section className="panel group-card" key={g.id}>
               <div className="group-top">
@@ -1882,6 +2172,11 @@ ${portal}`,
                 {g.id} · {g.provider}
               </small>
               <h2>{g.name}</h2>
+              {jobProfile && (
+                <p className="group-profile">
+                  <BriefcaseBusiness size={13} /> <bdi>{jobProfile}</bdi>
+                </p>
+              )}
               <p>
                 {t("{v0} pathway · Week {v1}", { v0: t(g.pathway), v1: g.week })}
               </p>
@@ -1997,14 +2292,16 @@ ${portal}`,
     const sessionDay = (s: Row) =>
       new Date(s.starts_at).toLocaleDateString("en-US", { weekday: "long", timeZone: "Africa/Cairo" });
     const sessionTime = (s: Row) =>
-      new Date(s.starts_at).toLocaleTimeString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" });
+      new Date(s.starts_at).toLocaleTimeString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { hour: "numeric", hour12: true, minute: "2-digit", timeZone: "Africa/Cairo" });
     const weekdays = ["Saturday", "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
-    const times = Array.from(new Set(sessions.map(sessionTime))).sort();
-    // One week at a time, Saturday to Friday in Cairo (the programme's week),
+    // Start times in clock order (the labels are 12-hour, so they cannot sort as text).
+    const clock = (s: Row) => { const d = new Date(new Date(s.starts_at).toLocaleString("en-US", { timeZone: "Africa/Cairo" })); return d.getHours() * 60 + d.getMinutes(); };
+    const times = Array.from(new Map([...sessions].sort((a, b) => clock(a) - clock(b)).map((s) => [sessionTime(s), true])).keys());
+    // One week at a time, Friday to Thursday in Cairo (the programme's week),
     // with arrows to step back and forward.
     const weekStart = (() => {
       const today = new Date(programDay() + "T00:00:00Z");
-      const back = (today.getUTCDay() + 1) % 7; // days since Saturday
+      const back = (today.getUTCDay() + 2) % 7; // days since Friday
       return new Date(today.getTime() - back * 86400000 + sessionWeek * 7 * 86400000);
     })();
     const weekEnd = new Date(weekStart.getTime() + 7 * 86400000);
@@ -2255,7 +2552,7 @@ ${portal}`,
                 <strong>{fmt(r.starts_at)}</strong>
                 <small className="block">
                   {new Date(r.starts_at).toLocaleTimeString("en", {
-                    hour: "2-digit",
+                    hour: "numeric", hour12: true,
                     minute: "2-digit",
                     timeZone: "Africa/Cairo",
                   })}
@@ -2449,21 +2746,12 @@ ${portal}`,
                 {answersAsCoordinator(r) && !r.coordinator_confirmed_at ? t("Confirm · then message the group") : t("Attending")}
               </button>
             )}
-            {/* The coordinator can send the group its confirmation again, or ask for feedback once it ended. */}
+            {/* The coordinator can send the group its confirmation again. */}
             {answersAsCoordinator(r) && r.status === "Confirmed" && Date.parse(r.starts_at) > Date.now() && (
               <button className="small-btn" onClick={() => setGroupMessage(confirmMessage(r))}>
                 <MessageCircle size={14} /> {t("Message the group")}
               </button>
             )}
-            {(answersAsCoordinator(r) || plansSession(r)) &&
-              r.status !== "Cancelled" &&
-              Date.parse(r.starts_at) + Number(r.duration_minutes || 180) * 60000 <= Date.now() &&
-              Date.now() - Date.parse(r.starts_at) < 7 * 86400000 &&
-              !checklistOf(r).feedback_requested?.done && (
-                <button className="small-btn" onClick={() => setGroupMessage(feedbackMessage(r))}>
-                  <MessageCircle size={14} /> {t("Ask for feedback")}
-                </button>
-              )}
             {canDecline(r) && (
               <button
                 className="small-btn"
@@ -2763,7 +3051,7 @@ ${portal}`,
                     {
                       key: "created_at",
                       label: t("Date"),
-                      render: (e) => <span>{fmt(e.created_at)}<small className="table-subline">{new Date(e.created_at).toLocaleTimeString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" })}</small></span>,
+                      render: (e) => <span>{fmt(e.created_at)}<small className="table-subline">{new Date(e.created_at).toLocaleTimeString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { hour: "numeric", hour12: true, minute: "2-digit", timeZone: "Africa/Cairo" })}</small></span>,
                     },
                     {
                       key: "account_id",
@@ -2853,9 +3141,35 @@ ${portal}`,
                     {
                       key: "label",
                       label: t("Account"),
-                      render: (r) => (
-                        <span><strong>{r.label}</strong><small className="table-subline">{r.comments || r.id}</small></span>
-                      ),
+                      // The email with its password beside it, each with a copy button.
+                      render: (r) => {
+                        const secret = accountSecrets?.[r.id];
+                        const copy = async (value: string, done: string) => {
+                          try {
+                            await navigator.clipboard.writeText(value);
+                            toast.success(done);
+                          } catch {
+                            toast.error(t("Copy did not work. Select the text and copy it."));
+                          }
+                        };
+                        return (
+                          <span className="account-login">
+                            <span className="account-login-line">
+                              <strong dir="ltr">{r.label}</strong>
+                              <button type="button" className="icon-btn" title={t("Copy the email")} aria-label={t("Copy the email")} onClick={() => copy(r.label, t("Email copied"))}><Copy size={13} /></button>
+                            </span>
+                            {secret ? (
+                              <span className="account-login-line">
+                                <code dir="ltr">{secret.password}</code>
+                                <button type="button" className="icon-btn" title={t("Copy the password")} aria-label={t("Copy the password")} onClick={() => copy(secret.password, t("Password copied"))}><Copy size={13} /></button>
+                              </span>
+                            ) : (
+                              <small className="table-subline">{accountSecrets ? t("No password you can see") : t("Loading passwords…")}</small>
+                            )}
+                            {r.comments && <small className="table-subline">{r.comments}</small>}
+                          </span>
+                        );
+                      },
                     },
                     { key: "platform", label: t("Marketplace") },
                     {
@@ -2895,11 +3209,6 @@ ${portal}`,
                         {keepsAccounts && (
                           <button className="small-btn" onClick={() => open("account_topup", { id: r.id })}>{t("Top up")}</button>
                         )}
-                        {!demoAccount && (
-                          <button className="small-btn" onClick={() => setSigninFor(r)} title={t("Show the account's email and password")}>
-                            <LockKeyhole size={14} /> {t("Sign-in")}
-                          </button>
-                        )}
                         {assignsAccounts && (
                           <button className="small-btn" onClick={() => open("account_coordinator", { id: r.id, account_ids: [r.id], coordinator_id: r.coordinator_id || "", slot: "first" })}>
                             {r.coordinator_id ? t("Reassign") : t("Assign")}
@@ -2917,7 +3226,7 @@ ${portal}`,
                     ),
                 )
               ) : (
-                <Empty title={accounts.length ? t("No account matches these filters") : t("No client accounts yet. Higher Board adds each account with its opening credit; top-ups are then recorded on the Credit tracker.")} />
+                <Empty title={accounts.length ? t("No account matches these filters") : t("No client accounts yet. The people who keep the accounts add them one at a time or upload the accounts sheet; top-ups are then recorded on the Credit tracker.")} />
               ),
               <div className="detail-actions">
                 {keepsAccounts && (
@@ -2925,36 +3234,8 @@ ${portal}`,
                     <Plus size={15} /> {t("Add account")}
                   </button>
                 )}
-                {keepsAccounts && canTransfer && (
-                  <>
-                    <button
-                      className="small-btn"
-                      onClick={() =>
-                        saveBlob(
-                          toXLSX([
-                            { id: "ACC-0001", label: "client.account@example.com", platform: "Khamsat", credits: 50 },
-                            { id: "ACC-0002", label: "second.account@example.com", platform: "Kafeel", credits: 0 },
-                          ]),
-                          "depi-accounts-template.xlsx",
-                          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        )
-                      }
-                      title={t("One row per account: id, label (the account's email), platform and opening credit in USD. Passwords are saved per account from Sign-in, never in a sheet.")}
-                    >
-                      <Download size={15} /> {t("Download import template")}
-                    </button>
-                    <button
-                      className="small-btn"
-                      onClick={() => {
-                        setImportMode("create");
-                        setImportModule("accounts");
-                        setImportOpen(true);
-                      }}
-                    >
-                      <Upload size={15} /> {t("Import accounts")}
-                    </button>
-                  </>
-                )}
+                {/* The team uploads its own accounts sheet, passwords included. */}
+                {keepsAccounts && !demoAccount && <AccountsSheetUpload onDone={refresh} />}
                 {can(user.roles, ["Project Operations", "Operations Systems / Admin"]) && (
                   <button className="small-btn" onClick={() => open("task_bank")} title={t("A ready-made service order coordinators pick when they request a client account")}>{t("Add approved task")}</button>
                 )}
@@ -3009,7 +3290,7 @@ ${portal}`,
                             )}
                             {hold && stage === "Reserved" && (
                               <small className="table-subline">
-                                {t("Held until {v0}", { v0: new Date(hold.expires_at).toLocaleTimeString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" }) })}
+                                {t("Held until {v0}", { v0: new Date(hold.expires_at).toLocaleTimeString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { hour: "numeric", hour12: true, minute: "2-digit", timeZone: "Africa/Cairo" }) })}
                               </small>
                             )}
                           </span>
@@ -3338,7 +3619,7 @@ ${portal}`,
       );
     };
     const setService = (f: Row) => { setServiceFilters(f); setPage(1); };
-    const setSubmission = (f: Row) => { setSubmissionFilters(f); setPage(1); };
+    const setSubmission = (f: Row) => { setSubmissionFilters(f); setStatusPage(1); };
     const supervisorOptions = (rows: Row[]) => [{ value: "All", label: t("All supervisors") }, ...Array.from(new Set(rows.map((r) => r.supervisor).filter(Boolean))).map((id) => ({ value: id, label: owner(id) })).sort((a, b) => a.label.localeCompare(b.label))];
     const submissionCount = (state: string) =>
       serviceSubmissionStatus.filter((r) => submissionState(r) === state).length;
@@ -3400,10 +3681,10 @@ ${portal}`,
               { key: "group_id", label: t("Group"), render: (r) => <span>{r.group_id}<small className="table-subline">{r.track}</small></span> },
               { key: "coordinator", label: t("Coordinator"), render: (r) => owner(r.coordinator) },
               { key: "follow_up", label: t("Follow-up"), render: (r) => <Badge value={r.follow_up} /> },
-              { key: "links_submitted", label: t("Approved"), render: (r) => <span>{r.links_locked}/3<small className="table-subline">{r.submitted_at ? t("{v0} submitted {v1}", { v0: r.links_submitted, v1: new Date(r.submitted_at).toLocaleDateString() }) : t("never submitted")}</small></span> },
+              { key: "links_submitted", label: t("Approved"), render: (r) => <span>{r.links_locked}/3<small className="table-subline">{r.submitted_at ? t("{v0} submitted {v1}", { v0: r.links_submitted, v1: fmt(r.submitted_at) }) : t("never submitted")}</small></span> },
             ],
             (r) => <div className="detail-actions"><button className="small-btn" onClick={() => setSelected(students.find((x) => x.id === r.student_id) || null)}>{t("Open student")}</button></div>,
-          )),
+          ), [statusPage, setStatusPage]),
         )}
       </>
     );
@@ -3540,15 +3821,15 @@ ${portal}`,
                   { key: "student_name", label: t("Student"), render: (r) => { const own = serviceLinks.filter((l) => l.student_id === r.student_id); const decided = own.filter((l) => l.qc_status !== "Pending").length; return <span><strong>{r.student_name}</strong><small className="table-subline">{r.student_id} · <bdi>{r.group_id}</bdi> · {decided}/{own.length} {t("reviewed")}</small></span>; } },
                   { key: "slot", label: t("Service"), render: (r) => (
                       <a className="text-link service-open" href={r.url} target="_blank" rel="noreferrer" title={t("Open the student's service")}>
-                        <strong>{serviceLabel(r.platform)}</strong> <ExternalLink size={14} />
+                        <strong className="service-open-name">{serviceLabel(r.platform)} <ExternalLink size={14} /></strong>
                         <small className="table-subline service-url">{r.url}</small>
-                        {r.submitted_at && <small className="table-subline">{t("Uploaded {v0}", { v0: new Date(r.submitted_at).toLocaleString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) })}</small>}
+                        {r.submitted_at && <small className="table-subline">{t("Uploaded {v0}", { v0: new Date(r.submitted_at).toLocaleString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { day: "numeric", month: "short", hour: "numeric", hour12: true, minute: "2-digit" }) })}</small>}
                       </a>
                     ) },
                   { key: "auto_status", label: t("Automatic check"), render: (r) => <Badge value={r.auto_status} /> },
                   { key: "reviewer_name", label: t("Reviewer"), render: (r) => isQualityLead && r.qc_status !== "Locked"
                       ? <SearchableSelect className="pick-inline" label={t("Assign this student to a reviewer")} placeholder={t("Waiting for a reviewer")} value={r.qc_actor || ""} onChange={(v) => !busy && v && quick("service_qc_assign", { student_id: r.student_id, reviewer_id: v })} options={qualityReviewers.map((q) => ({ value: q.id, label: `${q.name} (${reviewerStudents.get(q.id) || 0})` }))} />
-                      : <span>{!r.qc_actor || !staff.some((s: Row) => s.id === r.qc_actor) ? t("Waiting for a reviewer") : owner(r.qc_actor)}<small className="table-subline">{owner(r.coordinator)}</small></span> },
+                      : <span className="dash-people">{!r.qc_actor || !staff.some((s: Row) => s.id === r.qc_actor) ? t("Waiting for a reviewer") : owner(r.qc_actor)}<small className="table-subline">{owner(r.coordinator)}</small></span> },
                   { key: "qc_status", label: t("Review state"), render: (r) => <span><Badge value={qcState(r.qc_status)} />{resubmitted(r) && <Badge value={t("Resubmitted")} />}<small className="table-subline">{Math.round((Date.now() - Date.parse(r.updated_at)) / 3600000)}{t("h · revision")}{" "}{r.revision}</small></span> },
                 ],
                 (r) => <div className="detail-actions">{canDecideServiceLinks && r.qc_status !== "Locked" && (r.qc_actor === user.id || isQualityLead) && <button className="small-btn" onClick={() => open("service_qc_review", { ...r, service_id: r.id, student_id: r.student_id, decision: r.qc_status === "Needs Correction" ? "Lock" : "" })}>{t("Review")}</button>}</div>,
@@ -3747,7 +4028,7 @@ ${portal}`,
             <div className="prose">
               <h3>{t("Contact compliance")}</h3>
               <p>
-                {t("Active students with a complete, screenshot-backed contact within 7 days ÷ active students requiring contact.")}
+                {t("Active students contacted this programme week (Friday to Thursday) ÷ active students.")}
               </p>
               <h3>{t("Graduation rate")}</h3>
               <p>
@@ -4299,7 +4580,7 @@ ${portal}`,
                       </button>
                     )}
                   </div>
-                  {!["administration", "program", "weekly"].includes(module) && (
+                  {!["administration", "program", "weekly"].includes(module) && !(module === "students" && onlyCoach) && (
                     <div className="toolbar">
                       <label className="search-box">
                         <Search size={17} />
@@ -4363,7 +4644,9 @@ ${portal}`,
                           <Filter size={15} /> {t("Save view")}
                         </button>
                         {canTransfer && (<>
-                        <button
+                        {/* The portal view has its own two sheet uploads, and the Accounts tab
+                            its accounts-sheet upload, so no general import there. */}
+                        {module !== "portal" && module !== "accounts" && <button
                           className="small-btn"
                           onClick={() => {
                             setImportModule(
@@ -4375,7 +4658,7 @@ ${portal}`,
                           }}
                         >
                           <Upload size={15} /> {t("Import")}
-                        </button>
+                        </button>}
                         <Pick
                           label={t("Export")}
                           value=""
@@ -4490,7 +4773,7 @@ ${portal}`,
                 {may("contact") && (
                   <button
                     className="primary"
-                    title={t("Record a conversation that already happened, with proof")}
+                    title={t("Record a conversation that already happened, with a comment")}
                     onClick={() =>
                       open("contact", { student_id: selectedStudent.id })
                     }
@@ -4513,7 +4796,7 @@ ${portal}`,
                     .sort((a, b) => a.starts_at.localeCompare(b.starts_at))[0];
                   const link = groups.find((g) => g.id === selectedStudent.group_id)?.session_link;
                   const options: [string, "reminder" | "absence" | "congratulations", Row][] = [
-                    [t("Session reminder"), "reminder", { name: selectedStudent.name, title: next?.title || "", when: next ? fmt(next.starts_at) + " " + new Date(next.starts_at).toLocaleTimeString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" }) : "", link: link || "" }],
+                    [t("Session reminder"), "reminder", { name: selectedStudent.name, title: next?.title || "", when: next ? fmt(next.starts_at) + " " + new Date(next.starts_at).toLocaleTimeString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { hour: "numeric", hour12: true, minute: "2-digit", timeZone: "Africa/Cairo" }) : "", link: link || "" }],
                     [t("Absence follow-up"), "absence", { name: selectedStudent.name }],
                     [t("First-service congratulations"), "congratulations", { name: selectedStudent.name }],
                   ];
@@ -4545,15 +4828,16 @@ ${portal}`,
                   </button>
                 )}
               </div>
-              <p className="action-help">
-                <strong>{t("Log contact")}</strong>: {t("a conversation that already happened, with a screenshot as proof.")}{" "}
+              {!onlyCoach && <p className="action-help">
+                <strong>{t("Log contact")}</strong>: {t("a conversation that already happened, with a short comment. Once a week per student.")}{" "}
                 <strong>{t("Next action")}</strong>: {t("the follow-up step you commit to do next, with a due date.")}
-              </p>
+              </p>}
               <Tabs defaultValue="overview">
                 <TabsList className="detail-tabs">
                   {[
                     "overview",
-                    "contacts",
+                    // Contact follow-up is the coordinators', not the coach's.
+                    ...(onlyCoach ? [] : ["contacts"]),
                     "tasks",
                     "sessions",
                     // Services are not a coach's to see.
@@ -4591,7 +4875,7 @@ ${portal}`,
                       ["Coach", owner(selectedStudent.coach)],
                       ["Journey", t("Week {v0}", { v0: selectedStudent.week })],
                       ["Pathway", t(selectedStudent.pathway || "Not recorded")],
-                      ["Last valid contact", fmt(selectedStudent.last_contact)],
+                      ...(onlyCoach ? [] : [["Last valid contact", fmt(selectedStudent.last_contact)]]),
                       [
                         "Attendance",
                         selectedStudent.attendance === null
@@ -4903,11 +5187,9 @@ ${portal}`,
       <Dialog open={!!groupMessage} onOpenChange={(v) => !v && setGroupMessage(null)}>
         <DialogContent className="action-dialog sm:max-w-[560px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{groupMessage?.kind === "feedback" ? t("Ask the group for feedback") : t("Tell the group the session is confirmed")}</DialogTitle>
+            <DialogTitle>{t("Tell the group the session is confirmed")}</DialogTitle>
             <DialogDescription>
-              {groupMessage?.kind === "feedback"
-                ? t("Students rate the session on their own DEPI page. Send them this message in the group's WhatsApp.")
-                : t("Your confirmation is recorded in the app. The app cannot post into WhatsApp, so copy this message into the group's chat.")}
+              {t("Your confirmation is recorded in the app. The app cannot post into WhatsApp, so copy this message into the group's chat.")}
             </DialogDescription>
           </DialogHeader>
           {groupMessage && (
@@ -4940,35 +5222,9 @@ ${portal}`,
                 ) : (
                   <small className="footnote">{t("This group has no WhatsApp link yet. Add it from the Groups page so it opens in one tap.")}</small>
                 )}
-                {groupMessage.kind === "feedback" && ticksStep(groupMessage.session, sessionChecklist.find((i) => i.key === "feedback_requested")!) && (
-                  <button
-                    type="button"
-                    className="small-btn"
-                    disabled={busy}
-                    onClick={async () => {
-                      if (await quick("session_check", { id: groupMessage.session.id, item: "feedback_requested", done: true })) setGroupMessage(null);
-                    }}
-                  >
-                    <Check size={15} /> {t("Mark as sent")}
-                  </button>
-                )}
               </div>
             </div>
           )}
-        </DialogContent>
-      </Dialog>
-      {/* A client account's email and password, one tap from its row. */}
-      <Dialog open={!!signinFor} onOpenChange={(v) => !v && setSigninFor(null)}>
-        <DialogContent className="action-dialog sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{t("Account sign-in")}</DialogTitle>
-            <DialogDescription>{signinFor ? `${signinFor.label} · ${signinFor.platform}` : ""}</DialogDescription>
-          </DialogHeader>
-          <div className="info-box">
-            <LockKeyhole size={16} />
-            <span>{t("Passwords are kept encrypted in the app's credential vault, never in a sheet or the account list. They open here for the people who keep the accounts (the Service Team's supervisor, Project Operations, Higher Board, administrators), the account's coordinators, and the coordinator and supervisor of a group using it. Each opening is recorded with its purpose.")}</span>
-          </div>
-          {signinFor && <CredentialPanel account={signinFor.id} canStore={keepsAccounts} showReference={can(user.roles, ["Operations Systems / Admin"])} />}
         </DialogContent>
       </Dialog>
       {(() => {
@@ -4980,14 +5236,14 @@ ${portal}`,
               <DialogHeader>
                 <DialogTitle>{t("Session checklist")}</DialogTitle>
                 <DialogDescription>
-                  {r ? `${r.group_id} · ${t("Week {v0}", { v0: r.week })} · ${new Date(r.starts_at).toLocaleString(locale === "ar" ? "ar-EG" : "en-GB", { timeZone: "Africa/Cairo", weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""}
+                  {r ? `${r.group_id} · ${t("Week {v0}", { v0: r.week })} · ${new Date(r.starts_at).toLocaleString(locale === "ar" ? "ar-EG" : "en-GB", { timeZone: "Africa/Cairo", weekday: "short", day: "numeric", month: "short", hour: "numeric", hour12: true, minute: "2-digit" })}` : ""}
                 </DialogDescription>
               </DialogHeader>
               {r && (() => {
                 const steps = sessionChecklist.filter((item) => state[item.key]);
                 const done = steps.filter((item) => state[item.key].done).length;
                 const when = (at?: string | null) =>
-                  at ? new Date(at).toLocaleString(locale === "ar" ? "ar-EG" : "en-GB", { timeZone: "Africa/Cairo", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
+                  at ? new Date(at).toLocaleString(locale === "ar" ? "ar-EG" : "en-GB", { timeZone: "Africa/Cairo", day: "numeric", month: "short", hour: "numeric", hour12: true, minute: "2-digit" }) : "";
                 return (
                   <>
                     <div className="checklist-summary">
@@ -5025,9 +5281,7 @@ ${portal}`,
                                       ? t("Ticks itself once every student is marked")
                                       : item.owner === "coach_ops"
                                         ? t("Coach Operations ticks this after checking the day's sessions")
-                                        : item.key === "feedback_requested"
-                                          ? t("Send the group the feedback message, then mark it done")
-                                          : t("The group's coordinator ticks this")}
+                                        : t("The group's coordinator ticks this")}
                               </small>
                             </div>
                             <div className="checklist-action">
@@ -5037,11 +5291,6 @@ ${portal}`,
                                 ) : null
                               ) : editable ? (
                                 <span className="checklist-buttons">
-                                  {item.key === "feedback_requested" && !st.done && (
-                                    <button type="button" className="small-btn" onClick={() => { setChecklistFor(null); setGroupMessage(feedbackMessage(r)); }}>
-                                      <MessageCircle size={14} /> {t("Message")}
-                                    </button>
-                                  )}
                                   <button
                                     type="button"
                                     className={st.done ? "small-btn" : "primary small"}
@@ -5143,11 +5392,10 @@ ${portal}`,
                         "datetime-local",
                       )}
                     </div>
-                    {proofField()}
+                    {field("notes", t("Comment: what you talked about"))}
                     {field("next_action", t("Next action"))}
                     {ownerLine()}
                     {field("due", t("Action due date"), "datetime-local")}
-                    {field("notes", t("Notes"), "text", false)}
                   </>
                 );
               if (a === "task")
@@ -5310,7 +5558,7 @@ ${portal}`,
                 const mine = groups.filter((g) => can(user.roles, ["Project Operations", "Operations Systems / Admin"]) || g.coordinator === user.id);
                 return (
                   <>
-                    <p className="footnote">{t("One screenshot of a message sent to the whole group logs a contact for every active student in it.")}</p>
+                    <p className="footnote">{t("One message sent to the whole group logs this week's contact for every active student in it.")}</p>
                     <label className="field">
                       {t("Group")} *
                       <SearchableSelect
@@ -5331,8 +5579,7 @@ ${portal}`,
                       {choice("outcome", t("Outcome"), ["Responded", "No response", "Wrong number", "Unreachable"])}
                     </div>
                     {field("occurred_at", t("Sent at"), "datetime-local")}
-                    {form.group_id ? proofField() : null}
-                    {field("notes", t("Notes"), "text", false)}
+                    {field("notes", t("Comment: what the message was about"))}
                   </>
                 );
               }
@@ -5838,8 +6085,10 @@ ${portal}`,
                       "S3 Standard",
                       "S4 Low",
                     ])}
+                    {field("notes", t("Comment: what happened"))}
                     {ownerLine()}
                     {field("due", t("Due date"), "datetime-local")}
+                    <p className="footnote">{t("Coach Operations is notified of every new case.")}</p>
                   </>
                 );
               if (a === "case_transition")

@@ -38,6 +38,7 @@ import {
 import { isNationalId, nationalIdProblem, normalizeNationalId, normalizePhone } from "@/lib/domain/sheet-mapping";
 import { seed } from "@/lib/seed";
 import { appliesTo, beforeSessionKeys, checklistItem } from "@/lib/domain/session-checklist";
+import { cairoDay } from "@/lib/domain/programme-week";
 export const dynamic = "force-dynamic";
 const ops = ["Project Operations", "Operations Coordinator"];
 // Gig evidence passes three different people: a first check (the group's coach,
@@ -461,7 +462,8 @@ export async function POST(req: Request) {
       case "contact": {
         permit(u, ops);
         validateContact(x);
-        await proof(u, x.proof_id, sid);
+        // A screenshot is optional now; when one is attached it must be this student's.
+        if (x.proof_id) await proof(u, x.proof_id, sid);
         ensure(
           await stmt(
             "SELECT id FROM users WHERE id=? AND active=1",
@@ -477,11 +479,11 @@ export async function POST(req: Request) {
             x.channel,
             x.outcome,
             x.occurred_at,
-            x.proof_id,
+            x.proof_id || null,
             x.next_action,
             x.owner,
             x.due,
-            x.notes || "",
+            String(x.notes).trim(),
             u.id,
             t,
           ),
@@ -495,7 +497,7 @@ export async function POST(req: Request) {
             "UPDATE attachment_context SET activity_type='Student contact',occurred_at=?,source=?,performed_by_type='STAFF' WHERE attachment_id=?",
             x.occurred_at,
             x.channel,
-            x.proof_id,
+            x.proof_id || "",
           ),
           stmt(
             "INSERT INTO tasks VALUES(?,?,?,?,?,?,?,?,?,?)",
@@ -514,29 +516,33 @@ export async function POST(req: Request) {
         break;
       }
       case "group_contact": {
-        // One message to the whole group, one screenshot: a contact is logged
-        // for every active student in it. No follow-up action is opened for
-        // each; the coordinator's own tasks stay their list.
+        // One message to the whole group: a contact is logged for every active
+        // student in it, with the coordinator's comment. A screenshot is
+        // optional. No follow-up action is opened for each; the coordinator's
+        // own tasks stay their list.
         permit(u, ops);
-        ensure(x.group_id && x.proof_id && x.channel && x.outcome && x.occurred_at, "Group, screenshot, channel, outcome and time are required.");
+        ensure(x.group_id && x.channel && x.outcome && x.occurred_at, "Group, channel, outcome and time are required.");
+        ensure(String(x.notes || "").trim().length >= 3, "Write a short comment on the message.");
         const group: any = await stmt("SELECT * FROM groups WHERE id=?", x.group_id).first();
         ensure(group, "Group not found.");
         if (!can(u.roles, ["Project Operations", ...admin]))
           ensure(group.coordinator === u.id, "You can message only your own groups.");
-        const shot: any = await stmt(
-          "SELECT a.* FROM attachments a JOIN students s ON s.id=a.student_id WHERE a.id=? AND s.group_id=?",
-          x.proof_id,
-          x.group_id,
-        ).first();
-        ensure(shot, "Upload the screenshot of the group message first.");
+        const shot: any = x.proof_id
+          ? await stmt(
+              "SELECT a.* FROM attachments a JOIN students s ON s.id=a.student_id WHERE a.id=? AND s.group_id=?",
+              x.proof_id,
+              x.group_id,
+            ).first()
+          : null;
+        ensure(!x.proof_id || shot, "The screenshot does not belong to this group.");
         const members = await all("SELECT id FROM students WHERE group_id=? AND lifecycle='Active'", x.group_id);
         ensure(members.length > 0, "The group has no active students.");
         const due = new Date(Date.parse(x.occurred_at) + 7 * 86400000).toISOString();
         for (const m of members) {
           // Each student's contact keeps a screenshot of its own, as every
           // contact must; they all point at the one image that was uploaded.
-          let proofId = x.proof_id;
-          if (m.id !== shot.student_id) {
+          let proofId = x.proof_id || null;
+          if (shot && m.id !== shot.student_id) {
             proofId = uid("FILE");
             jobs.push(
               stmt(
@@ -590,14 +596,15 @@ export async function POST(req: Request) {
             ),
           );
         }
-        jobs.push(
-          stmt(
-            "UPDATE attachment_context SET activity_type='Group message',occurred_at=?,source=?,performed_by_type='STAFF' WHERE attachment_id=?",
-            x.occurred_at,
-            x.channel,
-            x.proof_id,
-          ),
-        );
+        if (x.proof_id)
+          jobs.push(
+            stmt(
+              "UPDATE attachment_context SET activity_type='Group message',occurred_at=?,source=?,performed_by_type='STAFF' WHERE attachment_id=?",
+              x.occurred_at,
+              x.channel,
+              x.proof_id,
+            ),
+          );
         auditValue = { group_id: x.group_id, students: members.length, channel: x.channel };
         break;
       }
@@ -1060,7 +1067,7 @@ export async function POST(req: Request) {
           if (group?.supervisor) leaders.add(group.supervisor);
           leaders.delete(u.id);
           const when = new Date(session.starts_at).toLocaleString("en-GB", {
-            timeZone: "Africa/Cairo", weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+            timeZone: "Africa/Cairo", weekday: "short", day: "numeric", month: "short", hour: "numeric", hour12: true, minute: "2-digit",
           });
           const title = `${u.name || who} cannot attend ${group?.id || session.group_id} Week ${session.week} (${when}): ${reason}`;
           for (const recipient of leaders)
@@ -1350,6 +1357,13 @@ export async function POST(req: Request) {
                       ).first(),
                     ))),
             "Only the group's coordinator or the session's coach takes its attendance.",
+          );
+        // The coordinator and the coach have until the end of the session's
+        // day (Cairo); after that only the session leaders correct it.
+        if (!can(u.roles, sessionLeaders))
+          ensure(
+            cairoDay(t) <= cairoDay(session.starts_at),
+            "Attendance closes at the end of the session's day. Ask Coach Operations to correct it.",
           );
         let marks = Object.entries((x.marks || {}) as Record<string, string>);
         ensure(marks.length > 0, "Mark at least one student.");
@@ -2398,6 +2412,8 @@ export async function POST(req: Request) {
           "Case title, owner and due date are required.",
         );
         ensure(String(x.title).length <= 200 && String(x.notes || "").length <= 2000, "Keep the title under 200 characters and the notes under 2,000.");
+        // Every case says what happened (decided 10 Oct 2026).
+        ensure(String(x.notes || "").trim().length >= 5, "Write a comment explaining the case.");
         // A case names its group when it has one, so it stays with that group's
         // people; one about the whole programme has neither student nor group,
         // and a demo account may not open those.
@@ -2429,10 +2445,19 @@ export async function POST(req: Request) {
             id,
             "Open",
             u.id,
-            x.notes || "Case opened",
+            String(x.notes).trim(),
             t,
           ),
         );
+        // Coach Operations hears about every new case at once.
+        {
+          const people = await all(`SELECT id,roles FROM users WHERE active=1 AND ${sameSide(u, "id")}`);
+          for (const p of people) {
+            const held = typeof p.roles === "string" ? JSON.parse(p.roles || "[]") : p.roles || [];
+            if (held.includes("Coach Operations") && p.id !== u.id)
+              jobs.push(notify(p.id, `New case: ${String(x.title).trim()}`, sid ? "student" : "case", sid || id, x.severity === "S1 Critical" || x.severity === "S2 High" ? "Urgent" : "Action Required", `case-new:${id}:${p.id}`));
+          }
+        }
         break;
       }
       case "case_transition": {

@@ -114,7 +114,7 @@ export function Opportunities() {
 
   return (
     <div className="opportunities">
-      <p className="footnote">{t("Jobs the Target Team found on the platforms. Each one shows to the students of its track on their own page.")}</p>
+      <p className="footnote">{t("Jobs found on the platforms by the Target Team, the supervisors and the coaches. Each one shows to the students of its track on their own page.")}</p>
 
       {data?.posts && (
         <section className="panel">

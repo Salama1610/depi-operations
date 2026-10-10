@@ -275,13 +275,20 @@ test("full seeded backend workflow and permission gates", async () => {
     due: "2027-01-01T00:00:00Z",
     occurred_at: new Date().toISOString(),
     channel: "WhatsApp",
+    notes: "Talked about the first gig",
     request_id: "contact-once",
   };
+  // A comment is required; the screenshot is not (10 Oct 2026).
+  assert.match((await post("contact", { ...c, notes: "", request_id: "contact-no-comment" })).error, /comment/);
+  const noShot = { ...c, proof_id: "", request_id: "contact-no-screenshot" };
+  await check("contact", noShot);
+  assert.equal((await dbRow("SELECT proof_id FROM contacts WHERE notes=? AND proof_id IS NULL LIMIT 1", "Talked about the first gig")).proof_id, null);
   await check("contact", c);
   await check("contact", c);
   assert.equal(
     (await dbRow("SELECT count(*) n FROM contacts WHERE student_id='S10001'")).n,
-    1,
+    2,
+    "the contact without a screenshot, then the one with it, recorded once despite the retry",
   );
   assert.equal(
     (await dbRow("SELECT activity_type FROM attachment_context WHERE attachment_id='PROOF-1'")).activity_type,
@@ -2393,6 +2400,52 @@ test("vault access is role restricted and never logs returned credentials", asyn
     Number((await dbRow("SELECT count(*) n FROM audit_events WHERE action='Credential access granted'")).n) >= 1,
     "every reveal is recorded",
   );
+  // The Accounts list shows each password the person may see, beside its email.
+  let listed = await (await call({ action: "list" })).json();
+  assert.equal(listed.credentials["ACC-102"]?.password, "stored-secret-never-log", "the responsible coordinator sees it in the list");
+  current = { id: "staff-coach", email: "staff-coach@example.invalid" };
+  assert.match((await (await call({ action: "list" })).json()).error, /does not show account passwords/);
+  current = { id: "owner", email: "owner@example.com" };
+  listed = await (await call({ action: "list" })).json();
+  assert.ok(listed.credentials["ACC-102"], "a keeper sees every password");
+  assert.equal(
+    (await dbRow("SELECT count(*) n FROM audit_events WHERE value LIKE '%stored-secret-never-log%'")).n,
+    0,
+    "listing never writes a password to the audit log",
+  );
+
+  // The team uploads its own accounts sheet: counted first, then applied, and
+  // uploading it again changes nothing.
+  const sheetApi = await route("accounts-sheet");
+  const upload = async (apply) =>
+    (await sheetApi.POST(new Request("https://test.local/api/accounts-sheet", {
+      method: "POST",
+      body: JSON.stringify({
+        apply,
+        rows: [
+          { sheet: "Accounts", cells: ["Account", "Password", "Coordinator", "Account on", "Active or Not", "Credits", "Pending", "Comments"] },
+          { sheet: "Accounts", cells: ["sheet.one@example.invalid", "pass-one-1", "Some Coordinator", "Kafeel ", "Active", "$5.50", "$0.00", ""] },
+          { sheet: "Not Active", cells: ["sheet.two@example.invalid", "pass-two-2", "Some Coordinator", "Nafezly", "Not Active", "", "-", "Locked out"] },
+          { sheet: "Not Active", cells: ["", "", "", "", "", "", "", ""] },
+        ],
+      }),
+    }))).json();
+  let sheet = await upload(false);
+  assert.equal(sheet.applied, false);
+  assert.equal(sheet.summary.new, 2);
+  assert.equal(await dbRow("SELECT id FROM accounts WHERE label='sheet.one@example.invalid'"), null, "a check writes nothing");
+  sheet = await upload(true);
+  assert.equal(sheet.applied, true);
+  const one = await dbRow("SELECT * FROM accounts WHERE label='sheet.one@example.invalid'");
+  assert.deepEqual([one.platform, one.status, Number(one.credits)], ["Kafeel", "Available", 5.5]);
+  assert.equal((await dbRow("SELECT status FROM accounts WHERE label='sheet.two@example.invalid'")).status, "Access Issue");
+  listed = await (await call({ action: "list" })).json();
+  assert.equal(listed.credentials[one.id]?.password, "pass-one-1", "the sheet's password is stored, encrypted");
+  sheet = await upload(false);
+  assert.equal(sheet.summary.new, 0);
+  assert.equal(sheet.summary.unchanged, 2, "uploading the same sheet again changes nothing");
+  current = { id: "coordinator", email: "staff-sara@example.invalid" };
+  assert.match((await upload(false)).error, /keep the accounts/);
   current = { id: "owner", email: "owner@example.com" };
 });
 test("encrypted database and evidence backup restores to a fresh isolated directory", async () => {
@@ -3044,8 +3097,9 @@ test("one screenshot of a group message logs a contact for every active student 
   const at = new Date().toISOString();
   current = { id: group.coordinator, email: group.email };
   const other = await dbRow("SELECT id FROM groups WHERE coordinator<>? AND status='Active' LIMIT 1", group.coordinator);
-  assert.match((await post("group_contact", { group_id: other.id, proof_id: "GROUP-SHOT-1", channel: "WhatsApp", outcome: "Responded", occurred_at: at })).error, /only your own groups/);
-  await check("group_contact", { group_id: group.id, proof_id: "GROUP-SHOT-1", channel: "WhatsApp", outcome: "Responded", occurred_at: at });
+  assert.match((await post("group_contact", { group_id: other.id, proof_id: "GROUP-SHOT-1", channel: "WhatsApp", outcome: "Responded", occurred_at: at, notes: "Weekly reminder" })).error, /only your own groups/);
+  assert.match((await post("group_contact", { group_id: group.id, channel: "WhatsApp", outcome: "Responded", occurred_at: at })).error, /comment/);
+  await check("group_contact", { group_id: group.id, proof_id: "GROUP-SHOT-1", channel: "WhatsApp", outcome: "Responded", occurred_at: at, notes: "Weekly reminder" });
   const logged = await dbRows("SELECT c.student_id FROM contacts c JOIN attachments a ON a.id=c.proof_id WHERE a.hash='group-shot-hash' AND c.occurred_at=?", at);
   assert.equal(logged.length, members.length, "every active student has the contact, each with the same screenshot");
   for (const m of members) assert.equal((await dbRow("SELECT last_contact FROM students WHERE id=?", m.id)).last_contact.slice(0, 16), at.slice(0, 16));
@@ -3142,10 +3196,10 @@ test("a demo account cannot open a programme-wide case or read real applicants",
   await check("demo_refresh");
   current = { id: "demo-auth-po", email: "demo.projectops@example.com" };
   const due = new Date(Date.now() + 86400000).toISOString();
-  assert.match((await post("case", { title: "Planted", owner: "DEMO-PO", due, group_id: "DEMO-G1" })).error ?? "", /^$/);
+  assert.match((await post("case", { title: "Planted", owner: "DEMO-PO", due, group_id: "DEMO-G1", notes: "A demo case for the test" })).error ?? "", /^$/);
   const planted = await dbRow("SELECT group_id FROM cases WHERE title='Planted'");
   assert.equal(planted.group_id, "DEMO-G1", "the case stays with the demo group");
-  assert.ok((await post("case", { title: "Global", owner: "DEMO-PO", due })).error, "no programme-wide case from the demo");
+  assert.ok((await post("case", { title: "Global", owner: "DEMO-PO", due, notes: "A programme-wide case" })).error, "no programme-wide case from the demo");
   const program = await (await programApi.GET(new Request("https://test.local/api/program"))).json();
   assert.deepEqual(program.applications || [], []);
   current = { id: "owner", email: "owner@example.com" };
@@ -3422,15 +3476,12 @@ test("the Target Team posts job opportunities, which a track's students and the 
       current = { id: other.id, email: other.email };
       assert.ok(!(await get()).opportunities.some((o) => o.id === made.id));
     }
-    // The Service Team's supervisor does not see them; the Target Team's
-    // supervisor sees every post, posts too and removes one, which then
-    // leaves the student's page.
+    // Any supervisor (here on the Service Team) sees every post, posts too
+    // and removes one, which then leaves the student's page. A coach posts.
     const supervisor = await dbRow(`SELECT id,email,team FROM users WHERE roles LIKE '%Team Supervisor%' AND roles NOT LIKE '%Admin%' AND roles NOT LIKE '%Project Operations%' AND id NOT LIKE 'DEMO-%' AND active=1 LIMIT 1`);
     try {
       current = { id: supervisor.id, email: supervisor.email };
       await dbExec("UPDATE users SET team='Service Team' WHERE id=?", supervisor.id);
-      assert.match((await get()).error, /Target Team/);
-      await dbExec("UPDATE users SET team='Target Team' WHERE id=?", supervisor.id);
       const all = await get();
       assert.equal(all.posts, true);
       assert.equal(all.leads, true);
@@ -3438,6 +3489,10 @@ test("the Target Team posts job opportunities, which a track's students and the 
       assert.equal((await send({ action: "remove", id: made.id })).error, undefined);
       current = { id: learner.id, email: learner.email };
       assert.ok(!(await get()).opportunities.some((o) => o.id === made.id));
+      const coach = await dbRow(`SELECT id,email FROM users WHERE roles LIKE '%"Coach"%' AND roles NOT LIKE '%Admin%' AND active=1 LIMIT 1`);
+      current = { id: coach.id, email: coach.email };
+      const posted = await send({ ...job, url: "https://khamsat.com/community/requests/456", title: "Banner for a bakery" });
+      assert.equal(posted.error, undefined, posted.error);
     } finally {
       await dbExec("UPDATE users SET team=? WHERE id=?", supervisor.team, supervisor.id);
     }

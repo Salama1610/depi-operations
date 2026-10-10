@@ -4,7 +4,7 @@
 // - the morning of, Coach Operations checks the day's sessions;
 // - during it, the coordinator sees the coach enter;
 // - after it, attendance is taken (worked out from the register, never
-//   ticked by hand) and the coordinator asks the group for feedback.
+//   ticked by hand). Students' feedback opens on their own page by itself.
 
 export type ChecklistStage = "Before" | "During" | "After";
 export type ChecklistOwner = "coordinator" | "coach" | "coach_ops" | "auto";
@@ -25,7 +25,6 @@ export const sessionChecklist: ChecklistItem[] = [
   { key: "coach_ops_checked", label: "Coach Operations checked", stage: "Before", owner: "coach_ops", when: "The morning of the session" },
   { key: "instructor_entered", label: "Coach entered the session", stage: "During", owner: "coordinator" },
   { key: "attendance_taken", label: "Attendance taken", stage: "After", owner: "auto" },
-  { key: "feedback_requested", label: "Feedback requested from the group", stage: "After", owner: "coordinator", when: "Right after the session" },
 ];
 
 /** Steps cleared when a session moves: they were done for the old time. */

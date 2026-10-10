@@ -143,9 +143,8 @@ export const contacts = sqliteTable(
     channel: text("channel").notNull(),
     outcome: text("outcome").notNull(),
     occurredAt: text("occurred_at").notNull(),
-    proofId: text("proof_id")
-      .notNull()
-      .references(() => attachments.id),
+    // Optional since 10 Oct 2026: a comment is required instead.
+    proofId: text("proof_id").references(() => attachments.id),
     nextAction: text("next_action").notNull(),
     owner: text("owner")
       .notNull()

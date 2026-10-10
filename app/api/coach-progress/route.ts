@@ -56,9 +56,21 @@ export async function GET() {
     );
     const portalStudents = studentsBatch
       ? await inChunks(ids, (slice) =>
-          all(`SELECT portal_id,student_id,final_status FROM portal_students WHERE batch_id=? AND student_id IN (${marks(slice)})`, studentsBatch, ...slice),
+          all(
+            `SELECT portal_id,student_id,final_status,total_gigs,approved_gigs,rejected_gigs FROM portal_students WHERE batch_id=? AND student_id IN (${marks(slice)})`,
+            studentsBatch,
+            ...slice,
+          ),
         )
       : [];
+    // Each student's attendance at their group's sessions, for the week filter.
+    const attendance = await inChunks(ids, (slice) =>
+      all(
+        `SELECT a.student_id,a.status,t.starts_at,t.week FROM attendance a JOIN sessions t ON t.id=a.session_id
+         WHERE t.status<>'Cancelled' AND a.student_id IN (${marks(slice)})`,
+        ...slice,
+      ),
+    );
     const portalIds = portalStudents.map((p: any) => String(p.portal_id));
     const portalGigs = gigsBatch && portalIds.length
       ? await inChunks(portalIds, (slice) =>
@@ -92,6 +104,9 @@ export async function GET() {
         id: s.id,
         name: s.name,
         group_id: s.group_id,
+        attendance: attendance
+          .filter((a: any) => a.student_id === s.id)
+          .map((a: any) => ({ at: a.starts_at, week: a.week, present: a.status !== "Absent" })),
         graduation: graduation(theirs.map((g) => ({ status: g.review_status, gig_status: g.gig_status, currency: "USD", value: g.usd }))),
         counted: counted.length,
         total_usd: Math.round(counted.reduce((sum, g) => sum + g.usd, 0) * 100) / 100,
@@ -101,6 +116,10 @@ export async function GET() {
         portal: portal
           ? {
               final_status: portal.final_status || null,
+              // The portal sheet's own summary of the student's gigs.
+              total: portal.total_gigs === null || portal.total_gigs === undefined ? null : Number(portal.total_gigs),
+              approved: portal.approved_gigs === null || portal.approved_gigs === undefined ? null : Number(portal.approved_gigs),
+              rejected: portal.rejected_gigs === null || portal.rejected_gigs === undefined ? null : Number(portal.rejected_gigs),
               gigs: portalGigs
                 .filter((p: any) => String(p.portal_student_id) === String(portal.portal_id))
                 .map((p: any) => ({

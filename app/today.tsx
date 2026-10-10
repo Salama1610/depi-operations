@@ -39,7 +39,7 @@ export type TodayContext = {
 
 const DAY = 86400000;
 const time = (iso: string) =>
-  new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Cairo" });
+  new Date(iso).toLocaleTimeString("en-GB", { hour: "numeric", hour12: true, minute: "2-digit", timeZone: "Africa/Cairo" });
 const pct = (part: number, whole: number) => (whole ? Math.round((100 * part) / whole) : null);
 const tone = (value: number | null, good = 85, fair = 65) =>
   value === null ? "neutral" : value >= good ? "green" : value >= fair ? "amber" : "red";
@@ -118,7 +118,8 @@ function CoordinatorToday({ ctx }: { ctx: TodayContext }) {
     .sort((a, b) => a.starts_at.localeCompare(b.starts_at));
   const silent = students
     .filter((s) => mine.has(s.group_id) && s.lifecycle === "Active")
-    .filter((s) => !s.last_contact || Date.now() - Date.parse(s.last_contact) > 7 * DAY)
+    // Contact is weekly: not yet contacted in this programme week.
+    .filter((s) => s.contact_due)
     .sort((a, b) => String(a.last_contact || "").localeCompare(String(b.last_contact || "")));
   const toReview = evidence
     .filter((e) => e.status === "Coordinator L1" && e.recorder !== user.id && students.some((s) => s.id === e.student_id && mine.has(s.group_id)))
@@ -166,7 +167,7 @@ function CoordinatorToday({ ctx }: { ctx: TodayContext }) {
       </section>
 
       <section className="panel today-panel">
-        <h3><MessageCircle size={17} /> {t("No contact in 7 days")} <span className="count">{silent.length}</span></h3>
+        <h3><MessageCircle size={17} /> {t("No contact this week")} <span className="count">{silent.length}</span></h3>
         {silent.length ? (
           <div className="today-list">
             {silent.slice(0, 15).map((s) => {

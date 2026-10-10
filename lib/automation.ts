@@ -94,27 +94,8 @@ export async function policyChecks(u: any, requestId: string) {
     ));
   }
 
-  // A session that ended in the last day: its coordinator is reminded to ask
-  // the group for feedback, unless they already marked it sent. (The
-  // coordinator's Overview shows the same prompt without waiting for a run.)
-  const feedbackAsked = new Set(
-    (snapshot.sessionChecks || []).filter((c: any) => c.item === "feedback_requested").map((c: any) => c.session_id),
-  );
-  const justEnded = snapshot.sessions.filter((session: any) => {
-    const end = Date.parse(session.starts_at) + Number(session.duration_minutes || 180) * 60000;
-    return session.status !== "Cancelled" && end <= Date.now() && Date.now() - end < 86400000 && !feedbackAsked.has(session.id);
-  });
-  let feedbackReminders = 0;
-  for (const session of justEnded.slice(0, 100)) {
-    const coordinator = session.coordinator_id || groupsById.get(session.group_id)?.coordinator;
-    if (!coordinator) continue;
-    jobs.push(notify(coordinator, `Ask ${session.group_id} for feedback on Week ${session.week}`, "session", session.id, "Action Required", `feedback-ask:${session.id}`));
-    feedbackReminders++;
-  }
-
   const summary = {
     session_cases: Math.min(sessionCases.length, 100),
-    feedback_reminders: feedbackReminders,
     planned: plan.length,
     processed: batch.length,
     remaining: Math.max(0, plan.length - batch.length),

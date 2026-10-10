@@ -12,7 +12,7 @@ export const runtimeTriggers = [
   `CREATE TRIGGER IF NOT EXISTS task_bank_platform_insert BEFORE INSERT ON task_bank WHEN NEW.platform NOT IN ('Kafeel','Nafezly','Khamsat') OR NEW.value<=0 BEGIN SELECT RAISE(ABORT,'Controlled task platform or value is invalid.'); END`,
   `CREATE TRIGGER IF NOT EXISTS account_retired_terminal BEFORE UPDATE OF status ON accounts WHEN OLD.status='Retired' AND NEW.status<>'Retired' BEGIN SELECT RAISE(ABORT,'Retired accounts cannot be reopened.'); END`,
   `CREATE TRIGGER IF NOT EXISTS contact_complete BEFORE INSERT ON contacts BEGIN
-    SELECT CASE WHEN trim(NEW.next_action)='' OR trim(NEW.outcome)='' OR trim(NEW.due)='' OR NOT EXISTS(SELECT 1 FROM attachments a WHERE a.id=NEW.proof_id AND a.student_id=NEW.student_id) THEN RAISE(ABORT,'Complete contact requires matching proof, outcome, next action and due date.') END;
+    SELECT CASE WHEN trim(NEW.next_action)='' OR trim(NEW.outcome)='' OR trim(NEW.due)='' OR (NEW.proof_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM attachments a WHERE a.id=NEW.proof_id AND a.student_id=NEW.student_id)) THEN RAISE(ABORT,'Complete contact requires an outcome, next action and due date, and any proof must be the student''s.') END;
   END`,
   `CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit_events BEGIN SELECT RAISE(ABORT,'Audit history is immutable.'); END`,
   `CREATE TRIGGER IF NOT EXISTS audit_no_delete BEFORE DELETE ON audit_events BEGIN SELECT RAISE(ABORT,'Audit history is immutable.'); END`,

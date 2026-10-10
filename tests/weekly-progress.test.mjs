@@ -168,7 +168,7 @@ test("a coordinator's schedule carries the group's meeting link", () => {
 
 test("the checklist works out the automatic steps", async () => {
   const { checklistState, sessionChecklist } = await vite.ssrLoadModule("/lib/domain/session-checklist.ts");
-  assert.deepEqual(sessionChecklist.map((i) => i.key), ["instructor_confirmed", "coach_ops_checked", "instructor_entered", "attendance_taken", "feedback_requested"]);
+  assert.deepEqual(sessionChecklist.map((i) => i.key), ["instructor_confirmed", "coach_ops_checked", "instructor_entered", "attendance_taken"]);
   assert.deepEqual(sessionChecklist.filter((i) => i.stage === "Before").map((i) => i.owner), ["coordinator", "coach_ops"], "the coordinator and Coach Operations each have their own step before the session");
   let state = checklistState({ week: 1, coach_confirmed_at: "2026-10-10T10:00:00Z" }, [], ["S1", "S2"], new Set(["S1"]));
   assert.equal(state.instructor_confirmed.done, true, "the coach confirming counts");

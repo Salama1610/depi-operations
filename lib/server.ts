@@ -3,6 +3,7 @@ import { env } from "./env";
 import { database } from "./data/database";
 import { objectStore } from "./data/storage";
 import { DEMO_PASSWORD, isDemo, sameSide } from "./demo";
+import { cairoDay, programmeWeekStart } from "./domain/programme-week";
 import {
   ensure,
   can,
@@ -670,6 +671,8 @@ export async function loadData(u: any) {
     "student_id",
   );
   const studentsByGroup = bucket(students, "group_id");
+  // The programme week (Friday to Thursday, Cairo) that is running now.
+  const thisWeek = programmeWeekStart(cairoDay(new Date().toISOString()));
   // History written before the cleaning existed is cleaned on the way out.
   for (const row of logs) {
     row.previous = scrubAuditText(row.previous);
@@ -682,14 +685,12 @@ export async function loadData(u: any) {
     const group = groupMap.get(s.group_id);
     s.policy = policyMap[group.policy_id];
     {
-      // Same first-contact window as risk(): nobody is late on a contact
-      // inside contactDays of joining.
-      const window = s.policy.contactDays * 86400000;
-      const joined = s.created_at ? Date.parse(s.created_at) : NaN;
-      const overdue = s.last_contact
-        ? Date.now() - Date.parse(s.last_contact) > window
-        : !(Number.isFinite(joined) && Date.now() - joined <= window);
-      s.contact_due = s.lifecycle === "Active" && overdue;
+      // Contact is weekly (decided 10 Oct 2026): every active student is
+      // contacted once in each programme week, Friday to Thursday in Cairo.
+      // A student who joined this week is not due until the next one.
+      const joinedDay = s.created_at ? cairoDay(s.created_at) : "";
+      const contacted = s.last_contact ? cairoDay(s.last_contact) >= thisWeek : false;
+      s.contact_due = s.lifecycle === "Active" && !contacted && !(joinedDay && joinedDay >= thisWeek);
     }
     s.week = Math.max(
       0,

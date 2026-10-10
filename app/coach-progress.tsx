@@ -2,12 +2,13 @@
 
 // A coach's read-only view of their own students' progress (see
 // app/api/coach-progress): gigs counted toward graduation (x of 3), their total
-// in US dollars, and each gig's status in our review and on the ministry
-// portal. View only: nothing here changes a record.
+// in US dollars, the portal's summary of accepted and rejected gigs, and, for
+// the week chosen, attendance and the gigs added. View only: nothing here
+// changes a record, and contact follow-up stays with the coordinators.
 
 import { useEffect, useMemo, useState } from "react";
-import { RefreshCw } from "lucide-react";
-import { useLocale, useT } from "@/lib/i18n/context";
+import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
+import { useDir, useLocale, useT } from "@/lib/i18n/context";
 import { SearchableSelect } from "@/components/searchable-select";
 import { GraduationDots } from "./today";
 
@@ -25,6 +26,20 @@ const reviewWords: Record<string, { label: string; tone: string }> = {
   "Closed L3": { label: "Closed", tone: "is-info" },
 };
 
+/** The Cairo calendar day of an instant, as YYYY-MM-DD. */
+function cairoDay(at: string | number | Date) {
+  const parts = new Intl.DateTimeFormat("en", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(at));
+  const part = (type: string) => parts.find((p) => p.type === type)?.value || "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+const shiftDay = (day: string, n: number) => {
+  const d = new Date(day + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+/** The Friday that opens the programme week (Friday to Thursday) containing `day`. */
+const fridayOf = (day: string) => shiftDay(day, -((new Date(day + "T12:00:00Z").getUTCDay() - 5 + 7) % 7));
+
 function portalTone(value?: string | null) {
   const v = String(value || "");
   if (/approv|graduat|accept/i.test(v)) return "is-ok";
@@ -41,6 +56,9 @@ export function CoachProgress() {
   const [error, setError] = useState("");
   const [group, setGroup] = useState("All");
   const [query, setQuery] = useState("");
+  // The programme week shown, Friday to Thursday: 0 is this week.
+  const [week, setWeek] = useState(0);
+  const dir = useDir();
 
   async function load() {
     setError("");
@@ -67,6 +85,22 @@ export function CoachProgress() {
     (s) => (group === "All" || s.group_id === group) && (!query.trim() || String(s.name).toLowerCase().includes(query.trim().toLowerCase())),
   );
   const graduated = shown.filter((s) => /Graduat/.test(s.graduation || "")).length;
+  const from = shiftDay(fridayOf(cairoDay(Date.now())), week * 7);
+  const to = shiftDay(from, 7);
+  const inWeek = (at?: string) => !!at && cairoDay(at) >= from && cairoDay(at) < to;
+  const weekLabel = `${new Date(from + "T12:00:00Z").toLocaleDateString(tag, { day: "numeric", month: "short", timeZone: "UTC" })} – ${new Date(shiftDay(to, -1) + "T12:00:00Z").toLocaleDateString(tag, { day: "numeric", month: "short", timeZone: "UTC" })}`;
+  // What each student did in the chosen week.
+  const weekOf = (s: Row) => {
+    const marks = (s.attendance || []).filter((a: Row) => inWeek(a.at));
+    const gigs = (s.portal?.gigs || []).filter((g: Row) => inWeek(g.date));
+    return {
+      attended: marks.some((a: Row) => a.present) ? "yes" : marks.length ? "no" : "none",
+      gigs: gigs.length,
+      approved: gigs.filter((g: Row) => /approv|accept/i.test(String(g.auditor_status || g.status || ""))).length,
+      rejected: gigs.filter((g: Row) => /reject/i.test(String(g.auditor_status || g.status || ""))).length,
+    };
+  };
+  const weekRows = shown.map(weekOf);
 
   if (!data && !error) return <div className="panel"><RefreshCw className="spin" size={18} /> {t("Loading your students' progress…")}</div>;
   if (error && !data)
@@ -90,22 +124,57 @@ export function CoachProgress() {
           <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("Search by name")} />
         </label>
       </div>
+      <div className="filter-row">
+        <div className="week-nav" role="group" aria-label={t("Week")}>
+          <button type="button" className="small-btn" onClick={() => setWeek(week - 1)} aria-label={t("Previous week")}>
+            {dir === "rtl" ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+          </button>
+          <span className="week-nav-label">
+            <strong>{weekLabel}</strong>
+            <small>{week === 0 ? t("This week") : week === -1 ? t("Last week") : week === 1 ? t("Next week") : week > 0 ? t("In {v0} weeks", { v0: week }) : t("{v0} weeks ago", { v0: -week })}</small>
+          </span>
+          <button type="button" className="small-btn" onClick={() => setWeek(week + 1)} aria-label={t("Next week")}>
+            {dir === "rtl" ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+          </button>
+          {week !== 0 && <button type="button" className="small-btn" onClick={() => setWeek(0)}>{t("This week")}</button>}
+        </div>
+      </div>
       <div className="mini-stats">
         <span><strong>{shown.length}</strong>{t("Students")}</span>
         <span><strong>{graduated}</strong>{t("Graduated")}</span>
-        <span><strong>{shown.filter((s) => !/Graduat/.test(s.graduation || "") && s.counted > 0).length}</strong>{t("On their way")}</span>
-        <span><strong>{shown.filter((s) => !s.counted).length}</strong>{t("No approved gig yet")}</span>
+        <span><strong>{weekRows.filter((w) => w.attended === "yes").length}</strong>{t("Attended this week")}</span>
+        <span><strong>{weekRows.filter((w) => w.attended === "no").length}</strong>{t("Missed this week")}</span>
+        <span><strong>{weekRows.reduce((n, w) => n + w.approved, 0)}</strong>{t("Gigs accepted this week")}</span>
+        <span><strong>{weekRows.reduce((n, w) => n + w.rejected, 0)}</strong>{t("Gigs rejected this week")}</span>
       </div>
       {!shown.length ? (
         <section className="panel"><p className="footnote">{students.length ? t("No student matches this search.") : t("No students in your groups yet.")}</p></section>
       ) : (
         <section className="panel coach-progress-list">
-          {shown.map((s) => (
+          {shown.map((s, i) => (
             <details key={s.id} className="coach-progress-row">
               <summary>
                 <span className="coach-progress-name">
                   <strong>{s.name}</strong>
                   <small>{s.group_id}</small>
+                </span>
+                {/* The portal sheet's summary: gigs accepted and rejected, of all its gigs. */}
+                <span className="coach-progress-portal-sum" title={t("On the ministry portal")}>
+                  {s.portal && s.portal.total !== null ? (
+                    <>
+                      <span className="cue is-ok">{t("{v0} accepted", { v0: s.portal.approved ?? 0 })}</span>
+                      <span className="cue is-bad">{t("{v0} rejected", { v0: s.portal.rejected ?? 0 })}</span>
+                      <small>{t("of {v0}", { v0: s.portal.total })}</small>
+                    </>
+                  ) : (
+                    <small>{t("Not on the portal yet")}</small>
+                  )}
+                </span>
+                <span className="coach-progress-week" title={t("The week shown")}>
+                  <span className={"cue " + (weekRows[i].attended === "yes" ? "is-ok" : weekRows[i].attended === "no" ? "is-bad" : "is-info")}>
+                    {weekRows[i].attended === "yes" ? t("Attended") : weekRows[i].attended === "no" ? t("Absent") : t("No session marked")}
+                  </span>
+                  {weekRows[i].gigs > 0 && <small>{t("{v0} new gigs", { v0: weekRows[i].gigs })}</small>}
                 </span>
                 <span className="coach-progress-count" title={t("Gigs that count toward graduation")}>
                   <GraduationDots graduation={s.graduation} />

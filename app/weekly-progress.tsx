@@ -94,7 +94,7 @@ export function WeeklyProgress({ data, onStudent }: { data: Row; onStudent: (id:
     });
   const clock = (value: string) =>
     new Date(value).toLocaleTimeString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", {
-      hour: "2-digit",
+      hour: "numeric", hour12: true,
       minute: "2-digit",
       timeZone: "Africa/Cairo",
     });

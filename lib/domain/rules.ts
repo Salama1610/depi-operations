@@ -75,11 +75,14 @@ export function nextGig(from: string, to: string, proof: boolean) {
     "This gig transition is not allowed. Complete the current step first.",
   );
 }
+/**
+ * A contact the coordinator had with a student. A screenshot is no longer
+ * needed (decided 10 Oct 2026); a short comment on what was said is.
+ */
 export function validateContact(x: any) {
   for (const k of [
     "student_id",
     "outcome",
-    "proof_id",
     "next_action",
     "owner",
     "due",
@@ -90,6 +93,7 @@ export function validateContact(x: any) {
       typeof x[k] === "string" && x[k].trim(),
       `Contact is incomplete: ${k.replaceAll("_", " ")} is required.`,
     );
+  ensure(String(x.notes || "").trim().length >= 3, "Write a short comment on the contact.");
   ensure(
     [
       "Responded",

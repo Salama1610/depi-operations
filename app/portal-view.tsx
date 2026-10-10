@@ -27,6 +27,93 @@ async function call(body: Row, failed: string) {
   return v;
 }
 
+/**
+ * Possible duplicates in the gigs sheet, for review: one gig link or one
+ * proof claimed by several students, and a student listing the same link
+ * more than once. Nothing is removed from here.
+ */
+function PortalDuplicates() {
+  const t = useT();
+  const [data, setData] = useState<Row | null>(null);
+  const [error, setError] = useState("");
+  const [open, setOpen] = useState(false);
+  async function load() {
+    setError("");
+    try {
+      const r = await fetch("/api/portal?duplicates=1", { cache: "no-store" });
+      const v = await r.json().catch(() => null);
+      if (!r.ok || !v || v.error) throw new Error(v?.error || t("Unable to check for duplicates."));
+      setData(v);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }
+  const people = (list: Row[]) => list.map((s) => s.name).join(" · ");
+  const cluster = (rows: Row[], empty: string) =>
+    !rows.length ? (
+      <p className="footnote">{t(empty)}</p>
+    ) : (
+      <table className="portal-gigs">
+        <thead>
+          <tr><th>{t("Link")}</th><th>{t("Students")}</th><th>{t("Rows")}</th></tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.link}>
+              <td><a className="text-link" href={r.link} target="_blank" rel="noreferrer" dir="ltr">{r.link.length > 70 ? r.link.slice(0, 70) + "…" : r.link}</a></td>
+              <td><bdi>{people(r.students)}</bdi></td>
+              <td>{r.count}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  return (
+    <details
+      className="portal-duplicates"
+      open={open}
+      onToggle={(e) => {
+        const next = (e.target as HTMLDetailsElement).open;
+        setOpen(next);
+        if (next && !data) load();
+      }}
+    >
+      <summary>{t("Possible duplicates in the gigs sheet")}</summary>
+      {error ? (
+        <small role="alert">{t(error)}</small>
+      ) : !data ? (
+        <small>{t("Loading…")}</small>
+      ) : (
+        <>
+          <h3>{t("The same gig link claimed by several students ({v0})", { v0: data.shared.length })}</h3>
+          {cluster(data.shared, "No gig link is claimed by more than one student.")}
+          <h3>{t("The same proof used by several students ({v0})", { v0: data.proofs.length })}</h3>
+          {cluster(data.proofs, "No proof is used by more than one student.")}
+          <h3>{t("A student listing the same link more than once ({v0})", { v0: data.repeats.length })}</h3>
+          {!data.repeats.length ? (
+            <p className="footnote">{t("No student lists the same link twice.")}</p>
+          ) : (
+            <table className="portal-gigs">
+              <thead>
+                <tr><th>{t("Student")}</th><th>{t("Link")}</th><th>{t("Times")}</th></tr>
+              </thead>
+              <tbody>
+                {data.repeats.slice(0, 200).map((r: Row) => (
+                  <tr key={r.portal_id + r.link}>
+                    <td><bdi>{r.name}</bdi></td>
+                    <td><a className="text-link" href={r.link} target="_blank" rel="noreferrer" dir="ltr">{r.link.length > 70 ? r.link.slice(0, 70) + "…" : r.link}</a></td>
+                    <td>{r.count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
+    </details>
+  );
+}
+
 export function PortalView({ staffName }: { staffName: (id: string) => string }) {
   const t = useT();
   // Dates in the page's language, with Latin digits like the rest of the app.
@@ -153,7 +240,7 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
     setShown(100);
   }
 
-  const when = (iso?: string) => (iso ? new Date(iso).toLocaleString(tag, { timeZone: "Africa/Cairo", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "—");
+  const when = (iso?: string) => (iso ? new Date(iso).toLocaleString(tag, { timeZone: "Africa/Cairo", day: "numeric", month: "short", hour: "numeric", hour12: true, minute: "2-digit" }) : "—");
   const problems = draft ? mappingProblems(draft.sheet, draft.mapping) : [];
 
   if (!data && !error) return <div className="panel"><RefreshCw className="spin" size={18} /> {t("Loading the portal sheets…")}</div>;
@@ -162,6 +249,7 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
       <p className="portal-lede">
         {t("The DEPI portal's students and gigs sheets are the cohort's official record. Services coordinators record in this app are internal validation.")}
       </p>
+      <PortalDuplicates />
       {data?.canUpload && (
         <div className="portal-uploads">
           {(["students", "gigs"] as PortalSheet[]).map((sheet) => {

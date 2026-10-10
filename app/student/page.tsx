@@ -57,7 +57,7 @@ function useDates() {
   const zone = { timeZone: "Africa/Cairo" } as const;
   return {
     day: (value: string) => new Date(value).toLocaleDateString(tag, { ...zone, day: "numeric", month: "short" }),
-    moment: (value: string) => new Date(value).toLocaleString(tag, { ...zone, day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }),
+    moment: (value: string) => new Date(value).toLocaleString(tag, { ...zone, day: "numeric", month: "short", hour: "numeric", hour12: true, minute: "2-digit" }),
   };
 }
 
@@ -124,6 +124,8 @@ type FeedbackSession = {
   starts_at: string;
   coach_name: string | null;
   given: boolean;
+  /** Open for a week after the session ends. */
+  open?: boolean;
   /** The student's own answers, once given. */
   mine?: { satisfaction: number; clarity: number; usefulness: number; searched_gig: number | boolean; liked?: string | null; comments?: string | null; at?: string } | null;
 };
@@ -153,7 +155,7 @@ function SessionFeedback({ sessions, onSent }: { sessions: FeedbackSession[]; on
   const [answers, setAnswers] = useState<FeedbackAnswers>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const due = sessions.filter((s) => !s.given);
+  const due = sessions.filter((s) => !s.given && s.open !== false);
   const complete =
     ratingQuestions.every((q) => answers[q.key]) && typeof answers.searched_gig === "boolean";
   async function send(sessionId: string) {
@@ -201,6 +203,8 @@ function SessionFeedback({ sessions, onSent }: { sessions: FeedbackSession[]; on
                 <span><strong>{sessionName(s.title)}</strong>{s.coach_name ? <small> · {s.coach_name}</small> : null}</span>
                 {s.given ? (
                   <span className="student-status success"><Check size={13} /> {t("Feedback sent")}</span>
+                ) : s.open === false ? (
+                  <span className="student-status">{t("Closed")}</span>
                 ) : openId !== s.id ? (
                   <button type="button" className="student-secondary" onClick={() => { setOpenId(s.id); setAnswers({}); setError(""); }}>{t("Give feedback")}</button>
                 ) : null}

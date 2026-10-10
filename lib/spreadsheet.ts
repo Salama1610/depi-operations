@@ -257,3 +257,55 @@ export async function readSheet(file: File, preferredSheet?: string) {
   });
   return objects(rows);
 }
+
+
+/**
+ * Every tab of an XLSX workbook as raw rows (arrays of cell texts, the header
+ * row included), for sheets read by column position rather than header name,
+ * such as the team's accounts sheet whose "Not Active" tab has no header over
+ * its email column.
+ */
+export async function readAllSheets(file: File): Promise<{ name: string; rows: string[][] }[]> {
+  ensure(file.size <= 25 * 1024 * 1024, "Import files must be smaller than 25 MB.");
+  ensure(file.name.toLowerCase().endsWith(".xlsx"), "Choose the XLSX workbook.");
+  const parts = unzipSync(new Uint8Array(await file.arrayBuffer()), {
+    filter: (f) =>
+      f.originalSize < 96 * 1024 * 1024 &&
+      /^xl\/(workbook\.xml|_rels\/workbook\.xml\.rels|sharedStrings\.xml|worksheets\/[^/]+\.xml)$/.test(f.name),
+  });
+  const parser = new DOMParser();
+  const read = (name: string) => parser.parseFromString(strFromU8(parts[name]), "text/xml");
+  ensure(parts["xl/workbook.xml"], "This file is not an Excel workbook.");
+  const relationships = parts["xl/_rels/workbook.xml.rels"]
+    ? new Map(
+        Array.from(read("xl/_rels/workbook.xml.rels").getElementsByTagName("Relationship")).map((r) => [
+          r.getAttribute("Id") || "",
+          (r.getAttribute("Target") || "").replace(/^\/?(xl\/)?/, ""),
+        ]),
+      )
+    : new Map<string, string>();
+  const strings = parts["xl/sharedStrings.xml"]
+    ? Array.from(read("xl/sharedStrings.xml").getElementsByTagName("si")).map((s) => s.textContent || "")
+    : [];
+  return Array.from(read("xl/workbook.xml").getElementsByTagName("sheet"))
+    .map((s) => ({
+      name: s.getAttribute("name") || "",
+      path: "xl/" + (relationships.get(s.getAttribute("r:id") || s.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships", "id") || "") || ""),
+    }))
+    .filter((s) => parts[s.path])
+    .map((s) => ({
+      name: s.name,
+      rows: Array.from(read(s.path).getElementsByTagName("row")).map((row) => {
+        const out: string[] = [];
+        for (const c of Array.from(row.getElementsByTagName("c"))) {
+          const ref = c.getAttribute("r") || "A1";
+          let n = 0;
+          for (const ch of ref.replace(/[0-9]/g, "")) n = n * 26 + ch.charCodeAt(0) - 64;
+          const v = c.getElementsByTagName("v")[0]?.textContent || "";
+          const type = c.getAttribute("t");
+          out[n - 1] = type === "s" ? strings[Number(v)] : type === "inlineStr" ? c.textContent || "" : v;
+        }
+        return Array.from(out, (v) => v ?? "");
+      }),
+    }));
+}

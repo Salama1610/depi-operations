@@ -452,7 +452,7 @@ export function Dashboard() {
           v1: num(active.length),
           v2: window.from === "0000-01-01" ? t("the start") : window.from,
           v3: window.to === "9999-12-31" ? t("today") : window.to,
-          v4: new Date(data.generated_at).toLocaleTimeString(ar ? "ar-EG-u-nu-latn" : "en-GB", { hour: "2-digit", minute: "2-digit" }),
+          v4: new Date(data.generated_at).toLocaleTimeString(ar ? "ar-EG-u-nu-latn" : "en-GB", { hour: "numeric", hour12: true, minute: "2-digit" }),
         })}
       </p>
 
@@ -556,7 +556,7 @@ export function Dashboard() {
                         <td className={p.checks ? "" : "is-zero"}>{num(p.checks)}</td>
                         <td className={p.reviews ? "" : "is-zero"}>{num(p.reviews)}</td>
                         <td className={p.tasks ? "" : "is-zero"}>{num(p.tasks)}</td>
-                        <td>{p.last ? new Date(p.last).toLocaleString(ar ? "ar-EG-u-nu-latn" : "en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : t("Never")}</td>
+                        <td>{p.last ? new Date(p.last).toLocaleString(ar ? "ar-EG-u-nu-latn" : "en-GB", { day: "numeric", month: "short", hour: "numeric", hour12: true, minute: "2-digit" }) : t("Never")}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -570,7 +570,7 @@ export function Dashboard() {
                   <tbody>
                     {audit.slice(0, 200).map((e, i) => (
                       <tr key={i}>
-                        <td>{new Date(e.created_at).toLocaleString(ar ? "ar-EG-u-nu-latn" : "en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</td>
+                        <td>{new Date(e.created_at).toLocaleString(ar ? "ar-EG-u-nu-latn" : "en-GB", { day: "numeric", month: "short", hour: "numeric", hour12: true, minute: "2-digit" })}</td>
                         <td>{who(e.actor)}</td>
                         <td>{t(actionNames[e.action] || e.action)}</td>
                         <td><bdi>{e.entity_id}</bdi></td>

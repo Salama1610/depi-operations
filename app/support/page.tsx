@@ -61,7 +61,7 @@ export default function SupportPage() {
   const t = useT();
   const tag = useLocale() === "ar" ? "ar-EG-u-nu-latn" : "en-GB";
   const when = (iso?: string) =>
-    iso ? new Date(iso).toLocaleString(tag, { timeZone: "Africa/Cairo", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : "—";
+    iso ? new Date(iso).toLocaleString(tag, { timeZone: "Africa/Cairo", day: "numeric", month: "short", hour: "numeric", hour12: true, minute: "2-digit" }) : "—";
   const [data, setData] = useState<Row | null>(null);
   const [loadError, setLoadError] = useState("");
   const [from, setFrom] = useState("other");

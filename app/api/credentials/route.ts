@@ -1,5 +1,5 @@
 import { env } from "@/lib/env";
-import { actor, keepsAccounts, permit, stmt, auditStmt, db, uid, now, rateLimit, scopeSql, refuseDemo } from "@/lib/server";
+import { actor, all, keepsAccounts, permit, stmt, auditStmt, db, uid, now, rateLimit, scopeSql, refuseDemo } from "@/lib/server";
 import { can, ensure } from "@/lib/domain/rules";
 import { credentialKey, credentialKeyConfigured, openCredential, sealCredential } from "@/lib/domain/account-secrets";
 import { resealLegacyCredentials } from "@/lib/credential-reseal";
@@ -36,6 +36,46 @@ async function mayReveal(u: any, accountId: string) {
   return Boolean(row);
 }
 
+/**
+ * Every password this person may open, for the Accounts list, where each one
+ * sits next to its email with a copy button (decided 10 Oct 2026, replacing
+ * the one-at-a-time Sign-in with a stated purpose). The same people as before:
+ * the account keepers see all of them; a coordinator the accounts assigned to
+ * them; a coordinator, supervisor or Project Operations the accounts a group
+ * of theirs is using, while the account is open for use. One audit entry
+ * records each listing.
+ */
+async function listCredentials(u: any) {
+  const keeper = can(u.roles, custodians) || keepsAccounts(u);
+  ensure(keeper || can(u.roles, ["Project Operations", "Operations Coordinator", "Team Supervisor"]), "Your staff role does not show account passwords.");
+  let rows: any[];
+  if (keeper) {
+    rows = await all("SELECT s.* FROM account_secrets s JOIN accounts a ON a.id=s.account_id");
+  } else {
+    const scope = scopeSql(u, "g", null);
+    rows = await all(
+      `SELECT s.* FROM account_secrets s JOIN accounts a ON a.id=s.account_id
+       WHERE a.status NOT IN ('Retired','Blocked','Under Review')
+         AND (a.coordinator_id=? OR a.coordinator_2_id=?
+              OR EXISTS (SELECT 1 FROM account_assignments n JOIN groups g ON g.id=n.group_id WHERE n.account_id=a.id AND ${scope.sql}))`,
+      u.id,
+      u.id,
+      ...scope.args,
+    );
+  }
+  const key = await credentialKey(env.CREDENTIAL_ENCRYPTION_KEY);
+  const out: Record<string, { username: string; password: string }> = {};
+  for (const row of rows) {
+    try {
+      out[row.account_id] = await openCredential(key, row.account_id, row);
+    } catch {
+      // A credential sealed with an older key stays hidden rather than failing the list.
+    }
+  }
+  await auditStmt(u, "Account passwords listed", "accounts", { count: Object.keys(out).length }).run();
+  return Response.json({ credentials: out }, { headers: { "Cache-Control": "no-store", Pragma: "no-cache" } });
+}
+
 export async function POST(req: Request) {
   try {
     const u = await actor();
@@ -46,6 +86,7 @@ export async function POST(req: Request) {
       "Cross-site credential access rejected.",
     );
     const x = await req.json();
+    if (x.action === "list") return await listCredentials(u);
     ensure(
       x.account_id && typeof x.purpose === "string" && x.purpose.trim().length >= 10,
       "Account and a meaningful access purpose are required.",
