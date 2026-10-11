@@ -121,6 +121,7 @@ import {
 } from "@/lib/domain/rules";
 import { readSheet, toCSV, toWorkbook, toXLSX } from "@/lib/spreadsheet";
 import { guessKeyColumn, guessMapping, normalizePhone } from "@/lib/domain/sheet-mapping";
+import { whatsappInvite } from "@/lib/domain/whatsapp";
 type Row = Record<string, any>;
 const nav = [
   ["home", "Overview", Home],
@@ -221,7 +222,7 @@ const actionCopy: Row = {
   bulk_group_owner:
     "The group and its students move to the coordinator you choose. The change is audited.",
   group_whatsapp:
-    "Paste the group's WhatsApp invite link (WhatsApp → group info → Invite via link). It then opens in one tap from the group, its sessions and each student's profile.",
+    "Paste the group's WhatsApp invite link (in WhatsApp: group info → Invite via link → Copy link). It opens in one tap from the group's card.",
 };
 const formatDay = (v: string, locale = "en-GB") =>
   new Date(v).toLocaleDateString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", {
@@ -6382,8 +6383,36 @@ See you there!`,
                 );
               }
               if (a === "group_whatsapp")
-                // Plain text: the server accepts the link as WhatsApp copies it and cleans it.
-                return field("whatsapp_link", t("WhatsApp group link"), "text", false);
+              {
+                // Taken as a phone pastes it: the invite is found in the text
+                // (extra words, "?mode=…", invisible marks) and shown clean.
+                const clean = whatsappInvite(form.whatsapp_link);
+                return (
+                  <>
+                    <label className="field">
+                      {t("WhatsApp group link")}
+                      <input
+                        type="text"
+                        dir="ltr"
+                        inputMode="url"
+                        autoComplete="off"
+                        value={form.whatsapp_link || ""}
+                        onChange={(e) => setForm({ ...form, whatsapp_link: e.target.value })}
+                        placeholder="https://chat.whatsapp.com/…"
+                      />
+                    </label>
+                    {String(form.whatsapp_link || "").trim() ? (
+                      clean ? (
+                        <p className="footnote" dir="auto">{t("Will be saved as:")} <bdi dir="ltr">{clean}</bdi></p>
+                      ) : (
+                        <p className="form-error" role="alert">{t("No WhatsApp group link found in what you pasted.")}</p>
+                      )
+                    ) : (
+                      <p className="footnote">{t("Leave it empty to remove the link.")}</p>
+                    )}
+                  </>
+                );
+              }
               if (a === "account_status") {
                 // The same moves the server allows from each state.
                 const flow: Record<string, string[]> = {

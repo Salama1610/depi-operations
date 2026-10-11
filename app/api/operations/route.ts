@@ -39,6 +39,7 @@ import { isNationalId, nationalIdProblem, normalizeNationalId, normalizePhone } 
 import { seed } from "@/lib/seed";
 import { appliesTo, beforeSessionKeys, checklistItem } from "@/lib/domain/session-checklist";
 import { cairoDay } from "@/lib/domain/programme-week";
+import { whatsappInvite } from "@/lib/domain/whatsapp";
 export const dynamic = "force-dynamic";
 const ops = ["Project Operations", "Operations Coordinator"];
 // Gig evidence passes three different people: a first check (the group's coach,
@@ -1737,16 +1738,11 @@ export async function POST(req: Request) {
           can(u.roles, ["Project Operations", "Operations Systems / Admin"]) || group.coordinator === u.id || group.supervisor === u.id,
           "Only the group's coordinator or supervisor, Project Operations or an administrator sets its WhatsApp link.",
         );
-        // Taken as WhatsApp gives it: "Copy link" adds "?mode=…" at the end,
-        // and people paste without "https://" or with "http://". The invite
-        // itself is stored, clean.
-        let link = String(x.whatsapp_link || "").trim().replace(/^http:\/\//i, "https://");
-        if (link && !/^https:\/\//i.test(link)) link = "https://" + link;
-        link = link.split(/[?#]/)[0].replace(/\/+$/, "");
-        ensure(
-          !link || (link.length <= 300 && /^https:\/\/(chat\.whatsapp\.com\/(invite\/)?[A-Za-z0-9]{10,}|wa\.me\/[\w/+-]+)$/i.test(link)),
-          "Paste the group's invite link, starting with https://chat.whatsapp.com/",
-        );
+        // Taken as a phone pastes it (extra words, "?mode=…", invisible
+        // direction marks): the invite is found in the text and stored clean.
+        const pasted = String(x.whatsapp_link || "").trim();
+        const link = pasted ? whatsappInvite(pasted.slice(0, 1000)) : "";
+        ensure(link !== null, "Paste the group's invite link, starting with https://chat.whatsapp.com/");
         auditPrevious = { whatsapp_link: group.whatsapp_link };
         auditValue = { group_id: id, whatsapp_link: link || null };
         jobs.push(stmt("UPDATE groups SET whatsapp_link=? WHERE id=?", link || null, id));

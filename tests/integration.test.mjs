@@ -2871,8 +2871,9 @@ test("groups keep a WhatsApp link, accounts can have a second coordinator, and t
   await dbExec("DELETE FROM rate_limits");
   const group = await dbRow("SELECT g.id,g.coordinator,u.email FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.status='Active' LIMIT 1");
   assert.match((await post("group_whatsapp", { id: group.id, whatsapp_link: "https://example.com/not-whatsapp" })).error, /invite link/);
-  // An administrator pastes the link as WhatsApp copies it: the "?mode=…" tail is dropped.
-  await check("group_whatsapp", { id: group.id, whatsapp_link: "chat.whatsapp.com/AbCdEfGhIjKlMnOp?mode=ems_copy_t" });
+  // An administrator pastes the link as a phone copies it into an Arabic page:
+  // invisible direction marks, share text around it and the "?mode=…" tail.
+  await check("group_whatsapp", { id: group.id, whatsapp_link: "‏‪Join my group: https://chat.whatsapp.com/AbCdEfGhIjKlMnOp?mode=ems_copy_t‬" });
   assert.equal((await dbRow("SELECT whatsapp_link FROM groups WHERE id=?", group.id)).whatsapp_link, "https://chat.whatsapp.com/AbCdEfGhIjKlMnOp");
   const other = await dbRow("SELECT id,email FROM users WHERE roles LIKE '%Operations Coordinator%' AND roles NOT LIKE '%Admin%' AND id<>? AND active=1 LIMIT 1", group.coordinator);
   current = { id: "other-login", email: other.email };

@@ -2429,4 +2429,8 @@ export const ar: Record<string, string> = {
   "No client accounts yet. The people who keep the accounts add them one at a time or upload the accounts sheet; top-ups are then recorded on the Credit tracker.": "لا توجد حسابات عملاء بعد. يضيفها من يديرون الحسابات واحداً تلو الآخر أو برفع شيت الحسابات، ثم يُسجَّل الشحن في متتبع الرصيد.",
   "Open the chat": "افتح المحادثة",
   "Only the group's coordinator or supervisor, Project Operations or an administrator sets its WhatsApp link.": "يضيف رابط واتساب للمجموعة منسقها أو مشرفها أو عمليات المشروع أو المسؤول فقط.",
+  "Paste the group's WhatsApp invite link (in WhatsApp: group info → Invite via link → Copy link). It opens in one tap from the group's card.": "الصق رابط دعوة مجموعة واتساب (في واتساب: معلومات المجموعة ← الدعوة عبر رابط ← نسخ الرابط). يفتح بلمسة واحدة من بطاقة المجموعة.",
+  "Will be saved as:": "سيُحفظ هكذا:",
+  "No WhatsApp group link found in what you pasted.": "لم يُعثر على رابط مجموعة واتساب فيما لصقته.",
+  "Leave it empty to remove the link.": "اتركه فارغاً لحذف الرابط.",
 };
