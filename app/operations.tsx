@@ -513,6 +513,9 @@ export default function Operations({ module: initialModule }: { module: string }
       month: new Date().toISOString().slice(0, 7), payee: "Coaches",
     }),
     [sessionFilters, setSessionFilters] = useState<Row>({ day: "All", time: "All" }),
+    // The training provider (YAT, HRV, EUI…) shown on Students, Groups and
+    // Sessions; one choice carries across the three pages.
+    [providerFilter, setProviderFilter] = useState("All"),
     // The schedule shows one programme week at a time: 0 is this week.
     [sessionWeek, setSessionWeek] = useState(0),
     [joinLogin, setJoinLogin] = useState<Row | null>(null),
@@ -1827,6 +1830,21 @@ See you there!`,
       </>
     );
   }
+  // The provider filter, shared by Students, Groups and Sessions.
+  const providers = Array.from(new Set(groups.map((g) => g.provider).filter(Boolean))).sort() as string[];
+  const providerOfGroup = new Map(groups.map((g) => [g.id, g.provider]));
+  const inProvider = (groupId: string) => providerFilter === "All" || providerOfGroup.get(groupId) === providerFilter;
+  const providerPick = (
+    <Pick
+      label={t("Provider")}
+      value={providerFilter}
+      onChange={(v) => {
+        setProviderFilter(v);
+        setPage(1);
+      }}
+      options={[{ value: "All", label: t("Every provider") }, ...providers.map((v) => ({ value: v, label: v }))]}
+    />
+  );
   let content: any;
   if (module === "home" && dashboardRole) {
     content = roleDashboard(dashboardRole);
@@ -2078,6 +2096,7 @@ See you there!`,
   } else if (module === "students") {
     const rows = students
       .filter(qMatch)
+      .filter((s) => inProvider(s.group_id))
       .filter(
         (s) =>
           filter === "All" ||
@@ -2087,10 +2106,15 @@ See you there!`,
           (filter === "Graduated" && s.graduation.includes("Graduate")) ||
           s.risk.status === filter,
       );
-    content = panel(
-      t("Student directory"),
-      paginate(rows, studentRows),
-      <span className="count">{rows.length}</span>,
+    content = (
+      <>
+        <div className="filter-row">{providerPick}</div>
+        {panel(
+          t("Student directory"),
+          paginate(rows, studentRows),
+          <span className="count">{rows.length}</span>,
+        )}
+      </>
     );
   } else if (module === "work") {
     let rows = openTasks.filter(qMatch);
@@ -2164,8 +2188,10 @@ See you there!`,
     );
   } else if (module === "groups") {
     content = (
+      <>
+      <div className="filter-row">{providerPick}</div>
       <div className="group-grid">
-        {groups.filter(qMatch).map((g) => {
+        {groups.filter(qMatch).filter((g) => inProvider(g.id)).map((g) => {
           const ss = students.filter((s) => s.group_id === g.id);
           const cc = ss.filter((s) => s.risk.status === "Critical").length;
           // The group's job profile: the one most of its students are enrolled on.
@@ -2272,6 +2298,7 @@ See you there!`,
           );
         })}
       </div>
+      </>
     );
   } else if (module === "sessions") {
     const activeSessions = sessions.filter((s) => s.status !== "Cancelled");
@@ -2326,6 +2353,7 @@ See you there!`,
     })();
     const sessionRows = sessions
       .filter(qMatch)
+      .filter((s) => inProvider(s.group_id))
       .filter(inShownWeek)
       .filter((session) => filter === "All" || session.status === filter)
       .filter((session) => sessionFilters.day === "All" || sessionDay(session) === sessionFilters.day)
@@ -2336,6 +2364,7 @@ See you there!`,
     const inRange = (iso: string) =>
       (!insightFilters.from || iso.slice(0, 10) >= insightFilters.from) && (!insightFilters.to || iso.slice(0, 10) <= insightFilters.to);
     const insightSessions = sessions
+      .filter((x) => inProvider(x.group_id))
       .filter((x) => insightFilters.group === "All" || x.group_id === insightFilters.group)
       .filter((x) => insightFilters.coach === "All" || x.coach_id === insightFilters.coach)
       .filter((x) => inRange(x.starts_at));
@@ -2537,6 +2566,7 @@ See you there!`,
               <button type="button" className="small-btn" onClick={() => setSessionWeek(0)}>{t("This week")}</button>
             )}
           </div>
+          {providerPick}
           <Pick
             label={t("Day")}
             value={sessionFilters.day}
@@ -5258,9 +5288,30 @@ See you there!`,
                       <span>{t("Coach")}: {owner(r.coach_id)}</span>
                     </div>
                     {r.status !== "Cancelled" && (
-                      <div className="confirm-pills is-row">
-                        {answer(t("Coordinator"), r.coordinator_confirmed_at, r.coordinator_unavailable)}
-                        {answer(t("Coach"), r.coach_confirmed_at, r.coach_unavailable)}
+                      <div className="confirm-answers">
+                        {/* Each person's answer, with what this viewer may do about it: the
+                            person undoes their own; a session leader confirms or undoes either. */}
+                        {(["coordinator", "coach"] as const).map((side) => {
+                          const at = side === "coach" ? r.coach_confirmed_at : r.coordinator_confirmed_at;
+                          const away = side === "coach" ? r.coach_unavailable : r.coordinator_unavailable;
+                          const self = side === "coach" ? answersAsCoach(r) : answersAsCoordinator(r);
+                          const upcoming = ["Scheduled", "Confirmed"].includes(r.status) && Date.parse(r.starts_at) > Date.now();
+                          return (
+                            <div className="confirm-answer" key={side}>
+                              {answer(side === "coach" ? t("Coach") : t("Coordinator"), at, away)}
+                              {upcoming && (at || away) && (self || plansSession(r)) && (
+                                <button type="button" className="small-btn" disabled={busy} onClick={() => quick("session_unconfirm", { id: r.id, for: side })}>
+                                  {t("Undo")}
+                                </button>
+                              )}
+                              {upcoming && !at && !away && plansSession(r) && !self && (
+                                <button type="button" className="small-btn" disabled={busy} onClick={() => quick("session_confirm", { id: r.id, for: side })}>
+                                  {side === "coach" ? t("Confirm for the coach") : t("Confirm for the coordinator")}
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                     <div className="student-progress-bar checklist-progress"><span style={{ width: `${steps.length ? (100 * done) / steps.length : 0}%` }} /></div>

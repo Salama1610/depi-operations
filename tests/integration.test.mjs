@@ -2734,6 +2734,47 @@ test("the coordinator's checklist: instructor confirmed before, instructor enter
   current = { id: "owner", email: "owner@example.com" };
 });
 
+test("confirmations: the checklist tick is the coach's confirmation, leaders answer on behalf, and undo clears it", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  const group = await dbRow("SELECT g.id,u.id uid,u.email FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.status='Active' AND g.id NOT IN (SELECT group_id FROM sessions WHERE week=8) LIMIT 1");
+  await check("session", { id: "SES-UNDO-1", group_id: group.id, title: "Week 8 coaching", starts_at: new Date(Date.now() + 150 * 86400000).toISOString(), week: 8, duration_minutes: 180, coach_id: "staff-coach" });
+  const row = () => dbRow("SELECT * FROM sessions WHERE id='SES-UNDO-1'");
+  // The coordinator ticks "Coach confirmed": the coach is confirmed on the session too.
+  current = { id: group.uid, email: group.email };
+  await check("session_check", { id: "SES-UNDO-1", item: "instructor_confirmed" });
+  assert.ok((await row()).coach_confirmed_at, "the tick confirms the coach");
+  // Undo clears both, including when the coach had confirmed themselves.
+  await check("session_check", { id: "SES-UNDO-1", item: "instructor_confirmed", done: false });
+  assert.equal((await row()).coach_confirmed_at, null);
+  current = { id: "coach-login", email: "staff-coach@example.invalid" };
+  await check("session_confirm", { id: "SES-UNDO-1" });
+  current = { id: group.uid, email: group.email };
+  await check("session_check", { id: "SES-UNDO-1", item: "instructor_confirmed", done: false });
+  assert.equal((await row()).coach_confirmed_at, null, "undoing the step undoes the coach's own confirmation");
+  // An administrator (a session leader) confirms for the coordinator and the coach.
+  current = { id: "owner", email: "owner@example.com" };
+  await check("session_confirm", { id: "SES-UNDO-1", for: "coordinator" });
+  await check("session_confirm", { id: "SES-UNDO-1", for: "coach" });
+  let r = await row();
+  assert.ok(r.coordinator_confirmed_at && r.coach_confirmed_at);
+  assert.equal(r.status, "Confirmed");
+  assert.equal(r.coach_id, "staff-coach", "confirming for the coach keeps the session's coach");
+  // And undoes either answer; the session goes back to Scheduled.
+  await check("session_unconfirm", { id: "SES-UNDO-1", for: "coordinator" });
+  r = await row();
+  assert.equal(r.coordinator_confirmed_at, null);
+  assert.equal(r.status, "Scheduled");
+  // The coordinator undoes only their own answer; the coach cannot undo the coordinator's.
+  current = { id: group.uid, email: group.email };
+  await check("session_confirm", { id: "SES-UNDO-1" });
+  current = { id: "coach-login", email: "staff-coach@example.invalid" };
+  assert.match((await post("session_unconfirm", { id: "SES-UNDO-1", for: "coordinator" })).error, /person who answered or a session leader/);
+  await check("session_unconfirm", { id: "SES-UNDO-1", for: "coach" });
+  assert.equal((await row()).coach_confirmed_at, null);
+  assert.ok((await row()).coordinator_confirmed_at, "the coordinator's answer stays");
+  current = { id: "owner", email: "owner@example.com" };
+});
+
 test("attendance is taken from the session itself, each student attended or absent", async () => {
   current = { id: "owner", email: "owner@example.com" };
   const group = await dbRow("SELECT g.id,u.id uid,u.email FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.status='Active' AND g.id NOT IN (SELECT group_id FROM sessions WHERE week IN (5,6)) AND (SELECT count(*) FROM students s WHERE s.group_id=g.id AND s.lifecycle='Active')>=2 LIMIT 1");

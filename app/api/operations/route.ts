@@ -100,7 +100,7 @@ const demoActions = new Set([
   "gig", "gig_transition", "evidence", "review", "transfer", "account_request", "student",
   "account_coordinator",
   "session", "session_attendance", "session_cancel", "session_check", "session_coach", "session_confirm",
-  "session_reschedule", "session_unavailable",
+  "session_reschedule", "session_unavailable", "session_unconfirm",
 ]);
 
 /**
@@ -984,7 +984,11 @@ export async function POST(req: Request) {
         // attending, or unavailable with a reason. It reads Confirmed only once
         // both attend. Someone unavailable puts it back to Scheduled and the
         // leaders are told, so they can cover or reschedule it.
-        permit(u, ["Coach", "Operations Coordinator"]);
+        // The session leaders (Coach Operations, Project Operations,
+        // administrators) can answer on someone's behalf: x.for names whose
+        // answer it is, the coordinator's or the coach's.
+        permit(u, ["Coach", "Operations Coordinator", ...sessionLeaders]);
+        const onBehalf = can(u.roles, sessionLeaders) && (x.for === "coordinator" || x.for === "coach") ? (x.for as string) : null;
         const attending = x.action === "session_confirm";
         const session: any = await stmt(
           "SELECT * FROM sessions WHERE id=?",
@@ -996,21 +1000,22 @@ export async function POST(req: Request) {
           attending ? "Only a scheduled session can be confirmed." : "Only an upcoming session can be answered.",
         );
         const group: any = await stmt("SELECT * FROM groups WHERE id=?", session.group_id).first();
-        const asCoach =
-          can(u.roles, ["Coach"]) &&
-          (session.coach_id
-            ? session.coach_id === u.id
-            : Boolean(
-                await stmt(
-                  "SELECT id FROM group_coaches WHERE group_id=? AND user_id=? AND status='Active'",
-                  session.group_id,
-                  u.id,
-                ).first(),
-              ));
-        const asCoordinator = group?.coordinator === u.id && can(u.roles, ["Operations Coordinator"]);
+        const asCoach = onBehalf
+          ? onBehalf === "coach"
+          : can(u.roles, ["Coach"]) &&
+            (session.coach_id
+              ? session.coach_id === u.id
+              : Boolean(
+                  await stmt(
+                    "SELECT id FROM group_coaches WHERE group_id=? AND user_id=? AND status='Active'",
+                    session.group_id,
+                    u.id,
+                  ).first(),
+                ));
+        const asCoordinator = onBehalf ? onBehalf === "coordinator" : group?.coordinator === u.id && can(u.roles, ["Operations Coordinator"]);
         ensure(
           asCoach || asCoordinator,
-          "Only the group's coordinator or the session's coach can answer for it.",
+          "Only the group's coordinator or the session's coach can answer for it, or a session leader on their behalf.",
         );
         const reason = String(x.reason || "").trim();
         if (!attending) ensure(reason.length >= 5, "Say why you cannot attend.");
@@ -1027,10 +1032,13 @@ export async function POST(req: Request) {
         const both = Boolean(coachAt && coordinatorAt);
         const who = asCoach && asCoordinator ? "The coordinator and coach" : asCoach ? "The coach" : "The coordinator";
         auditPrevious = session;
+        if (onBehalf) auditValue = { ...auditValue, on_behalf_of: onBehalf };
         jobs.push(
           stmt(
             "UPDATE sessions SET coach_id=?,coach_confirmed_at=?,coordinator_confirmed_at=?,coach_unavailable=?,coordinator_unavailable=?,status=?,confirmed_at=?,updated_at=? WHERE id=?",
-            session.coach_id || (asCoach ? u.id : null),
+            // A coach answering attaches themselves; a leader answering for the coach does not.
+            session.coach_id ||
+              (asCoach && !onBehalf ? u.id : asCoach && group?.coach && group.coach !== "system-unassigned-coach" ? group.coach : null),
             coachAt,
             coordinatorAt,
             coachAway,
@@ -1074,6 +1082,43 @@ export async function POST(req: Request) {
           for (const recipient of leaders)
             jobs.push(notify(recipient, title, "session", session.id, "Urgent", `session-unavailable:${session.id}:${u.id}:${t}:${recipient}`));
         }
+        break;
+      }
+      case "session_unconfirm": {
+        // Undoing an answer (x.for: "coordinator" or "coach"), attending or
+        // unavailable: by the person themself, or by a session leader. The
+        // session goes back to Scheduled and its case reopens. For the coach
+        // it also clears the checklist's "Coach confirmed" step, which is the
+        // same fact.
+        permit(u, ["Coach", "Operations Coordinator", ...sessionLeaders]);
+        ensure(x.for === "coordinator" || x.for === "coach", "Choose whose answer to undo.");
+        const session: any = await stmt("SELECT * FROM sessions WHERE id=?", id).first();
+        ensure(session, "Session not found.");
+        ensure(["Scheduled", "Confirmed"].includes(session.status) && Date.parse(session.starts_at) > Date.now(), "Only an upcoming session's answer can be undone.");
+        const group: any = await stmt("SELECT * FROM groups WHERE id=?", session.group_id).first();
+        const leader = can(u.roles, sessionLeaders);
+        const self =
+          x.for === "coordinator"
+            ? group?.coordinator === u.id && can(u.roles, ["Operations Coordinator"])
+            : can(u.roles, ["Coach"]) && (session.coach_id ? session.coach_id === u.id : group?.coach === u.id);
+        ensure(leader || self, "Only the person who answered or a session leader can undo it.");
+        const coach = x.for === "coach";
+        ensure(
+          coach ? session.coach_confirmed_at || session.coach_unavailable : session.coordinator_confirmed_at || session.coordinator_unavailable,
+          "There is no answer to undo.",
+        );
+        auditPrevious = session;
+        jobs.push(
+          stmt(
+            coach
+              ? "UPDATE sessions SET coach_confirmed_at=NULL,coach_unavailable=NULL,status='Scheduled',confirmed_at=NULL,updated_at=? WHERE id=?"
+              : "UPDATE sessions SET coordinator_confirmed_at=NULL,coordinator_unavailable=NULL,status='Scheduled',confirmed_at=NULL,updated_at=? WHERE id=?",
+            t,
+            id,
+          ),
+          ...(coach ? [stmt("DELETE FROM session_checks WHERE session_id=? AND item='instructor_confirmed'", id)] : []),
+          ...(await sessionCase(session, group, "In Progress", `${coach ? "The coach's" : "The coordinator's"} answer was undone${leader && !self ? " by a session leader" : ""}.`, u.id, t)),
+        );
         break;
       }
       case "session_reschedule": {
@@ -1254,6 +1299,33 @@ export async function POST(req: Request) {
           );
         else if (!done && existing)
           jobs.push(stmt("DELETE FROM session_checks WHERE id=?", existing.id));
+        // "Coach confirmed" and the coach's own confirmation are one fact:
+        // ticking it confirms the coach on the session, and undoing it
+        // clears that confirmation too (it used to stay, so Undo seemed to
+        // do nothing when the coach had confirmed themselves).
+        if (item!.key === "instructor_confirmed" && ["Scheduled", "Confirmed"].includes(session.status)) {
+          if (done && !session.coach_confirmed_at && !session.coach_unavailable) {
+            const both = Boolean(session.coordinator_confirmed_at);
+            jobs.push(
+              stmt(
+                "UPDATE sessions SET coach_confirmed_at=?,status=?,confirmed_at=?,updated_at=? WHERE id=?",
+                t,
+                both ? "Confirmed" : "Scheduled",
+                both ? session.confirmed_at || t : null,
+                t,
+                id,
+              ),
+              ...(await sessionCase(session, group, both ? "Resolved" : "In Progress", both ? "Confirmed by the coordinator and the coach." : "The coach confirmed. Waiting for the coordinator.", u.id, t)),
+            );
+          }
+          if (!done && (session.coach_confirmed_at || existing)) {
+            jobs.push(
+              stmt("UPDATE sessions SET coach_confirmed_at=NULL,status='Scheduled',confirmed_at=NULL,updated_at=? WHERE id=?", t, id),
+              stmt("DELETE FROM session_checks WHERE session_id=? AND item='instructor_confirmed'", id),
+              ...(await sessionCase(session, group, "In Progress", "The coach's confirmation was undone.", u.id, t)),
+            );
+          }
+        }
         break;
       }
       case "session_coach": {

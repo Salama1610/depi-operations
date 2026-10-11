@@ -1291,3 +1291,6 @@ td .searchable-select,td .pick-inline{max-width:240px;min-width:0}
 .service-open-name{display:inline-flex;align-items:center;gap:5px}
 .service-open .service-url{max-width:260px}
 .dash-people .table-subline{white-space:normal;overflow-wrap:anywhere}
+.confirm-answers{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0}
+.confirm-answer{flex:1 1 220px;display:flex;flex-direction:column;gap:6px}
+.confirm-answer .small-btn{align-self:flex-start}

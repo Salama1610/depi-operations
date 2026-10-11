@@ -2433,4 +2433,12 @@ export const ar: Record<string, string> = {
   "Will be saved as:": "سيُحفظ هكذا:",
   "No WhatsApp group link found in what you pasted.": "لم يُعثر على رابط مجموعة واتساب فيما لصقته.",
   "Leave it empty to remove the link.": "اتركه فارغاً لحذف الرابط.",
+  "Every provider": "كل مقدمي التدريب",
+  "Confirm for the coach": "تأكيد نيابةً عن المدرب",
+  "Confirm for the coordinator": "تأكيد نيابةً عن المنسق",
+  "Only the person who answered or a session leader can undo it.": "يتراجع عن الرد صاحبه أو أحد مسؤولي الجلسات فقط.",
+  "There is no answer to undo.": "لا يوجد رد للتراجع عنه.",
+  "Only an upcoming session's answer can be undone.": "يمكن التراجع عن الرد للجلسات القادمة فقط.",
+  "Choose whose answer to undo.": "اختر رد من تريد التراجع عنه.",
+  "Only the group's coordinator or the session's coach can answer for it, or a session leader on their behalf.": "يرد على الجلسة منسق المجموعة أو مدرب الجلسة، أو أحد مسؤولي الجلسات نيابةً عنهما.",
 };
