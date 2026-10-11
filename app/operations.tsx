@@ -3862,7 +3862,7 @@ See you there!`,
                   { key: "slot", label: t("Service"), render: (r) => (
                       <a className="text-link service-open" href={r.url} target="_blank" rel="noreferrer" title={t("Open the student's service")}>
                         <strong className="service-open-name">{serviceLabel(r.platform)} <ExternalLink size={14} /></strong>
-                        <small className="table-subline service-url">{r.url}</small>
+                        <small className="table-subline service-url" title={r.url}>{r.url}</small>
                         {r.submitted_at && <small className="table-subline">{t("Uploaded {v0}", { v0: new Date(r.submitted_at).toLocaleString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { day: "numeric", month: "short", hour: "numeric", hour12: true, minute: "2-digit" }) })}</small>}
                       </a>
                     ) },
