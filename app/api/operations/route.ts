@@ -1735,11 +1735,16 @@ export async function POST(req: Request) {
         ensure(group, "Group not found.");
         ensure(
           can(u.roles, ["Project Operations", "Operations Systems / Admin"]) || group.coordinator === u.id || group.supervisor === u.id,
-          "Only the group's coordinator or supervisor, or Project Operations, sets its WhatsApp link.",
+          "Only the group's coordinator or supervisor, Project Operations or an administrator sets its WhatsApp link.",
         );
-        const link = String(x.whatsapp_link || "").trim();
+        // Taken as WhatsApp gives it: "Copy link" adds "?mode=…" at the end,
+        // and people paste without "https://" or with "http://". The invite
+        // itself is stored, clean.
+        let link = String(x.whatsapp_link || "").trim().replace(/^http:\/\//i, "https://");
+        if (link && !/^https:\/\//i.test(link)) link = "https://" + link;
+        link = link.split(/[?#]/)[0].replace(/\/+$/, "");
         ensure(
-          !link || (link.length <= 300 && /^https:\/\/(chat\.whatsapp\.com\/[A-Za-z0-9]{10,}|wa\.me\/[\w/?=&%+-]+)$/.test(link)),
+          !link || (link.length <= 300 && /^https:\/\/(chat\.whatsapp\.com\/(invite\/)?[A-Za-z0-9]{10,}|wa\.me\/[\w/+-]+)$/i.test(link)),
           "Paste the group's invite link, starting with https://chat.whatsapp.com/",
         );
         auditPrevious = { whatsapp_link: group.whatsapp_link };

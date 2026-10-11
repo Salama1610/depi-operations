@@ -6382,7 +6382,8 @@ See you there!`,
                 );
               }
               if (a === "group_whatsapp")
-                return field("whatsapp_link", t("WhatsApp group link"), "url", false);
+                // Plain text: the server accepts the link as WhatsApp copies it and cleans it.
+                return field("whatsapp_link", t("WhatsApp group link"), "text", false);
               if (a === "account_status") {
                 // The same moves the server allows from each state.
                 const flow: Record<string, string[]> = {

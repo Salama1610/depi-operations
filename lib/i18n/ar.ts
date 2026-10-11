@@ -2428,4 +2428,5 @@ export const ar: Record<string, string> = {
   "Coordinator / coach": "المنسق / المدرب",
   "No client accounts yet. The people who keep the accounts add them one at a time or upload the accounts sheet; top-ups are then recorded on the Credit tracker.": "لا توجد حسابات عملاء بعد. يضيفها من يديرون الحسابات واحداً تلو الآخر أو برفع شيت الحسابات، ثم يُسجَّل الشحن في متتبع الرصيد.",
   "Open the chat": "افتح المحادثة",
+  "Only the group's coordinator or supervisor, Project Operations or an administrator sets its WhatsApp link.": "يضيف رابط واتساب للمجموعة منسقها أو مشرفها أو عمليات المشروع أو المسؤول فقط.",
 };
