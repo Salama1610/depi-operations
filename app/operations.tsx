@@ -445,6 +445,9 @@ export default function Operations({ module: initialModule }: { module: string }
   const locale = useLocale();
   const dir = useDir();
   const fmt = (v: string) => (v ? formatDay(v, locale) : t("Not recorded"));
+  // A day and time in the reader's language, Cairo time, 12-hour.
+  const moment = (v?: string) =>
+    v ? new Date(v).toLocaleString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { timeZone: "Africa/Cairo", day: "numeric", month: "short", year: "numeric", hour: "numeric", hour12: true, minute: "2-digit" }) : "";
   // Which module is showing is client state, not a route. The sidebar used to
   // be plain links, so every click reloaded the page and re-fetched the whole
   // workspace. Now a click changes the address bar and this state; the data
@@ -3388,7 +3391,8 @@ See you there!`,
         rows,
         [
           studentCol,
-          { key: "title", label: t("Service") },
+          // A long title or a pasted link wraps inside its column.
+          { key: "title", label: t("Service"), render: (r) => <span className="wrap-text">{r.title}</span> },
           { key: "platform", label: t("Platform") },
           {
             key: "value",
@@ -5040,11 +5044,12 @@ See you there!`,
                         ) : serviceLinks.filter((link) => link.student_id === selectedStudent.id).map((link) => (
                           <article key={link.id}>
                             <div className="detail-actions"><Badge value={serviceLabel(link.platform)} /><Badge value={qcState(link.qc_status)} /><Badge value={link.auto_status} /></div>
-                            <h3><a className="text-link" href={link.url} target="_blank" rel="noreferrer">{link.platform} <ExternalLink size={14} /></a></h3>
+                            <h3><a className="text-link" href={link.url} target="_blank" rel="noreferrer">{serviceLabel(link.platform)} <ExternalLink size={14} /></a></h3>
+                            <small className="service-link-url" dir="ltr">{link.url}</small>
                             <p>{(() => { try { return checkText(JSON.parse(link.auto_result || "{}").message); } catch { return t("Automatic details unavailable."); } })()}</p>
-                            <small>{t("Revision")}{" "}{link.revision} {t("· submitted")}{" "}{new Date(link.submitted_at).toLocaleString()}{link.qc_at ? t(" · reviewed {v0} by {v1}", { v0: new Date(link.qc_at).toLocaleString(), v1: link.reviewer_name || owner(link.qc_actor) }) : ""}</small>
+                            <small>{t("Revision")}{" "}{link.revision} {t("· submitted")}{" "}{moment(link.submitted_at)}{link.qc_at ? t(" · reviewed {v0} by {v1}", { v0: moment(link.qc_at), v1: link.reviewer_name || owner(link.qc_actor) }) : ""}</small>
                             {serviceLinkReviews.filter((review) => review.service_link_id === link.id).map((review) => (
-                              <div className="info-box" key={review.id}><Badge value={review.decision} /><span>{review.comment}</span><small>{new Date(review.reviewed_at).toLocaleString()} · {review.reviewer_name}</small></div>
+                              <div className="info-box" key={review.id}><Badge value={review.decision} /><span>{review.comment}</span><small>{moment(review.reviewed_at)} · {review.reviewer_name}</small></div>
                             ))}
                           </article>
                         ))}
@@ -5061,7 +5066,7 @@ See you there!`,
                             return { ...g, review, stage: review ? review.status : g.status };
                           }),
                         [
-                          { key: "title", label: t("Service") },
+                          { key: "title", label: t("Service"), render: (r) => <span className="wrap-text">{r.title}</span> },
                           { key: "value", label: t("Value"), render: (r) => r.currency + " " + r.value },
                           { key: "stage", label: t("Review stage"), render: (r) => <Badge value={r.stage} /> },
                         ],

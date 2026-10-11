@@ -1294,3 +1294,14 @@ td .searchable-select,td .pick-inline{max-width:240px;min-width:0}
 .confirm-answers{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0}
 .confirm-answer{flex:1 1 220px;display:flex;flex-direction:column;gap:6px}
 .confirm-answer .small-btn{align-self:flex-start}
+/* Long service titles and links wrap instead of running out of their box. */
+.wrap-text{display:block;white-space:normal;overflow-wrap:anywhere;min-width:14ch;max-width:340px}
+.service-link-url{display:block;max-width:100%;overflow-wrap:anywhere;word-break:break-all;color:#7c8aa0}
+.history article{max-width:100%;min-width:0}
+.history article>*{max-width:100%}
+.history p,.history small,.history .info-box span,.history .info-box small{overflow-wrap:anywhere;min-width:0}
+.history .info-box{max-width:100%;min-width:0;flex:1 1 auto}
+.student-qc-note,.student-check-note,.student-meta{overflow-wrap:anywhere;min-width:0}
+/* Student 360 header: a long name, group code or email wraps on a phone. */
+.detail-header>div{min-width:0}
+.detail-header h2,.detail-header p,.contact-line a{overflow-wrap:anywhere;min-width:0}
