@@ -23,7 +23,7 @@ import { AccountsSheetUpload } from "./accounts-sheet";
 import { Opportunities } from "./opportunities";
 import { scoreOf } from "@/lib/domain/feedback";
 import { coachPayout, coachRates } from "@/lib/domain/payouts";
-import { checklistState, sessionChecklist, type ChecklistItem } from "@/lib/domain/session-checklist";
+import { checklistState, confirmOpensAt, confirmWindowOpen, sessionChecklist, type ChecklistItem } from "@/lib/domain/session-checklist";
 import { Suspense, lazy, useState, useEffect } from "react";
 import {
   Home,
@@ -196,6 +196,7 @@ const titles: Row = {
   group_close: "Close group",
   service_qc_review: "Review student service link",
   bulk_group_owner: "Change coordinator",
+  group_coach: "Change the group's coach",
   group_whatsapp: "WhatsApp group link",
 };
 const actionCopy: Row = {
@@ -221,6 +222,8 @@ const actionCopy: Row = {
     "One link at a time. Approve a correct link, or reject it with a clear comment for the student.",
   bulk_group_owner:
     "The group and its students move to the coordinator you choose. The change is audited.",
+  group_coach:
+    "Every session from the day you choose to the end moves to the new coach. Sessions before it keep the coach who held them. You can still change one session's coach on its own from Sessions.",
   group_whatsapp:
     "Paste the group's WhatsApp invite link (in WhatsApp: group info → Invite via link → Copy link). It opens in one tap from the group's card.",
 };
@@ -790,6 +793,8 @@ export default function Operations({ module: initialModule }: { module: string }
     setFormError("");
   }
   async function mutate(action: string, values: Row) {
+    // Changing a group's coach is the same handover as its coordinator, on the program API.
+    if (action === "group_coach") action = "bulk_group_owner";
     const r = await fetch(action === "bulk_group_owner" ? "/api/program" : "/api/operations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1481,9 +1486,21 @@ See you there!`,
     r.status !== "Cancelled" &&
     item.owner !== "auto" &&
     (plansSession(r) || (item.owner === "coordinator" ? answersAsCoordinator(r) : item.owner === "coach" ? answersAsCoach(r) : false));
-  const canAttend = (r: Row) =>
+  // Still to confirm by this person; confirming itself opens 48 hours before the session.
+  const owesAnswer = (r: Row) =>
     r.status === "Scheduled" &&
     ((answersAsCoach(r) && !r.coach_confirmed_at) || (answersAsCoordinator(r) && !r.coordinator_confirmed_at));
+  const canAttend = (r: Row) => owesAnswer(r) && confirmWindowOpen(r.starts_at);
+  const confirmLater = (r: Row) =>
+    owesAnswer(r) && !confirmWindowOpen(r.starts_at) ? (
+      <small className="table-subline">
+        {t("Confirming opens {v0}", {
+          v0: confirmOpensAt(r.starts_at).toLocaleString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", {
+            timeZone: "Africa/Cairo", weekday: "short", day: "numeric", month: "short", hour: "numeric", hour12: true, minute: "2-digit",
+          }),
+        })}
+      </small>
+    ) : null;
   const canDecline = (r: Row) =>
     ["Scheduled", "Confirmed"].includes(r.status) &&
     ((answersAsCoach(r) && !r.coach_unavailable) || (answersAsCoordinator(r) && !r.coordinator_unavailable));
@@ -1710,6 +1727,7 @@ See you there!`,
               {canAttend(s) && (
                 <button className="small-btn" disabled={busy} onClick={() => quick("session_confirm", { id: s.id })}>{t("Attending")}</button>
               )}
+              {confirmLater(s)}
               {takesAttendance(s) && (
                 <button className="small-btn" onClick={() => openAttendance(s)}>{t("Take attendance")}</button>
               )}
@@ -2259,6 +2277,21 @@ See you there!`,
                     {t("Change coordinator")}
                   </button>
                 )}
+                {can(user.roles, ["Coach Operations"]) && g.status !== "Archived" && (
+                  <button
+                    className="small-btn"
+                    onClick={() =>
+                      open("group_coach", {
+                        group_ids: [g.id],
+                        owner_type: "Coach",
+                        owner: g.coach && g.coach !== "system-unassigned-coach" ? g.coach : "",
+                        from: new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" }),
+                      })
+                    }
+                  >
+                    {t("Change coach")}
+                  </button>
+                )}
                 {g.session_link && (
                   <a className="small-btn" href={g.session_link} target="_blank" rel="noreferrer">
                     <ExternalLink size={14} /> {t("Session link")}
@@ -2785,6 +2818,7 @@ See you there!`,
                 {answersAsCoordinator(r) && !r.coordinator_confirmed_at ? t("Confirm · then message the group") : t("Attending")}
               </button>
             )}
+            {confirmLater(r)}
             {/* The coordinator can send the group its confirmation again. */}
             {answersAsCoordinator(r) && r.status === "Confirmed" && Date.parse(r.starts_at) > Date.now() && (
               <button className="small-btn" onClick={() => setGroupMessage(confirmMessage(r))}>
@@ -5856,6 +5890,35 @@ See you there!`,
                         })
                         .map((u: Row) => ({ value: u.id, label: u.name + (u.title ? " · " + t(u.title) : "") })),
                     )}
+                    {field("reason", t("Reason for the change"))}
+                  </>
+                );
+              if (a === "group_coach")
+                return (
+                  <>
+                    <div className="info-box">
+                      <strong>{(form.group_ids || []).join(", ")}</strong>
+                    </div>
+                    {choice(
+                      "owner",
+                      t("New coach"),
+                      staff
+                        .filter((u: Row) => {
+                          const held = Array.isArray(u.roles) ? u.roles : JSON.parse(u.roles || "[]");
+                          return u.active !== false && u.active !== 0 && held.includes("Coach");
+                        })
+                        .map((u: Row) => ({ value: u.id, label: u.name + (u.title ? " · " + t(u.title) : "") })),
+                    )}
+                    <label className="field">
+                      {t("Starts from")}
+                      <input
+                        type="date"
+                        required
+                        value={form.from || ""}
+                        min={new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" })}
+                        onChange={(e) => setForm({ ...form, from: e.target.value })}
+                      />
+                    </label>
                     {field("reason", t("Reason for the change"))}
                   </>
                 );

@@ -68,3 +68,21 @@ export function checklistState(
     if (appliesTo(item, session)) result[item.key] = state[item.key] || { done: false };
   return result;
 }
+
+/**
+ * Attending is confirmed only in the 48 hours before a session, so nobody
+ * confirms a whole term of sessions in one go. Saying "unavailable" is open at
+ * any time (early warning helps), and the session leaders, answering on
+ * someone's behalf, are not held to the window.
+ */
+export const CONFIRM_WINDOW_HOURS = 48;
+
+export function confirmWindowOpen(startsAt: string | number | Date, now = Date.now()) {
+  const start = new Date(startsAt).getTime();
+  return start - now <= CONFIRM_WINDOW_HOURS * 3600000;
+}
+
+/** When confirming opens for a session. */
+export function confirmOpensAt(startsAt: string | number | Date) {
+  return new Date(new Date(startsAt).getTime() - CONFIRM_WINDOW_HOURS * 3600000);
+}

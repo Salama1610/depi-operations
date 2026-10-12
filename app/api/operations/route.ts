@@ -37,7 +37,7 @@ import {
 } from "@/lib/domain/rules";
 import { isNationalId, nationalIdProblem, normalizeNationalId, normalizePhone } from "@/lib/domain/sheet-mapping";
 import { seed } from "@/lib/seed";
-import { appliesTo, beforeSessionKeys, checklistItem } from "@/lib/domain/session-checklist";
+import { appliesTo, beforeSessionKeys, checklistItem, confirmWindowOpen, CONFIRM_WINDOW_HOURS } from "@/lib/domain/session-checklist";
 import { cairoDay } from "@/lib/domain/programme-week";
 import { whatsappInvite } from "@/lib/domain/whatsapp";
 export const dynamic = "force-dynamic";
@@ -1019,6 +1019,12 @@ export async function POST(req: Request) {
         );
         const reason = String(x.reason || "").trim();
         if (!attending) ensure(reason.length >= 5, "Say why you cannot attend.");
+        // Coordinators and coaches confirm only in the 48 hours before the session.
+        if (attending && !onBehalf)
+          ensure(
+            confirmWindowOpen(session.starts_at),
+            `Confirming opens ${CONFIRM_WINDOW_HOURS} hours before the session. You can say now if you cannot attend.`,
+          );
         // Each side's answer: a confirmation time when attending, a reason when not.
         const coachAt = asCoach ? (attending ? session.coach_confirmed_at || t : null) : session.coach_confirmed_at;
         const coordinatorAt = asCoordinator ? (attending ? session.coordinator_confirmed_at || t : null) : session.coordinator_confirmed_at;
@@ -1285,6 +1291,9 @@ export async function POST(req: Request) {
           item!.key,
         ).first();
         const done = x.done !== false;
+        // Ticking "Coach confirmed" confirms the coach, so it keeps the same 48-hour window.
+        if (done && item!.key === "instructor_confirmed" && !can(u.roles, sessionLeaders))
+          ensure(confirmWindowOpen(session.starts_at), `Confirming opens ${CONFIRM_WINDOW_HOURS} hours before the session.`);
         auditPrevious = existing;
         if (done && !existing)
           jobs.push(

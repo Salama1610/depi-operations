@@ -501,6 +501,9 @@ test("a leader schedules a group's session; its coordinator and coach confirm it
   if (!theirs.groups.some((g) => g.id === group.id))
     assert.ok(!theirs.cases.some((c) => c.source === "session-SES-COORD-1"), "a session case stays with its group");
   current = { id: group.uid, email: group.email };
+  assert.match((await post("session_confirm", { id: "SES-COORD-1" })).error, /48 hours before/, "a session months away cannot be confirmed yet");
+  // Confirming opens 48 hours before the session.
+  await dbExec("UPDATE sessions SET starts_at=? WHERE id=?", new Date(Date.now() + 24 * 3600000).toISOString(), "SES-COORD-1");
   await check("session_confirm", { id: "SES-COORD-1" });
   await dbExec(
     "INSERT INTO group_coaches(id,group_id,user_id,coach_type,status,onboarding_status,assigned_by,assigned_at) VALUES(?,?,?,?,?,?,?,?)",
@@ -592,6 +595,8 @@ test("session delivery enforces model limits, coach coverage and lifecycle contr
   assert.equal((await sessionCase()).status, "Open");
   assert.equal((await sessionCase()).group_id, "G101");
   current = { id: "coach-login", email: "staff-coach@example.invalid" };
+  // Confirming opens 48 hours before the session.
+  await dbExec("UPDATE sessions SET starts_at=? WHERE id=?", new Date(Date.now() + 24 * 3600000).toISOString(), "SES-RULE-1");
   await check("session_confirm", { id: "SES-RULE-1" });
   let confirmed = await dbRow("SELECT * FROM sessions WHERE id='SES-RULE-1'");
   assert.ok(confirmed.coach_confirmed_at);
@@ -2684,6 +2689,8 @@ test("the coordinator and coach answer attending or unavailable, and the leaders
   assert.ok(!recipients.has(group.uid), "not the person who said it");
   assert.match(told[0].title, /cannot attend .* Week 6 .*Ministry visit/);
   // Plans change: the coordinator can attend after all, and the coach confirms.
+  // Confirming opens 48 hours before the session.
+  await dbExec("UPDATE sessions SET starts_at=? WHERE id=?", new Date(Date.now() + 24 * 3600000).toISOString(), "SES-ANSWER-1");
   await check("session_confirm", { id: "SES-ANSWER-1" });
   current = { id: "coach-login", email: "staff-coach@example.invalid" };
   await check("session_confirm", { id: "SES-ANSWER-1" });
@@ -2714,6 +2721,9 @@ test("the coordinator's checklist: instructor confirmed before, instructor enter
   await check("session", { id: "SES-CHECK-1", group_id: group.id, title: "Week 7 coaching", starts_at: new Date(Date.now() + 140 * 86400000).toISOString(), week: 7, duration_minutes: 180, coach_id: "staff-coach" });
   const ticks = async () => (await dbRows("SELECT item FROM session_checks WHERE session_id='SES-CHECK-1' ORDER BY item")).map((r) => r.item);
   current = { id: group.uid, email: group.email };
+  assert.match((await post("session_check", { id: "SES-CHECK-1", item: "instructor_confirmed" })).error, /48 hours before/, "nor ticked as the coach confirmed");
+  // Confirming opens 48 hours before the session.
+  await dbExec("UPDATE sessions SET starts_at=? WHERE id=?", new Date(Date.now() + 24 * 3600000).toISOString(), "SES-CHECK-1");
   await check("session_check", { id: "SES-CHECK-1", item: "instructor_confirmed" });
   await check("session_check", { id: "SES-CHECK-1", item: "instructor_entered" });
   assert.deepEqual(await ticks(), ["instructor_confirmed", "instructor_entered"]);
@@ -2741,6 +2751,8 @@ test("confirmations: the checklist tick is the coach's confirmation, leaders ans
   const row = () => dbRow("SELECT * FROM sessions WHERE id='SES-UNDO-1'");
   // The coordinator ticks "Coach confirmed": the coach is confirmed on the session too.
   current = { id: group.uid, email: group.email };
+  // Confirming opens 48 hours before the session.
+  await dbExec("UPDATE sessions SET starts_at=? WHERE id=?", new Date(Date.now() + 24 * 3600000).toISOString(), "SES-UNDO-1");
   await check("session_check", { id: "SES-UNDO-1", item: "instructor_confirmed" });
   assert.ok((await row()).coach_confirmed_at, "the tick confirms the coach");
   // Undo clears both, including when the coach had confirmed themselves.
@@ -3089,6 +3101,37 @@ test("a backup coach takes one session, and a group's new coach or coordinator t
   assert.equal(later.coach_id, "staff-support-coach");
   assert.equal(later.coordinator_id, coordinator.id);
   await programCheck("bulk_group_owner", { group_ids: [group.id], owner_type: "Coordinator", owner: group.coordinator, reason: "Restore" });
+});
+
+test("a group's new coach starts on a chosen day; earlier sessions keep the coach who had them", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  const group = (await dbRows("SELECT g.id,(SELECT count(*) FROM sessions t WHERE t.group_id=g.id AND t.status<>'Cancelled') n FROM groups g WHERE g.status='Active' ORDER BY n, g.id LIMIT 1"))[0];
+  const taken = new Set((await dbRows("SELECT week FROM sessions WHERE group_id=? AND status<>'Cancelled'", group.id)).map((r) => Number(r.week)));
+  const [w1, w2, w3] = [1, 2, 3, 4, 5, 6, 7, 8].filter((w) => !taken.has(w));
+  await dbExec("UPDATE groups SET coach='staff-coach' WHERE id=?", group.id);
+  const at = (days) => new Date(Date.now() + days * 86400000).toISOString();
+  const cairo = (iso) => new Date(iso).toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" });
+  // Sessions that only follow the group's coach: no coach is written on them.
+  await check("session", { id: "SES-FROM-HELD", group_id: group.id, title: "Held", starts_at: at(-12), week: w1, duration_minutes: 180 });
+  await check("session", { id: "SES-FROM-BEFORE", group_id: group.id, title: "Before the change", starts_at: at(201), week: w2, duration_minutes: 180 });
+  await check("session", { id: "SES-FROM-AFTER", group_id: group.id, title: "After the change", starts_at: at(208), week: w3, duration_minutes: 180 });
+  const from = cairo(at(205));
+  assert.match(
+    (await programPost("bulk_group_owner", { group_ids: [group.id], owner_type: "Coach", owner: "staff-support-coach", reason: "Change", from: cairo(at(-3)) })).error,
+    /today or later/,
+  );
+  await programCheck("bulk_group_owner", { group_ids: [group.id], owner_type: "Coach", owner: "staff-support-coach", reason: "New coach from the next block", from });
+  const coachOf = async (id) => (await dbRow("SELECT coach_id FROM sessions WHERE id=?", id))?.coach_id;
+  assert.equal(await coachOf("SES-FROM-HELD"), "staff-coach", "the held session records the coach who held it");
+  assert.equal(await coachOf("SES-FROM-BEFORE"), "staff-coach", "a session before the chosen day keeps the old coach");
+  assert.equal(await coachOf("SES-FROM-AFTER"), "staff-support-coach", "sessions from the chosen day move");
+  assert.equal((await dbRow("SELECT coach FROM groups WHERE id=?", group.id)).coach, "staff-support-coach");
+  // One session can still be changed on its own afterwards.
+  current = { id: "staff-coach-ops", email: "staff-coach-ops@example.invalid" };
+  await check("session_coach", { id: "SES-FROM-BEFORE", coach_id: "staff-support-coach", reason: "Old coach is away that day" });
+  assert.equal(await coachOf("SES-FROM-BEFORE"), "staff-support-coach");
+  current = { id: "owner", email: "owner@example.com" };
+  for (const id of ["SES-FROM-HELD", "SES-FROM-BEFORE", "SES-FROM-AFTER"]) await dbExec("DELETE FROM sessions WHERE id=?", id);
 });
 
 

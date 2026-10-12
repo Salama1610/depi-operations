@@ -15,6 +15,7 @@ import {
 } from "@/lib/server";
 import { isDemo, sameSide } from "@/lib/demo";
 import { can, dataTransferRefusal, dataTransferRoles, ensure } from "@/lib/domain/rules";
+import { cairoDay } from "@/lib/domain/programme-week";
 import { toCSV, toXLSX } from "@/lib/spreadsheet";
 
 export const dynamic = "force-dynamic";
@@ -1180,9 +1181,29 @@ export async function POST(req: Request) {
             t,
           ));
         if (x.owner_type === "Coach") {
+          // The change runs from a chosen day (today if none): every session
+          // from that day to the end moves to the new coach, including one
+          // that had been given to a backup. Everything before it, held or
+          // not, keeps its coach; a session that only followed the group's
+          // coach gets that coach written on it first, so the history (and
+          // pay) still shows who held it.
+          const from = String(x.from || "").trim() || cairoDay(t);
+          ensure(/^\d{4}-\d{2}-\d{2}$/.test(from), "Choose the day the new coach starts.");
+          ensure(from >= cairoDay(t), "The new coach can start today or later; past sessions keep their coach.");
+          const previous = await all(`SELECT id,coach FROM groups WHERE id IN (${marks})`, ...groupIds);
+          for (const g of previous)
+            if (g.coach && g.coach !== "system-unassigned-coach")
+              jobs.push(stmt(
+                "UPDATE sessions SET coach_id=? WHERE group_id=? AND coach_id IS NULL AND NOT (session_day>=? AND starts_at>? AND status IN ('Scheduled','Confirmed'))",
+                g.coach,
+                g.id,
+                from,
+                t,
+              ));
           const upcoming = await all(
-            `SELECT id,group_id,session_day,coach_id FROM sessions WHERE group_id IN (${marks}) AND starts_at>? AND status IN ('Scheduled','Confirmed')`,
+            `SELECT id,group_id,session_day,coach_id FROM sessions WHERE group_id IN (${marks}) AND session_day>=? AND starts_at>? AND status IN ('Scheduled','Confirmed')`,
             ...groupIds,
+            from,
             t,
           );
           const moving = new Set(upcoming.map((s: any) => s.id));
@@ -1195,12 +1216,15 @@ export async function POST(req: Request) {
             ensure(!clash || moving.has(clash.id), `${owner.name} already has a session on ${s.session_day} (${clash?.group_id}).`);
           }
           jobs.push(stmt(
-            `UPDATE sessions SET coach_id=?,coach_confirmed_at=NULL,coach_unavailable=NULL,status='Scheduled',confirmed_at=NULL,updated_at=? WHERE group_id IN (${marks}) AND starts_at>? AND status IN ('Scheduled','Confirmed')`,
+            `UPDATE sessions SET coach_id=?,coach_confirmed_at=NULL,coach_unavailable=NULL,status='Scheduled',confirmed_at=NULL,updated_at=? WHERE group_id IN (${marks}) AND session_day>=? AND starts_at>? AND status IN ('Scheduled','Confirmed')`,
             owner.id,
             t,
             ...groupIds,
+            from,
             t,
           ));
+          x.from = from;
+          x.sessions_moved = upcoming.length;
         }
         // Naming the coach of a group is not the same as putting them to work:
         // a session and the first evidence review both need an onboarded
