@@ -39,10 +39,32 @@ function draw(pool: { id: string; pending: number }[]) {
 export async function GET() {
   try {
     const u = await actor();
-    permit(u, team);
+    permit(u, [...team, "Coach"]);
     await rateLimit("feedback-review:" + u.id, 60, 60);
     const leads = can(u.roles, lead);
     const side = sameSide(u, "g.id");
+
+    // A coach (who is not also on the quality team) reads their own sessions'
+    // feedback, read-only: the sessions they led, or that followed them as the
+    // group's coach. No reviewer, note or student is shown.
+    if (!can(u.roles, team)) {
+      const own = "coalesce(t.coach_id,g.coach)=?";
+      const [sessions, responses] = await Promise.all([
+        all(
+          `SELECT t.id,t.title,t.group_id,t.week,t.starts_at,g.track,g.provider,coalesce(t.coach_id,g.coach) coach_id,c.name coach_name
+           FROM sessions t JOIN groups g ON g.id=t.group_id LEFT JOIN users c ON c.id=coalesce(t.coach_id,g.coach)
+           WHERE ${side} AND ${own} AND EXISTS (SELECT 1 FROM session_feedback f WHERE f.session_id=t.id) ORDER BY t.starts_at DESC`,
+          u.id,
+        ),
+        all(
+          `SELECT f.id,f.session_id,f.satisfaction,f.clarity,f.usefulness,f.searched_gig,f.liked,f.comments,f.created_at
+           FROM session_feedback f JOIN sessions t ON t.id=f.session_id JOIN groups g ON g.id=t.group_id
+           WHERE ${side} AND ${own} ORDER BY f.created_at`,
+          u.id,
+        ),
+      ]);
+      return Response.json({ sessions, responses, lead: false, coach: true, me: u.id }, noStore);
+    }
 
     // Sessions whose feedback nobody reviews yet are given out now.
     const pool = await members(u);

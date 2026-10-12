@@ -286,9 +286,11 @@ export function FeedbackReview() {
     <div className="fr">
       <div className="fr-head">
         <div>
-          <h2>{t("Session feedback review")}</h2>
+          <h2>{data.coach ? t("Your sessions' feedback") : t("Session feedback review")}</h2>
           <small>
-            {data.lead
+            {data.coach
+              ? t("What your students said after each session you led. You can read it; nobody can change it.")
+              : data.lead
               ? t("Each session with feedback goes at random to one Quality Member. You see every review and can hand one to someone else.")
               : t("The sessions given to you. Open one to read its results, then mark it reviewed.")}
           </small>
@@ -323,7 +325,7 @@ export function FeedbackReview() {
           onChange={(v) => v && !f.groups.includes(v) && set("groups", [...f.groups, v])}
           options={uniq(sessions.filter((s) => f.track === "All" || s.track === f.track).map((s) => s.group_id)).map((v) => ({ value: v, label: v }))}
         />
-        <SearchableSelect label={t("Coach")} value={f.coach} onChange={(v) => set("coach", v)} options={opt(t("All coaches"), [...coaches].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label)))} />
+        {!data.coach && <SearchableSelect label={t("Coach")} value={f.coach} onChange={(v) => set("coach", v)} options={opt(t("All coaches"), [...coaches].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label)))} />}
         <SearchableSelect label={t("Week")} value={f.week} onChange={(v) => set("week", v)} options={opt(t("Every week"), uniq(sessions.map((s) => String(s.week))).sort((a, b) => Number(a) - Number(b)).map((v) => ({ value: v, label: t("Week {v0}", { v0: v }) })))} />
         <SearchableSelect label={t("Day")} value={f.day} onChange={(v) => set("day", v)} options={opt(t("Every day"), weekdays.filter((d) => sessions.some((s) => cairoParts(s.starts_at).weekday === d)).map((d) => ({ value: d, label: t(d) })))} />
         <SearchableSelect label={t("Time")} value={f.time} onChange={(v) => set("time", v)} options={opt(t("Any time"), uniq(sessions.map((s) => cairoParts(s.starts_at).time)).map((v) => ({ value: v, label: v })))} />
@@ -332,7 +334,7 @@ export function FeedbackReview() {
         {data.lead && (
           <SearchableSelect label={t("Reviewer")} value={f.reviewer} onChange={(v) => set("reviewer", v)} options={opt(t("Every reviewer"), (data.reviewers || []).map((p: Row) => ({ value: p.id, label: p.name })))} />
         )}
-        <SearchableSelect label={t("Review")} value={f.status} onChange={(v) => set("status", v)} options={opt(t("Pending and reviewed"), [{ value: "Pending", label: t("Waiting for review") }, { value: "Reviewed", label: t("Reviewed") }])} />
+        {!data.coach && <SearchableSelect label={t("Review")} value={f.status} onChange={(v) => set("status", v)} options={opt(t("Pending and reviewed"), [{ value: "Pending", label: t("Waiting for review") }, { value: "Reviewed", label: t("Reviewed") }])} />}
       </div>
       {(f.groups.length > 0 || active) && (
         <div className="dash-chips">
@@ -351,8 +353,8 @@ export function FeedbackReview() {
 
       <div className="fr-kpis fr-kpis-top">
         <div><span>{t("Sessions")}</span><strong><bdi dir="ltr">{shown.length}</bdi></strong></div>
-        <div><span>{t("Waiting for review")}</span><strong><bdi dir="ltr">{pending}</bdi></strong></div>
-        <div><span>{t("Reviewed")}</span><strong><bdi dir="ltr">{shown.length - pending}</bdi></strong></div>
+        {!data.coach && <div><span>{t("Waiting for review")}</span><strong><bdi dir="ltr">{pending}</bdi></strong></div>}
+        {!data.coach && <div><span>{t("Reviewed")}</span><strong><bdi dir="ltr">{shown.length - pending}</bdi></strong></div>}
         <div><span>{t("Responses")}</span><strong><bdi dir="ltr">{shownResponses.length}</bdi></strong></div>
         <div><span>{t("Overall score")}</span><strong><FeedbackScore score={scoreOf(shownResponses as any)} /></strong></div>
         <div className={flagged ? "is-bad" : ""}><span>{t("Red flags")}</span><strong><bdi dir="ltr">{flagged}</bdi></strong></div>
@@ -377,7 +379,7 @@ export function FeedbackReview() {
                     shown.map((s) => ({
                       session: s.title, group: s.group_id, week: s.week, date: cairoParts(s.starts_at).day, time: cairoParts(s.starts_at).time,
                       coach: s.coach_name || "", responses: (bySession.get(s.id) || []).length, score: scoreOfSession(s.id) ?? "",
-                      reviewer: s.reviewer_name || "", review: s.status, note: s.note || "",
+                      ...(data.coach ? {} : { reviewer: s.reviewer_name || "", review: s.status, note: s.note || "" }),
                     })),
                   )
                 }
@@ -397,7 +399,7 @@ export function FeedbackReview() {
                       <th>{t("Responses")}</th>
                       <th>{t("Score")}</th>
                       {data.lead && <th>{t("Reviewer")}</th>}
-                      <th>{t("Review")}</th>
+                      {!data.coach && <th>{t("Review")}</th>}
                       <th />
                     </tr>
                   </thead>
@@ -414,11 +416,13 @@ export function FeedbackReview() {
                         <td><bdi dir="ltr">{(bySession.get(s.id) || []).length}</bdi></td>
                         <td><FeedbackScore score={scoreOfSession(s.id)} /></td>
                         {data.lead && <td>{s.reviewer_name || "—"}</td>}
-                        <td>
-                          <span className={"cue " + (s.status === "Reviewed" ? "is-ok" : "is-warn")}>
-                            {s.status === "Reviewed" ? t("Reviewed") : t("Waiting for review")}
-                          </span>
-                        </td>
+                        {!data.coach && (
+                          <td>
+                            <span className={"cue " + (s.status === "Reviewed" ? "is-ok" : "is-warn")}>
+                              {s.status === "Reviewed" ? t("Reviewed") : t("Waiting for review")}
+                            </span>
+                          </td>
+                        )}
                         <td>
                           <button type="button" className="small-btn" onClick={() => openSession(s.id)}>
                             {t("Open results")}
@@ -520,7 +524,7 @@ export function FeedbackReview() {
                 </DialogDescription>
               </DialogHeader>
               <FormSummary responses={bySession.get(opened.id) || []} />
-              <section className="fr-review">
+              {!data.coach && <section className="fr-review">
                 <h4>{t("Your review")}</h4>
                 <small>
                   {t("Reviewer")} {opened.reviewer_name || "—"}
@@ -555,7 +559,7 @@ export function FeedbackReview() {
                     options={(data.reviewers || []).map((p: Row) => ({ value: p.id, label: p.name }))}
                   />
                 )}
-              </section>
+              </section>}
             </>
           )}
         </DialogContent>

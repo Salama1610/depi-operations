@@ -2496,4 +2496,7 @@ export const ar: Record<string, string> = {
   "This reviewer already has it.": "هذه المراجعة مسندة بالفعل لهذا المراجع.",
   "There is no active Quality Member to give reviews to.": "لا يوجد عضو جودة نشط لإسناد المراجعات إليه.",
   "Choose a feedback review action.": "اختر إجراءً لمراجعة التقييمات.",
+  "Your sessions' feedback": "تقييمات جلساتك",
+  "What your students said after each session you led. You can read it; nobody can change it.": "ما قاله طلابك بعد كل جلسة قدّمتها. يمكنك قراءتها، ولا يمكن لأحد تعديلها.",
+  "My session feedback": "تقييمات جلساتي",
 };

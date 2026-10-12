@@ -3651,6 +3651,20 @@ test("session feedback goes at random to the quality team, who read the results 
   assert.equal((await send({ action: "reassign", session_id: "SES-FR-1", reviewer: "staff-sara" })).error, "Choose an active Quality Member.");
   assert.equal((await send({ action: "redistribute" })).ok, true);
 
+  // A coach reads their own sessions' feedback, read-only, without reviewers, notes or students.
+  const led = await dbRow("SELECT coalesce(t.coach_id,g.coach) coach FROM sessions t JOIN groups g ON g.id=t.group_id WHERE t.id='SES-FR-1'");
+  if (!led.coach || led.coach === "system-unassigned-coach") await dbExec("UPDATE sessions SET coach_id='staff-coach' WHERE id='SES-FR-1'");
+  const coachId = led.coach && led.coach !== "system-unassigned-coach" ? led.coach : "staff-coach";
+  const coachUser = await dbRow("SELECT id,email FROM users WHERE id=?", coachId);
+  current = { id: coachUser.id, email: coachUser.email };
+  const own = await get();
+  assert.equal(own.error, undefined, own.error);
+  assert.ok(own.coach);
+  assert.ok(own.sessions.some((s) => s.id === "SES-FR-1"), "the coach sees the session they led");
+  assert.ok(own.sessions.every((s) => s.coach_id === coachUser.id), "and only their own");
+  assert.ok(!/reviewer|"note"|student_id|student_name/.test(JSON.stringify(own)), "no reviewer, note or student: " + JSON.stringify(own).match(/.{40}(reviewer|"note"|student_id|student_name).{40}/)?.[0]);
+  assert.match((await send({ action: "review", session_id: "SES-FR-1", note: "Mine" })).error, /role/, "a coach cannot change anything");
+
   // The people who run groups have their own feedback page; this one is the quality team's.
   current = { id: "coordinator", email: "staff-sara@example.invalid" };
   assert.match((await get()).error, /role/);

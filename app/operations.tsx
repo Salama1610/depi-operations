@@ -681,8 +681,9 @@ export default function Operations({ module: initialModule }: { module: string }
     qualityOnly
       ? m === "quality" || m === "feedback-review" || (m === "portal" && !demoAccount)
       : m === "feedback-review"
-        ? // Students' session feedback, given out to the quality team to review.
-          can(user.roles, ["Quality Lead", "Quality Member", "Operations Systems / Admin"])
+        ? // Students' session feedback, given out to the quality team to review;
+          // a coach reads their own sessions' feedback there, read-only.
+          can(user.roles, ["Quality Lead", "Quality Member", "Operations Systems / Admin", "Coach"])
       : m === "dashboard"
         ? // Every tracker and what everyone did: the administrator's view.
           can(user.roles, ["Operations Systems / Admin"]) && !demoAccount
@@ -748,7 +749,11 @@ export default function Operations({ module: initialModule }: { module: string }
   // (coordinators, supervisors, Project Operations) it is "Service links".
   const reviewsQuality = can(user.roles, ["Quality Member", "Quality Lead"]);
   const pageName = (id: string) =>
-    id === "quality" && !reviewsQuality ? "Service links" : String(nav.find((n) => n[0] === id)?.[1] || "");
+    id === "quality" && !reviewsQuality
+      ? "Service links"
+      : id === "feedback-review" && !reviewsQuality && !can(user.roles, ["Operations Systems / Admin"])
+        ? "My session feedback"
+        : String(nav.find((n) => n[0] === id)?.[1] || "");
   // The Accounts list shows each password beside its email: load the ones
   // this person may see when the tab opens, and again after a dialog closes
   // (a keeper may just have saved a new password).
@@ -4420,7 +4425,7 @@ See you there!`,
                   <SidebarMenuButton asChild isActive={module === id}>
                     <a href={id === "home" ? "/" : "/" + id} onClick={(event) => goTo(id, event)}>
                       <Icon />
-                      <span>{t(id === "quality" ? pageName(id) : label)}</span>
+                      <span>{t(id === "quality" || id === "feedback-review" ? pageName(id) : label)}</span>
                       {id === "work" && overdue.length > 0 && (
                         <b className="nav-count">{overdue.length}</b>
                       )}
