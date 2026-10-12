@@ -14,6 +14,7 @@ import { acceptedServicePlatforms } from "@/lib/domain/service-links";
 import { PortalView } from "./portal-view";
 // The dashboard and its charts load only when someone opens it.
 const Dashboard = lazy(() => import("./dashboard").then((m) => ({ default: m.Dashboard })));
+const FeedbackReview = lazy(() => import("./feedback-review").then((m) => ({ default: m.FeedbackReview })));
 import { SearchableSelect } from "@/components/searchable-select";
 import { Progress } from "@/components/ui/progress";
 import { GraduationDots } from "./today";
@@ -69,6 +70,7 @@ import {
   LockKeyhole,
   Check,
   LayoutDashboard,
+  MessageSquareText,
 } from "lucide-react";
 import {
   SidebarProvider,
@@ -138,6 +140,7 @@ const nav = [
   ["opportunities", "Opportunities", ExternalLink],
   ["portal", "Gigs portal view", Files],
   ["quality", "Quality review", ShieldCheck],
+  ["feedback-review", "Feedback review", MessageSquareText],
   ["cases", "Cases", Flag],
   ["reports", "Reports", ChartNoAxesCombined],
   ["administration", "Administration", Settings2],
@@ -676,7 +679,10 @@ export default function Operations({ module: initialModule }: { module: string }
     (can(user.roles, ["Team Supervisor"]) && user.team === "Service Team");
   const shownNav = nav.filter(([m]) =>
     qualityOnly
-      ? m === "quality" || (m === "portal" && !demoAccount)
+      ? m === "quality" || m === "feedback-review" || (m === "portal" && !demoAccount)
+      : m === "feedback-review"
+        ? // Students' session feedback, given out to the quality team to review.
+          can(user.roles, ["Quality Lead", "Quality Member", "Operations Systems / Admin"])
       : m === "dashboard"
         ? // Every tracker and what everyone did: the administrator's view.
           can(user.roles, ["Operations Systems / Admin"]) && !demoAccount
@@ -2983,6 +2989,12 @@ See you there!`,
           </TabsContent>
         )}
       </Tabs>
+    );
+  } else if (module === "feedback-review") {
+    content = (
+      <Suspense fallback={<div className="dash-loading">{t("Loading…")}</div>}>
+        <FeedbackReview />
+      </Suspense>
     );
   } else if (module === "dashboard") {
     content = (

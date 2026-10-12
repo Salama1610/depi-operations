@@ -1189,6 +1189,24 @@ export const feedbackFlags = sqliteTable("feedback_flags", {
     .references(() => users.id),
   handledAt: text("handled_at").notNull(),
 });
+// Which Quality Member reviews each session's student feedback. See migration 202610120035.
+export const feedbackReviews = sqliteTable(
+  "feedback_reviews",
+  {
+    sessionId: text("session_id")
+      .primaryKey()
+      .references(() => sessions.id),
+    reviewer: text("reviewer")
+      .notNull()
+      .references(() => users.id),
+    assignedBy: text("assigned_by").references(() => users.id),
+    assignedAt: text("assigned_at").notNull(),
+    status: text("status").notNull().default("Pending"),
+    note: text("note"),
+    reviewedAt: text("reviewed_at"),
+  },
+  (t) => [index("feedback_reviews_reviewer_idx").on(t.reviewer, t.status)],
+);
 export const joinAccounts = sqliteTable("join_accounts", {
   id: text("id").primaryKey(),
   kind: text("kind").notNull(),

@@ -778,5 +778,14 @@
     "created_at": "timestamptz",
     "removed_by": "text",
     "removed_at": "timestamptz"
+  },
+  "feedback_reviews": {
+    "session_id": "text",
+    "reviewer": "text",
+    "assigned_by": "text",
+    "assigned_at": "timestamptz",
+    "status": "text",
+    "note": "text",
+    "reviewed_at": "timestamptz"
   }
 }

@@ -3587,3 +3587,74 @@ test("the Target Team posts job opportunities, which a track's students and the 
     await dbExec("UPDATE users SET team=? WHERE id=?", group.team, group.uid);
   }
 });
+
+test("session feedback goes at random to the quality team, who read the results without students' names", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const reviewApi = await route("feedback-review");
+  const get = async () => (await reviewApi.GET()).json();
+  const send = async (body) =>
+    (await reviewApi.POST(new Request("https://test.local/api/feedback-review", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }))).json();
+  // A second Quality Member, so the work can be shared.
+  await dbExec(
+    "INSERT INTO users(id,email,name,roles,scopes,active,national_id,phone,title) VALUES(?,?,?,?,?,?,?,?,?)",
+    "staff-quality-2", "staff-quality-2@example.invalid", "Second Reviewer", JSON.stringify(["Quality Member"]), "[]", 1, "29801011234561", null, "Quality Member",
+  );
+  const group = await dbRow(
+    "SELECT g.id FROM groups g WHERE g.status='Active' AND g.id NOT LIKE 'DEMO-%' AND (SELECT count(*) FROM students s WHERE s.group_id=g.id AND s.lifecycle='Active')>=2 AND g.id NOT IN (SELECT group_id FROM sessions WHERE week=5) ORDER BY g.id LIMIT 1",
+  );
+  await check("session", { id: "SES-FR-1", group_id: group.id, title: "Week 5 coaching", starts_at: new Date(Date.now() - 5 * 3600000).toISOString(), week: 5, duration_minutes: 180 });
+  const learners = await dbRows("SELECT id FROM students WHERE group_id=? AND lifecycle='Active' ORDER BY id LIMIT 2", group.id);
+  for (const [i, l] of learners.entries())
+    await dbExec(
+      "INSERT INTO session_feedback(id,session_id,student_id,satisfaction,clarity,searched_gig,usefulness,liked,comments,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+      `SFB-FR-${i}`, "SES-FR-1", l.id, 5 - i, 4, i, 4, i ? null : "The examples", null, new Date().toISOString(),
+    );
+
+  // The lead's first look gives every session with feedback to a member, evenly.
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  const lead = await get();
+  assert.equal(lead.error, undefined, lead.error);
+  assert.ok(lead.lead);
+  const withFeedback = (await dbRows("SELECT DISTINCT f.session_id FROM session_feedback f JOIN sessions t ON t.id=f.session_id WHERE t.group_id NOT LIKE 'DEMO-%'")).length;
+  assert.equal(lead.sessions.length, withFeedback, "every session with feedback is given out");
+  const load = await dbRows(
+    "SELECT u.id,u.roles,(SELECT count(*) FROM feedback_reviews r WHERE r.reviewer=u.id) n FROM users u WHERE u.active=1 AND u.id NOT LIKE 'DEMO-%' AND (u.roles LIKE '%Quality Member%' OR EXISTS (SELECT 1 FROM feedback_reviews r WHERE r.reviewer=u.id))",
+  );
+  assert.ok(load.filter((r) => r.n > 0).every((r) => JSON.parse(r.roles).includes("Quality Member")), "only Quality Members review");
+  assert.ok(Math.max(...load.map((r) => r.n)) - Math.min(...load.map((r) => r.n)) <= 1, "and evenly");
+  const mine = lead.sessions.find((s) => s.id === "SES-FR-1");
+  assert.ok(mine && mine.week === 5 && mine.starts_at && "coach_name" in mine);
+  assert.ok(!/student_id|student_name|national_id/.test(JSON.stringify(lead.responses)), "reviewers do not see who answered");
+  assert.equal(lead.responses.filter((r) => r.session_id === "SES-FR-1").length, 2);
+
+  // A member sees only their own; another member's is not theirs to review.
+  const owner = (await dbRow("SELECT reviewer FROM feedback_reviews WHERE session_id='SES-FR-1'")).reviewer;
+  const other = owner === "staff-quality" ? "staff-quality-2" : "staff-quality";
+  current = { id: other, email: other + "@example.invalid" };
+  const theirs = await get();
+  assert.ok(theirs.sessions.every((s) => s.reviewer === other) && !theirs.sessions.some((s) => s.id === "SES-FR-1"));
+  assert.match((await send({ action: "review", session_id: "SES-FR-1", note: "x" })).error, /reviewer it was given to/);
+  assert.match((await send({ action: "reassign", session_id: "SES-FR-1", reviewer: other })).error, /Quality Lead/);
+  current = { id: owner, email: owner + "@example.invalid" };
+  assert.equal((await send({ action: "review", session_id: "SES-FR-1", note: "Students liked the examples." })).ok, true);
+  const done = await dbRow("SELECT * FROM feedback_reviews WHERE session_id='SES-FR-1'");
+  assert.equal(done.status, "Reviewed");
+  assert.equal(done.note, "Students liked the examples.");
+
+  // The lead hands it to someone else, which opens it again for them, and can share the pending ones out again.
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  assert.equal((await send({ action: "reassign", session_id: "SES-FR-1", reviewer: other })).ok, true);
+  const moved = await dbRow("SELECT * FROM feedback_reviews WHERE session_id='SES-FR-1'");
+  assert.equal(moved.reviewer, other);
+  assert.equal(moved.status, "Pending");
+  assert.equal((await send({ action: "reassign", session_id: "SES-FR-1", reviewer: "staff-sara" })).error, "Choose an active Quality Member.");
+  assert.equal((await send({ action: "redistribute" })).ok, true);
+
+  // The people who run groups have their own feedback page; this one is the quality team's.
+  current = { id: "coordinator", email: "staff-sara@example.invalid" };
+  assert.match((await get()).error, /role/);
+  current = { id: "owner", email: "owner@example.com" };
+  await dbExec("DELETE FROM feedback_reviews WHERE reviewer='staff-quality-2'");
+  await dbExec("UPDATE users SET active=0 WHERE id='staff-quality-2'");
+});
