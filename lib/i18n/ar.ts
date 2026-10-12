@@ -2499,4 +2499,9 @@ export const ar: Record<string, string> = {
   "Your sessions' feedback": "تقييمات جلساتك",
   "What your students said after each session you led. You can read it; nobody can change it.": "ما قاله طلابك بعد كل جلسة قدّمتها. يمكنك قراءتها، ولا يمكن لأحد تعديلها.",
   "My session feedback": "تقييمات جلساتي",
+  "Remove the group's coach": "إزالة مدرب المجموعة",
+  "Remove coach": "إزالة المدرب",
+  "Without a coach from": "بدون مدرب ابتداءً من",
+  "From the day you choose, the group's sessions have no coach until you name one. Sessions before it keep the coach who held them, and the coach stops seeing the group's students once they have no session left in it.": "ابتداءً من اليوم الذي تختاره تصبح جلسات المجموعة بدون مدرب حتى تعيّن مدربًا. الجلسات قبله تحتفظ بالمدرب الذي قدّمها، ولا يعود المدرب يرى طلاب المجموعة بعد أن لا تتبقى له أي جلسة فيها.",
+  "This group has no coach to remove.": "هذه المجموعة ليس لها مدرب لإزالته.",
 };

@@ -1145,8 +1145,18 @@ export async function POST(req: Request) {
             : x.owner_type === "Coach"
               ? "Coach"
               : "Team Supervisor";
-        const owner: any = await stmt("SELECT * FROM users WHERE id=? AND active=1", x.owner).first();
-        ensure(owner && JSON.parse(owner.roles).includes(requiredRole), `Choose an active ${requiredRole}.`);
+        // Coach Operations can also take the coach off a group: from the chosen
+        // day its sessions have no coach until someone is named.
+        const removing = x.owner_type === "Coach" && x.remove === true;
+        const owner: any = removing
+          ? { id: "system-unassigned-coach", name: "Unassigned coach" }
+          : await stmt("SELECT * FROM users WHERE id=? AND active=1", x.owner).first();
+        if (removing)
+          jobs.push(stmt(
+            "INSERT OR IGNORE INTO users(id,email,name,roles,scopes,active) VALUES(?,?,?,?,?,?)",
+            "system-unassigned-coach", "unassigned+coach@invalid.local", "Unassigned coach", JSON.stringify(["Coach"]), "[]", 0,
+          ));
+        else ensure(owner && JSON.parse(owner.roles).includes(requiredRole), `Choose an active ${requiredRole}.`);
         ensure(x.reason?.trim(), "Record the bulk ownership reason.");
         // A supervisor hands groups only within their own team.
         if (x.owner_type === "Coordinator") {
@@ -1191,6 +1201,7 @@ export async function POST(req: Request) {
           ensure(/^\d{4}-\d{2}-\d{2}$/.test(from), "Choose the day the new coach starts.");
           ensure(from >= cairoDay(t), "The new coach can start today or later; past sessions keep their coach.");
           const previous = await all(`SELECT id,coach FROM groups WHERE id IN (${marks})`, ...groupIds);
+          if (removing) ensure(previous.some((g: any) => g.coach && g.coach !== "system-unassigned-coach"), "This group has no coach to remove.");
           for (const g of previous)
             if (g.coach && g.coach !== "system-unassigned-coach")
               jobs.push(stmt(
@@ -1207,7 +1218,7 @@ export async function POST(req: Request) {
             t,
           );
           const moving = new Set(upcoming.map((s: any) => s.id));
-          for (const s of upcoming) {
+          for (const s of removing ? [] : upcoming) {
             const clash: any = await stmt(
               "SELECT id,group_id FROM sessions WHERE coach_id=? AND session_day=? AND status<>'Cancelled'",
               owner.id,
@@ -1217,7 +1228,7 @@ export async function POST(req: Request) {
           }
           jobs.push(stmt(
             `UPDATE sessions SET coach_id=?,coach_confirmed_at=NULL,coach_unavailable=NULL,status='Scheduled',confirmed_at=NULL,updated_at=? WHERE group_id IN (${marks}) AND session_day>=? AND starts_at>? AND status IN ('Scheduled','Confirmed')`,
-            owner.id,
+            removing ? null : owner.id,
             t,
             ...groupIds,
             from,
@@ -1225,12 +1236,23 @@ export async function POST(req: Request) {
           ));
           x.from = from;
           x.sessions_moved = upcoming.length;
+          // The coach who leaves stops seeing the group's students, unless they
+          // still have a session of it before the chosen day.
+          for (const g of previous) {
+            if (!g.coach || g.coach === "system-unassigned-coach" || g.coach === owner.id) continue;
+            const stillHolds: any = await stmt(
+              "SELECT id FROM sessions WHERE group_id=? AND coalesce(coach_id,?)=? AND starts_at>? AND session_day<? AND status IN ('Scheduled','Confirmed')",
+              g.id, g.coach, g.coach, t, from,
+            ).first();
+            if (!stillHolds)
+              jobs.push(stmt("UPDATE group_coaches SET status='Removed' WHERE group_id=? AND user_id=? AND coach_type<>'Backup Coach'", g.id, g.coach));
+          }
         }
         // Naming the coach of a group is not the same as putting them to work:
         // a session and the first evidence review both need an onboarded
         // functional assignment, so the row is created here and the onboarding
         // checklist is still completed through the coach assignment screen.
-        if (x.owner_type === "Coach")
+        if (x.owner_type === "Coach" && !removing)
           for (const groupId of groupIds)
             jobs.push(stmt(
               `INSERT INTO group_coaches(id,group_id,user_id,coach_type,status,onboarding_status,checklist,assigned_by,assigned_at,onboarded_at)

@@ -3130,6 +3130,26 @@ test("a group's new coach starts on a chosen day; earlier sessions keep the coac
   current = { id: "staff-coach-ops", email: "staff-coach-ops@example.invalid" };
   await check("session_coach", { id: "SES-FROM-BEFORE", coach_id: "staff-support-coach", reason: "Old coach is away that day" });
   assert.equal(await coachOf("SES-FROM-BEFORE"), "staff-support-coach");
+  // Coach Operations can also take the coach off the group from a day: those sessions have no coach,
+  // and the coach stops seeing the group once no session of it is left to them.
+  await programCheck("bulk_group_owner", { group_ids: [group.id], owner_type: "Coach", remove: true, reason: "Coach left the programme", from: cairo(at(206)) });
+  assert.equal(await coachOf("SES-FROM-AFTER"), null, "the session after the day has no coach");
+  assert.equal(await coachOf("SES-FROM-HELD"), "staff-coach", "the held session keeps its coach");
+  assert.equal((await dbRow("SELECT coach FROM groups WHERE id=?", group.id)).coach, "system-unassigned-coach");
+  assert.equal(
+    (await dbRow("SELECT status FROM group_coaches WHERE group_id=? AND user_id='staff-support-coach' AND coach_type='Outcome Coach'", group.id))?.status,
+    "Active",
+    "they keep the group while a session before the day is still theirs",
+  );
+  await dbExec("DELETE FROM sessions WHERE id='SES-FROM-BEFORE'");
+  await programCheck("bulk_group_owner", { group_ids: [group.id], owner_type: "Coach", owner: "staff-support-coach", reason: "Back", from: cairo(at(0)) });
+  await programCheck("bulk_group_owner", { group_ids: [group.id], owner_type: "Coach", remove: true, reason: "Coach left the programme", from: cairo(at(0)) });
+  assert.equal(
+    (await dbRow("SELECT status FROM group_coaches WHERE group_id=? AND user_id='staff-support-coach' AND coach_type='Outcome Coach'", group.id)).status,
+    "Removed",
+    "and lose it once none is left",
+  );
+  assert.match((await programPost("bulk_group_owner", { group_ids: [group.id], owner_type: "Coach", remove: true, reason: "Again" })).error, /no coach to remove/);
   current = { id: "owner", email: "owner@example.com" };
   for (const id of ["SES-FROM-HELD", "SES-FROM-BEFORE", "SES-FROM-AFTER"]) await dbExec("DELETE FROM sessions WHERE id=?", id);
 });

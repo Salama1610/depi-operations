@@ -200,6 +200,7 @@ const titles: Row = {
   service_qc_review: "Review student service link",
   bulk_group_owner: "Change coordinator",
   group_coach: "Change the group's coach",
+  group_coach_remove: "Remove the group's coach",
   group_whatsapp: "WhatsApp group link",
 };
 const actionCopy: Row = {
@@ -225,6 +226,8 @@ const actionCopy: Row = {
     "One link at a time. Approve a correct link, or reject it with a clear comment for the student.",
   bulk_group_owner:
     "The group and its students move to the coordinator you choose. The change is audited.",
+  group_coach_remove:
+    "From the day you choose, the group's sessions have no coach until you name one. Sessions before it keep the coach who held them, and the coach stops seeing the group's students once they have no session left in it.",
   group_coach:
     "Every session from the day you choose to the end moves to the new coach. Sessions before it keep the coach who held them. You can still change one session's coach on its own from Sessions.",
   group_whatsapp:
@@ -805,7 +808,7 @@ export default function Operations({ module: initialModule }: { module: string }
   }
   async function mutate(action: string, values: Row) {
     // Changing a group's coach is the same handover as its coordinator, on the program API.
-    if (action === "group_coach") action = "bulk_group_owner";
+    if (action === "group_coach" || action === "group_coach_remove") action = "bulk_group_owner";
     const r = await fetch(action === "bulk_group_owner" ? "/api/program" : "/api/operations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2301,6 +2304,22 @@ See you there!`,
                     }
                   >
                     {t("Change coach")}
+                  </button>
+                )}
+                {can(user.roles, ["Coach Operations"]) && g.status !== "Archived" && g.coach && g.coach !== "system-unassigned-coach" && (
+                  <button
+                    className="small-btn"
+                    onClick={() =>
+                      open("group_coach_remove", {
+                        group_ids: [g.id],
+                        owner_type: "Coach",
+                        remove: true,
+                        coach_name: g.coach_name,
+                        from: new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" }),
+                      })
+                    }
+                  >
+                    {t("Remove coach")}
                   </button>
                 )}
                 {g.session_link && (
@@ -5907,6 +5926,26 @@ See you there!`,
                         })
                         .map((u: Row) => ({ value: u.id, label: u.name + (u.title ? " · " + t(u.title) : "") })),
                     )}
+                    {field("reason", t("Reason for the change"))}
+                  </>
+                );
+              if (a === "group_coach_remove")
+                return (
+                  <>
+                    <div className="info-box">
+                      <strong>{(form.group_ids || []).join(", ")}</strong>
+                      <span>{t("Coach")} {form.coach_name}</span>
+                    </div>
+                    <label className="field">
+                      {t("Without a coach from")}
+                      <input
+                        type="date"
+                        required
+                        value={form.from || ""}
+                        min={new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" })}
+                        onChange={(e) => setForm({ ...form, from: e.target.value })}
+                      />
+                    </label>
                     {field("reason", t("Reason for the change"))}
                   </>
                 );
