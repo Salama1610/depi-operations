@@ -22,6 +22,7 @@ import {
   provisionStaffLogin,
   provisionDemoLogin,
   teamCoordinators,
+  revokesStudents,
 } from "@/lib/server";
 import { demoPeople, demoPlan, demoStudentEmail, isDemo, sameSide } from "@/lib/demo";
 import {
@@ -785,6 +786,41 @@ export async function POST(req: Request) {
             t,
           ),
         );
+        break;
+      }
+      case "student_revoke": {
+        // Revoking takes a student out of everyone's view but the people who
+        // can restore them (lib/server.ts revokesStudents): the lists, the
+        // quality queues, feedback and search. Their pending reviews go back to
+        // the pool. Restoring returns them to the state they were in.
+        ensure(revokesStudents(u), "Only an administrator or the account-owner keeper can revoke a student.");
+        ensure(s, "Choose a student.");
+        const reason = String(x.reason || "").trim();
+        ensure(reason.length >= 5, "Say why, in a few words.");
+        const restoring = x.restore === true;
+        if (restoring) {
+          ensure(s.lifecycle === "Revoked", "This student is not revoked.");
+          const last: any = await stmt(
+            "SELECT previous FROM student_status_events WHERE student_id=? AND dimension='Lifecycle' AND value='Revoked' ORDER BY created_at DESC LIMIT 1",
+            sid,
+          ).first();
+          const back = last?.previous && last.previous !== "Revoked" ? last.previous : "Active";
+          auditPrevious = s;
+          jobs.push(
+            stmt("UPDATE students SET lifecycle=? WHERE id=?", back, sid),
+            stmt("INSERT INTO student_status_events VALUES(?,?,?,?,?,?,?,?)", uid("STATUS"), sid, "Lifecycle", "Revoked", back, u.id, reason, t),
+          );
+        } else {
+          ensure(s.lifecycle !== "Revoked", "This student is already revoked.");
+          auditPrevious = s;
+          jobs.push(
+            stmt("UPDATE students SET lifecycle='Revoked' WHERE id=?", sid),
+            stmt("INSERT INTO student_status_events VALUES(?,?,?,?,?,?,?,?)", uid("STATUS"), sid, "Lifecycle", s.lifecycle, "Revoked", u.id, reason, t),
+            // Reviews still to do go back to the pool, so no reviewer carries a hidden student.
+            stmt("UPDATE service_links SET qc_actor=NULL,updated_at=? WHERE student_id=? AND qc_status<>'Locked'", t, sid),
+            stmt("UPDATE evidence SET qc_actor=NULL WHERE student_id=? AND status='Quality Review'", sid),
+          );
+        }
         break;
       }
       case "student": {
@@ -2923,7 +2959,8 @@ export async function POST(req: Request) {
         permit(u, ["Quality Lead"]);
         const services = x.action === "service_qc_assign";
         const table = services ? "service_links" : "evidence";
-        const openFilter = services ? "qc_status<>'Locked'" : "status='Quality Review'";
+        // Revoked students are nobody's work until they are restored.
+        const openFilter = (services ? "qc_status<>'Locked'" : "status='Quality Review'") + " AND student_id NOT IN (SELECT id FROM students WHERE lifecycle='Revoked')";
         // The team leader does not carry a share of the reviewing, so the pool
         // for service work is the members. Gig evidence keeps its wider pool.
         const reviewers = (await (await stmt(

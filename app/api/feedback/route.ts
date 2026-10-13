@@ -1,4 +1,4 @@
-import { actor, all, auditStmt, db, now, permit, rateLimit, scopeSql, stmt, uid } from "@/lib/server";
+import { actor, all, auditStmt, db, notRevoked, now, permit, rateLimit, scopeSql, stmt, uid } from "@/lib/server";
 import { can, ensure } from "@/lib/domain/rules";
 import { levelOf, scoreOf } from "@/lib/domain/feedback";
 
@@ -25,7 +25,7 @@ export async function GET(req: Request) {
       const totals = await all(
         `SELECT f.session_id, count(*) n, sum(f.satisfaction+f.clarity+f.usefulness) total
          FROM session_feedback f JOIN sessions t ON t.id=f.session_id JOIN groups g ON g.id=t.group_id
-         WHERE ${q.sql} AND NOT EXISTS (SELECT 1 FROM feedback_flags h WHERE h.session_id=f.session_id)
+         WHERE ${q.sql} AND ${notRevoked(u, "f.student_id")} AND NOT EXISTS (SELECT 1 FROM feedback_flags h WHERE h.session_id=f.session_id)
          GROUP BY f.session_id`,
         ...q.args,
       );
@@ -43,7 +43,7 @@ export async function GET(req: Request) {
       all(
         `SELECT f.id,f.session_id,f.student_id,s.name student_name,f.satisfaction,f.clarity,f.usefulness,f.searched_gig,f.liked,f.comments,f.created_at
          FROM session_feedback f JOIN sessions t ON t.id=f.session_id JOIN groups g ON g.id=t.group_id LEFT JOIN students s ON s.id=f.student_id
-         WHERE ${q.sql} ORDER BY f.created_at DESC`,
+         WHERE ${q.sql} AND ${notRevoked(u, "f.student_id")} ORDER BY f.created_at DESC`,
         ...q.args,
       ),
       all(

@@ -178,6 +178,7 @@ const titles: Row = {
   case_transition: "Update case",
   engagement: "Review engagement status",
   lifecycle: "Update lifecycle status",
+  student_revoke: "Revoke or restore a student",
   staff: "Manage staff access",
   account_topup: "Record a top-up",
   account_coordinator: "Assign to a coordinator",
@@ -302,7 +303,7 @@ function Badge({ value }: { value: any }) {
     <span
       className={
         "badge " +
-        (/Critical|Rejected|Overdue|Blocked|S1|S2|Unresponsive|Access Issue/.test(value)
+        (/Critical|Rejected|Overdue|Blocked|S1|S2|Unresponsive|Access Issue|Revoked/.test(value)
           ? "red"
           : /Risk|Pending|Submitted|Review|Waiting|Delayed|Funding|Cooldown|Reserved/.test(value)
             ? "amber"
@@ -680,6 +681,12 @@ export default function Operations({ module: initialModule }: { module: string }
   const keepsAccounts =
     can(user.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin"]) ||
     (can(user.roles, ["Team Supervisor"]) && user.team === "Service Team");
+  // Revoking a student (they vanish for everyone else): administrators and the
+  // account-owner keeper, as the server checks in revokesStudents.
+  const revokes =
+    !demoAccount &&
+    (can(user.roles, ["Operations Systems / Admin"]) ||
+      (Array.isArray(user.scopes) && (user.scopes.includes("account-owner") || user.scopes.includes("revoke-students"))));
   const shownNav = nav.filter(([m]) =>
     qualityOnly
       ? m === "quality" || m === "feedback-review" || (m === "portal" && !demoAccount)
@@ -5036,6 +5043,20 @@ See you there!`,
                         {t("Lifecycle")}
                       </button>
                     )}
+                    {revokes && (
+                      <button
+                        className="small-btn"
+                        onClick={() =>
+                          open("student_revoke", {
+                            student_id: selectedStudent.id,
+                            student_name: selectedStudent.name,
+                            restore: selectedStudent.lifecycle === "Revoked",
+                          })
+                        }
+                      >
+                        {selectedStudent.lifecycle === "Revoked" ? t("Restore student") : t("Revoke student")}
+                      </button>
+                    )}
                     {may("transfer") && (
                       <button
                         className="small-btn"
@@ -6305,6 +6326,20 @@ See you there!`,
                       "Unresponsive",
                     ])}
                     {field("reason", t("Reason for confirmation or override"))}
+                  </>
+                );
+              if (a === "student_revoke")
+                return (
+                  <>
+                    <div className="info-box">
+                      <strong>{form.student_name}</strong>
+                      <span>
+                        {form.restore
+                          ? t("The student comes back for everyone, in the state they were in before.")
+                          : t("The student disappears for everyone except administrators and Taha: lists, quality review, feedback and search. Their reviews still to do go back to the pool. You can restore them later.")}
+                      </span>
+                    </div>
+                    {field("reason", t("Reason"))}
                   </>
                 );
               if (a === "lifecycle")

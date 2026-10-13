@@ -100,7 +100,7 @@ export async function currentStudent() {
     "Your account has not been linked to a student record yet. Ask the program team to verify your email.",
   );
   ensure(
-    !["Removed", "Withdrawn", "Graduate Closed", "Non-Graduate Closed"].includes(
+    !["Removed", "Withdrawn", "Graduate Closed", "Non-Graduate Closed", "Revoked"].includes(
       s.lifecycle,
     ),
     "This student record is closed and can no longer be updated.",
@@ -211,6 +211,22 @@ export function seesAccountOwner(u: any) {
   return can(u.roles, ["Operations Systems / Admin"]) || scopes.includes("account-owner");
 }
 
+/**
+ * Who may revoke a student: the administrators and the keeper of the account
+ * owners (Taha, the "account-owner" scope), or anyone given "revoke-students".
+ * A revoked student disappears for everyone else: every query scoped with
+ * scopeSql(u, ..., studentAlias) leaves them out, and so do the feedback and
+ * quality queues. They alone still see them, to restore them.
+ */
+export function revokesStudents(u: any) {
+  const scopes = Array.isArray(u?.scopes) ? u.scopes : [];
+  return seesAccountOwner(u) || scopes.includes("revoke-students");
+}
+/** A condition on a student id column that leaves revoked students out, unless this person revokes. */
+export function notRevoked(u: any, column: string) {
+  return revokesStudents(u) ? "1=1" : `${column} NOT IN (SELECT id FROM students WHERE lifecycle='Revoked')`;
+}
+
 /** Demo sign-ins try things out on demo records; this is real work. */
 export function refuseDemo(u: any) {
   ensure(!isDemo(u), "This is not available in the demo. Demo accounts work on the demo groups only.");
@@ -247,7 +263,9 @@ export function scopeSql(u: any, alias = "g", studentAlias: string | null = "s")
   // Depi Industry was dropped from Round 5. Its groups stay in the database for
   // the record, but nobody sees them; delete this line to bring them back.
   // Demo sign-ins see the demo groups and nothing else; nobody else sees them.
-  const shown = `COALESCE(${alias}.delivery_model,'Regular')<>'Industry' AND ${sameSide(u, alias + ".id")}`;
+  // A revoked student is seen only by the people who can restore them.
+  const revoked = studentAlias && !revokesStudents(u) ? ` AND COALESCE(${studentAlias}.lifecycle,'')<>'Revoked'` : "";
+  const shown = `COALESCE(${alias}.delivery_model,'Regular')<>'Industry' AND ${sameSide(u, alias + ".id")}${revoked}`;
   if (
     can(u.roles, [
       "Project Operations",
@@ -628,7 +646,7 @@ export async function loadData(u: any) {
     // team do not receive it.
     can(u.roles, ["Coach Operations", "Operations Coordinator", "Team Supervisor", "Project Operations", "Operations Systems / Admin"])
       ? all(
-          `SELECT f.* FROM session_feedback f JOIN sessions t ON t.id=f.session_id JOIN groups g ON g.id=t.group_id WHERE ${qg.sql}`,
+          `SELECT f.* FROM session_feedback f JOIN sessions t ON t.id=f.session_id JOIN groups g ON g.id=t.group_id WHERE ${qg.sql} AND ${notRevoked(u, "f.student_id")}`,
           ...qg.args,
         )
       : none,

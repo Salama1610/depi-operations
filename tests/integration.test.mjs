@@ -3692,3 +3692,52 @@ test("session feedback goes at random to the quality team, who read the results 
   await dbExec("DELETE FROM feedback_reviews WHERE reviewer='staff-quality-2'");
   await dbExec("UPDATE users SET active=0 WHERE id='staff-quality-2'");
 });
+
+test("a revoked student disappears for everyone but administrators and the account-owner keeper, and comes back on restore", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const pupil = await dbRow(
+    "SELECT s.id,s.lifecycle,g.coordinator,u.email FROM students s JOIN groups g ON g.id=s.group_id JOIN users u ON u.id=g.coordinator WHERE s.lifecycle='Active' AND g.status='Active' AND g.id NOT LIKE 'DEMO-%' AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=s.id) ORDER BY s.id LIMIT 1",
+  );
+  const created = new Date().toISOString();
+  await dbExec(
+    "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,account_id,submitted_at,updated_at) VALUES(?,?,3,?,?,'Khamsat','Needs Review','{}',?,'Pending',NULL,'staff-quality',NULL,1,NULL,?,?)",
+    "SLK-REVOKE", pupil.id, "https://khamsat.com/x/7001-r", "https://khamsat.com/x/7001-r", created, created, created,
+  );
+  const sees = async (who) => {
+    current = who;
+    const view = await (await api.GET()).json();
+    return view.students.some((s) => s.id === pupil.id);
+  };
+  const coordinator = { id: pupil.coordinator, email: pupil.email };
+  const quality = { id: "quality-login", email: "staff-quality@example.invalid" };
+  assert.ok(await sees(coordinator));
+  assert.ok(await sees(quality), "the reviewer holding their service sees them");
+
+  // Only administrators and the account-owner keeper revoke.
+  current = coordinator;
+  assert.match((await post("student_revoke", { student_id: pupil.id, reason: "Left the programme" })).error, /administrator|account-owner/);
+  await dbExec("UPDATE users SET scopes=? WHERE id='staff-nour'", JSON.stringify(["account-owner"]));
+  current = { id: "staff-nour", email: "staff-nour@example.invalid" };
+  assert.match((await post("student_revoke", { student_id: pupil.id, reason: "x" })).error, /Say why/);
+  await check("student_revoke", { student_id: pupil.id, reason: "Duplicate registration" });
+  assert.equal((await dbRow("SELECT lifecycle FROM students WHERE id=?", pupil.id)).lifecycle, "Revoked");
+  assert.equal((await dbRow("SELECT qc_actor FROM service_links WHERE id='SLK-REVOKE'")).qc_actor, null, "their review goes back to the pool");
+  assert.ok(await sees({ id: "staff-nour", email: "staff-nour@example.invalid" }), "the keeper still sees them, to restore them");
+  assert.ok(await sees({ id: "owner", email: "owner@example.com" }), "and so do administrators");
+  assert.ok(!(await sees(coordinator)), "the coordinator no longer sees them");
+  current = coordinator;
+  assert.match((await post("contact", { student_id: pupil.id, channel: "WhatsApp", outcome: "Responded", occurred_at: created, notes: "x" })).error, /not found/i);
+  assert.ok(!(await sees({ id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" })), "nor does the quality team");
+  const lead = await (await api.GET()).json();
+  assert.ok(Array.isArray(lead.serviceLinks) && !lead.serviceLinks.some((l) => l.student_id === pupil.id), "their links leave the quality queue");
+
+  // Restoring brings them back as they were.
+  current = { id: "owner", email: "owner@example.com" };
+  await check("student_revoke", { student_id: pupil.id, restore: true, reason: "Registration confirmed" });
+  assert.equal((await dbRow("SELECT lifecycle FROM students WHERE id=?", pupil.id)).lifecycle, pupil.lifecycle);
+  assert.ok(await sees(coordinator));
+  current = { id: "owner", email: "owner@example.com" };
+  await dbExec("UPDATE users SET scopes='[]' WHERE id='staff-nour'");
+  await dbExec("DELETE FROM service_links WHERE id='SLK-REVOKE'");
+});

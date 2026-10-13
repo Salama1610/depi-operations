@@ -1,4 +1,4 @@
-import { actor, all, auditStmt, db, now, permit, rateLimit, stmt, uid } from "@/lib/server";
+import { actor, all, auditStmt, db, notRevoked, now, permit, rateLimit, stmt, uid } from "@/lib/server";
 import { sameSide } from "@/lib/demo";
 import { can, ensure } from "@/lib/domain/rules";
 
@@ -59,7 +59,7 @@ export async function GET() {
         all(
           `SELECT f.id,f.session_id,f.satisfaction,f.clarity,f.usefulness,f.searched_gig,f.liked,f.comments,f.created_at
            FROM session_feedback f JOIN sessions t ON t.id=f.session_id JOIN groups g ON g.id=t.group_id
-           WHERE ${side} AND ${own} ORDER BY f.created_at`,
+           WHERE ${side} AND ${own} AND ${notRevoked(u, "f.student_id")} ORDER BY f.created_at`,
           u.id,
         ),
       ]);
@@ -105,7 +105,7 @@ export async function GET() {
       all(
         `SELECT f.id,f.session_id,f.satisfaction,f.clarity,f.usefulness,f.searched_gig,f.liked,f.comments,f.created_at
          FROM session_feedback f JOIN feedback_reviews r ON r.session_id=f.session_id JOIN sessions t ON t.id=f.session_id JOIN groups g ON g.id=t.group_id
-         WHERE ${side}${mine} ORDER BY f.created_at`,
+         WHERE ${side}${mine} AND ${notRevoked(u, "f.student_id")} ORDER BY f.created_at`,
         ...args,
       ),
     ]);
