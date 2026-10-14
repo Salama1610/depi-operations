@@ -816,16 +816,28 @@ export default function Operations({ module: initialModule }: { module: string }
   async function mutate(action: string, values: Row) {
     // Changing a group's coach is the same handover as its coordinator, on the program API.
     if (action === "group_coach" || action === "group_coach_remove") action = "bulk_group_owner";
-    const r = await fetch(action === "bulk_group_owner" ? "/api/program" : "/api/operations", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...values,
-        action,
-        request_id: crypto.randomUUID(),
-      }),
-    });
-    const v = await r.json();
+    const body = JSON.stringify({ ...values, action, request_id: crypto.randomUUID() });
+    const send = () =>
+      fetch(action === "bulk_group_owner" ? "/api/program" : "/api/operations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+    // A dropped connection ("Failed to fetch") is tried once more with the same
+    // request key: the server records each key once, so nothing is saved twice.
+    let r: Response;
+    try {
+      r = await send();
+    } catch {
+      await new Promise((done) => setTimeout(done, 1500));
+      try {
+        r = await send();
+      } catch {
+        throw Error("The app could not reach the server. Check your internet connection, then try again.");
+      }
+    }
+    const v = await r.json().catch(() => null);
+    if (!v) throw Error("The server did not answer properly. Try again in a minute.");
     if (v.error) throw Error(v.error);
     return v;
   }

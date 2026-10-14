@@ -542,8 +542,10 @@ export default function StudentServicesPage() {
                       ? minServiceLinks - progress.required === 1
                         ? t("Add 1 more Kafiil or Nafezly link to submit.")
                         : t("Add {v0} more Kafiil or Nafezly links to submit.", { v0: minServiceLinks - progress.required })
-                      : changed
-                        ? t("Ready to submit.")
+                      : problems.length
+                        ? t("Fix the link marked above to submit.")
+                        : changed
+                          ? t("Ready to submit.")
                         : t("Nothing new to send. Add a link or fix one to submit again.")}
                   </span>
                   <button className="student-primary" disabled={!canSubmit} type="submit"><Send size={16} />{busy ? t("Submitting…") : t("Submit")}</button>

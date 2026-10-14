@@ -92,3 +92,15 @@ test("a rejected link is still recorded, with a reason the student can act on", 
   // An http address anywhere else is still refused.
   assert.equal(verifyServiceLink("http://example.com/service/12345-a-service").status, "Failed");
 });
+
+test("a real service title passes whatever its punctuation; the service number is what is checked", () => {
+  // A student's Nafezly link from 14 Oct 2026: "Audit - Redesign" becomes three hyphens.
+  const nafezly =
+    "https://nafezly.com/service/95125-%D8%AA%D8%AD%D9%84%D9%8A%D9%84-%D9%88%D8%A5%D8%B9%D8%A7%D8%AF%D8%A9-%D8%AA%D8%B5%D9%85%D9%8A%D9%85-%D9%88%D8%A7%D8%AC%D9%87%D8%A7%D8%AA-%D8%A7%D9%84%D9%85%D8%B3%D8%AA%D8%AE%D8%AF%D9%85-UIUX-Audit---Redesign-%D9%84%D9%85%D9%88%D9%82%D8%B9%D9%83-%D8%A3%D9%88-%D8%AA%D8%B7%D8%A8%D9%8A%D9%82%D9%83";
+  assert.equal(verifyServiceLink(nafezly).status, "Needs Review");
+  assert.equal(verifyServiceLink(nafezly).serviceId, "95125");
+  for (const title of ["تصميم-شعار-احترافي-؟", "كتابة-محتوى-،-مقالات", "تصميمٌ-جميلٌ", "logo--design", "تصميم-(شعار)", "seo-&-marketing", "design-", "تصميم_شعار"])
+    assert.equal(verifyServiceLink("https://kafiil.com/service/239440-" + encodeURIComponent(title)).status, "Needs Review", title);
+  for (const wrong of ["https://nafezly.com/service/abc-design", "https://nafezly.com/service/123", "https://nafezly.com/u/someone", "https://kafiil.com/service/239440-x/extra"])
+    assert.equal(verifyServiceLink(wrong).status, "Failed", wrong);
+});

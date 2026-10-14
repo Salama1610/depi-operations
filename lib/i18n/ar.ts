@@ -2515,4 +2515,7 @@ export const ar: Record<string, string> = {
   "This student is not revoked.": "هذا الطالب ليس ملغى.",
   "This student is already revoked.": "هذا الطالب ملغى بالفعل.",
   "Choose a student.": "اختر طالبًا.",
+  "Fix the link marked above to submit.": "صحّح الرابط المشار إليه بالأعلى لتتمكن من الإرسال.",
+  "The app could not reach the server. Check your internet connection, then try again.": "تعذّر على التطبيق الوصول إلى الخادم. تحقق من اتصال الإنترنت ثم حاول مرة أخرى.",
+  "The server did not answer properly. Try again in a minute.": "لم يستجب الخادم كما ينبغي. حاول مرة أخرى بعد دقيقة.",
 };

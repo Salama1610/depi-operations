@@ -19,7 +19,10 @@ const platformHosts: Record<string, string> = {
   "khamsat.com": "Khamsat",
   "nafezly.com": "Nafezly",
 };
-const slug = "[\\p{L}\\p{N}]+(?:-[\\p{L}\\p{N}]+)*";
+// The title part after the number is whatever the marketplace made of the
+// service's title: Arabic with tashkeel, "؟" or "،", brackets, "&", emoji,
+// double or trailing hyphens. Any of it is fine; only the number is checked.
+const slug = "[^/]+";
 const servicePath = new RegExp(`^/service/(\\d+)-(${slug})/?$`, "iu");
 const categoryPath = new RegExp(`^/(${slug})/(${slug})/(\\d+)-(${slug})/?$`, "iu");
 
