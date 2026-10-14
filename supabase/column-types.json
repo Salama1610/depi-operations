@@ -787,5 +787,12 @@
     "status": "text",
     "note": "text",
     "reviewed_at": "timestamptz"
+  },
+  "coach_availability": {
+    "user_id": "text",
+    "slots": "text",
+    "note": "text",
+    "updated_by": "text",
+    "updated_at": "timestamptz"
   }
 }

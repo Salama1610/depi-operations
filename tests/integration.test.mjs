@@ -3774,3 +3774,54 @@ test("an administrator sends a student's service links for them, through the stu
   await dbExec("DELETE FROM service_links WHERE student_id=?", pupil.id);
   await dbExec("DELETE FROM service_submissions WHERE student_id=?", pupil.id);
 });
+
+test("coach availability: Coach Operations sees every coach with free and booked hours, and records free hours", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  const api = await route("coach-availability");
+  const get = async () => (await api.GET()).json();
+  const send = async (body) =>
+    (await api.POST(new Request("https://test.local/api/coach-availability", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }))).json();
+  // A coach with an upcoming 7 PM (Cairo) session on a known weekday.
+  const group = await dbRow("SELECT id FROM groups WHERE status='Active' AND id NOT LIKE 'DEMO-%' AND id NOT IN (SELECT group_id FROM sessions WHERE week=9) ORDER BY id LIMIT 1");
+  let day = "";
+  for (let n = 3; !day; n++) {
+    const d = new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+    if (!(await dbRow("SELECT 1 FROM sessions WHERE coach_id='staff-coach' AND session_day=? AND status<>'Cancelled'", d))) day = d;
+  }
+  await dbExec(
+    "INSERT INTO sessions(id,group_id,coach_id,title,starts_at,session_day,duration_minutes,status,week) VALUES(?,?,?,?,?,?,?,?,?)",
+    "SES-CA-1", group.id, "staff-coach", "Week 9", day + "T16:00:00.000Z", day, 180, "Scheduled", 9,
+  );
+  const weekday = new Date(day + "T16:00:00.000Z").toLocaleDateString("en-US", { timeZone: "Africa/Cairo", weekday: "short" });
+
+  current = { id: "coach-ops-login", email: "staff-coach-ops@example.invalid" };
+  const first = await get();
+  assert.equal(first.error, undefined, first.error);
+  const coach = first.coaches.find((c) => c.id === "staff-coach");
+  assert.ok(coach, "every coach is listed");
+  assert.ok(!first.coaches.some((c) => c.id.startsWith("system-unassigned")), "not the placeholder coach");
+  assert.ok(!/national_id/.test(JSON.stringify(first)), "no national IDs");
+  const s = coach.sessions.find((x) => x.group_id === group.id && x.day === weekday);
+  assert.ok(s, "the upcoming session is in the coach's week");
+  assert.equal(s.time, "19:00");
+  assert.deepEqual(s.keys, [`${weekday}-19`, `${weekday}-20`, `${weekday}-21`]);
+
+  // Free hours are recorded, cleaned of anything outside the grid, and audited.
+  const saved = await send({ action: "save", user_id: "staff-coach", slots: ["Sat-17", "Sat-18", "Sat-17", "Xyz-3", "Sun-30"], note: "Prefers evenings" });
+  assert.equal(saved.ok, true, saved.error);
+  assert.deepEqual(saved.slots, ["Sat-17", "Sat-18"]);
+  const again = (await get()).coaches.find((c) => c.id === "staff-coach");
+  assert.deepEqual(again.declared, ["Sat-17", "Sat-18"]);
+  assert.equal(again.note, "Prefers evenings");
+  assert.ok(await dbRow("SELECT 1 FROM audit_events WHERE action='Coach availability saved' AND entity_id='staff-coach'"));
+  assert.equal((await send({ action: "save", user_id: "staff-coach-ops", slots: [] })).error, "Choose a coach.");
+  assert.equal((await send({ action: "clear", user_id: "staff-coach" })).ok, true);
+  assert.equal((await get()).coaches.find((c) => c.id === "staff-coach").declared, null);
+
+  // Coaches and coordinators do not open it.
+  current = { id: "coach-login", email: "staff-coach@example.invalid" };
+  assert.match((await get()).error, /role/);
+  assert.match((await send({ action: "save", user_id: "staff-coach", slots: [] })).error, /role/);
+  current = { id: "owner", email: "owner@example.com" };
+  await dbExec("DELETE FROM sessions WHERE id='SES-CA-1'");
+});

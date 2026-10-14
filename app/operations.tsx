@@ -15,6 +15,7 @@ import { PortalView } from "./portal-view";
 // The dashboard and its charts load only when someone opens it.
 const Dashboard = lazy(() => import("./dashboard").then((m) => ({ default: m.Dashboard })));
 const FeedbackReview = lazy(() => import("./feedback-review").then((m) => ({ default: m.FeedbackReview })));
+const CoachAvailability = lazy(() => import("./coach-availability").then((m) => ({ default: m.CoachAvailability })));
 import { SearchableSelect } from "@/components/searchable-select";
 import { Progress } from "@/components/ui/progress";
 import { GraduationDots } from "./today";
@@ -32,6 +33,7 @@ import {
   Users,
   Layers,
   CalendarDays,
+  CalendarClock,
   BriefcaseBusiness,
   Files,
   ShieldCheck,
@@ -135,6 +137,7 @@ const nav = [
   ["progress", "Student progress", GraduationCap],
   ["groups", "Groups", Layers],
   ["sessions", "Sessions", CalendarDays],
+  ["coaches", "Coach availability", CalendarClock],
   ["accounts", "Accounts", WalletCards],
   ["gigs", "Services", BriefcaseBusiness],
   ["opportunities", "Opportunities", ExternalLink],
@@ -695,6 +698,9 @@ export default function Operations({ module: initialModule }: { module: string }
         ? // Students' session feedback, given out to the quality team to review;
           // a coach reads their own sessions' feedback there, read-only.
           can(user.roles, ["Quality Lead", "Quality Member", "Operations Systems / Admin", "Coach"])
+      : m === "coaches"
+        ? // Every coach with their free and booked hours, to find who is free when.
+          can(user.roles, ["Coach Operations", "Operations Systems / Admin"])
       : m === "dashboard"
         ? // Every tracker and what everyone did: the administrator's view.
           can(user.roles, ["Operations Systems / Admin"]) && !demoAccount
@@ -3048,6 +3054,12 @@ See you there!`,
         <FeedbackReview />
       </Suspense>
     );
+  } else if (module === "coaches") {
+    content = (
+      <Suspense fallback={<div className="dash-loading">{t("Loading the coaches…")}</div>}>
+        <CoachAvailability />
+      </Suspense>
+    );
   } else if (module === "dashboard") {
     content = (
       <Suspense fallback={<div className="dash-loading">{t("Loading the dashboard…")}</div>}>
@@ -4656,6 +4668,7 @@ See you there!`,
                                 "One student, one owner, a complete operational picture.",
                               groups: "Rolling journeys, accountable teams.",
                               sessions: "Coaching schedules and attendance.",
+                              coaches: "Who is free, on which day and at what time.",
                               accounts:
                                 "Controlled allocations with eligibility checks.",
                               gigs: "Track delivery, payment and the proof behind them.",

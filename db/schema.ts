@@ -1207,6 +1207,16 @@ export const feedbackReviews = sqliteTable(
   },
   (t) => [index("feedback_reviews_reviewer_idx").on(t.reviewer, t.status)],
 );
+// The hours of the week each coach can take a session. See migration 202610140036.
+export const coachAvailability = sqliteTable("coach_availability", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id),
+  slots: text("slots").notNull().default("[]"),
+  note: text("note"),
+  updatedBy: text("updated_by").references(() => users.id),
+  updatedAt: text("updated_at").notNull(),
+});
 export const joinAccounts = sqliteTable("join_accounts", {
   id: text("id").primaryKey(),
   kind: text("kind").notNull(),
