@@ -179,6 +179,7 @@ const titles: Row = {
   engagement: "Review engagement status",
   lifecycle: "Update lifecycle status",
   student_revoke: "Revoke or restore a student",
+  student_services_submit: "Submit service links for this student",
   staff: "Manage staff access",
   account_topup: "Record a top-up",
   account_coordinator: "Assign to a coordinator",
@@ -816,9 +817,17 @@ export default function Operations({ module: initialModule }: { module: string }
   async function mutate(action: string, values: Row) {
     // Changing a group's coach is the same handover as its coordinator, on the program API.
     if (action === "group_coach" || action === "group_coach_remove") action = "bulk_group_owner";
-    const body = JSON.stringify({ ...values, action, request_id: crypto.randomUUID() });
+    // An administrator sends a student's service links through the student page's own Send.
+    const forStudent = action === "student_services_submit";
+    const body = forStudent
+      ? JSON.stringify({
+          action: "submit_services",
+          student_id: values.student_id,
+          services: String(values.links || "").split(/\s+/).map((v) => v.trim()).filter(Boolean),
+        })
+      : JSON.stringify({ ...values, action, request_id: crypto.randomUUID() });
     const send = () =>
-      fetch(action === "bulk_group_owner" ? "/api/program" : "/api/operations", {
+      fetch(forStudent ? "/api/student-services" : action === "bulk_group_owner" ? "/api/program" : "/api/operations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body,
@@ -5055,6 +5064,16 @@ See you there!`,
                         {t("Lifecycle")}
                       </button>
                     )}
+                    {can(user.roles, ["Operations Systems / Admin"]) && !demoAccount && (
+                      <button
+                        className="small-btn"
+                        onClick={() =>
+                          open("student_services_submit", { student_id: selectedStudent.id, student_name: selectedStudent.name, links: "" })
+                        }
+                      >
+                        {t("Submit service links for this student")}
+                      </button>
+                    )}
                     {revokes && (
                       <button
                         className="small-btn"
@@ -6338,6 +6357,28 @@ See you there!`,
                       "Unresponsive",
                     ])}
                     {field("reason", t("Reason for confirmation or override"))}
+                  </>
+                );
+              if (a === "student_services_submit")
+                return (
+                  <>
+                    <div className="info-box">
+                      <strong>{form.student_name}</strong>
+                      <span>
+                        {t("Paste the student's new links, one per line. The links they already sent stay as they are. The same checks as the student's own page apply, the links go to a quality reviewer, and you are recorded as the one who sent them.")}
+                      </span>
+                    </div>
+                    <label className="field">
+                      {t("Service links")}
+                      <textarea
+                        required
+                        rows={5}
+                        dir="ltr"
+                        value={form.links || ""}
+                        onChange={(e) => setForm({ ...form, links: e.target.value })}
+                        style={{ border: "1px solid #dae2ef", borderRadius: 6, padding: "9px 11px", font: "inherit", fontSize: 13 }}
+                      />
+                    </label>
                   </>
                 );
               if (a === "student_revoke")

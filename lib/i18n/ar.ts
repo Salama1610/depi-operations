@@ -2518,4 +2518,6 @@ export const ar: Record<string, string> = {
   "Fix the link marked above to submit.": "صحّح الرابط المشار إليه بالأعلى لتتمكن من الإرسال.",
   "The app could not reach the server. Check your internet connection, then try again.": "تعذّر على التطبيق الوصول إلى الخادم. تحقق من اتصال الإنترنت ثم حاول مرة أخرى.",
   "The server did not answer properly. Try again in a minute.": "لم يستجب الخادم كما ينبغي. حاول مرة أخرى بعد دقيقة.",
+  "Submit service links for this student": "إرسال روابط الخدمات نيابةً عن الطالب",
+  "Paste the student's new links, one per line. The links they already sent stay as they are. The same checks as the student's own page apply, the links go to a quality reviewer, and you are recorded as the one who sent them.": "الصق روابط الطالب الجديدة، رابطًا في كل سطر. الروابط التي أرسلها من قبل تبقى كما هي. تُطبَّق نفس فحوص صفحة الطالب، وتذهب الروابط لمراجع جودة، ويُسجَّل أنك من أرسلها.",
 };

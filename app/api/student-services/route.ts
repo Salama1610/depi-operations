@@ -233,12 +233,25 @@ export async function POST(req: Request) {
     if (x.action === "qc_review") return await qcReview(x);
     if (x.action === "session_feedback") return await sessionFeedback(x);
     if (x.action !== "submit_services") throw new Error("Choose a service-link action.");
-    const s = await currentStudent();
-    await rateLimit("student-services:" + s.id, 30, 60);
+    // An administrator can send a student's links for them, from the student's
+    // details: the same checks, reviewer and notifications as the student's own
+    // Send, with the administrator recorded as the one who sent them.
+    let staff: any = null;
+    let s: any;
+    if (x.student_id) {
+      staff = await actor();
+      permit(staff, ["Operations Systems / Admin"]);
+      s = await student(staff, String(x.student_id));
+      if (["Removed", "Withdrawn", "Graduate Closed", "Non-Graduate Closed", "Revoked"].includes(s.lifecycle))
+        throw new Error("This student record is closed and can no longer be updated.");
+    } else s = await currentStudent();
+    await rateLimit("student-services:" + (staff ? staff.id : s.id), 30, 60);
     const existing = await all(
       "SELECT * FROM service_links WHERE student_id=? ORDER BY slot",
       s.id,
     );
+    // Staff send only the new links; the ones already in stay in their places.
+    if (staff && Array.isArray(x.services)) x.services = [...existing.map((row: any) => row.url), ...x.services];
     const bySlot = new Map(existing.map((row) => [Number(row.slot), row]));
     // The student sends the whole form: the links already submitted, in their
     // places, with corrections, then any new ones. An approved or waiting link
@@ -389,7 +402,11 @@ export async function POST(req: Request) {
       reviewer,
       s.id,
     ));
-    jobs.push(auditStmt(s, "Student service links submitted", s.id, { links: values.length }, null, uid("REQ")));
+    jobs.push(
+      staff
+        ? auditStmt(staff, "Service links submitted for a student", s.id, { links: values.length, on_behalf_of: s.id }, null, uid("REQ"))
+        : auditStmt(s, "Student service links submitted", s.id, { links: values.length }, null, uid("REQ")),
+    );
     await db().batch(jobs);
     return Response.json({ ok: true, ...(await studentView(s.id)) });
   } catch (e: any) {

@@ -3741,3 +3741,36 @@ test("a revoked student disappears for everyone but administrators and the accou
   await dbExec("UPDATE users SET scopes='[]' WHERE id='staff-nour'");
   await dbExec("DELETE FROM service_links WHERE id='SLK-REVOKE'");
 });
+
+test("an administrator sends a student's service links for them, through the student's own checks", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const servicesApi = await route("student-services");
+  const call = (body) =>
+    servicesApi.POST(new Request("https://test.local/api/student-services", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
+  const pupil = await dbRow(
+    "SELECT s.id,g.coordinator,u.email FROM students s JOIN groups g ON g.id=s.group_id JOIN users u ON u.id=g.coordinator WHERE s.lifecycle='Active' AND g.status='Active' AND g.id NOT LIKE 'DEMO-%' AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=s.id) ORDER BY s.id DESC LIMIT 1",
+  );
+  const links = [
+    "https://kafiil.com/service/880001-" + encodeURIComponent("تصميم-واجهات-مستخدم-uiux"),
+    "https://nafezly.com/service/880002-" + encodeURIComponent("تحليل-وإعادة-تصميم-UIUX-Audit---Redesign"),
+    "https://nafezly.com/service/880003-" + encodeURIComponent("بحث-UX-شامل"),
+  ];
+  current = { id: pupil.coordinator, email: pupil.email };
+  assert.match((await (await call({ action: "submit_services", student_id: pupil.id, services: links })).json()).error, /role/, "only an administrator");
+  current = { id: "owner", email: "owner@example.com" };
+  const first = await (await call({ action: "submit_services", student_id: pupil.id, services: links.slice(0, 2).concat(links[2]) })).json();
+  assert.equal(first.error, undefined, first.error);
+  const saved = await dbRows("SELECT slot,platform,qc_status,qc_actor FROM service_links WHERE student_id=? ORDER BY slot", pupil.id);
+  assert.deepEqual(saved.map((r) => r.platform), ["Kafiil", "Nafezly", "Nafezly"]);
+  assert.ok(saved.every((r) => r.qc_status === "Pending" && r.qc_actor), "pending and given to a reviewer");
+  const audit = await dbRow("SELECT actor,action FROM audit_events WHERE entity_id=? ORDER BY created_at DESC LIMIT 1", pupil.id);
+  assert.equal(audit.actor, "owner");
+  assert.equal(audit.action, "Service links submitted for a student");
+  // A further link adds to the ones already in, which stay where they are.
+  const more = await (await call({ action: "submit_services", student_id: pupil.id, services: ["https://khamsat.com/designing/logo/880004-" + encodeURIComponent("شعار")] })).json();
+  assert.equal(more.error, undefined, more.error);
+  assert.equal((await dbRows("SELECT id FROM service_links WHERE student_id=?", pupil.id)).length, 4);
+  await dbExec("DELETE FROM service_links WHERE student_id=?", pupil.id);
+  await dbExec("DELETE FROM service_submissions WHERE student_id=?", pupil.id);
+});
