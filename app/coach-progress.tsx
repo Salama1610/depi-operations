@@ -47,6 +47,13 @@ function portalTone(value?: string | null) {
   return v ? "is-warn" : "is-info";
 }
 
+/** Gigs our quality team has decided on that still wait for the coach on the portal. */
+function qcWaiting(s: Row) {
+  return (s.portal?.gigs || []).filter(
+    (g: Row) => (g.qc_status === "Approved" || g.qc_status === "Rejected") && /^(pending)?$/i.test(String(g.provider_status || "").trim()),
+  ).length;
+}
+
 export function CoachProgress() {
   const t = useT();
   const tag = useLocale() === "ar" ? "ar-EG-u-nu-latn" : "en-GB";
@@ -165,6 +172,7 @@ export function CoachProgress() {
                       <span className="cue is-ok">{t("{v0} accepted", { v0: s.portal.approved ?? 0 })}</span>
                       <span className="cue is-bad">{t("{v0} rejected", { v0: s.portal.rejected ?? 0 })}</span>
                       <small>{t("of {v0}", { v0: s.portal.total })}</small>
+                      {qcWaiting(s) > 0 && <span className="cue is-warn">{t("{v0} checked by QC, waiting for you", { v0: qcWaiting(s) })}</span>}
                     </>
                   ) : (
                     <small>{t("Not on the portal yet")}</small>
@@ -216,7 +224,13 @@ export function CoachProgress() {
                           <span className="coach-progress-portal">
                             <span className={"cue " + portalTone(g.status)} title={t("Portal status")}>{g.status ? t(g.status) : "—"}</span>
                             <span className={"cue " + portalTone(g.auditor_status)} title={t("Auditor")}>{g.auditor_status ? t(g.auditor_status) : "—"}</span>
+                            {/* Our quality team's check: the coach's cue to approve or reject on the portal. */}
+                            <span className={"cue " + (g.qc_status ? portalTone(g.qc_status) : "is-info")} title={t("Our QC")}>
+                              {t("Our QC")}: {g.qc_status ? t(g.qc_status) : t("Not checked")}
+                            </span>
+                            {g.url && <a className="text-link" href={g.url} target="_blank" rel="noreferrer">{t("Gig")}</a>}
                           </span>
+                          {g.qc_comment && <small className="coach-progress-qc wrap-text">{g.qc_comment}</small>}
                         </li>
                       ))}
                     </ul>

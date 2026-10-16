@@ -794,5 +794,20 @@
     "note": "text",
     "updated_by": "text",
     "updated_at": "timestamptz"
+  },
+  "portal_gig_reviews": {
+    "portal_gig_id": "text",
+    "portal_student_id": "text",
+    "student_id": "text",
+    "student_name": "text",
+    "title": "text",
+    "url": "text",
+    "reviewer": "text",
+    "assigned_by": "text",
+    "assigned_at": "timestamptz",
+    "status": "text",
+    "comment": "text",
+    "reviewed_by": "text",
+    "reviewed_at": "timestamptz"
   }
 }

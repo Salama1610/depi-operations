@@ -1304,3 +1304,26 @@ export const portalGigs = sqliteTable(
   },
   (t) => [index("portal_gigs_batch_idx").on(t.batchId, t.portalStudentId)],
 );
+// Our Quality Member's verdict on each ministry-portal gig before the coach
+// approves it there; keyed by the portal's own gig id so it survives uploads.
+export const portalGigReviews = sqliteTable(
+  "portal_gig_reviews",
+  {
+    portalGigId: text("portal_gig_id").primaryKey(),
+    portalStudentId: text("portal_student_id").notNull(),
+    studentId: text("student_id").references(() => students.id),
+    studentName: text("student_name"),
+    title: text("title"),
+    url: text("url"),
+    reviewer: text("reviewer")
+      .notNull()
+      .references(() => users.id),
+    assignedBy: text("assigned_by").references(() => users.id),
+    assignedAt: text("assigned_at").notNull(),
+    status: text("status").notNull().default("Pending"),
+    comment: text("comment"),
+    reviewedBy: text("reviewed_by").references(() => users.id),
+    reviewedAt: text("reviewed_at"),
+  },
+  (t) => [index("portal_gig_reviews_reviewer_idx").on(t.reviewer, t.status), index("portal_gig_reviews_student_idx").on(t.portalStudentId)],
+);

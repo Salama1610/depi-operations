@@ -3825,3 +3825,103 @@ test("coach availability: Coach Operations sees every coach with free and booked
   current = { id: "owner", email: "owner@example.com" };
   await dbExec("DELETE FROM sessions WHERE id='SES-CA-1'");
 });
+
+test("portal gigs waiting for the coach go to the quality team, whose verdict the coach and coordinator read", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const portal = await route("portal");
+  const qc = await route("portal-qc");
+  const upload = async (sheet, mapping, rows) => {
+    const post = async (body) =>
+      (await portal.POST(new Request("https://test.local/api/portal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }))).json();
+    const begun = await post({ action: "begin", sheet, mapping, total: rows.length, file_name: sheet + ".xlsx" });
+    assert.ok(begun.batch, JSON.stringify(begun));
+    assert.equal((await post({ action: "chunk", batch: begun.batch, rows })).error, undefined);
+    const done = await post({ action: "commit", batch: begun.batch });
+    assert.equal(done.error, undefined, done.error);
+  };
+  const get = async () => (await qc.GET()).json();
+  const send = async (body) =>
+    (await qc.POST(new Request("https://test.local/api/portal-qc", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }))).json();
+  const ours = await dbRow(
+    `SELECT s.id,s.email,g.coordinator,g.coach FROM students s JOIN groups g ON g.id=s.group_id
+     WHERE s.email IS NOT NULL AND s.lifecycle='Active' AND g.status='Active' AND g.id NOT LIKE 'DEMO-%'
+       AND coalesce(g.delivery_model,'Regular')<>'Industry' AND g.coach IS NOT NULL AND g.coach<>'system-unassigned-coach' ORDER BY s.id LIMIT 1`,
+  );
+  assert.ok(ours, "a coached student to link");
+  await dbExec(
+    "INSERT INTO users(id,email,name,roles,scopes,active,national_id,phone,title) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET active=1",
+    "staff-quality-2", "staff-quality-2@example.invalid", "Second Reviewer", JSON.stringify(["Quality Member"]), "[]", 1, "29801011234561", null, "Quality Member",
+  );
+  await upload("students", { ID: "portal_id", Email: "email", "Full Name": "full_name" }, [
+    { portal_id: "PQ-1", email: ours.email, full_name: "Linked student" },
+    { portal_id: "PQ-2", email: "portal-only-qc@example.org", full_name: "Portal only" },
+  ]);
+  const gigMapping = { ID: "portal_gig_id", "Student ID": "portal_student_id", Title: "title", URL: "url", Status: "status", "Provider Status": "provider_status" };
+  const gigRows = [
+    { portal_gig_id: "QG-1", portal_student_id: "PQ-1", title: "Logo", url: "https://example.org/1", status: "Pending", provider_status: "Pending" },
+    { portal_gig_id: "QG-2", portal_student_id: "PQ-1", title: "Banner", url: "https://example.org/2", status: "Pending", provider_status: "Pending" },
+    { portal_gig_id: "QG-3", portal_student_id: "PQ-1", title: "Already decided", status: "Approved", provider_status: "Approved" },
+    { portal_gig_id: "QG-4", portal_student_id: "PQ-2", title: "Deck", status: "Pending", provider_status: "" },
+  ];
+  await upload("gigs", gigMapping, gigRows);
+
+  // The lead's look hands out only what waits for the coach, a student's gigs to one member.
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  const lead = await get();
+  assert.equal(lead.error, undefined, lead.error);
+  assert.ok(lead.lead);
+  assert.deepEqual(lead.reviews.map((r) => r.portal_gig_id).sort(), ["QG-1", "QG-2", "QG-4"], "the coach's decided gig is not queued");
+  const rows = await dbRows("SELECT * FROM portal_gig_reviews ORDER BY portal_gig_id");
+  assert.equal(rows[0].reviewer, rows[1].reviewer, "one student's gigs stay together");
+  assert.equal(rows[0].student_id, ours.id);
+  for (const r of rows) {
+    const roles = JSON.parse((await dbRow("SELECT roles FROM users WHERE id=?", r.reviewer)).roles);
+    assert.ok(roles.includes("Quality Member") && !roles.includes("Quality Lead"), "only Quality Members, not the lead");
+  }
+  const owner = rows[0].reviewer;
+  const other = lead.reviewers.find((p) => p.id !== owner).id;
+
+  // Only the member it was given to decides; a rejection needs its reason.
+  current = { id: other, email: other + "@example.invalid" };
+  assert.ok((await get()).reviews.every((r) => r.reviewer === other));
+  assert.match((await send({ action: "decide", portal_gig_id: "QG-1", status: "Approved" })).error, /reviewer it was given to/);
+  current = { id: owner, email: owner + "@example.invalid" };
+  assert.match((await send({ action: "decide", portal_gig_id: "QG-1", status: "Rejected" })).error, /why the gig is rejected/);
+  assert.equal((await send({ action: "decide", portal_gig_id: "QG-1", status: "Rejected", comment: "The link shows another seller." })).ok, true);
+  assert.equal((await send({ action: "decide", portal_gig_id: "QG-2", status: "Approved" })).ok, true);
+  assert.match((await send({ action: "redistribute" })).error, /Quality Lead/);
+
+  // A new upload of the same sheet keeps the verdicts with their gigs.
+  current = { id: "owner", email: "owner@example.com" };
+  await upload("gigs", gigMapping, gigRows);
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  assert.equal((await get()).reviews.length, 3);
+  assert.equal((await dbRow("SELECT status FROM portal_gig_reviews WHERE portal_gig_id='QG-1'")).status, "Rejected");
+
+  // The coordinator and the coach read the verdict.
+  const coordinator = await dbRow("SELECT id,email FROM users WHERE id=?", ours.coordinator);
+  current = { id: coordinator.id, email: coordinator.email };
+  const theirs = (await portal.GET(new Request("https://test.local/api/portal?student=PQ-1")).then((r) => r.json())).gigs;
+  assert.equal(theirs.find((g) => g.portal_gig_id === "QG-1").qc_status, "Rejected");
+  assert.equal(theirs.find((g) => g.portal_gig_id === "QG-1").qc_comment, "The link shows another seller.");
+  assert.match((await get()).error, /role/, "the queue itself is the quality team's");
+  const coach = await dbRow("SELECT id,email FROM users WHERE id=?", ours.coach);
+  current = { id: coach.id, email: coach.email };
+  const progress = await (await route("coach-progress")).GET().then((r) => r.json());
+  assert.equal(progress.error, undefined, progress.error);
+  const pupil = progress.students.find((s) => s.id === ours.id);
+  assert.equal(pupil.portal.gigs.find((g) => g.id === "QG-2").qc_status, "Approved");
+
+  // The lead moves the whole student, then shares the pending ones out again.
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  assert.equal((await send({ action: "decide", portal_gig_id: "QG-2", status: "Pending" })).ok, true);
+  assert.equal((await send({ action: "reassign", portal_gig_id: "QG-2", reviewer: other })).ok, true);
+  assert.equal((await dbRow("SELECT reviewer FROM portal_gig_reviews WHERE portal_gig_id='QG-2'")).reviewer, other);
+  assert.equal((await send({ action: "reassign", portal_gig_id: "QG-2", reviewer: "staff-quality-lead" })).error, "Choose an active Quality Member.");
+  assert.equal((await send({ action: "redistribute" })).ok, true);
+
+  current = { id: "owner", email: "owner@example.com" };
+  await dbExec("DELETE FROM portal_gig_reviews");
+  await dbExec("UPDATE users SET active=0 WHERE id='staff-quality-2'");
+});

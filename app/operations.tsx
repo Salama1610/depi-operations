@@ -15,6 +15,7 @@ import { PortalView } from "./portal-view";
 // The dashboard and its charts load only when someone opens it.
 const Dashboard = lazy(() => import("./dashboard").then((m) => ({ default: m.Dashboard })));
 const FeedbackReview = lazy(() => import("./feedback-review").then((m) => ({ default: m.FeedbackReview })));
+const PortalQc = lazy(() => import("./portal-qc").then((m) => ({ default: m.PortalQc })));
 const CoachAvailability = lazy(() => import("./coach-availability").then((m) => ({ default: m.CoachAvailability })));
 import { SearchableSelect } from "@/components/searchable-select";
 import { Progress } from "@/components/ui/progress";
@@ -37,6 +38,7 @@ import {
   BriefcaseBusiness,
   Files,
   ShieldCheck,
+  ClipboardCheck,
   Flag,
   ChartNoAxesCombined,
   Settings2,
@@ -142,6 +144,7 @@ const nav = [
   ["gigs", "Services", BriefcaseBusiness],
   ["opportunities", "Opportunities", ExternalLink],
   ["portal", "Gigs portal view", Files],
+  ["portal-qc", "Portal gigs QC", ClipboardCheck],
   ["quality", "Quality review", ShieldCheck],
   ["feedback-review", "Feedback review", MessageSquareText],
   ["cases", "Cases", Flag],
@@ -693,11 +696,15 @@ export default function Operations({ module: initialModule }: { module: string }
       (Array.isArray(user.scopes) && (user.scopes.includes("account-owner") || user.scopes.includes("revoke-students"))));
   const shownNav = nav.filter(([m]) =>
     qualityOnly
-      ? m === "quality" || m === "feedback-review" || (m === "portal" && !demoAccount)
+      ? m === "quality" || m === "feedback-review" || ((m === "portal" || m === "portal-qc") && !demoAccount)
       : m === "feedback-review"
         ? // Students' session feedback, given out to the quality team to review;
           // a coach reads their own sessions' feedback there, read-only.
           can(user.roles, ["Quality Lead", "Quality Member", "Operations Systems / Admin", "Coach"])
+      : m === "portal-qc"
+        ? // Our quality team's check of the portal gigs before the coach decides.
+          // Coaches and coordinators read the verdicts in their own views.
+          !demoAccount && can(user.roles, ["Quality Lead", "Quality Member", "Operations Systems / Admin"])
       : m === "coaches"
         ? // Every coach with their free and booked hours, to find who is free when.
           can(user.roles, ["Coach Operations", "Operations Systems / Admin"])
@@ -3052,6 +3059,12 @@ See you there!`,
     content = (
       <Suspense fallback={<div className="dash-loading">{t("Loading…")}</div>}>
         <FeedbackReview />
+      </Suspense>
+    );
+  } else if (module === "portal-qc") {
+    content = (
+      <Suspense fallback={<div className="dash-loading">{t("Loading…")}</div>}>
+        <PortalQc />
       </Suspense>
     );
   } else if (module === "coaches") {

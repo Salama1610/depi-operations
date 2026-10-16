@@ -435,6 +435,9 @@ function PortalRow({ s, c, open, gigs, error, onToggle }: { s: Row; c?: Row; ope
         <td>
           {c ? `${c.approved}/${c.total}` : `${s.approved_gigs ?? 0}/${s.total_gigs ?? 0}`}
           {c && Number(c.audit_pending) > 0 && <small className="table-subline">{t("{v0} awaiting the auditor", { v0: c.audit_pending })}</small>}
+          {c && Number(c.qc_approved) + Number(c.qc_rejected) > 0 && (
+            <small className="table-subline">{t("Our QC: {v0} approved · {v1} rejected", { v0: Number(c.qc_approved), v1: Number(c.qc_rejected) })}</small>
+          )}
         </td>
         <td>{s.total_revenue != null ? "$" + Number(s.total_revenue).toLocaleString("en-US", { maximumFractionDigits: 2 }) : "—"}</td>
         <td>
@@ -458,7 +461,7 @@ function PortalRow({ s, c, open, gigs, error, onToggle }: { s: Row; c?: Row; ope
             ) : (
               <table className="portal-gigs">
                 <thead>
-                  <tr><th>{t("Gig")}</th><th>{t("Platform")}</th><th>{t("Price")}</th><th>{t("Status")}</th><th>{t("Auditor")}</th><th>{t("Comment")}</th><th /></tr>
+                  <tr><th>{t("Gig")}</th><th>{t("Platform")}</th><th>{t("Price")}</th><th>{t("Status")}</th><th>{t("Auditor")}</th><th>{t("Our QC")}</th><th>{t("Comment")}</th><th /></tr>
                 </thead>
                 <tbody>
                   {gigs.map((g) => (
@@ -468,6 +471,12 @@ function PortalRow({ s, c, open, gigs, error, onToggle }: { s: Row; c?: Row; ope
                       <td>{g.price != null ? "$" + g.price : "—"}</td>
                       <td><span className={"badge " + tone(g.status)}>{g.status ? t(g.status) : "—"}</span></td>
                       <td><span className={"badge " + tone(g.auditor_status)}>{g.auditor_status ? t(g.auditor_status) : "—"}</span><small className="table-subline">{g.action_by}</small></td>
+                      <td>
+                        {/* Our quality team's check, done before the coach decides on the portal. */}
+                        <span className={"badge " + tone(g.qc_status)}>{g.qc_status ? t(g.qc_status) : t("Not checked")}</span>
+                        {g.qc_comment && <small className="table-subline wrap-text">{g.qc_comment}</small>}
+                        {g.qc_reviewer && <small className="table-subline">{g.qc_reviewer}</small>}
+                      </td>
                       <td><small>{g.comment}</small></td>
                       <td>
                         {g.url && <a className="text-link" href={g.url} target="_blank" rel="noreferrer">{t("Gig")} <ExternalLink size={12} /></a>}

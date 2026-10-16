@@ -75,7 +75,10 @@ export async function GET() {
     const portalGigs = gigsBatch && portalIds.length
       ? await inChunks(portalIds, (slice) =>
           all(
-            `SELECT portal_gig_id,portal_student_id,title,price,created_on,status,auditor_status FROM portal_gigs WHERE batch_id=? AND portal_student_id IN (${marks(slice)}) ORDER BY created_on`,
+            `SELECT z.portal_gig_id,z.portal_student_id,z.title,z.url,z.price,z.created_on,z.status,z.provider_status,z.auditor_status,
+                    r.status qc_status,r.comment qc_comment,r.reviewed_at qc_reviewed_at
+             FROM portal_gigs z LEFT JOIN portal_gig_reviews r ON r.portal_gig_id=z.portal_gig_id
+             WHERE z.batch_id=? AND z.portal_student_id IN (${marks(slice)}) ORDER BY z.created_on`,
             gigsBatch,
             ...slice,
           ),
@@ -129,6 +132,12 @@ export async function GET() {
                   date: p.created_on,
                   status: p.status,
                   auditor_status: p.auditor_status,
+                  provider_status: p.provider_status,
+                  url: p.url || null,
+                  // Our quality team's check, for the coach to act on in the portal.
+                  qc_status: p.qc_status || null,
+                  qc_comment: p.qc_comment || null,
+                  qc_at: p.qc_reviewed_at || null,
                 })),
             }
           : null,

@@ -1408,3 +1408,25 @@ td .searchable-select,td .pick-inline{max-width:240px;min-width:0}
 .ca-sessions li small{color:#7b88a0}
 .ca textarea,.ca-dialog textarea{border:1px solid #dfe4ee;border-radius:8px;padding:8px 10px;font:inherit;font-size:14px;width:100%}
 .ca-actions{justify-content:flex-end}
+/* Portal gigs QC: a student's portal gigs, each with our quality verdict. */
+.pqc-load{display:flex;flex-wrap:wrap;gap:6px}
+.pqc-student{display:flex;flex-direction:column;gap:10px;min-width:0}
+.pqc-student>header{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;flex-wrap:wrap}
+.pqc-student>header>div:first-child{min-width:0}
+.pqc-student>header>*:last-child{max-width:260px;flex:0 1 220px}
+.pqc-gigs{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.pqc-gig{border:1px solid #e4e9f2;border-inline-start:4px solid #e0b04f;border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.pqc-gig.is-ok{border-inline-start-color:#3c9a6a}
+.pqc-gig.is-bad{border-inline-start-color:#c0453a}
+.pqc-gig-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap}
+.pqc-gig-head>div:first-child{min-width:0;flex:1 1 240px}
+.pqc-links{display:flex;gap:10px;flex-wrap:wrap}
+.pqc-portal,.pqc-verdict{display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-width:0}
+.pqc-portal small,.pqc-verdict small{color:#6a7891}
+.pqc-verdict p{flex-basis:100%;margin:0;font-size:13px;color:#33415c}
+.pqc-decide{display:flex;flex-direction:column;gap:6px}
+.pqc-decide textarea{width:100%;border:1px solid #dfe4ee;border-radius:8px;padding:8px;font:inherit;font-size:13px;resize:vertical}
+.pqc-actions{display:flex;gap:6px;flex-wrap:wrap}
+.pqc-approve{color:#256b47;border-color:#b9dfc9}
+.pqc-reject{color:#a0362d;border-color:#efc4bf}
+.coach-progress-qc{display:block;flex-basis:100%;color:#6a7891;font-size:12px}

@@ -58,7 +58,10 @@ export async function GET(req: Request) {
       ensure(scope === null || (owner?.student_id && scope.has(owner.student_id)), "This student is outside your scope.");
       const rows = gigs
         ? await all(
-            "SELECT * FROM portal_gigs WHERE batch_id=? AND portal_student_id=? ORDER BY created_on DESC",
+            // With our quality team's verdict, read by the coordinator before the coach decides.
+            `SELECT z.*,r.status qc_status,r.comment qc_comment,r.reviewed_at qc_reviewed_at,q.name qc_reviewer
+             FROM portal_gigs z LEFT JOIN portal_gig_reviews r ON r.portal_gig_id=z.portal_gig_id LEFT JOIN users q ON q.id=r.reviewed_by
+             WHERE z.batch_id=? AND z.portal_student_id=? ORDER BY z.created_on DESC`,
             gigs.batch_id,
             portalId,
           )
@@ -119,8 +122,10 @@ export async function GET(req: Request) {
                   sum(CASE WHEN status='Approved' THEN 1 ELSE 0 END) approved,
                   sum(CASE WHEN status='Rejected' THEN 1 ELSE 0 END) rejected,
                   sum(CASE WHEN auditor_status='Pending' THEN 1 ELSE 0 END) audit_pending,
-                  sum(CASE WHEN status='Approved' THEN price ELSE 0 END) approved_value
-           FROM portal_gigs WHERE batch_id=? GROUP BY portal_student_id`,
+                  sum(CASE WHEN status='Approved' THEN price ELSE 0 END) approved_value,
+                  sum(CASE WHEN EXISTS (SELECT 1 FROM portal_gig_reviews r WHERE r.portal_gig_id=z.portal_gig_id AND r.status='Approved') THEN 1 ELSE 0 END) qc_approved,
+                  sum(CASE WHEN EXISTS (SELECT 1 FROM portal_gig_reviews r WHERE r.portal_gig_id=z.portal_gig_id AND r.status='Rejected') THEN 1 ELSE 0 END) qc_rejected
+           FROM portal_gigs z WHERE batch_id=? GROUP BY portal_student_id`,
           gigs.batch_id,
         )
       : [];
