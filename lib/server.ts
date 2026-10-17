@@ -222,6 +222,15 @@ export function revokesStudents(u: any) {
   const scopes = Array.isArray(u?.scopes) ? u.scopes : [];
   return seesAccountOwner(u) || scopes.includes("revoke-students");
 }
+/**
+ * Who may release a client account locked to a student: only the people given
+ * the "account-unlock" scope (Taha and Abdelrahman Salama, 17 October 2026).
+ * Not every administrator: the lock exists so the pairing is not changed casually.
+ */
+export function unlocksAccounts(u: any) {
+  const scopes = Array.isArray(u?.scopes) ? u.scopes : [];
+  return scopes.includes("account-unlock");
+}
 /** A condition on a student id column that leaves revoked students out, unless this person revokes. */
 export function notRevoked(u: any, column: string) {
   return revokesStudents(u) ? "1=1" : `${column} NOT IN (SELECT id FROM students WHERE lifecycle='Revoked')`;
@@ -417,7 +426,10 @@ export async function loadData(u: any) {
   const none = Promise.resolve([] as any[]);
   // Service links: the quality team, and everyone who follows the services of
   // their own groups (coordinators, supervisors, Coach Operations, leaders).
+  // Coaches too (17 October 2026): everyone assigned to a student reads the
+  // quality team's comments on their services, read-only.
   const qualityScope = can(u.roles, [
+    "Coach",
     "Quality Member",
     "Quality Lead",
     "Project Operations",
@@ -428,6 +440,7 @@ export async function loadData(u: any) {
     "Higher Board",
   ]);
   const coverageScope = can(u.roles, [
+    "Coach Operations",
     "Quality Member",
     "Quality Lead",
     "Project Operations",
@@ -622,7 +635,7 @@ export async function loadData(u: any) {
     // the accounts and the supervisors who assign them; a coordinator sees the
     // accounts assigned to them. The owner column only for its keeper.
     (() => {
-      const columns = `id,label,platform,status,credits,pending_credits,comments,coordinator_id,coordinator_2_id${seesAccountOwner(u) ? ",owner_name" : ""}`;
+      const columns = `id,label,platform,status,credits,pending_credits,comments,coordinator_id,coordinator_2_id,student_id,linked_at,linked_by,coordinator_state,coordinator_note,coordinator_state_at,coordinator_state_by${seesAccountOwner(u) ? ",owner_name" : ""}`;
       if (can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin", "Team Supervisor"]) || keepsAccounts(u))
         return all(`SELECT ${columns} FROM accounts WHERE ${sameSide(u, "id")}`);
       if (can(u.roles, ["Operations Coordinator"]))
@@ -679,6 +692,20 @@ export async function loadData(u: any) {
     }
     return out;
   };
+  // Where the owner stands on each open task (e.g. "Contacted the student").
+  const openIds = tasks.filter((task) => task.status === "Open").map((task) => task.id);
+  const progress: any[] = [];
+  for (let i = 0; i < openIds.length; i += 400) {
+    const slice = openIds.slice(i, i + 400);
+    progress.push(
+      ...(await all(
+        `SELECT p.task_id,p.status,p.note,p.updated_at,u.name updated_by_name FROM task_progress p LEFT JOIN users u ON u.id=p.updated_by WHERE p.task_id IN (${slice.map(() => "?").join(",")})`,
+        ...slice,
+      )),
+    );
+  }
+  const progressByTask = new Map(progress.map((p) => [p.task_id, p]));
+  for (const task of tasks) if (progressByTask.has(task.id)) task.progress = progressByTask.get(task.id);
   const attendanceByStudent = bucket(attendance, "student_id");
   const evidenceByStudent = bucket(evidence, "student_id");
   const contactsByStudent = bucket(contacts, "student_id");

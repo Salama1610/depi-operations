@@ -15,6 +15,7 @@ import { PortalView } from "./portal-view";
 // The dashboard and its charts load only when someone opens it.
 const Dashboard = lazy(() => import("./dashboard").then((m) => ({ default: m.Dashboard })));
 const FeedbackReview = lazy(() => import("./feedback-review").then((m) => ({ default: m.FeedbackReview })));
+const AttendanceCheck = lazy(() => import("./attendance-check").then((m) => ({ default: m.AttendanceCheck })));
 const PortalQc = lazy(() => import("./portal-qc").then((m) => ({ default: m.PortalQc })));
 const CoachAvailability = lazy(() => import("./coach-availability").then((m) => ({ default: m.CoachAvailability })));
 import { SearchableSelect } from "@/components/searchable-select";
@@ -39,6 +40,10 @@ import {
   Files,
   ShieldCheck,
   ClipboardCheck,
+  ClipboardList,
+  Lock,
+  Unlock,
+  Link2,
   Flag,
   ChartNoAxesCombined,
   Settings2,
@@ -147,6 +152,7 @@ const nav = [
   ["portal-qc", "Portal gigs QC", ClipboardCheck],
   ["quality", "Quality review", ShieldCheck],
   ["feedback-review", "Feedback review", MessageSquareText],
+  ["attendance-check", "Attendance check", ClipboardList],
   ["cases", "Cases", Flag],
   ["reports", "Reports", ChartNoAxesCombined],
   ["administration", "Administration", Settings2],
@@ -202,6 +208,8 @@ const titles: Row = {
   policy: "Create policy draft",
   policy_edit: "Edit policy draft",
   account_status: "Change account status",
+  account_state: "Update the account's status",
+  account_unlock: "Unlock the account",
   refund_credit: "Refund account credit",
   policy_transition: "Progress policy review",
   group_close: "Close group",
@@ -325,7 +333,7 @@ function Badge({ value }: { value: any }) {
 }
 // Filters on the Services page. "Uploaded" is when the student last sent the
 // link (a corrected link counts from its new upload).
-const serviceFilterDefaults: Row = { state: "Pending", platform: "All", track: "All", group: "All", coordinator: "All", supervisor: "All", reviewer: "All", age: "All", automatic: "All", corrections: "All", uploaded: "All", from: "", to: "", sort: "waiting" };
+const serviceFilterDefaults: Row = { state: "Pending", student: "All", platform: "All", track: "All", group: "All", coordinator: "All", supervisor: "All", reviewer: "All", age: "All", automatic: "All", corrections: "All", uploaded: "All", from: "", to: "", sort: "waiting" };
 const submissionFilterDefaults: Row = { state: "All", track: "All", group: "All", coordinator: "All", supervisor: "All", approved: "All", platform: "All", lifecycle: "All", uploaded: "All", from: "", to: "", sort: "follow-up" };
 /** How many filters narrow the list, for the "Clear filters" button. */
 const narrowing = (value: Row, defaults: Row) =>
@@ -516,6 +524,8 @@ export default function Operations({ module: initialModule }: { module: string }
     [importId, setImportId] = useState(""),
     [serviceFilters, setServiceFilters] = useState<Row>(serviceFilterDefaults),
     [submissionFilters, setSubmissionFilters] = useState<Row>(submissionFilterDefaults),
+    // The Students list by services: how many uploaded, approved, rejected.
+    [studentServices, setStudentServices] = useState<Row>({ uploaded: "All", approved: "All", rejected: "All" }),
     [moreFilters, setMoreFilters] = useState<Row>({}),
     [saved, setSaved] = useState<string[]>([]),
     [checklistFor, setChecklistFor] = useState<string | null>(null),
@@ -527,7 +537,7 @@ export default function Operations({ module: initialModule }: { module: string }
     [groupMessage, setGroupMessage] = useState<Row | null>(null),
     [feedbackFor, setFeedbackFor] = useState<string | null>(null),
     [sessionTab, setSessionTab] = useState("schedule"),
-    [accountFilters, setAccountFilters] = useState<Row>({ platform: "All", status: "All", request: "Open", ledger: "All", coordinator: "All", owner: "All" }),
+    [accountFilters, setAccountFilters] = useState<Row>({ platform: "All", status: "All", request: "Open", ledger: "All", coordinator: "All", owner: "All", linked: "All", word: "All", sort: "platform" }),
     [insightFilters, setInsightFilters] = useState<Row>({
       group: "All", coach: "All", from: "", to: "", absentOnly: false,
       month: new Date().toISOString().slice(0, 7), payee: "Coaches",
@@ -635,6 +645,7 @@ export default function Operations({ module: initialModule }: { module: string }
   // stake — the coordinator of the group, their supervisor, Project Operations
   // — watches the queue and the coverage without deciding on it.
   const canSeeServiceQueue = can(user.roles, [
+    "Coach Operations",
     "Quality Member",
     "Quality Lead",
     "Operations Coordinator",
@@ -696,11 +707,15 @@ export default function Operations({ module: initialModule }: { module: string }
       (Array.isArray(user.scopes) && (user.scopes.includes("account-owner") || user.scopes.includes("revoke-students"))));
   const shownNav = nav.filter(([m]) =>
     qualityOnly
-      ? m === "quality" || m === "feedback-review" || ((m === "portal" || m === "portal-qc") && !demoAccount)
+      ? m === "quality" || m === "feedback-review" || m === "attendance-check" || ((m === "portal" || m === "portal-qc") && !demoAccount)
       : m === "feedback-review"
         ? // Students' session feedback, given out to the quality team to review;
           // a coach reads their own sessions' feedback there, read-only.
           can(user.roles, ["Quality Lead", "Quality Member", "Operations Systems / Admin", "Coach"])
+      : m === "attendance-check"
+        ? // The quality team checks each held session's register; Coach and
+          // Project Operations read their checks and notes.
+          can(user.roles, ["Quality Lead", "Quality Member", "Coach Operations", "Project Operations", "Operations Systems / Admin"])
       : m === "portal-qc"
         ? // Our quality team's check of the portal gigs before the coach decides.
           // Coaches and coordinators read the verdicts in their own views.
@@ -765,7 +780,7 @@ export default function Operations({ module: initialModule }: { module: string }
               keepsAccounts ||
               (can(user.roles, ["Operations Coordinator"]) &&
                 (groups.some((g) => g.coordinator === user.id && g.supervisor_team === "Service Team") ||
-                  (d.accounts || []).some((a: Row) => a.coordinator_id === user.id)))
+                  (d.accounts || []).some((a: Row) => a.coordinator_id === user.id || a.coordinator_2_id === user.id)))
             : true,
   );
   // The service-link list lives on the quality page. Its reviewers call it
@@ -1125,18 +1140,41 @@ export default function Operations({ module: initialModule }: { module: string }
   function taskRows(rows: Row[]) {
     return rows.length ? (
       <div className="task-list">
-        {rows.map((task) => (
-          <article className="task-row" key={task.id}>
-            <button
-              className="complete"
-              aria-label={t("Complete {v0}", { v0: task.title })}
-              disabled={busy}
-              onClick={() => quick("complete_task", { id: task.id })}
-            >
-              <CheckCheck size={17} />
-            </button>
+        {rows.map((task) => {
+          // A service link the quality team sent back: the coordinator records
+          // contacting the student; the task closes when the link is approved.
+          const serviceFix = task.category === "Service correction";
+          const fixComment = serviceFix ? String(task.title).split(" — ").slice(1).join(" — ") : "";
+          return (
+          <article className={"task-row" + (serviceFix ? " is-service-fix" : "")} key={task.id}>
+            {serviceFix ? (
+              <span className="complete is-waiting" title={t("Closes when the quality team approves the corrected link")}>
+                <ShieldCheck size={17} />
+              </span>
+            ) : (
+              <button
+                className="complete"
+                aria-label={t("Complete {v0}", { v0: task.title })}
+                disabled={busy}
+                onClick={() => quick("complete_task", { id: task.id })}
+              >
+                <CheckCheck size={17} />
+              </button>
+            )}
             <div className="task-main">
-              <strong>{task.title}</strong>
+              {serviceFix ? (
+                <>
+                  <strong>{t("Service link sent back by quality: contact the student")}</strong>
+                  {fixComment && <small className="wrap-text task-comment">“{fixComment}”</small>}
+                  {task.progress && (
+                    <small className="task-progress">
+                      <Badge value={t(task.progress.status)} /> {task.progress.updated_by_name} · {fmt(task.progress.updated_at)}
+                    </small>
+                  )}
+                </>
+              ) : (
+                <strong>{task.title}</strong>
+              )}
               <button
                 className="text-link muted"
                 onClick={() =>
@@ -1155,7 +1193,20 @@ export default function Operations({ module: initialModule }: { module: string }
               <Clock3 size={14} />
               {fmt(task.due)}
             </span>
-            {task.category === "Contact" && may("contact") ? (
+            {serviceFix && (task.owner === user.id || can(user.roles, ["Project Operations", "Team Supervisor"])) ? (
+              <Pick
+                bare
+                label={t("Where you are")}
+                value={task.progress?.status || ""}
+                onChange={(status) => status && !busy && quick("task_progress", { id: task.id, status })}
+                options={[
+                  { value: "", label: t("Set where you are…") },
+                  { value: "Contacted the student", label: t("Contacted the student") },
+                  { value: "Could not reach the student", label: t("Could not reach the student") },
+                  { value: "Student is fixing it", label: t("Student is fixing it") },
+                ]}
+              />
+            ) : task.category === "Contact" && may("contact") ? (
               <button
                 className="small-btn"
                 onClick={() => open("contact", { student_id: task.student_id })}
@@ -1176,7 +1227,8 @@ export default function Operations({ module: initialModule }: { module: string }
               </button>
             )}
           </article>
-        ))}
+          );
+        })}
       </div>
     ) : (
       <Empty />
@@ -1599,6 +1651,7 @@ See you there!`,
             "At Risk",
             "Critical",
             "Rejected Evidence",
+            "Service corrections",
             "Evidence Blocker",
             "Account Requests Pending",
             "Open Escalations",
@@ -2170,9 +2223,21 @@ See you there!`,
     // gigs, and each week's attendance. Contact follow-up is the coordinators'.
     content = <CoachProgress />;
   } else if (module === "students") {
+    // Counts of each student's service links, for the services filters.
+    const servicesOf = new Map<string, Row>(serviceSubmissionStatus.map((r: Row) => [r.student_id, r]));
+    const countIs = (n: number, pick: string) => pick === "All" || (pick === "3+" ? n >= 3 : n === Number(pick));
     const rows = students
       .filter(qMatch)
       .filter((s) => inProvider(s.group_id))
+      .filter((s) => {
+        const c = servicesOf.get(s.id) || {};
+        return (
+          countIs(Number(c.links_submitted) || 0, studentServices.uploaded) &&
+          countIs(Number(c.links_locked) || 0, studentServices.approved) &&
+          (studentServices.rejected === "All" ||
+            (studentServices.rejected === "Yes" ? Number(c.links_need_correction) > 0 : !Number(c.links_need_correction)))
+        );
+      })
       .filter(
         (s) =>
           filter === "All" ||
@@ -2184,7 +2249,16 @@ See you there!`,
       );
     content = (
       <>
-        <div className="filter-row">{providerPick}</div>
+        <div className="filter-row">
+          {providerPick}
+          {serviceSubmissionStatus.length > 0 && (
+            <>
+              <Pick label={t("Services uploaded")} value={studentServices.uploaded} onChange={(uploaded) => setStudentServices({ ...studentServices, uploaded })} options={[{ value: "All", label: t("Any number") }, { value: "0", label: t("None") }, "1", "2", "3+"]} />
+              <Pick label={t("Services approved")} value={studentServices.approved} onChange={(approved) => setStudentServices({ ...studentServices, approved })} options={[{ value: "All", label: t("Any number") }, { value: "0", label: t("None") }, "1", "2", "3+"]} />
+              <Pick label={t("Sent back by quality")} value={studentServices.rejected} onChange={(rejected) => setStudentServices({ ...studentServices, rejected })} options={[{ value: "All", label: t("Either") }, { value: "Yes", label: t("Has a link to correct") }, { value: "No", label: t("Nothing to correct") }]} />
+            </>
+          )}
+        </div>
         {panel(
           t("Student directory"),
           paginate(rows, studentRows),
@@ -2211,6 +2285,8 @@ See you there!`,
     }
     if (filter === "Rejected Evidence")
       rows = rows.filter((t) => t.category === "Correction");
+    if (filter === "Service corrections")
+      rows = rows.filter((t) => t.category === "Service correction");
     if (filter === "Evidence Blocker")
       rows = rows.filter((t) =>
         evidence.some(
@@ -3061,6 +3137,12 @@ See you there!`,
         <FeedbackReview />
       </Suspense>
     );
+  } else if (module === "attendance-check") {
+    content = (
+      <Suspense fallback={<div className="dash-loading">{t("Loading…")}</div>}>
+        <AttendanceCheck />
+      </Suspense>
+    );
   } else if (module === "portal-qc") {
     content = (
       <Suspense fallback={<div className="dash-loading">{t("Loading…")}</div>}>
@@ -3095,6 +3177,23 @@ See you there!`,
         (z: Row) => z.request_id === requestId && z.status === "Active" && z.expires_at > new Date().toISOString(),
       );
     const requestStage = (r: Row) => (r.status === "Submitted" && activeReservation(r.id) ? "Reserved" : r.status);
+    // The student an account is the key for (linked automatically after two
+    // approved services); locked until Taha or Abdelrahman Salama release it.
+    const keyStudent = (r: Row) => (r.student_id ? name(r.student_id) : "");
+    const text = (v: any) => String(v ?? "");
+    const accountSorts: Record<string, (x: Row, y: Row) => number> = {
+      platform: (x, y) => text(x.platform).localeCompare(text(y.platform)) || Number(y.credits) - Number(x.credits),
+      "credit-high": (x, y) => Number(y.credits) - Number(x.credits),
+      "credit-low": (x, y) => Number(x.credits) - Number(y.credits),
+      email: (x, y) => text(x.label).localeCompare(text(y.label)),
+      coordinator: (x, y) => text(x.coordinator_id ? owner(x.coordinator_id) : "~").localeCompare(text(y.coordinator_id ? owner(y.coordinator_id) : "~")),
+      state: (x, y) => text(x.status).localeCompare(text(y.status)),
+      student: (x, y) => text(keyStudent(x) || "~").localeCompare(text(keyStudent(y) || "~")),
+      linked: (x, y) => text(y.linked_at).localeCompare(text(x.linked_at)),
+      word: (x, y) => text(y.coordinator_state_at).localeCompare(text(x.coordinator_state_at)),
+    };
+    const unlocks = Array.isArray(user.scopes) && user.scopes.includes("account-unlock");
+    const wordOn = (r: Row) => r.coordinator_id === user.id || r.coordinator_2_id === user.id || keepsAccounts;
     // Status changes, unblocking included, belong to the people who keep the accounts.
     const managesAccounts = keepsAccounts;
     // Supervisors (Taha among them) assign accounts to coordinators.
@@ -3128,7 +3227,9 @@ See you there!`,
             ? attention.includes(r.status)
             : r.status === accountFilters.status,
       )
-      .sort((x, y) => String(x.platform).localeCompare(String(y.platform)) || Number(y.credits) - Number(x.credits));
+      .filter((r) => accountFilters.linked === "All" || (accountFilters.linked === "Linked" ? Boolean(r.student_id) : !r.student_id))
+      .filter((r) => accountFilters.word === "All" || (accountFilters.word === "None" ? !r.coordinator_state : r.coordinator_state === accountFilters.word))
+      .sort(accountSorts[accountFilters.sort] || accountSorts.platform);
     const requestRows = requests
       .filter(qMatch)
       .filter((r) => accountFilters.platform === "All" || r.platform === accountFilters.platform)
@@ -3288,8 +3389,45 @@ See you there!`,
                   options={[{ value: "All", label: t("Every owner") }, { value: "None", label: t("No owner") }, ...ownerNames.map((n) => ({ value: String(n), label: String(n) }))]}
                 />
               )}
+              <Pick
+                label={t("Student")}
+                value={accountFilters.linked}
+                onChange={(linked) => setAccountFilters({ ...accountFilters, linked })}
+                options={[{ value: "All", label: t("Linked or free") }, { value: "Linked", label: t("Linked to a student") }, { value: "Free", label: t("Not linked") }]}
+              />
+              <Pick
+                label={t("Coordinator's status")}
+                value={accountFilters.word}
+                onChange={(word) => setAccountFilters({ ...accountFilters, word })}
+                options={[
+                  { value: "All", label: t("Any") },
+                  { value: "None", label: t("Not given yet") },
+                  ...["In use", "Not used yet", "Needs a new account", "Does not work"].map((v) => ({ value: v, label: t(v) })),
+                ]}
+              />
+              <Pick
+                label={t("Sort by")}
+                value={accountFilters.sort}
+                onChange={(sort) => setAccountFilters({ ...accountFilters, sort })}
+                options={[
+                  { value: "platform", label: t("Marketplace, then credit") },
+                  { value: "credit-high", label: t("Most credit first") },
+                  { value: "credit-low", label: t("Least credit first") },
+                  { value: "email", label: t("Email A–Z") },
+                  { value: "coordinator", label: t("Coordinator") },
+                  { value: "state", label: t("State") },
+                  { value: "student", label: t("Student") },
+                  { value: "linked", label: t("Latest linked first") },
+                  { value: "word", label: t("Latest coordinator status first") },
+                ]}
+              />
+              {keepsAccounts && (
+                <button className="small-btn" disabled={busy} onClick={() => quick("account_link_sweep", {})} title={t("Links an account to every Service Team student with two approved services who has none yet")}>
+                  <Link2 size={15} /> {t("Link accounts to eligible students")}
+                </button>
+              )}
               {assignsAccounts && pool.length > 0 && (
-                <button className="small-btn" onClick={() => open("account_coordinator", { id: "", account_ids: pool.map((a) => a.id), coordinator_id: "" })}>
+                <button className="small-btn" onClick={() => open("account_coordinator", { id: "", account_ids: pool.filter((a) => !a.student_id).map((a) => a.id), coordinator_id: "" })}>
                   {t("Assign the {v0} shown", { v0: pool.length })}
                 </button>
               )}
@@ -3357,12 +3495,33 @@ See you there!`,
                       ),
                     },
                     {
-                      key: "active_assignment",
-                      label: t("With"),
+                      key: "student_id",
+                      label: t("Student"),
                       render: (r) => {
+                        if (r.student_id)
+                          return (
+                            <span className="account-key">
+                              <strong><Lock size={13} /> {name(r.student_id)}</strong>
+                              <small className="table-subline">{r.linked_by ? t("Linked by {v0}", { v0: owner(r.linked_by) }) : t("Linked automatically")}{r.linked_at ? " · " + fmt(r.linked_at) : ""}</small>
+                            </span>
+                          );
                         const request = r.active_assignment ? requests.find((q) => q.status === "Assigned" && (d.reservations || []).some((z: Row) => z.account_id === r.id && z.request_id === q.id)) : null;
                         return request ? <span>{name(request.student_id)}<small className="table-subline">{request.task}</small></span> : "—";
                       },
+                    },
+                    {
+                      key: "coordinator_state",
+                      label: t("Coordinator's status"),
+                      render: (r) =>
+                        r.coordinator_state ? (
+                          <span>
+                            <Badge value={t(r.coordinator_state)} />
+                            {r.coordinator_note && <small className="table-subline wrap-text">{r.coordinator_note}</small>}
+                            <small className="table-subline">{owner(r.coordinator_state_by)} · {fmt(r.coordinator_state_at)}</small>
+                          </span>
+                        ) : (
+                          "—"
+                        ),
                     },
                   ],
                   (r) =>
@@ -3371,9 +3530,19 @@ See you there!`,
                         {keepsAccounts && (
                           <button className="small-btn" onClick={() => open("account_topup", { id: r.id })}>{t("Top up")}</button>
                         )}
-                        {assignsAccounts && (
+                        {wordOn(r) && (
+                          <button className="small-btn" onClick={() => open("account_state", { id: r.id, label: r.label, platform: r.platform, state: r.coordinator_state || "", note: r.coordinator_note || "", student_id: "" })}>
+                            {t("Update status")}
+                          </button>
+                        )}
+                        {assignsAccounts && !r.student_id && (
                           <button className="small-btn" onClick={() => open("account_coordinator", { id: r.id, account_ids: [r.id], coordinator_id: r.coordinator_id || "", slot: "first" })}>
                             {r.coordinator_id ? t("Reassign") : t("Assign")}
+                          </button>
+                        )}
+                        {unlocks && r.student_id && (
+                          <button className="small-btn" onClick={() => open("account_unlock", { id: r.id, label: r.label, platform: r.platform, key_student: r.student_id, reason: "", student_id: "" })}>
+                            <Unlock size={14} /> {t("Unlock")}
                           </button>
                         )}
                         {assignsAccounts && r.coordinator_id && (
@@ -3632,6 +3801,11 @@ See you there!`,
       .sort((a, b) => a.stage_at.localeCompare(b.stage_at));
     // "All" is everything still open; "Every" adds the approved links, so the
     // people following a group can also see what has already passed.
+    // The quality team's latest comment on a link: on the link itself while it
+    // waits on the student, otherwise from its review history.
+    const lastComment = (r: Row) =>
+      r.qc_comment ||
+      (serviceLinkReviews.find((v: Row) => v.service_link_id === r.id && v.comment && !/^Verified in (coordinator|quality) review\.$/.test(v.comment))?.comment ?? "");
     const serviceQueue = serviceLinks
       .filter((r) =>
         serviceFilters.state === "Every"
@@ -3641,6 +3815,7 @@ See you there!`,
             : r.qc_status === serviceFilters.state,
       )
       .filter(qMatch)
+      .filter((r) => serviceFilters.student === "All" || r.student_id === serviceFilters.student)
       .filter((r) => serviceFilters.platform === "All" || r.platform === serviceFilters.platform)
       .filter((r) => serviceFilters.track === "All" || r.track === serviceFilters.track)
       .filter((r) => serviceFilters.group === "All" || r.group_id === serviceFilters.group)
@@ -3877,6 +4052,17 @@ See you there!`,
                   { value: "Every", label: t("Every upload") },
                 ]}
               />
+              <SearchableSelect
+                label={t("Student")}
+                value={serviceFilters.student}
+                onChange={(student) => setService({ ...serviceFilters, student: student || "All" })}
+                options={[
+                  { value: "All", label: t("Every student") },
+                  ...Array.from(new Map(serviceLinks.map((r) => [r.student_id, r.student_name])).entries())
+                    .sort((a, b) => String(a[1]).localeCompare(String(b[1])))
+                    .map(([value, name]) => ({ value, label: `${name} · ${value}` })),
+                ]}
+              />
               <Pick label={t("Track")} value={serviceFilters.track} onChange={(track) => setService({ ...serviceFilters, track })} options={["All", ...Array.from(new Set(serviceLinks.map((r) => r.track).filter(Boolean)))]} />
               <Pick label={t("Group")} value={serviceFilters.group} onChange={(group) => setService({ ...serviceFilters, group })} options={["All", ...Array.from(new Set(serviceLinks.map((r) => r.group_id).filter(Boolean))).sort()]} />
               <Pick label={t("Coordinator")} value={serviceFilters.coordinator} onChange={(coordinator) => setService({ ...serviceFilters, coordinator })} options={[{ value: "All", label: t("All coordinators") }, ...Array.from(new Set(serviceLinks.map((r) => r.coordinator).filter(Boolean))).map((id) => ({ value: id, label: owner(id) }))]} />
@@ -3993,7 +4179,7 @@ See you there!`,
                   { key: "reviewer_name", label: t("Reviewer"), render: (r) => isQualityLead && r.qc_status !== "Locked"
                       ? <SearchableSelect className="pick-inline" label={t("Assign this student to a reviewer")} placeholder={t("Waiting for a reviewer")} value={r.qc_actor || ""} onChange={(v) => !busy && v && quick("service_qc_assign", { student_id: r.student_id, reviewer_id: v })} options={qualityReviewers.map((q) => ({ value: q.id, label: `${q.name} (${reviewerStudents.get(q.id) || 0})` }))} />
                       : <span className="dash-people">{!r.qc_actor || !staff.some((s: Row) => s.id === r.qc_actor) ? t("Waiting for a reviewer") : owner(r.qc_actor)}<small className="table-subline">{owner(r.coordinator)}</small></span> },
-                  { key: "qc_status", label: t("Review state"), render: (r) => <span><Badge value={qcState(r.qc_status)} />{resubmitted(r) && <Badge value={t("Resubmitted")} />}<small className="table-subline">{Math.round((Date.now() - Date.parse(r.updated_at)) / 3600000)}{t("h · revision")}{" "}{r.revision}</small></span> },
+                  { key: "qc_status", label: t("Review state"), render: (r) => <span><Badge value={qcState(r.qc_status)} />{resubmitted(r) && <Badge value={t("Resubmitted")} />}<small className="table-subline">{Math.round((Date.now() - Date.parse(r.updated_at)) / 3600000)}{t("h · revision")}{" "}{r.revision}</small>{lastComment(r) && <small className="table-subline wrap-text qc-comment" title={t("Quality comment")}>“{lastComment(r)}”</small>}</span> },
                 ],
                 (r) => <div className="detail-actions">{canDecideServiceLinks && r.qc_status !== "Locked" && (r.qc_actor === user.id || isQualityLead) && <button className="small-btn" onClick={() => open("service_qc_review", { ...r, service_id: r.id, student_id: r.student_id, decision: r.qc_status === "Needs Correction" ? "Lock" : "" })}>{t("Review")}</button>}</div>,
               )),
@@ -5159,7 +5345,7 @@ See you there!`,
                         ).length === 0 ? (
                           <Empty
                             title={t("No contacts recorded")}
-                            text={t("Log a contact with screenshot proof and a next action.")}
+                            text={t("Log a contact with a comment and a next action.")}
                           />
                         ) : (
                           (d.contacts || [])
@@ -5172,15 +5358,19 @@ See you there!`,
                                 <h3>
                                   {c.channel} · {fmt(c.occurred_at)}
                                 </h3>
+                                {c.notes && <p className="wrap-text">{c.notes}</p>}
                                 <p>{c.next_action}</p>
                                 <small>{t("Recorded by")}{" "}{owner(c.recorder)}</small>
-                                <a
-                                  href={"/api/files?id=" + c.proof_id}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                >
-                                  {t("View screenshot")}{" "}<ExternalLink size={14} />
-                                </a>
+                                {/* A screenshot is optional since 10 October: the link only when one was uploaded. */}
+                                {c.proof_id && (
+                                  <a
+                                    href={"/api/files?id=" + c.proof_id}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
+                                    {t("View screenshot")}{" "}<ExternalLink size={14} />
+                                  </a>
+                                )}
                               </article>
                             ))
                         )}
@@ -6699,6 +6889,35 @@ See you there!`,
                     ) : (
                       <p className="footnote">{t("Leave it empty to remove the link.")}</p>
                     )}
+                  </>
+                );
+              }
+              if (a === "account_state") {
+                return (
+                  <>
+                    <div className="account-summary">
+                      <div>
+                        <strong>{modal!.label}</strong>
+                        <small>{modal!.platform}</small>
+                      </div>
+                    </div>
+                    {choice("state", t("The account is"), ["In use", "Not used yet", "Needs a new account", "Does not work"].map((v) => ({ value: v, label: t(v) })))}
+                    {field("note", t("Comment"), "text", ["Needs a new account", "Does not work"].includes(form.state))}
+                    <p className="footnote">{t("Needs a new account and Does not work reach the people who keep the accounts.")}</p>
+                  </>
+                );
+              }
+              if (a === "account_unlock") {
+                return (
+                  <>
+                    <div className="account-summary">
+                      <div>
+                        <strong>{modal!.label}</strong>
+                        <small>{modal!.platform} · {name(modal!.key_student)}</small>
+                      </div>
+                    </div>
+                    <p className="footnote">{t("The account stops being this student's key and becomes free. The student is linked to another account the next time they qualify.")}</p>
+                    {field("reason", t("Why it is being released"))}
                   </>
                 );
               }

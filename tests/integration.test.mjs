@@ -3608,7 +3608,7 @@ test("the Target Team posts job opportunities, which a track's students and the 
   }
 });
 
-test("session feedback goes at random to the quality team, who read the results without students' names", async () => {
+test("session feedback goes at random to the quality team, who read the results student by student, and their notes reach Coach and Project Operations", async () => {
   await dbExec("DELETE FROM rate_limits");
   current = { id: "owner", email: "owner@example.com" };
   const reviewApi = await route("feedback-review");
@@ -3645,8 +3645,13 @@ test("session feedback goes at random to the quality team, who read the results 
   assert.ok(Math.max(...load.map((r) => r.n)) - Math.min(...load.map((r) => r.n)) <= 1, "and evenly");
   const mine = lead.sessions.find((s) => s.id === "SES-FR-1");
   assert.ok(mine && mine.week === 5 && mine.starts_at && "coach_name" in mine);
-  assert.ok(!/student_id|student_name|national_id/.test(JSON.stringify(lead.responses)), "reviewers do not see who answered");
-  assert.equal(lead.responses.filter((r) => r.session_id === "SES-FR-1").length, 2);
+  // The quality team reads each response with the student who gave it, but never their national ID.
+  assert.ok(!/national_id/.test(JSON.stringify(lead.responses)), "no national ID");
+  const answered = lead.responses.filter((r) => r.session_id === "SES-FR-1");
+  assert.equal(answered.length, 2);
+  const names = new Map((await dbRows("SELECT id,name FROM students WHERE id IN (?,?)", learners[0].id, learners[1].id)).map((s) => [s.id, s.name]));
+  assert.deepEqual(answered.map((r) => r.student_id).sort(), learners.map((l) => l.id).sort(), "reviewers see who answered");
+  assert.ok(answered.every((r) => r.student_name === names.get(r.student_id)), "with the student's name");
 
   // A member sees only their own; another member's is not theirs to review.
   const owner = (await dbRow("SELECT reviewer FROM feedback_reviews WHERE session_id='SES-FR-1'")).reviewer;
@@ -3654,6 +3659,7 @@ test("session feedback goes at random to the quality team, who read the results 
   current = { id: other, email: other + "@example.invalid" };
   const theirs = await get();
   assert.ok(theirs.sessions.every((s) => s.reviewer === other) && !theirs.sessions.some((s) => s.id === "SES-FR-1"));
+  assert.ok(theirs.responses.every((r) => "student_id" in r && "student_name" in r), "a member sees the students of their sessions too");
   assert.match((await send({ action: "review", session_id: "SES-FR-1", note: "x" })).error, /reviewer it was given to/);
   assert.match((await send({ action: "reassign", session_id: "SES-FR-1", reviewer: other })).error, /Quality Lead/);
   current = { id: owner, email: owner + "@example.invalid" };
@@ -3684,6 +3690,38 @@ test("session feedback goes at random to the quality team, who read the results 
   assert.ok(own.sessions.every((s) => s.coach_id === coachUser.id), "and only their own");
   assert.ok(!/reviewer|"note"|student_id|student_name/.test(JSON.stringify(own)), "no reviewer, note or student: " + JSON.stringify(own).match(/.{40}(reviewer|"note"|student_id|student_name).{40}/)?.[0]);
   assert.match((await send({ action: "review", session_id: "SES-FR-1", note: "Mine" })).error, /role/, "a coach cannot change anything");
+
+  // The quality note reaches Coach Operations and Project Operations on their feedback page,
+  // with the reviewer and the state; the group's coordinator does not get it.
+  const feedbackApi = await route("feedback");
+  const feedback = async () => (await feedbackApi.GET(new Request("https://test.local/api/feedback"))).json();
+  const reviewer = await dbRow("SELECT r.reviewer,u.name FROM feedback_reviews r JOIN users u ON u.id=r.reviewer WHERE r.session_id='SES-FR-1'");
+  current = { id: "staff-coach-ops", email: "staff-coach-ops@example.invalid" };
+  const ops = await feedback();
+  assert.equal(ops.error, undefined, ops.error);
+  assert.equal(ops.quality, true);
+  const seen = ops.reviews.find((r) => r.session_id === "SES-FR-1");
+  assert.equal(seen?.note, "Students liked the examples.", "Coach Operations reads the quality note");
+  assert.equal(seen.status, "Pending", "and that it was opened again");
+  assert.equal(seen.reviewer, reviewer.reviewer);
+  assert.equal(seen.reviewer_name, reviewer.name);
+  assert.ok(ops.responses.some((r) => r.session_id === "SES-FR-1" && r.student_name), "and the students who answered");
+  const projectOps = await dbRow("SELECT id,email FROM users WHERE roles LIKE '%Project Operations%' AND roles NOT LIKE '%Admin%' AND active=1 AND id NOT LIKE 'DEMO-%' LIMIT 1");
+  if (projectOps) {
+    current = { id: projectOps.id, email: projectOps.email };
+    const project = await feedback();
+    assert.equal(project.error, undefined, project.error);
+    assert.equal(project.reviews.find((r) => r.session_id === "SES-FR-1")?.note, "Students liked the examples.", "Project Operations reads it too");
+  }
+  const runner = await dbRow("SELECT u.id,u.email,u.roles FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.id=?", group.id);
+  if (runner && !/Coach Operations|Project Operations|Admin/.test(runner.roles)) {
+    current = { id: runner.id, email: runner.email };
+    const theirView = await feedback();
+    assert.equal(theirView.error, undefined, theirView.error);
+    assert.ok(theirView.sessions.some((s) => s.id === "SES-FR-1"), "the coordinator reads their group's feedback");
+    assert.ok(!("reviews" in theirView) && !("quality" in theirView), "but not the quality review");
+    assert.ok(!JSON.stringify(theirView).includes("Students liked the examples."));
+  }
 
   // The people who run groups have their own feedback page; this one is the quality team's.
   current = { id: "coordinator", email: "staff-sara@example.invalid" };
@@ -3924,4 +3962,192 @@ test("portal gigs waiting for the coach go to the quality team, whose verdict th
   current = { id: "owner", email: "owner@example.com" };
   await dbExec("DELETE FROM portal_gig_reviews");
   await dbExec("UPDATE users SET active=0 WHERE id='staff-quality-2'");
+});
+
+
+test("a service link sent back is the coordinator's task until approved, and two approved links earn a locked client account", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const group = await dbRow(
+    `SELECT g.id,g.supervisor,g.coordinator,u.email FROM groups g JOIN users u ON u.id=g.coordinator
+     WHERE g.status='Active' AND g.id NOT LIKE 'DEMO-%' AND coalesce(g.delivery_model,'Regular')<>'Industry'
+       AND EXISTS (SELECT 1 FROM students s WHERE s.group_id=g.id AND s.lifecycle='Active'
+         AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=s.id)
+         AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.student_id=s.id)) ORDER BY g.id LIMIT 1`,
+  );
+  const learner = await dbRow(
+    "SELECT s.id FROM students s WHERE s.group_id=? AND s.lifecycle='Active' AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=s.id) ORDER BY s.id LIMIT 1",
+    group.id,
+  );
+  const team = (await dbRow("SELECT team FROM users WHERE id=?", group.supervisor)).team;
+  await dbExec("UPDATE users SET team='Service Team' WHERE id=?", group.supervisor);
+  const at = new Date().toISOString();
+  for (const [i, id] of ["SLK-KEY-1", "SLK-KEY-2", "SLK-KEY-3"].entries())
+    await dbExec(
+      "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,account_id,submitted_at,updated_at) VALUES(?,?,?,?,?,'Kafiil','Needs Review','{}',?,'Pending',NULL,'staff-quality',NULL,1,NULL,?,?)",
+      id, learner.id, i + 1, `https://kafiil.com/kafiil/service/key-${i}`, `kafiil.com/kafiil/service/key-${i}`, at, at, at,
+    );
+  // An empty account is never chosen; the one with the most credit is.
+  await check("account", { id: "ACC-KEY-EMPTY", label: "empty-key@example.org", platform: "Kafeel", credits: 0 });
+  await check("account", { id: "ACC-KEY-1", label: "key-one@example.org", platform: "Kafeel", credits: 99999 });
+
+  // The quality team sends a link back: the coordinator gets a task.
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  await check("service_qc_review", { service_id: "SLK-KEY-1", decision: "Needs Correction", comment: "The price is missing." });
+  const first = await dbRow("SELECT * FROM tasks WHERE source='service-fix:SLK-KEY-1:1'");
+  assert.equal(first.owner, group.coordinator);
+  assert.equal(first.category, "Service correction");
+  assert.equal(first.status, "Open");
+  assert.match(first.title, /The price is missing\./);
+
+  // The coordinator records contacting the student; the task stays open.
+  current = { id: group.coordinator, email: group.email };
+  assert.match((await post("complete_task", { id: first.id })).error, /closes by itself/);
+  assert.match((await post("task_progress", { id: first.id, status: "Done" })).error, /where you are/);
+  await check("task_progress", { id: first.id, status: "Contacted the student", note: "Sent on WhatsApp" });
+  const mine = (await (await api.GET()).json()).tasks.find((x) => x.id === first.id);
+  assert.equal(mine.progress.status, "Contacted the student");
+  assert.equal((await dbRow("SELECT status FROM tasks WHERE id=?", first.id)).status, "Open");
+
+  // The student corrects it and it is sent back again: the old task gives way to a new one.
+  await dbExec("UPDATE service_links SET revision=2,qc_status='Pending',qc_comment=NULL WHERE id='SLK-KEY-1'");
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  await check("service_qc_review", { service_id: "SLK-KEY-1", decision: "Needs Correction", comment: "Still no price." });
+  assert.equal((await dbRow("SELECT status FROM tasks WHERE id=?", first.id)).status, "Closed");
+  assert.equal((await dbRow("SELECT status FROM tasks WHERE source='service-fix:SLK-KEY-1:2'")).status, "Open");
+
+  // One approval is not enough for an account; the second is.
+  await check("service_qc_review", { service_id: "SLK-KEY-2", decision: "Lock" });
+  assert.ok(!(await dbRow("SELECT id FROM accounts WHERE student_id=?", learner.id)), "one approval is not enough");
+  await dbExec("UPDATE service_links SET revision=3,qc_status='Pending',qc_comment=NULL WHERE id='SLK-KEY-1'");
+  await check("service_qc_review", { service_id: "SLK-KEY-1", decision: "Lock" });
+  assert.equal((await dbRow("SELECT count(*) n FROM tasks WHERE source LIKE 'service-fix:SLK-KEY-1:%' AND status='Open'")).n, 0, "approval closes the task");
+  const key = await dbRow("SELECT * FROM accounts WHERE student_id=?", learner.id);
+  assert.equal(key.id, "ACC-KEY-1");
+  assert.equal(key.coordinator_id, group.coordinator, "the student's coordinator holds it");
+  assert.equal(key.linked_by, null, "linked by the app");
+  assert.ok(await dbRow("SELECT id FROM notifications WHERE recipient=? AND source=?", group.coordinator, `account-key:ACC-KEY-1:${learner.id}`));
+
+  // Locked: nobody reassigns it, and the coordinator gives their word on it.
+  current = { id: "owner", email: "owner@example.com" };
+  assert.match((await post("account_coordinator", { id: "ACC-KEY-1", account_ids: ["ACC-KEY-1"], coordinator_id: "" })).error, /locked/);
+  current = { id: group.coordinator, email: group.email };
+  assert.match((await post("account_state", { id: "ACC-KEY-1", state: "Does not work" })).error, /what is wrong/);
+  await check("account_state", { id: "ACC-KEY-1", state: "Does not work", note: "Login asks for a phone code" });
+  assert.equal((await dbRow("SELECT coordinator_state FROM accounts WHERE id='ACC-KEY-1'")).coordinator_state, "Does not work");
+  assert.match((await post("account_unlock", { id: "ACC-KEY-1", reason: "x" })).error, /allowed to unlock/);
+
+  // Only the account-unlock holders release it, with a reason; the catch-up links them again.
+  current = { id: "owner", email: "owner@example.com" };
+  assert.match((await post("account_unlock", { id: "ACC-KEY-1", reason: "Broken" })).error, /allowed to unlock/, "not every administrator");
+  const scopes = (await dbRow("SELECT scopes FROM users WHERE email='owner@example.com'")).scopes;
+  await dbExec("UPDATE users SET scopes=? WHERE email='owner@example.com'", JSON.stringify([...JSON.parse(scopes || "[]"), "account-unlock"]));
+  assert.match((await post("account_unlock", { id: "ACC-KEY-1", reason: "" })).error, /why/);
+  await check("account_unlock", { id: "ACC-KEY-1", reason: "Broken login" });
+  assert.equal((await dbRow("SELECT student_id FROM accounts WHERE id='ACC-KEY-1'")).student_id, null);
+  await check("account_status", { id: "ACC-KEY-1", status: "Access Issue", reason: "Broken login" });
+  await check("account", { id: "ACC-KEY-2", label: "key-two@example.org", platform: "Kafeel", credits: 50 });
+  const swept = await check("account_link_sweep", {});
+  assert.ok(swept.linked >= 1);
+  const relinked = await dbRow("SELECT id,platform,status,credits FROM accounts WHERE student_id=?", learner.id);
+  assert.ok(relinked && relinked.id !== "ACC-KEY-1" && relinked.platform === "Kafeel" && relinked.status === "Available" && Number(relinked.credits) > 0, "a working account with credit");
+
+  await dbExec("UPDATE users SET scopes=? WHERE email='owner@example.com'", scopes);
+  await dbExec("UPDATE accounts SET student_id=NULL,status='Retired' WHERE id IN ('ACC-KEY-1','ACC-KEY-2','ACC-KEY-EMPTY')");
+  await dbExec("UPDATE accounts SET student_id=NULL WHERE student_id IS NOT NULL");
+  await dbExec("UPDATE users SET team=? WHERE id=?", team, group.supervisor);
+});
+
+
+test("the quality team checks each held session's attendance register, which Coach and Project Operations read", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const acApi = await route("attendance-check");
+  const get = async (session) =>
+    (await acApi.GET(new Request("https://test.local/api/attendance-check" + (session ? "?session=" + session : "")))).json();
+  const send = async (body) =>
+    (await acApi.POST(new Request("https://test.local/api/attendance-check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }))).json();
+  const group = await dbRow(
+    "SELECT g.id FROM groups g WHERE g.status='Active' AND g.id NOT LIKE 'DEMO-%' AND coalesce(g.delivery_model,'Regular')<>'Industry' AND (SELECT count(*) FROM students s WHERE s.group_id=g.id AND s.lifecycle='Active')>=3 AND g.id NOT IN (SELECT group_id FROM sessions WHERE week=6) ORDER BY g.id LIMIT 1",
+  );
+  assert.ok(group, "a group with students");
+  await check("session", { id: "SES-AC-1", group_id: group.id, title: "Week 6 coaching", starts_at: new Date(Date.now() - 4 * 3600000).toISOString(), week: 6, duration_minutes: 180 });
+  await check("session", { id: "SES-AC-2", group_id: group.id, title: "Week 7 coaching", starts_at: new Date(Date.now() + 72 * 3600000).toISOString(), week: 7, duration_minutes: 180 });
+  const learners = await dbRows("SELECT id,name FROM students WHERE group_id=? AND lifecycle='Active' ORDER BY id LIMIT 2", group.id);
+  for (const [i, l] of learners.entries())
+    await dbExec(
+      "INSERT INTO attendance(id,session_id,student_id,status,recorder,source,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(session_id,student_id) DO UPDATE SET status=excluded.status",
+      `ATT-AC-${i}`, "SES-AC-1", l.id, i ? "Absent" : "Present", "staff-coach", "manual", new Date().toISOString(),
+    );
+
+  // A Quality Member sees held sessions only, with the counts and who recorded them.
+  current = { id: "staff-quality", email: "staff-quality@example.invalid" };
+  const member = await get();
+  assert.equal(member.error, undefined, member.error);
+  assert.ok(member.checks && !member.lead);
+  const row = member.sessions.find((s) => s.id === "SES-AC-1");
+  assert.ok(row, "the held session is listed");
+  assert.equal(row.present, 1);
+  assert.equal(row.absent, 1);
+  assert.equal(row.marked, 2);
+  assert.ok(row.enrolled >= 3);
+  assert.ok(row.recorded_by.length === 1 && row.recorded_by[0] !== "staff-coach", "the recorder is named");
+  assert.equal(row.check_status, null);
+  assert.ok(!member.sessions.some((s) => s.id === "SES-AC-2"), "a session that has not started is not checked yet");
+  assert.ok(member.sessions.every((s) => !String(s.group_id).startsWith("DEMO-")));
+
+  // Its register names the students, marked and not yet marked.
+  const reg = await get("SES-AC-1");
+  assert.equal(reg.error, undefined, reg.error);
+  for (const l of learners) assert.ok(reg.register.some((r) => r.student_id === l.id && r.student_name === l.name), "the register shows the student's name");
+  assert.equal(reg.register.find((r) => r.student_id === learners[0].id).status, "Present");
+  assert.ok(reg.register.some((r) => r.status === null), "students nobody marked are listed");
+  assert.match((await get("SES-AC-2")).error, /not one to check/);
+
+  // A problem needs a note; Valid does not. Checks can change later.
+  assert.match((await send({ action: "check", session_id: "SES-AC-1", status: "Has problems", note: "" })).error, /what the problem is/);
+  assert.match((await send({ action: "check", session_id: "SES-AC-1", status: "Maybe" })).error, /Valid or Has problems/);
+  assert.match((await send({ action: "check", session_id: "SES-AC-2", status: "Valid" })).error, /not one to check/);
+  assert.equal((await send({ action: "check", session_id: "SES-AC-1", status: "Valid" })).ok, true);
+  let saved = await dbRow("SELECT * FROM attendance_checks WHERE session_id='SES-AC-1'");
+  assert.equal(saved.status, "Valid");
+  assert.equal(saved.checked_by, "staff-quality");
+  assert.match((await send({ action: "clear", session_id: "SES-AC-1" })).error, /Quality Lead/);
+
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  const before = (await dbRow("SELECT count(*) n FROM notifications WHERE source LIKE 'attendance-check:SES-AC-1:%'")).n;
+  assert.equal(before, 0);
+  assert.equal((await send({ action: "check", session_id: "SES-AC-1", status: "Has problems", note: "Two students say they attended but were marked absent." })).ok, true);
+  saved = await dbRow("SELECT * FROM attendance_checks WHERE session_id='SES-AC-1'");
+  assert.equal(saved.status, "Has problems");
+  assert.equal(saved.checked_by, "staff-quality-lead");
+  assert.equal((await dbRow("SELECT status FROM attendance WHERE session_id='SES-AC-1' AND student_id=?", learners[1].id)).status, "Absent", "the marks are not changed");
+  const told = await dbRows("SELECT recipient,entity_id FROM notifications WHERE source LIKE 'attendance-check:SES-AC-1:%'");
+  assert.ok(told.some((n) => n.recipient === "staff-coach-ops" && n.entity_id === "SES-AC-1"), "Coach Operations is told");
+  assert.ok(told.every((n) => !String(n.recipient).startsWith("DEMO-")), "demo people are not told about real sessions");
+  assert.ok((await dbRow("SELECT count(*) n FROM audit_events WHERE entity_id=? AND action='Attendance register checked'", "SES-AC-1")).n >= 2, "every check is audited");
+
+  // Coach Operations reads the check and the register, and cannot change them.
+  current = { id: "staff-coach-ops", email: "staff-coach-ops@example.invalid" };
+  const ops = await get();
+  assert.equal(ops.error, undefined, ops.error);
+  assert.equal(ops.checks, false);
+  const seen = ops.sessions.find((s) => s.id === "SES-AC-1");
+  assert.equal(seen.check_status, "Has problems");
+  assert.match(seen.check_note, /marked absent/);
+  assert.equal(seen.checked_by_name, (await dbRow("SELECT name FROM users WHERE id='staff-quality-lead'")).name);
+  assert.ok((await get("SES-AC-1")).register.length >= 3);
+  assert.match((await send({ action: "check", session_id: "SES-AC-1", status: "Valid" })).error, /role/);
+
+  // The people who run groups are refused.
+  current = { id: "coordinator", email: "staff-sara@example.invalid" };
+  assert.match((await get()).error, /role/);
+  assert.match((await send({ action: "check", session_id: "SES-AC-1", status: "Valid" })).error, /role/);
+
+  // The lead may remove a check.
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  assert.equal((await send({ action: "clear", session_id: "SES-AC-1" })).ok, true);
+  assert.ok(!(await dbRow("SELECT * FROM attendance_checks WHERE session_id='SES-AC-1'")), "the check is gone");
+  assert.ok((await dbRow("SELECT count(*) n FROM audit_events WHERE entity_id=? AND action='Attendance check removed'", "SES-AC-1")).n === 1);
+  current = { id: "owner", email: "owner@example.com" };
 });

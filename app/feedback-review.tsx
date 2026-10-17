@@ -6,7 +6,8 @@
 // form's responses are summarised, and marks it reviewed. The Analysis tab
 // reads the same results across whatever the filters select: one coach over all
 // their groups, over a few groups or one, broken down by coach, group, session
-// or week.
+// or week. The Students tab (the quality team only, not a coach) reads it
+// student by student, with each student's responses one by one.
 
 import { useEffect, useMemo, useState } from "react";
 import { Download, RefreshCw, Shuffle, X } from "lucide-react";
@@ -16,7 +17,7 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { levelOf, scoreOf } from "@/lib/domain/feedback";
-import { FeedbackScore } from "./feedback-view";
+import { FeedbackScore, StudentFeedback, downloadCsv } from "./feedback-view";
 
 type Row = Record<string, any>;
 
@@ -39,17 +40,47 @@ const cairoParts = (iso: string) => {
   };
 };
 
-function downloadCsv(name: string, rows: Row[]) {
-  if (!rows.length) return;
-  const keys = Object.keys(rows[0]);
-  const cell = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const text = "﻿" + [keys.map(cell).join(","), ...rows.map((r) => keys.map((k) => cell(r[k])).join(","))].join("\n");
-  const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${name}-${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+/** Each response of one session with the student who gave it (the quality team only). */
+function ResponseList({ responses }: { responses: Row[] }) {
+  const t = useT();
+  if (!responses.length) return null;
+  return (
+    <section className="fr-card">
+      <h4>{t("Each response")}</h4>
+      <div className="fr-table-wrap">
+        <table className="fr-table">
+          <thead>
+            <tr>
+              <th>{t("Student")}</th>
+              <th>{t("Satisfaction")}</th>
+              <th>{t("Clarity")}</th>
+              <th>{t("Usefulness")}</th>
+              <th>{t("Score")}</th>
+              <th>{t("Searched for a gig")}</th>
+              <th>{t("Liked most")}</th>
+              <th>{t("Comments or support needed")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[...responses]
+              .sort((a, b) => (scoreOf([a as any]) ?? 99) - (scoreOf([b as any]) ?? 99))
+              .map((r) => (
+                <tr key={r.id}>
+                  <td><bdi>{r.student_name || r.student_id || "—"}</bdi></td>
+                  <td><bdi dir="ltr">{r.satisfaction}</bdi></td>
+                  <td><bdi dir="ltr">{r.clarity}</bdi></td>
+                  <td><bdi dir="ltr">{r.usefulness}</bdi></td>
+                  <td><FeedbackScore score={scoreOf([r as any])} /></td>
+                  <td>{yes(r.searched_gig) ? t("Yes") : t("No")}</td>
+                  <td><small>{r.liked || "—"}</small></td>
+                  <td><small>{r.comments || "—"}</small></td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
 }
 
 /** One answer per row, as a form's summary shows it: the answer, its bar, how many and what share. */
@@ -363,6 +394,7 @@ export function FeedbackReview() {
       <Tabs defaultValue="sessions">
         <TabsList>
           <TabsTrigger value="sessions">{t("Sessions")}</TabsTrigger>
+          {!data.coach && <TabsTrigger value="students">{t("Students")}</TabsTrigger>}
           <TabsTrigger value="analysis">{t("Analysis")}</TabsTrigger>
         </TabsList>
 
@@ -438,6 +470,12 @@ export function FeedbackReview() {
             )}
           </section>
         </TabsContent>
+
+        {!data.coach && (
+          <TabsContent value="students">
+            <StudentFeedback sessions={shown} responses={shownResponses} name="session-feedback-by-student" />
+          </TabsContent>
+        )}
 
         <TabsContent value="analysis">
           <section className="fr-panel">
@@ -524,6 +562,7 @@ export function FeedbackReview() {
                 </DialogDescription>
               </DialogHeader>
               <FormSummary responses={bySession.get(opened.id) || []} />
+              {!data.coach && <ResponseList responses={bySession.get(opened.id) || []} />}
               {!data.coach && <section className="fr-review">
                 <h4>{t("Your review")}</h4>
                 <small>

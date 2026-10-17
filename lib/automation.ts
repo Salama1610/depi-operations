@@ -1,5 +1,6 @@
 import { all, stmt, db, uid, now, auditStmt, loadData, permit } from "./server";
 import { planPolicyActions } from "./domain/policy-actions";
+import { serviceFollowUpSweep } from "./service-followup";
 
 export function notify(recipient: string, title: string, entityType: string, entityId: string, severity: string, source: string) {
   return stmt(
@@ -109,5 +110,7 @@ export async function policyChecks(u: any, requestId: string) {
     jobs.push(stmt("UPDATE system_configuration SET value=?,updated_by=?,updated_at=? WHERE key=?", JSON.stringify(kept), u.id, now(), DISMISSED));
   jobs.push(auditStmt(u, "policy_check", "workspace", summary, null, requestId));
   await db().batch(jobs);
-  return summary;
+  // Service corrections without a coordinator task, and students due a client account.
+  const followUps = await serviceFollowUpSweep(u);
+  return { ...summary, service_tasks: followUps.tasks, accounts_linked: followUps.linked };
 }

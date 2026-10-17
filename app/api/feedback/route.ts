@@ -8,8 +8,13 @@ export const dynamic = "force-dynamic";
 // Coach Operations follows it closely and handles the red flags; the group's
 // coordinator, its supervisor and Project Operations read it for their own
 // groups. Coaches and the quality team do not see it.
+//
+// Coach Operations and Project Operations also read the quality team's review
+// of each session (app/api/feedback-review): whether it was reviewed, the
+// reviewer's note, who wrote it and when. Coordinators and supervisors do not.
 const readers = ["Coach Operations", "Operations Coordinator", "Team Supervisor", "Project Operations", "Operations Systems / Admin"];
 const handlers = ["Coach Operations", "Operations Systems / Admin"];
+const qualityReaders = ["Coach Operations", "Project Operations", "Operations Systems / Admin"];
 const noStore = { headers: { "Cache-Control": "no-store" } };
 
 export async function GET(req: Request) {
@@ -33,7 +38,8 @@ export async function GET(req: Request) {
       return Response.json({ open, handles: can(u.roles, handlers) }, noStore);
     }
 
-    const [sessions, responses, handled] = await Promise.all([
+    const quality = can(u.roles, qualityReaders);
+    const [sessions, responses, handled, reviews] = await Promise.all([
       all(
         `SELECT t.id,t.group_id,t.coach_id,t.week,t.starts_at,t.title,c.name coach_name
          FROM sessions t JOIN groups g ON g.id=t.group_id LEFT JOIN users c ON c.id=t.coach_id
@@ -53,6 +59,15 @@ export async function GET(req: Request) {
          WHERE ${q.sql}`,
         ...q.args,
       ),
+      quality
+        ? all(
+            `SELECT r.session_id,r.status,r.note,r.reviewer,p.name reviewer_name,r.reviewed_at
+             FROM feedback_reviews r JOIN sessions t ON t.id=r.session_id JOIN groups g ON g.id=t.group_id
+             LEFT JOIN users p ON p.id=r.reviewer
+             WHERE ${q.sql}`,
+            ...q.args,
+          )
+        : Promise.resolve([]),
     ]);
     return Response.json(
       {
@@ -60,6 +75,7 @@ export async function GET(req: Request) {
         responses,
         handled,
         handles: can(u.roles, handlers),
+        ...(quality ? { quality: true, reviews } : {}),
       },
       noStore,
     );

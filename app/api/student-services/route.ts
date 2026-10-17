@@ -1,3 +1,4 @@
+import { linkAccountKey, serviceFixStatements } from "@/lib/service-followup";
 import {
   all,
   auditStmt,
@@ -464,8 +465,11 @@ async function qcReview(x: any) {
     ),
     submissionStatus(link.student_id, t, "now"),
     auditStmt(u, "Service link review", link.id, { decision: next, student_id: link.student_id, comment }),
+    // The coordinator's task: opened by a correction, closed by the approval.
+    ...(await serviceFixStatements(link, next, comment, t)),
   ];
   await db().batch(jobs);
+  if (next === "Locked") await linkAccountKey(link.student_id, u).catch(() => null);
   return Response.json({ ok: true });
 }
 

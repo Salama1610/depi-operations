@@ -10,8 +10,9 @@ export const dynamic = "force-dynamic";
 // among those with the fewest reviews still pending (so the work stays even).
 // A member sees the sessions given to them; the Quality Lead and the
 // administrators see them all, and can hand one to someone else or share the
-// pending ones out again. Reviewers read the ratings and comments, not who gave
-// them: students' names stay with the people who run the groups.
+// pending ones out again. The quality team reads each response with the
+// student who gave it, so they can follow feedback student by student. A coach
+// reading their own sessions' feedback still does not see who answered.
 const lead = ["Quality Lead", "Operations Systems / Admin"];
 const team = ["Quality Member", ...lead];
 const noStore = { headers: { "Cache-Control": "no-store" } };
@@ -103,8 +104,9 @@ export async function GET() {
         ...args,
       ),
       all(
-        `SELECT f.id,f.session_id,f.satisfaction,f.clarity,f.usefulness,f.searched_gig,f.liked,f.comments,f.created_at
+        `SELECT f.id,f.session_id,f.student_id,s.name student_name,f.satisfaction,f.clarity,f.usefulness,f.searched_gig,f.liked,f.comments,f.created_at
          FROM session_feedback f JOIN feedback_reviews r ON r.session_id=f.session_id JOIN sessions t ON t.id=f.session_id JOIN groups g ON g.id=t.group_id
+         LEFT JOIN students s ON s.id=f.student_id
          WHERE ${side}${mine} AND ${notRevoked(u, "f.student_id")} ORDER BY f.created_at`,
         ...args,
       ),

@@ -173,6 +173,18 @@ export const accounts = sqliteTable("accounts", {
   comments: text("comments"),
   // A second coordinator sharing the account; both see it and its sign-in.
   coordinator2Id: text("coordinator_2_id").references(() => users.id),
+  // The student this account is the key for, linked automatically once they
+  // have two approved services (linked_by null) or by a keeper. Locked until
+  // someone holding the "account-unlock" scope releases it.
+  studentId: text("student_id"),
+  linkedAt: text("linked_at"),
+  linkedBy: text("linked_by"),
+  // The coordinator's word on the account: In use, Not used yet, Needs a new
+  // account, Does not work.
+  coordinatorState: text("coordinator_state"),
+  coordinatorNote: text("coordinator_note"),
+  coordinatorStateAt: text("coordinator_state_at"),
+  coordinatorStateBy: text("coordinator_state_by"),
 });
 
 // Marketplace credentials held by the programme, encrypted at rest with a
@@ -1326,4 +1338,33 @@ export const portalGigReviews = sqliteTable(
     reviewedAt: text("reviewed_at"),
   },
   (t) => [index("portal_gig_reviews_reviewer_idx").on(t.reviewer, t.status), index("portal_gig_reviews_student_idx").on(t.portalStudentId)],
+);
+// Where a coordinator stands on an open task, such as having contacted the
+// student about a service link the quality team sent back.
+export const taskProgress = sqliteTable("task_progress", {
+  taskId: text("task_id")
+    .primaryKey()
+    .references(() => tasks.id),
+  status: text("status").notNull(),
+  note: text("note"),
+  updatedBy: text("updated_by")
+    .notNull()
+    .references(() => users.id),
+  updatedAt: text("updated_at").notNull(),
+});
+// The quality team's check of a held session's attendance register.
+export const attendanceChecks = sqliteTable(
+  "attendance_checks",
+  {
+    sessionId: text("session_id")
+      .primaryKey()
+      .references(() => sessions.id),
+    status: text("status").notNull(),
+    note: text("note"),
+    checkedBy: text("checked_by")
+      .notNull()
+      .references(() => users.id),
+    checkedAt: text("checked_at").notNull(),
+  },
+  (t) => [index("attendance_checks_status_idx").on(t.status)],
 );

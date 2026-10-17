@@ -109,7 +109,14 @@
     "coordinator_id": "text",
     "pending_credits": "numeric(14,2)",
     "comments": "text",
-    "coordinator_2_id": "text"
+    "coordinator_2_id": "text",
+    "student_id": "text",
+    "linked_at": "timestamptz",
+    "linked_by": "text",
+    "coordinator_state": "text",
+    "coordinator_note": "text",
+    "coordinator_state_at": "timestamptz",
+    "coordinator_state_by": "text"
   },
   "account_requests": {
     "id": "text",
@@ -809,5 +816,19 @@
     "comment": "text",
     "reviewed_by": "text",
     "reviewed_at": "timestamptz"
+  },
+  "task_progress": {
+    "task_id": "text",
+    "status": "text",
+    "note": "text",
+    "updated_by": "text",
+    "updated_at": "timestamptz"
+  },
+  "attendance_checks": {
+    "session_id": "text",
+    "status": "text",
+    "note": "text",
+    "checked_by": "text",
+    "checked_at": "timestamptz"
   }
 }

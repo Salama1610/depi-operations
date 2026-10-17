@@ -23,7 +23,9 @@ import {
   provisionDemoLogin,
   teamCoordinators,
   revokesStudents,
+  unlocksAccounts,
 } from "@/lib/server";
+import { accountStates, linkAccountKey, serviceFixCategory, serviceFixStatements, serviceFollowUpSweep, taskProgressStates } from "@/lib/service-followup";
 import { demoPeople, demoPlan, demoStudentEmail, isDemo, sameSide } from "@/lib/demo";
 import {
   ensure,
@@ -649,6 +651,10 @@ export async function POST(req: Request) {
           task.category !== "Correction",
           "Correction closes only after accepted evidence or final Quality Lead resolution.",
         );
+        ensure(
+          task.category !== serviceFixCategory,
+          "This task closes by itself when the quality team approves the corrected link. Record that you contacted the student instead.",
+        );
         if (task.category === "Contact")
           ensure(
             await stmt(
@@ -656,7 +662,7 @@ export async function POST(req: Request) {
               task.student_id,
               task.created_at,
             ).first(),
-            "Log a complete contact with proof before closing this contact task.",
+            "Log a contact with the student before closing this contact task.",
           );
         auditPrevious = task;
         jobs.push(stmt("UPDATE tasks SET status='Completed' WHERE id=?", id));
@@ -1687,6 +1693,7 @@ export async function POST(req: Request) {
           a.platform === r.platform,
           "Account platform does not match this request.",
         );
+        ensure(!a.student_id || a.student_id === r.student_id, "This account is locked to another student.");
         ensure(a.credits >= r.value, "Account has insufficient credits.");
         ensure(
           !(await stmt(
@@ -1872,8 +1879,13 @@ export async function POST(req: Request) {
         const accountIds: string[] = Array.isArray(x.account_ids) ? x.account_ids.map(String) : [String(id)];
         ensure(accountIds.length > 0 && accountIds.length <= 600, "Choose between 1 and 600 accounts.");
         const marks = accountIds.map(() => "?").join(",");
-        const found = await all(`SELECT id,coordinator_id,coordinator_2_id FROM accounts WHERE id IN (${marks})`, ...accountIds);
+        const found = await all(`SELECT id,coordinator_id,coordinator_2_id,student_id FROM accounts WHERE id IN (${marks})`, ...accountIds);
         ensure(found.length === accountIds.length, "One or more accounts were not found.");
+        // An account linked to a student is locked with its coordinator until it is released.
+        ensure(
+          x.slot === "second" || found.every((a: any) => !a.student_id),
+          "This account is locked to a student and their coordinator. Only the people allowed to unlock accounts can release it.",
+        );
         // An account can be shared by two coordinators: "second" sets the one
         // working it alongside the first.
         const second = x.slot === "second";
@@ -2949,8 +2961,90 @@ export async function POST(req: Request) {
             link.student_id,
             link.student_id,
           ),
+          // The coordinator's task: opened by a correction, closed by the approval.
+          ...(await serviceFixStatements(link, next, comment, t)),
         );
         break;
+      }
+      case "task_progress": {
+        // Where the coordinator stands on an open task, without closing it.
+        const task: any = await stmt("SELECT * FROM tasks WHERE id=?", id).first();
+        ensure(task, "Task not found.");
+        if (task.student_id) await student(u, task.student_id);
+        ensure(
+          task.owner === u.id || can(u.roles, ["Project Operations", "Team Supervisor"]),
+          "Only the task's owner or a supervisor can update it.",
+        );
+        ensure(task.status === "Open", "This task is already closed.");
+        ensure(taskProgressStates.includes(x.status), "Choose where you are with this task.");
+        const note = String(x.note || "").trim();
+        ensure(note.length <= 1000, "Keep the note under 1,000 characters.");
+        auditPrevious = await stmt("SELECT * FROM task_progress WHERE task_id=?", id).first();
+        auditValue = { task_id: id, status: x.status, note: note || null };
+        jobs.push(
+          stmt(
+            `INSERT INTO task_progress(task_id,status,note,updated_by,updated_at) VALUES(?,?,?,?,?)
+             ON CONFLICT(task_id) DO UPDATE SET status=excluded.status,note=excluded.note,updated_by=excluded.updated_by,updated_at=excluded.updated_at`,
+            id, x.status, note || null, u.id, t,
+          ),
+        );
+        break;
+      }
+      case "account_state": {
+        // The coordinator's word on an account: in use, not used yet, needs a
+        // new one, does not work. The keepers read it and act on it.
+        const a: any = await stmt("SELECT * FROM accounts WHERE id=?", id).first();
+        ensure(a, "Account not found.");
+        ensure(
+          a.coordinator_id === u.id || a.coordinator_2_id === u.id || keepsAccounts(u),
+          "Only the account's coordinator or the people who keep the accounts can update it.",
+        );
+        ensure(accountStates.includes(x.state), "Choose the account's state.");
+        const note = String(x.note || "").trim();
+        ensure(note.length <= 1000, "Keep the note under 1,000 characters.");
+        ensure(!["Needs a new account", "Does not work"].includes(x.state) || note.length >= 3, "Say what is wrong with the account.");
+        auditPrevious = { coordinator_state: a.coordinator_state, coordinator_note: a.coordinator_note };
+        auditValue = { account_id: id, coordinator_state: x.state, coordinator_note: note || null };
+        jobs.push(
+          stmt(
+            "UPDATE accounts SET coordinator_state=?,coordinator_note=?,coordinator_state_at=?,coordinator_state_by=? WHERE id=?",
+            x.state, note || null, t, u.id, id,
+          ),
+        );
+        // A problem reaches the people who can fix it.
+        if (["Needs a new account", "Does not work"].includes(x.state))
+          jobs.push(
+            stmt(
+              `INSERT OR IGNORE INTO notifications(id,recipient,title,entity_type,entity_id,severity,source,created_at,read_at)
+               SELECT ?||'-'||id,id,?,'account',?,'Action Required',?||':'||id,?,NULL FROM users
+               WHERE active=1 AND id<>? AND (roles LIKE '%Project Operations%' OR (roles LIKE '%Team Supervisor%' AND team='Service Team'))`,
+              uid("NTF"), `Account ${a.label}: ${String(x.state).toLowerCase()} — ${note}`.slice(0, 300), id, `account-state:${id}:${t}`, t, u.id,
+            ),
+          );
+        break;
+      }
+      case "account_unlock": {
+        // Releasing a student's account is kept to the people given the
+        // "account-unlock" scope; the account becomes free to link again.
+        ensure(unlocksAccounts(u), "Only the people allowed to unlock accounts can release one.");
+        const a: any = await stmt("SELECT * FROM accounts WHERE id=?", id).first();
+        ensure(a, "Account not found.");
+        ensure(a.student_id, "This account is not linked to a student.");
+        const reason = String(x.reason || "").trim();
+        ensure(reason.length >= 3, "Say why the account is being released.");
+        auditPrevious = { student_id: a.student_id, linked_at: a.linked_at, linked_by: a.linked_by, coordinator_id: a.coordinator_id };
+        auditValue = { account_id: id, student_id: null };
+        jobs.push(stmt("UPDATE accounts SET student_id=NULL,linked_at=NULL,linked_by=NULL WHERE id=?", id));
+        break;
+      }
+      case "account_link_sweep": {
+        // Links an account to every Service Team student who already has
+        // enough approved links, and opens the coordinators' tasks for links
+        // waiting for correction. Each decision does this by itself; this is the catch-up.
+        ensure(keepsAccounts(u), "Only the people who keep the accounts can run this.");
+        const summary = await serviceFollowUpSweep(u);
+        await db().batch([auditStmt(u, "account_link_sweep", "accounts", summary, null, key)]);
+        return Response.json({ ok: true, ...summary });
       }
       // A lead hands out the open quality work, evenly. Passing a reviewer
       // assigns just that item; passing none distributes the whole queue.
@@ -3253,6 +3347,14 @@ export async function POST(req: Request) {
       ),
     );
     await db().batch(jobs);
+    // An approval may be the one that earns the student their client account.
+    if (x.action === "service_qc_review" && x.decision === "Lock" && sid) {
+      try {
+        await linkAccountKey(sid, u);
+      } catch (e: any) {
+        console.error("account link after approval failed", e?.message);
+      }
+    }
     // The record exists; now make sure the person can get in. This runs after
     // the write so a failure here leaves a listed member of staff rather than
     // an account with no record, and it is reported instead of thrown: the

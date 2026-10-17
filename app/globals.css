@@ -1430,3 +1430,30 @@ td .searchable-select,td .pick-inline{max-width:240px;min-width:0}
 .pqc-approve{color:#256b47;border-color:#b9dfc9}
 .pqc-reject{color:#a0362d;border-color:#efc4bf}
 .coach-progress-qc{display:block;flex-basis:100%;color:#6a7891;font-size:12px}
+/* Attendance check (app/attendance-check.tsx); builds on the .fr-* Feedback review styles. */
+.ac-nowrap{white-space:nowrap}
+.ac-gap{color:#9a6f22;font-weight:600}
+.ac-more{align-self:center}
+.ac-note{margin:0;background:#f6f8fc;border-radius:8px;padding:8px 10px;font-size:14px;color:#2b3a55;white-space:pre-wrap;overflow-wrap:anywhere}
+.ac-problem:not(:disabled){color:#b0564e;border-color:#f1cdc7}
+@media (max-width:640px){.fr-filters>*{max-width:none}.ac-nowrap{white-space:normal}}
+
+/* Feedback by student (app/feedback-view.tsx StudentFeedback; reused on the quality team's Students tab) */
+.fs-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.fs-tools>*{flex:0 1 220px;min-width:0}
+.fs-tools .fr-search{flex:2 1 240px!important}
+.fs-toggle{display:inline-flex;align-items:center;gap:6px;background:none;border:0;padding:0;font:inherit;color:inherit;cursor:pointer;text-align:start}
+[dir="rtl"] .fs-chevron{transform:scaleX(-1)}
+.fs-comment{display:block;max-width:320px;overflow-wrap:anywhere;color:#3b4a66}
+.fs-detail>td{background:#f7f9fd;padding:8px 10px 12px}
+.fs-detail .fr-table{font-size:13px;background:#fff}
+.fs-quality{display:flex;flex-direction:column;align-items:flex-start;gap:4px;max-width:340px}
+.fs-note{color:#2b3a55;white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:700px){.fs-tools>*{flex:1 1 100%}.fs-comment{max-width:220px}}
+
+/* Accounts: the student an account is the key for; service-correction tasks. */
+.account-key strong{display:inline-flex;align-items:center;gap:4px}
+.task-row.is-service-fix .complete.is-waiting{display:inline-grid;place-items:center;color:#9a6f22;cursor:default}
+.task-comment{display:block;color:#6a7891;font-size:12px;margin-top:2px}
+.task-progress{display:flex;align-items:center;gap:6px;flex-wrap:wrap;color:#6a7891;font-size:12px;margin-top:4px}
+.qc-comment{color:#6a5320}

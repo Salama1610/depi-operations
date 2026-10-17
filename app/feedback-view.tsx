@@ -2,12 +2,14 @@
 
 // Students' feedback after their sessions, for the people who run the groups
 // (see lib/domain/feedback.ts for the scoring rule and app/api/feedback for who
-// sees what). Two modes: Total (the overall picture and its trend) and Weekly
-// (one block per week, coach by coach). Red flags, sessions rated below 3 out
-// of 5, lead the page; Coach Operations records what was done about each one.
+// sees what). Three modes: Total (the overall picture and its trend), Weekly
+// (one block per week, coach by coach) and By student (each student's
+// responses). Red flags, sessions rated below 3 out of 5, lead the page; Coach
+// Operations records what was done about each one. Coach Operations and Project
+// Operations also see the quality team's note on each session it reviewed.
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Flag, RefreshCw } from "lucide-react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Download, Flag, RefreshCw } from "lucide-react";
 import { useLocale, useT } from "@/lib/i18n/context";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -44,6 +46,224 @@ export function FeedbackScore({ score }: { score: number | null | undefined }) {
       {score.toFixed(1)}
       <span className="feedback-score-word">{word}</span>
     </span>
+  );
+}
+
+const said = (v: any) => v === true || v === 1 || v === "1" || v === "true";
+
+/** Rows to a CSV file, with a byte-order mark so a spreadsheet reads Arabic. */
+export function downloadCsv(name: string, rows: Row[]) {
+  if (!rows.length) return;
+  const keys = Object.keys(rows[0]);
+  const cell = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const text = "﻿" + [keys.map(cell).join(","), ...rows.map((r) => keys.map((k) => cell(r[k])).join(","))].join("\n");
+  const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${name}-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** A date and time in Cairo, on the 12-hour clock. */
+function useCairoTime() {
+  const tag = useLocale() === "ar" ? "ar-EG-u-nu-latn" : "en-GB";
+  return (value?: string | null) =>
+    value
+      ? new Date(value).toLocaleString(tag, { timeZone: "Africa/Cairo", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true })
+      : "—";
+}
+
+/** One row per student who answered: how many times, their average and lowest score, and what they said last. */
+export function studentSummaries(sessions: Row[], responses: Row[]) {
+  const sessionById = new Map(sessions.map((s) => [s.id, s]));
+  const byStudent = new Map<string, Row[]>();
+  for (const r of responses) {
+    if (!sessionById.has(r.session_id)) continue;
+    const key = String(r.student_id || "");
+    if (!key) continue;
+    byStudent.set(key, [...(byStudent.get(key) || []), r]);
+  }
+  return [...byStudent.entries()].map(([key, list]) => {
+    const newest = [...list].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    const scores = list.map((r) => scoreOf([r as any])).filter((n): n is number => n !== null);
+    return {
+      key,
+      name: String(list.find((r) => r.student_name)?.student_name || key),
+      groups: [...new Set(list.map((r) => sessionById.get(r.session_id)?.group_id).filter(Boolean))].sort() as string[],
+      responses: newest,
+      score: scoreOf(list as any),
+      lowest: scores.length ? Math.min(...scores) : null,
+      searched: Math.round((100 * list.filter((r) => said(r.searched_gig)).length) / list.length),
+      latest: String(newest.find((r) => String(r.comments || "").trim())?.comments || "").trim(),
+    };
+  });
+}
+
+/**
+ * Feedback student by student: one row per student in the selection, lowest
+ * score first by default; opening a student lists each of their responses.
+ */
+export function StudentFeedback({ sessions, responses, name = "feedback-by-student" }: { sessions: Row[]; responses: Row[]; name?: string }) {
+  const t = useT();
+  const when = useCairoTime();
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState("lowest");
+  const [low, setLow] = useState(false);
+  const [open, setOpen] = useState<string | null>(null);
+  const [shown, setShown] = useState(100);
+  const sessionById = useMemo(() => new Map(sessions.map((s) => [s.id, s])), [sessions]);
+  const students = useMemo(() => studentSummaries(sessions, responses), [sessions, responses]);
+  const needle = q.trim().toLowerCase();
+  const list = students
+    .filter(
+      (s) =>
+        (!needle || [s.name, s.key, ...s.groups].some((v) => String(v).toLowerCase().includes(needle))) &&
+        (!low || (s.lowest ?? 5) < 3),
+    )
+    .sort((a, b) =>
+      sort === "name"
+        ? a.name.localeCompare(b.name)
+        : sort === "responses"
+        ? b.responses.length - a.responses.length || a.name.localeCompare(b.name)
+        : sort === "score"
+        ? (a.score ?? 99) - (b.score ?? 99) || a.name.localeCompare(b.name)
+        : (a.lowest ?? 99) - (b.lowest ?? 99) || (a.score ?? 99) - (b.score ?? 99) || a.name.localeCompare(b.name),
+    );
+  const sessionOf = (r: Row) => sessionById.get(r.session_id) || {};
+  return (
+    <section className="fr-panel fs-students">
+      <header>
+        <h3>{t("Students · {v0}", { v0: list.length })}</h3>
+        <button
+          type="button"
+          className="small-btn"
+          disabled={!list.length}
+          onClick={() =>
+            downloadCsv(
+              name,
+              list.flatMap((s) =>
+                s.responses.map((r: Row) => {
+                  const x = sessionOf(r);
+                  return {
+                    student: s.name, student_id: s.key, group: x.group_id || "", session: x.title || "", week: x.week ?? "",
+                    date: when(x.starts_at || r.created_at), satisfaction: r.satisfaction, clarity: r.clarity, usefulness: r.usefulness,
+                    score: scoreOf([r as any]) ?? "", searched_gig: said(r.searched_gig) ? "Yes" : "No", liked: r.liked || "", comments: r.comments || "",
+                    student_average: s.score ?? "", student_lowest: s.lowest ?? "",
+                  };
+                }),
+              ),
+            )
+          }
+        >
+          <Download size={14} /> {t("Export CSV")}
+        </button>
+      </header>
+      <div className="fs-tools">
+        <input className="fr-search" type="search" placeholder={t("Search student, ID or group")} value={q} onChange={(e) => { setQ(e.target.value); setShown(100); }} />
+        <SearchableSelect
+          label={t("Sort by")}
+          value={sort}
+          onChange={setSort}
+          options={[
+            { value: "lowest", label: t("Lowest score first") },
+            { value: "score", label: t("Lowest average first") },
+            { value: "responses", label: t("Most responses first") },
+            { value: "name", label: t("Name") },
+          ]}
+        />
+        <label className="check"><Checkbox checked={low} onCheckedChange={(v) => { setLow(v === true); setShown(100); }} />{t("Only students who rated a session below 3")}</label>
+      </div>
+      <small className="fr-hint">{t("Open a student to see each of their responses.")}</small>
+      {list.length ? (
+        <div className="fr-table-wrap">
+          <table className="fr-table">
+            <thead>
+              <tr>
+                <th>{t("Student")}</th>
+                <th>{t("Group")}</th>
+                <th>{t("Responses")}</th>
+                <th>{t("Average")}</th>
+                <th>{t("Lowest score")}</th>
+                <th>{t("Searched for a gig")}</th>
+                <th>{t("Latest comment")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.slice(0, shown).map((s) => {
+                const expanded = open === s.key;
+                return (
+                  <Fragment key={s.key}>
+                    <tr className="fr-pick" onClick={() => setOpen(expanded ? null : s.key)}>
+                      <td>
+                        <button type="button" className="fs-toggle" aria-expanded={expanded} onClick={(e) => { e.stopPropagation(); setOpen(expanded ? null : s.key); }}>
+                          {expanded ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" className="fs-chevron" />}
+                          <strong><bdi>{s.name}</bdi></strong>
+                        </button>
+                        <small className="table-subline"><bdi dir="ltr">{s.key}</bdi></small>
+                      </td>
+                      <td><bdi>{s.groups.join(", ") || "—"}</bdi></td>
+                      <td><bdi dir="ltr">{s.responses.length}</bdi></td>
+                      <td><FeedbackScore score={s.score} /></td>
+                      <td><FeedbackScore score={s.lowest} /></td>
+                      <td><bdi dir="ltr">{s.searched}%</bdi></td>
+                      <td><small className="fs-comment">{s.latest || "—"}</small></td>
+                    </tr>
+                    {expanded && (
+                      <tr className="fs-detail">
+                        <td colSpan={7}>
+                          <div className="fr-table-wrap">
+                            <table className="fr-table">
+                              <thead>
+                                <tr>
+                                  <th>{t("Session")}</th>
+                                  <th>{t("Date")}</th>
+                                  <th>{t("Satisfaction")}</th>
+                                  <th>{t("Clarity")}</th>
+                                  <th>{t("Usefulness")}</th>
+                                  <th>{t("Score")}</th>
+                                  <th>{t("Searched for a gig")}</th>
+                                  <th>{t("Liked most")}</th>
+                                  <th>{t("Comments or support needed")}</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {s.responses.map((r: Row) => {
+                                  const x = sessionOf(r);
+                                  return (
+                                    <tr key={r.id}>
+                                      <td>
+                                        <strong>{x.title || t("Session")}</strong>
+                                        <small className="table-subline"><bdi>{x.group_id}</bdi>{x.week !== undefined && x.week !== null ? <> · {t("Week {v0}", { v0: x.week })}</> : null}</small>
+                                      </td>
+                                      <td><bdi>{when(x.starts_at || r.created_at)}</bdi></td>
+                                      <td><bdi dir="ltr">{r.satisfaction}</bdi></td>
+                                      <td><bdi dir="ltr">{r.clarity}</bdi></td>
+                                      <td><bdi dir="ltr">{r.usefulness}</bdi></td>
+                                      <td><FeedbackScore score={scoreOf([r as any])} /></td>
+                                      <td>{said(r.searched_gig) ? t("Yes") : t("No")}</td>
+                                      <td><small>{r.liked || "—"}</small></td>
+                                      <td><small>{r.comments || "—"}</small></td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="fr-empty">{students.length ? t("No student matches these filters.") : t("No feedback in this view")}</p>
+      )}
+      {list.length > shown && <button type="button" className="small-btn" onClick={() => setShown(shown + 200)}>{t("Show more ({v0} left)", { v0: list.length - shown })}</button>}
+    </section>
   );
 }
 
@@ -326,10 +546,11 @@ function HandleDialog({ target, responses, onClose, onDone }: { target: Row | nu
 export function FeedbackView() {
   const t = useT();
   const day = useDay();
+  const when = useCairoTime();
   const [data, setData] = useState<Row | null>(null);
   const [error, setError] = useState("");
   const [mode, setMode] = useState("total");
-  const [filters, setFilters] = useState({ group: "All", coach: "All" });
+  const [filters, setFilters] = useState({ group: "All", coach: "All", noted: false });
   const [only, setOnly] = useState({ low: false, comments: false });
   const [shown, setShown] = useState(100);
   const [handling, setHandling] = useState<Row | null>(null);
@@ -356,10 +577,18 @@ export function FeedbackView() {
   const handledIds = useMemo(() => new Set(handled.keys()), [handled]);
   const coachNames = useMemo(() => new Map<string, string>(sessions.filter((s) => s.coach_id).map((s) => [s.coach_id, s.coach_name || s.coach_id])), [sessions]);
   const coachName = (id?: string | null) => (id ? coachNames.get(id) || id : t("No coach"));
+  // The quality team's review of each session, for Coach Operations and Project Operations only.
+  const quality = Boolean(data?.quality);
+  const reviews = useMemo(() => new Map<string, Row>((data?.reviews || []).map((r: Row) => [r.session_id, r])), [data]);
+  const hasNote = (id: string) => Boolean(String(reviews.get(id)?.note || "").trim());
 
   const visibleSessions = sessions.filter(
-    (s) => (filters.group === "All" || s.group_id === filters.group) && (filters.coach === "All" || (s.coach_id || "") === filters.coach),
+    (s) =>
+      (filters.group === "All" || s.group_id === filters.group) &&
+      (filters.coach === "All" || (s.coach_id || "") === filters.coach) &&
+      (!filters.noted || hasNote(s.id)),
   );
+  const noted = visibleSessions.filter((s) => hasNote(s.id)).length;
   const sessionById = new Map(visibleSessions.map((s) => [s.id, s]));
   const rows = responses.filter((r) => sessionById.has(r.session_id));
   const summaries = sessionSummaries(visibleSessions as any, rows as any);
@@ -410,7 +639,25 @@ export function FeedbackView() {
             <span className="cue is-bad">{t("Open")}</span>
           )}
         </TableCell>
+        {quality && <TableCell>{qualityNote(s.session_id)}</TableCell>}
       </TableRow>
+    );
+  };
+  /** The quality team's review of a session: its state, the note, and who wrote it when. */
+  const qualityNote = (id: string) => {
+    const r = reviews.get(id);
+    if (!r) return "—";
+    const done = r.status === "Reviewed";
+    return (
+      <span className="fs-quality">
+        <span className={"cue " + (done ? "is-ok" : "is-warn")}>{done ? t("Reviewed") : t("Waiting for review")}</span>
+        {r.note ? <small className="fs-note">{r.note}</small> : null}
+        <small className="table-subline">
+          {done
+            ? t("By {v0}, {v1}", { v0: r.reviewer_name || r.reviewer || "—", v1: when(r.reviewed_at) })
+            : t("Given to {v0}", { v0: r.reviewer_name || r.reviewer || "—" })}
+        </small>
+      </span>
     );
   };
   const sessionTable = (list: Row[]) => (
@@ -423,6 +670,7 @@ export function FeedbackView() {
             <TableHead>{t("Ratings")}</TableHead>
             <TableHead>{t("Average")}</TableHead>
             <TableHead>{t("Flag")}</TableHead>
+            {quality && <TableHead>{t("Quality note")}</TableHead>}
           </TableRow>
         </TableHeader>
         <TableBody>{list.map(flagRow)}</TableBody>
@@ -435,8 +683,14 @@ export function FeedbackView() {
       <div className="filter-row">
         <label className="field">{t("Group")}<SearchableSelect label={t("Group")} value={filters.group} onChange={(group) => setFilters({ ...filters, group })} options={groupOptions} /></label>
         <label className="field">{t("Coach")}<SearchableSelect label={t("Coach")} value={filters.coach} onChange={(coach) => setFilters({ ...filters, coach })} options={coachOptions} /></label>
-        {(filters.group !== "All" || filters.coach !== "All") && (
-          <button className="small-btn" onClick={() => setFilters({ group: "All", coach: "All" })}>{t("Clear filters")}</button>
+        {quality && (
+          <label className="check">
+            <Checkbox checked={filters.noted} onCheckedChange={(v) => setFilters({ ...filters, noted: v === true })} />
+            {t("Only sessions with a quality note")}
+          </label>
+        )}
+        {(filters.group !== "All" || filters.coach !== "All" || filters.noted) && (
+          <button className="small-btn" onClick={() => setFilters({ group: "All", coach: "All", noted: false })}>{t("Clear filters")}</button>
         )}
       </div>
 
@@ -455,6 +709,7 @@ export function FeedbackView() {
         <TabsList>
           <TabsTrigger value="total">{t("Total")}</TabsTrigger>
           <TabsTrigger value="weekly">{t("Weekly")}</TabsTrigger>
+          <TabsTrigger value="students">{t("By student")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="total">
@@ -468,6 +723,7 @@ export function FeedbackView() {
                 <span><strong>{summaries.length}</strong>{t("Sessions rated")}</span>
                 <span><strong>{open.length}</strong>{t("Red flags open")}</span>
                 <span><strong>{Math.round((100 * searched) / rows.length)}%</strong>{t("Searched for work on the platforms")}</span>
+                {quality && <span><strong>{noted}</strong>{t("Sessions with a quality note")}</span>}
               </div>
               <div className="feedback-charts">
                 <section className="panel">
@@ -576,6 +832,10 @@ export function FeedbackView() {
               </div>
             </section>
           ))}
+        </TabsContent>
+
+        <TabsContent value="students">
+          <StudentFeedback sessions={visibleSessions} responses={rows} />
         </TabsContent>
       </Tabs>
 
