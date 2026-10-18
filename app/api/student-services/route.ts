@@ -305,6 +305,24 @@ export async function POST(req: Request) {
         t,
       ),
     ];
+    // A link the quality team sent back can be fixed on the marketplace without
+    // its address changing (a lower price, a better description). The student
+    // says so, and the same link goes back to the reviewer.
+    const fixedSlots = new Set((Array.isArray(x.fixed_slots) ? x.fixed_slots : []).map(Number));
+    // Each link goes in once, in its own place: the same link twice, or two
+    // links swapped between places, is refused in words a student can act on.
+    const placeOf = new Map<string, number>();
+    for (let index = 0; index < values.length; index += 1) {
+      const normalized = verifyServiceLink(values[index], { open: true }).normalizedUrl;
+      if (!normalized) continue;
+      const earlier = placeOf.get(normalized);
+      if (earlier)
+        throw new Error(`Link ${index + 1} is the same as link ${earlier}. Each link goes in once. If you fixed a rejected link on the same page, press "I fixed it" under it instead of pasting it again.`);
+      placeOf.set(normalized, index + 1);
+      const owner = existing.find((row: any) => row.normalized_url === normalized);
+      if (owner && Number(owner.slot) !== index + 1)
+        throw new Error(`Link ${index + 1} is already your service ${owner.slot}. Keep each link in its own place. If you fixed a rejected link on the same page, press "I fixed it" under it instead of pasting it again.`);
+    }
     for (let index = 0; index < values.length; index += 1) {
       const slot = index + 1;
       const value = values[index];
@@ -313,8 +331,10 @@ export async function POST(req: Request) {
       // form is what gets stored and opened; both screens link to this column.
       const stored = check.upgraded ? check.normalizedUrl : value;
       const prior: any = bySlot.get(slot);
-      // A link sent back unchanged is left exactly as it is, a correction included.
-      if (prior && prior.normalized_url === check.normalizedUrl) continue;
+      // The same address sent back: left as it is, unless it was rejected and
+      // the student says they fixed it, which sends it to the reviewer again.
+      const fixedInPlace = prior && prior.qc_status === "Needs Correction" && fixedSlots.has(slot);
+      if (prior && prior.normalized_url === check.normalizedUrl && !fixedInPlace) continue;
       if (prior && prior.qc_status !== "Needs Correction") {
         if (prior.normalized_url !== check.normalizedUrl)
           throw new Error(
@@ -411,7 +431,10 @@ export async function POST(req: Request) {
     await db().batch(jobs);
     return Response.json({ ok: true, ...(await studentView(s.id)) });
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    const message = /UNIQUE|duplicate key/i.test(String(e.message))
+      ? "One of these links is already in your list. Each link goes in once, in its own place. If you fixed a rejected link on the same page, press \"I fixed it\" under it."
+      : e.message;
+    return Response.json({ error: message }, { status: 400 });
   }
 }
 

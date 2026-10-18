@@ -106,6 +106,10 @@ function say(t: Translate, message: string) {
   if (m) return t('Answer "{v0}"', { v0: t(m[1]) });
   m = message.match(/^Link (\d+) is already submitted by another student\. Each student submits their own services\.$/);
   if (m) return t("Link {v0} is already submitted by another student. Each student submits their own services.", { v0: m[1] });
+  m = message.match(/^Link (\d+) is the same as link (\d+)\. /);
+  if (m) return t('Link {v0} is the same as link {v1}. Each link goes in once. If you fixed a rejected link on the same page, press "I fixed it" under it instead of pasting it again.', { v0: m[1], v1: m[2] });
+  m = message.match(/^Link (\d+) is already your service (\d+)\. /);
+  if (m) return t('Link {v0} is already your service {v1}. Keep each link in its own place. If you fixed a rejected link on the same page, press "I fixed it" under it instead of pasting it again.', { v0: m[1], v1: m[2] });
   m = message.match(/^Submit at most (\d+) service links\.$/);
   if (m) return t("Submit at most {v0} service links.", { v0: m[1] });
   m = message.match(/^At most (\d+) (\w+) links can be submitted; this has (\d+)\.$/);
@@ -302,6 +306,9 @@ export default function StudentServicesPage() {
   // whether the student is confirming the submission.
   const [drafts, setDrafts] = useState<Record<ServiceCategory, string[]>>({ Nafezly: [""], Kafiil: [""], Other: [] });
   const [fixes, setFixes] = useState<Record<number, string>>({});
+  // Rejected links the student fixed on the marketplace without the address
+  // changing (a lower price, say): sent back to the reviewer as they are.
+  const [fixedSame, setFixedSame] = useState<Record<number, boolean>>({});
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   async function refresh() {
@@ -343,6 +350,12 @@ export default function StudentServicesPage() {
   const filled = (category: ServiceCategory) => drafts[category].map((url) => url.trim()).filter(Boolean);
   const newLinks = [...filled("Nafezly"), ...filled("Kafiil"), ...filled("Other")];
   const corrected = services.map((service) => (fixes[service.slot]?.trim() ? fixes[service.slot].trim() : service.url));
+  // Pasting the same address into the correction box means the same thing as "I fixed it".
+  const sameAddress = (service: any) =>
+    Boolean(fixes[service.slot]?.trim()) && verifyServiceLink(fixes[service.slot].trim(), { open: true }).normalizedUrl === verifyServiceLink(service.url, { open: true }).normalizedUrl;
+  const fixedSlots = services
+    .filter((service) => service.qc_status === "Needs Correction" && (fixedSame[service.slot] || sameAddress(service)))
+    .map((service) => service.slot);
   const progress = serviceProgress([...corrected, ...newLinks].map(platformOf));
   const savedProgress = serviceProgress(services.map((service) => service.platform || ""));
   const lockedRequired = services.filter((service) => service.qc_status === "Locked" && serviceCategory(service.platform || "") !== "Other").length;
@@ -370,7 +383,7 @@ export default function StudentServicesPage() {
     ...sections.flatMap(({ category }) => drafts[category].map((url) => problem(category, url))),
     ...services.map((service) => (fixes[service.slot]?.trim() ? problem(serviceCategory(platformOf(fixes[service.slot])), fixes[service.slot]) : "")),
   ].filter(Boolean);
-  const changed = newLinks.length > 0 || services.some((service) => fixes[service.slot]?.trim());
+  const changed = newLinks.length > 0 || fixedSlots.length > 0 || services.some((service) => fixes[service.slot]?.trim());
   const canSubmit = progress.met && problems.length === 0 && changed && !busy;
 
   function setDraft(category: ServiceCategory, index: number, url: string) {
@@ -395,7 +408,7 @@ export default function StudentServicesPage() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "submit_services", services: [...corrected, ...newLinks] }),
+          body: JSON.stringify({ action: "submit_services", services: [...corrected, ...newLinks], fixed_slots: fixedSlots }),
         },
         t("Unable to submit your links."),
         t("Check your connection and try again."),
@@ -406,6 +419,7 @@ export default function StudentServicesPage() {
       setLastReviewedAt(value.last_reviewed_at || null);
       setDrafts({ Nafezly: [], Kafiil: [], Other: [] });
       setFixes({});
+      setFixedSame({});
       setSaved(true);
     } catch (e: any) {
       setSubmitError(e.message);
@@ -504,10 +518,22 @@ export default function StudentServicesPage() {
                             </div>
                             {correction && (
                               <>
-                                <div className="student-qc-note"><strong>{t("Rejected:")}</strong> {service.qc_comment} {t("Paste the updated link below and submit it.")}</div>
-                                <div className="student-url-wrap student-fix">
-                                  <input type="url" value={fix} disabled={busy} placeholder={t("Corrected link")} onChange={(e) => { setSaved(false); setFixes((current) => ({ ...current, [service.slot]: e.target.value })); }} />
-                                </div>
+                                <div className="student-qc-note"><strong>{t("Rejected:")}</strong> {service.qc_comment} {t("Fix it on the platform and press “I fixed it”, or paste a new link below.")}</div>
+                                {fixedSame[service.slot] ? (
+                                  <div className="student-fixed-same">
+                                    <Check size={15} /> {t("Fixed on the same link: it goes back to the quality team when you submit.")}
+                                    <button type="button" className="student-link-btn" disabled={busy} onClick={() => setFixedSame((current) => ({ ...current, [service.slot]: false }))}>{t("Undo")}</button>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <button type="button" className="student-secondary student-fixed-btn" disabled={busy} onClick={() => { setSaved(false); setFixes((current) => ({ ...current, [service.slot]: "" })); setFixedSame((current) => ({ ...current, [service.slot]: true })); }}>
+                                      <Check size={15} /> {t("I fixed it on the same link")}
+                                    </button>
+                                    <div className="student-url-wrap student-fix">
+                                      <input type="url" value={fix} disabled={busy} placeholder={t("Or paste a new link")} onChange={(e) => { setSaved(false); setFixes((current) => ({ ...current, [service.slot]: e.target.value })); }} />
+                                    </div>
+                                  </>
+                                )}
                                 {fix.trim() && problem(serviceCategory(platformOf(fix)), fix) && <div className="student-qc-note">{problem(serviceCategory(platformOf(fix)), fix)}</div>}
                               </>
                             )}

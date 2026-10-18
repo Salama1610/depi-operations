@@ -4151,3 +4151,36 @@ test("the quality team checks each held session's attendance register, which Coa
   assert.ok((await dbRow("SELECT count(*) n FROM audit_events WHERE entity_id=? AND action='Attendance check removed'", "SES-AC-1")).n === 1);
   current = { id: "owner", email: "owner@example.com" };
 });
+
+test("a rejected link fixed on the same page goes back to the reviewer, and a link pasted twice is refused in words", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  const servicesApi = await route("student-services");
+  const send = async (body) =>
+    (await servicesApi.POST(new Request("https://test.local/api/student-services", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }))).json();
+  const kafiil = (id) => `https://kafiil.com/service/${id}-service`;
+  const pupil = await dbRow("SELECT id,email FROM students WHERE id NOT IN (SELECT student_id FROM service_links) AND lifecycle='Active' AND email IS NOT NULL AND email<>'' ORDER BY id LIMIT 1");
+  current = { id: pupil.id, email: pupil.email };
+  const links = [kafiil(8801), kafiil(8802), kafiil(8803)];
+  assert.equal((await send({ action: "submit_services", services: links })).error, undefined);
+  await dbExec("UPDATE service_links SET qc_status='Needs Correction',qc_comment='The price is over $7' WHERE student_id=? AND slot IN (1,2)", pupil.id);
+  // Sent back unchanged without saying it was fixed: nothing moves.
+  await send({ action: "submit_services", services: links });
+  assert.equal((await dbRow("SELECT qc_status FROM service_links WHERE student_id=? AND slot=1", pupil.id)).qc_status, "Needs Correction");
+  // The same link pasted into another place, or twice: a sentence, not a database error.
+  let r = await send({ action: "submit_services", services: [links[1], links[0], links[2]] });
+  assert.match(r.error, /already your service/);
+  r = await send({ action: "submit_services", services: [links[0], links[0], links[2]] });
+  assert.match(r.error, /must be different|is the same as link 1/);
+  // "I fixed it": the same address goes back to the reviewer as a new revision.
+  r = await send({ action: "submit_services", services: links, fixed_slots: [1] });
+  assert.equal(r.error, undefined, r.error);
+  const rows = await dbRows("SELECT slot,qc_status,revision,qc_comment FROM service_links WHERE student_id=? ORDER BY slot", pupil.id);
+  assert.deepEqual(rows.map((x) => [x.qc_status, Number(x.revision)]), [["Pending", 2], ["Needs Correction", 1], ["Pending", 1]]);
+  assert.equal(rows[0].qc_comment, null);
+  // A locked or waiting link is never sent back by the flag.
+  r = await send({ action: "submit_services", services: links, fixed_slots: [3] });
+  assert.equal((await dbRow("SELECT revision FROM service_links WHERE student_id=? AND slot=3", pupil.id)).revision, 1);
+  current = { id: "owner", email: "owner@example.com" };
+});

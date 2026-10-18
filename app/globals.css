@@ -1457,3 +1457,7 @@ td .searchable-select,td .pick-inline{max-width:240px;min-width:0}
 .task-comment{display:block;color:#6a7891;font-size:12px;margin-top:2px}
 .task-progress{display:flex;align-items:center;gap:6px;flex-wrap:wrap;color:#6a7891;font-size:12px;margin-top:4px}
 .qc-comment{color:#6a5320}
+/* Student page: a rejected link fixed on the marketplace, sent back as it is. */
+.student-fixed-btn{display:inline-flex;align-items:center;gap:6px;margin:10px 0 8px;padding:8px 13px;font-size:13px}
+.student-fixed-same{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;padding:9px 12px;border-radius:7px;background:#effaf6;border:1px solid #d5f1e7;color:#34846f;font-size:13px}
+.student-link-btn{border:0;background:none;color:#315ce8;font-size:13px;text-decoration:underline;padding:0;cursor:pointer}

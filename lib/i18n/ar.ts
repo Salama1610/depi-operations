@@ -2709,4 +2709,12 @@ export const ar: Record<string, string> = {
   "Only the people who keep the accounts can run this.": "لا يشغّل هذا إلا المسؤولون عن الحسابات.",
   "Account not found.": "الحساب غير موجود.",
   "Task not found.": "المهمة غير موجودة.",
+  // A rejected service link fixed on the same page (18 Oct 2026)
+  "Fix it on the platform and press “I fixed it”, or paste a new link below.": "عدّلها على المنصة ثم اضغط «عدّلتها على نفس الرابط»، أو الصق رابطًا جديدًا بالأسفل.",
+  "Fixed on the same link: it goes back to the quality team when you submit.": "تم التعديل على نفس الرابط: سيعود لفريق الجودة للمراجعة عند الإرسال.",
+  "I fixed it on the same link": "عدّلتها على نفس الرابط",
+  "Or paste a new link": "أو الصق رابطًا جديدًا",
+  "Link {v0} is the same as link {v1}. Each link goes in once. If you fixed a rejected link on the same page, press \"I fixed it\" under it instead of pasting it again.": "الرابط {v0} هو نفسه الرابط {v1}. يُضاف كل رابط مرة واحدة فقط. إذا عدّلت خدمة مرفوضة على نفس الصفحة، اضغط «عدّلتها على نفس الرابط» تحتها بدل لصق الرابط مرة أخرى.",
+  "Link {v0} is already your service {v1}. Keep each link in its own place. If you fixed a rejected link on the same page, press \"I fixed it\" under it instead of pasting it again.": "الرابط {v0} موجود بالفعل كخدمتك رقم {v1}. اترك كل رابط في مكانه. إذا عدّلت خدمة مرفوضة على نفس الصفحة، اضغط «عدّلتها على نفس الرابط» تحتها بدل لصق الرابط مرة أخرى.",
+  "One of these links is already in your list. Each link goes in once, in its own place. If you fixed a rejected link on the same page, press \"I fixed it\" under it.": "أحد هذه الروابط موجود بالفعل في قائمتك. يُضاف كل رابط مرة واحدة في مكانه. إذا عدّلت خدمة مرفوضة على نفس الصفحة، اضغط «عدّلتها على نفس الرابط» تحتها.",
 };
