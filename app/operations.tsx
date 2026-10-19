@@ -6505,6 +6505,7 @@ See you there!`,
                           { value: t("The service owner could not be matched to your student record. Confirm the seller profile and resubmit."), label: t("Owner mismatch") },
                           { value: t("The service is unavailable, paused or deleted. Submit an active public service."), label: t("Service unavailable") },
                           { value: t("The service category or title does not match your assigned track. Submit a track-relevant service."), label: t("Track mismatch") },
+                          { value: t("The service price is outside the allowed range. Set the starting price between $3 and $7, then submit the link again."), label: t("Price mismatch ($3–$7)") },
                         ]}
                       />
                     )}

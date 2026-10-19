@@ -2717,4 +2717,6 @@ export const ar: Record<string, string> = {
   "Link {v0} is the same as link {v1}. Each link goes in once. If you fixed a rejected link on the same page, press \"I fixed it\" under it instead of pasting it again.": "الرابط {v0} هو نفسه الرابط {v1}. يُضاف كل رابط مرة واحدة فقط. إذا عدّلت خدمة مرفوضة على نفس الصفحة، اضغط «عدّلتها على نفس الرابط» تحتها بدل لصق الرابط مرة أخرى.",
   "Link {v0} is already your service {v1}. Keep each link in its own place. If you fixed a rejected link on the same page, press \"I fixed it\" under it instead of pasting it again.": "الرابط {v0} موجود بالفعل كخدمتك رقم {v1}. اترك كل رابط في مكانه. إذا عدّلت خدمة مرفوضة على نفس الصفحة، اضغط «عدّلتها على نفس الرابط» تحتها بدل لصق الرابط مرة أخرى.",
   "One of these links is already in your list. Each link goes in once, in its own place. If you fixed a rejected link on the same page, press \"I fixed it\" under it.": "أحد هذه الروابط موجود بالفعل في قائمتك. يُضاف كل رابط مرة واحدة في مكانه. إذا عدّلت خدمة مرفوضة على نفس الصفحة، اضغط «عدّلتها على نفس الرابط» تحتها.",
+  "Price mismatch ($3–$7)": "عدم تطابق السعر (3$ – 7$)",
+  "The service price is outside the allowed range. Set the starting price between $3 and $7, then submit the link again.": "سعر الخدمة خارج النطاق المسموح. اجعل سعر البداية بين 3$ و7$ ثم أرسل الرابط مرة أخرى.",
 };
