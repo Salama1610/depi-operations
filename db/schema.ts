@@ -185,6 +185,8 @@ export const accounts = sqliteTable("accounts", {
   coordinatorNote: text("coordinator_note"),
   coordinatorStateAt: text("coordinator_state_at"),
   coordinatorStateBy: text("coordinator_state_by"),
+  // The approved service this account orders for (one account per service).
+  serviceLinkId: text("service_link_id"),
 });
 
 // Marketplace credentials held by the programme, encrypted at rest with a

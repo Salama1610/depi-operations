@@ -25,7 +25,7 @@ import {
   revokesStudents,
   unlocksAccounts,
 } from "@/lib/server";
-import { accountStates, linkAccountKey, serviceFixCategory, serviceFixStatements, serviceFollowUpSweep, taskProgressStates } from "@/lib/service-followup";
+import { accountStates, accountsPerStudent, linkAccountKey, serviceFixCategory, serviceFixStatements, serviceFollowUpSweep, taskProgressStates } from "@/lib/service-followup";
 import { demoPeople, demoPlan, demoStudentEmail, isDemo, sameSide } from "@/lib/demo";
 import {
   ensure,
@@ -1883,7 +1883,7 @@ export async function POST(req: Request) {
         ensure(found.length === accountIds.length, "One or more accounts were not found.");
         // An account linked to a student is locked with its coordinator until it is released.
         ensure(
-          x.slot === "second" || found.every((a: any) => !a.student_id),
+          x.slot === "second" || unlocksAccounts(u) || found.every((a: any) => !a.student_id),
           "This account is locked to a student and their coordinator. Only the people allowed to unlock accounts can release it.",
         );
         // An account can be shared by two coordinators: "second" sets the one
@@ -3032,9 +3032,67 @@ export async function POST(req: Request) {
         ensure(a.student_id, "This account is not linked to a student.");
         const reason = String(x.reason || "").trim();
         ensure(reason.length >= 3, "Say why the account is being released.");
-        auditPrevious = { student_id: a.student_id, linked_at: a.linked_at, linked_by: a.linked_by, coordinator_id: a.coordinator_id };
-        auditValue = { account_id: id, student_id: null };
-        jobs.push(stmt("UPDATE accounts SET student_id=NULL,linked_at=NULL,linked_by=NULL WHERE id=?", id));
+        auditPrevious = { student_id: a.student_id, service_link_id: a.service_link_id, linked_at: a.linked_at, linked_by: a.linked_by, coordinator_id: a.coordinator_id };
+        auditValue = { account_id: id, student_id: null, service_link_id: null };
+        jobs.push(stmt("UPDATE accounts SET student_id=NULL,service_link_id=NULL,linked_at=NULL,linked_by=NULL WHERE id=?", id));
+        break;
+      }
+      case "account_assign": {
+        // Taha, Abdelrahman Salama and whoever else holds "account-unlock"
+        // give an account to a student (and one of their approved services)
+        // and a coordinator by hand, or change either.
+        ensure(unlocksAccounts(u), "Only the people allowed to change account assignments can do this.");
+        const a: any = await stmt("SELECT * FROM accounts WHERE id=?", id).first();
+        ensure(a, "Account not found.");
+        const studentId = x.key_student ? String(x.key_student) : null;
+        let coordinatorId = x.coordinator_id ? String(x.coordinator_id) : null;
+        let serviceId: string | null = null;
+        if (studentId) {
+          const pupil: any = await stmt(
+            "SELECT s.id,s.lifecycle,g.coordinator FROM students s JOIN groups g ON g.id=s.group_id WHERE s.id=?",
+            studentId,
+          ).first();
+          ensure(pupil, "Student not found.");
+          ensure(pupil.lifecycle === "Active", "Choose an active student.");
+          const others = Number((await stmt("SELECT count(*) n FROM accounts WHERE student_id=? AND id<>?", studentId, id).first() as any)?.n || 0);
+          ensure(others < accountsPerStudent, "This student already has two accounts. Remove one of them first.");
+          if (x.service_link_id) {
+            const link: any = await stmt("SELECT id,student_id,qc_status FROM service_links WHERE id=?", String(x.service_link_id)).first();
+            ensure(link && link.student_id === studentId, "Choose one of this student's services.");
+            const taken: any = await stmt("SELECT id FROM accounts WHERE service_link_id=? AND id<>?", link.id, id).first();
+            ensure(!taken, "Another account is already linked to this service.");
+            serviceId = link.id;
+          }
+          if (!coordinatorId) coordinatorId = pupil.coordinator || null;
+        }
+        if (coordinatorId) {
+          const person: any = await stmt("SELECT id,roles FROM users WHERE id=? AND active=1", coordinatorId).first();
+          ensure(person && JSON.parse(person.roles).includes("Operations Coordinator"), "Choose an active coordinator.");
+        }
+        auditPrevious = { student_id: a.student_id, service_link_id: a.service_link_id, coordinator_id: a.coordinator_id };
+        auditValue = { account_id: id, student_id: studentId, service_link_id: serviceId, coordinator_id: coordinatorId };
+        const sameStudent = studentId && studentId === a.student_id;
+        jobs.push(
+          stmt(
+            `UPDATE accounts SET student_id=?,service_link_id=?,linked_at=?,linked_by=?,coordinator_id=?,
+               coordinator_2_id=CASE WHEN coordinator_2_id=? THEN NULL ELSE coordinator_2_id END WHERE id=?`,
+            studentId,
+            serviceId,
+            studentId ? (sameStudent ? a.linked_at : t) : null,
+            studentId ? (sameStudent ? a.linked_by : u.id) : null,
+            coordinatorId,
+            coordinatorId,
+            id,
+          ),
+        );
+        if (coordinatorId && studentId && (coordinatorId !== a.coordinator_id || !sameStudent))
+          jobs.push(
+            stmt(
+              "INSERT OR IGNORE INTO notifications VALUES(?,?,?,?,?,?,?,?,?)",
+              uid("NTF"), coordinatorId, `Client account ${a.label} is now for ${(await stmt("SELECT name FROM students WHERE id=?", studentId).first() as any)?.name || studentId}`,
+              "student", studentId, "Information", `account-assign:${id}:${studentId}:${t}`, t, null,
+            ),
+          );
         break;
       }
       case "account_link_sweep": {

@@ -80,17 +80,10 @@ export function AccountsSheetUpload({ onDone }: { onDone: () => void }) {
     }
   }
 
+  // An upload only adds: accounts already in the app are left exactly as they are.
   const changes: [string, string][] = [
-    ["new", "New accounts"],
-    ["password", "Passwords to update"],
-    ["status", "Status changes"],
-    ["credit", "Credit corrections"],
-    ["pending", "Pending credit changes"],
-    ["owner", "Coordinator (owner) changes"],
-    ["comments", "Comment changes"],
-    ["unchanged", "Already up to date"],
-    ["status_kept", "Status kept (in use or decided in the app)"],
-    ["credit_kept", "Credit kept (changed in the app since)"],
+    ["new", "New accounts to add"],
+    ["already_in_app", "Already in the app (left as they are)"],
     ["repeated_in_sheet", "Listed twice in the sheet"],
     ["only_in_app", "In the app but not in the sheet (left alone)"],
   ];

@@ -116,7 +116,8 @@
     "coordinator_state": "text",
     "coordinator_note": "text",
     "coordinator_state_at": "timestamptz",
-    "coordinator_state_by": "text"
+    "coordinator_state_by": "text",
+    "service_link_id": "text"
   },
   "account_requests": {
     "id": "text",

@@ -13,18 +13,20 @@ function notify(recipient: string, title: string, entityType: string, entityId: 
 // until the quality team approves the corrected link; a new correction comment
 // replaces it with a new task.
 //
-// Once a Service Team student has two approved links, an available client
-// account with credit on the same marketplace is linked to them and their
-// coordinator. It is the coordinator's key: the account to order that
-// student's services from. The student never sees it. One student per account,
-// one account per student, and the link is locked until someone holding the
-// "account-unlock" scope releases it.
+// Each approved service of a Service Team student (on Kafiil, Nafezly or
+// Khamsat) earns an available client account with credit on the same
+// marketplace, linked to the student, that service and the student's
+// coordinator: up to two accounts per student, so a third approved service
+// earns none (19 October 2026). It is the coordinator's key: the account to
+// order that service from. The student never sees it. One student per account,
+// and the link is locked: only the people holding the "account-unlock" scope
+// change or remove it.
 
 export const serviceFixCategory = "Service correction";
 export const taskProgressStates = ["Contacted the student", "Could not reach the student", "Student is fixing it"];
 export const accountStates = ["In use", "Not used yet", "Needs a new account", "Does not work"];
-/** Approved links a student needs before an account is linked to them. */
-export const linksForAccount = 2;
+/** The most client accounts one student is linked to, one per approved service. */
+export const accountsPerStudent = 2;
 
 // Service-link platforms are spelled as students see them; client accounts as
 // the accounts sheet does.
@@ -65,10 +67,11 @@ export async function serviceFixStatements(link: any, decision: "Locked" | "Need
 }
 
 /**
- * Links a client account to the student if they now qualify (linked_by stays
- * empty: the app did it; `actor` is whoever's action prompted it, for the audit). Safe to call any
- * number of times: a student who has one, or does not qualify yet, is left as
- * they are. Returns what happened, for the caller to report.
+ * Links client accounts to the student's approved services, oldest approval
+ * first, until they hold two. Safe to call any number of times: services that
+ * have an account, or a student who has two, are left as they are. `actor` is
+ * whoever's action prompted it, for the audit; linked_by stays empty because
+ * the app did it. Returns the accounts linked and what stopped it.
  */
 export async function linkAccountKey(studentId: string, actor: any | null) {
   const s: any = await stmt(
@@ -78,48 +81,64 @@ export async function linkAccountKey(studentId: string, actor: any | null) {
   ).first();
   // Service Team students only: theirs are the services ordered from client accounts.
   if (!s || s.lifecycle !== "Active" || s.team !== "Service Team" || s.model === "Industry" || !s.coordinator)
-    return { linked: false, reason: "not eligible" } as const;
-  if (await stmt("SELECT id FROM accounts WHERE student_id=?", studentId).first()) return { linked: false, reason: "has one" } as const;
-  const approved = await all(
-    "SELECT platform FROM service_links WHERE student_id=? AND qc_status='Locked' ORDER BY qc_at,updated_at,id",
+    return { linked: 0, reason: "not eligible" } as const;
+  const held = Number((await stmt("SELECT count(*) n FROM accounts WHERE student_id=?", studentId).first() as any)?.n || 0);
+  if (held >= accountsPerStudent) return { linked: 0, reason: "has two" } as const;
+  const waiting = await all(
+    `SELECT l.id,l.platform,l.slot FROM service_links l
+     WHERE l.student_id=? AND l.qc_status='Locked' AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.service_link_id=l.id)
+     ORDER BY l.qc_at,l.updated_at,l.slot`,
     studentId,
   );
-  if (approved.length < linksForAccount) return { linked: false, reason: "not enough approved" } as const;
-  // The marketplace of their first approved link that is on one.
-  const platform = approved.map((l: any) => marketplace[l.platform]).find(Boolean);
-  if (!platform) return { linked: false, reason: "no marketplace" } as const;
+  let linked = 0;
+  let count = held;
+  const missing: string[] = [];
   const t = now();
-  const account: any = await stmt(
-    `SELECT id,label FROM accounts WHERE platform=? AND status='Available' AND student_id IS NULL AND active_assignment IS NULL AND credits>0
-     ORDER BY credits DESC,id LIMIT 1`,
-    platform,
-  ).first();
-  if (!account) {
-    // Nobody to link: the people who keep the accounts hear about it once per student.
+  for (const link of waiting) {
+    if (count >= accountsPerStudent) break;
+    const platform = marketplace[link.platform];
+    if (!platform) continue;
+    const account: any = await stmt(
+      `SELECT id,label FROM accounts WHERE platform=? AND status='Available' AND student_id IS NULL AND active_assignment IS NULL AND credits>0
+       ORDER BY credits DESC,id LIMIT 1`,
+      platform,
+    ).first();
+    if (!account) {
+      missing.push(platform);
+      continue;
+    }
+    // Guarded: the account is still free and the student still under two.
+    await db().batch([
+      stmt(
+        `UPDATE accounts SET student_id=?,service_link_id=?,linked_at=?,linked_by=?,coordinator_id=?,
+           coordinator_2_id=CASE WHEN coordinator_2_id=? THEN NULL ELSE coordinator_2_id END
+         WHERE id=? AND student_id IS NULL AND (SELECT count(*) FROM accounts x WHERE x.student_id=?)<?`,
+        studentId, link.id, t, null, s.coordinator, s.coordinator, account.id, studentId, accountsPerStudent,
+      ),
+    ]);
+    const now_linked: any = await stmt("SELECT student_id,service_link_id FROM accounts WHERE id=?", account.id).first();
+    if (now_linked?.student_id !== studentId || now_linked?.service_link_id !== link.id) continue;
+    linked++;
+    count++;
+    await db().batch([
+      notify(s.coordinator, `Client account linked to ${s.name}'s ${link.platform} service ${link.slot}: use ${account.label}`, "student", studentId, "Information", `account-key:${account.id}:${link.id}`),
+      auditStmt(actor || { id: "system" }, "account_link", account.id, { student_id: studentId, service_link_id: link.id, coordinator_id: s.coordinator, platform, automatic: true }, null),
+    ]);
+  }
+  if (missing.length) {
+    // Nobody to link: the people who keep the accounts hear about it once per student and marketplace.
     const keepers = await all(
       `SELECT id FROM users WHERE active=1 AND (roles LIKE '%Project Operations%' OR (roles LIKE '%Team Supervisor%' AND team='Service Team'))`,
     );
     await db().batch(
-      keepers.map((k: any) =>
-        notify(k.id, `No ${platform} account with credit for ${s.name}: add or top up one`, "student", studentId, "Action Required", `account-key-missing:${studentId}:${k.id}`),
+      [...new Set(missing)].flatMap((platform) =>
+        keepers.map((k: any) =>
+          notify(k.id, `No ${platform} account with credit for ${s.name}: add or top up one`, "student", studentId, "Action Required", `account-key-missing:${studentId}:${platform}:${k.id}`),
+        ),
       ),
     );
-    return { linked: false, reason: "no account", platform } as const;
   }
-  await db().batch([
-    stmt(
-      `UPDATE accounts SET student_id=?,linked_at=?,linked_by=?,coordinator_id=?,
-         coordinator_2_id=CASE WHEN coordinator_2_id=? THEN NULL ELSE coordinator_2_id END
-       WHERE id=? AND student_id IS NULL`,
-      studentId, t, null, s.coordinator, s.coordinator, account.id,
-    ),
-    notify(s.coordinator, `Client account linked to ${s.name}: use ${account.label} for their orders`, "student", studentId, "Information", `account-key:${account.id}:${studentId}`),
-    auditStmt(actor || { id: "system" }, "account_link", account.id, { student_id: studentId, coordinator_id: s.coordinator, platform, automatic: !actor }, null),
-  ]);
-  const now_linked: any = await stmt("SELECT student_id FROM accounts WHERE id=?", account.id).first();
-  return now_linked?.student_id === studentId
-    ? ({ linked: true, account_id: account.id, platform } as const)
-    : ({ linked: false, reason: "taken" } as const);
+  return { linked, reason: missing.length ? "no account" : "done", platforms: [...new Set(missing)] } as const;
 }
 
 /**
@@ -141,17 +160,18 @@ export async function serviceFollowUpSweep(actor: any) {
     tasks++;
   }
   const candidates = await all(
-    `SELECT l.student_id FROM service_links l JOIN students s ON s.id=l.student_id
-     WHERE l.qc_status='Locked' AND s.lifecycle='Active' AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.student_id=l.student_id)
-     GROUP BY l.student_id HAVING count(*)>=?`,
-    linksForAccount,
+    `SELECT DISTINCT l.student_id FROM service_links l JOIN students s ON s.id=l.student_id
+     WHERE l.qc_status='Locked' AND s.lifecycle='Active' AND l.platform IN ('Kafiil','Nafezly','Khamsat')
+       AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.service_link_id=l.id)
+       AND (SELECT count(*) FROM accounts a WHERE a.student_id=l.student_id)<?`,
+    accountsPerStudent,
   );
   let linked = 0;
   const missing = new Set<string>();
   for (const c of candidates) {
     const result = await linkAccountKey(c.student_id, actor);
-    if (result.linked) linked++;
-    else if (result.reason === "no account" && "platform" in result) missing.add(result.platform);
+    linked += result.linked;
+    if ("platforms" in result) for (const p of result.platforms || []) missing.add(p);
   }
   return { tasks, linked, candidates: candidates.length, no_account_on: [...missing] };
 }

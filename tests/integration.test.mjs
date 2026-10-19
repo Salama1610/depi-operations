@@ -2446,9 +2446,13 @@ test("vault access is role restricted and never logs returned credentials", asyn
   assert.equal((await dbRow("SELECT status FROM accounts WHERE label='sheet.two@example.invalid'")).status, "Access Issue");
   listed = await (await call({ action: "list" })).json();
   assert.equal(listed.credentials[one.id]?.password, "pass-one-1", "the sheet's password is stored, encrypted");
-  sheet = await upload(false);
+  // Uploads only add: an account already in the app keeps its state, credit and password.
+  await dbExec("UPDATE accounts SET credits=9,status='Blocked' WHERE id=?", one.id);
+  sheet = await upload(true);
   assert.equal(sheet.summary.new, 0);
-  assert.equal(sheet.summary.unchanged, 2, "uploading the same sheet again changes nothing");
+  assert.equal(sheet.summary.already_in_app, 2, "uploading the same sheet again changes nothing");
+  const kept = await dbRow("SELECT status,credits FROM accounts WHERE id=?", one.id);
+  assert.deepEqual([kept.status, Number(kept.credits)], ["Blocked", 9], "an existing account is left as it is");
   current = { id: "coordinator", email: "staff-sara@example.invalid" };
   assert.match((await upload(false)).error, /keep the accounts/);
   current = { id: "owner", email: "owner@example.com" };
@@ -3965,7 +3969,7 @@ test("portal gigs waiting for the coach go to the quality team, whose verdict th
 });
 
 
-test("a service link sent back is the coordinator's task until approved, and two approved links earn a locked client account", async () => {
+test("a service link sent back is the coordinator's task until approved, and each approved service earns a locked client account, two at most", async () => {
   await dbExec("DELETE FROM rate_limits");
   current = { id: "owner", email: "owner@example.com" };
   const group = await dbRow(
@@ -4016,45 +4020,61 @@ test("a service link sent back is the coordinator's task until approved, and two
   assert.equal((await dbRow("SELECT status FROM tasks WHERE id=?", first.id)).status, "Closed");
   assert.equal((await dbRow("SELECT status FROM tasks WHERE source='service-fix:SLK-KEY-1:2'")).status, "Open");
 
-  // One approval is not enough for an account; the second is.
+  // Each approved service earns an account on its marketplace, two at most.
+  current = { id: "owner", email: "owner@example.com" };
+  await check("account", { id: "ACC-KEY-2", label: "key-two@example.org", platform: "Kafeel", credits: 99998 });
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
   await check("service_qc_review", { service_id: "SLK-KEY-2", decision: "Lock" });
-  assert.ok(!(await dbRow("SELECT id FROM accounts WHERE student_id=?", learner.id)), "one approval is not enough");
+  let held = await dbRows("SELECT * FROM accounts WHERE student_id=? ORDER BY linked_at,id", learner.id);
+  assert.equal(held.length, 1, "one approved service, one account");
+  assert.deepEqual([held[0].id, held[0].service_link_id], ["ACC-KEY-1", "SLK-KEY-2"], "the most credit, for that service");
+  assert.equal(held[0].coordinator_id, group.coordinator, "the student's coordinator holds it");
+  assert.equal(held[0].linked_by, null, "linked by the app");
+  assert.ok(await dbRow("SELECT id FROM notifications WHERE recipient=? AND source=?", group.coordinator, "account-key:ACC-KEY-1:SLK-KEY-2"));
   await dbExec("UPDATE service_links SET revision=3,qc_status='Pending',qc_comment=NULL WHERE id='SLK-KEY-1'");
   await check("service_qc_review", { service_id: "SLK-KEY-1", decision: "Lock" });
   assert.equal((await dbRow("SELECT count(*) n FROM tasks WHERE source LIKE 'service-fix:SLK-KEY-1:%' AND status='Open'")).n, 0, "approval closes the task");
-  const key = await dbRow("SELECT * FROM accounts WHERE student_id=?", learner.id);
-  assert.equal(key.id, "ACC-KEY-1");
-  assert.equal(key.coordinator_id, group.coordinator, "the student's coordinator holds it");
-  assert.equal(key.linked_by, null, "linked by the app");
-  assert.ok(await dbRow("SELECT id FROM notifications WHERE recipient=? AND source=?", group.coordinator, `account-key:ACC-KEY-1:${learner.id}`));
+  current = { id: "owner", email: "owner@example.com" };
+  await check("account", { id: "ACC-KEY-3", label: "key-three@example.org", platform: "Kafeel", credits: 99997 });
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  await check("service_qc_review", { service_id: "SLK-KEY-3", decision: "Lock" });
+  held = await dbRows("SELECT id,service_link_id FROM accounts WHERE student_id=? ORDER BY id", learner.id);
+  assert.deepEqual(held.map((a) => [a.id, a.service_link_id]), [["ACC-KEY-1", "SLK-KEY-2"], ["ACC-KEY-2", "SLK-KEY-1"]], "a third approved service earns no third account");
+  assert.equal((await dbRow("SELECT student_id FROM accounts WHERE id='ACC-KEY-3'")).student_id, null);
 
-  // Locked: nobody reassigns it, and the coordinator gives their word on it.
+  // Locked: nobody else reassigns it, and the coordinator gives their word on it.
   current = { id: "owner", email: "owner@example.com" };
   assert.match((await post("account_coordinator", { id: "ACC-KEY-1", account_ids: ["ACC-KEY-1"], coordinator_id: "" })).error, /locked/);
+  assert.match((await post("account_assign", { id: "ACC-KEY-3", key_student: learner.id })).error, /allowed to change/);
   current = { id: group.coordinator, email: group.email };
   assert.match((await post("account_state", { id: "ACC-KEY-1", state: "Does not work" })).error, /what is wrong/);
   await check("account_state", { id: "ACC-KEY-1", state: "Does not work", note: "Login asks for a phone code" });
   assert.equal((await dbRow("SELECT coordinator_state FROM accounts WHERE id='ACC-KEY-1'")).coordinator_state, "Does not work");
   assert.match((await post("account_unlock", { id: "ACC-KEY-1", reason: "x" })).error, /allowed to unlock/);
 
-  // Only the account-unlock holders release it, with a reason; the catch-up links them again.
+  // The account-unlock holders change and remove assignments; the catch-up links again.
   current = { id: "owner", email: "owner@example.com" };
   assert.match((await post("account_unlock", { id: "ACC-KEY-1", reason: "Broken" })).error, /allowed to unlock/, "not every administrator");
   const scopes = (await dbRow("SELECT scopes FROM users WHERE email='owner@example.com'")).scopes;
   await dbExec("UPDATE users SET scopes=? WHERE email='owner@example.com'", JSON.stringify([...JSON.parse(scopes || "[]"), "account-unlock"]));
+  assert.match((await post("account_assign", { id: "ACC-KEY-3", key_student: learner.id })).error, /already has two accounts/);
+  await check("account_assign", { id: "ACC-KEY-2", key_student: learner.id, service_link_id: "SLK-KEY-3", coordinator_id: group.coordinator });
+  assert.equal((await dbRow("SELECT service_link_id FROM accounts WHERE id='ACC-KEY-2'")).service_link_id, "SLK-KEY-3", "moved to another of their services");
   assert.match((await post("account_unlock", { id: "ACC-KEY-1", reason: "" })).error, /why/);
   await check("account_unlock", { id: "ACC-KEY-1", reason: "Broken login" });
-  assert.equal((await dbRow("SELECT student_id FROM accounts WHERE id='ACC-KEY-1'")).student_id, null);
+  const freed = await dbRow("SELECT student_id,service_link_id,coordinator_id FROM accounts WHERE id='ACC-KEY-1'");
+  assert.deepEqual([freed.student_id, freed.service_link_id], [null, null]);
+  assert.equal(freed.coordinator_id, group.coordinator, "the coordinator stays");
   await check("account_status", { id: "ACC-KEY-1", status: "Access Issue", reason: "Broken login" });
-  await check("account", { id: "ACC-KEY-2", label: "key-two@example.org", platform: "Kafeel", credits: 50 });
   const swept = await check("account_link_sweep", {});
   assert.ok(swept.linked >= 1);
-  const relinked = await dbRow("SELECT id,platform,status,credits FROM accounts WHERE student_id=?", learner.id);
-  assert.ok(relinked && relinked.id !== "ACC-KEY-1" && relinked.platform === "Kafeel" && relinked.status === "Available" && Number(relinked.credits) > 0, "a working account with credit");
+  held = await dbRows("SELECT id,platform,status FROM accounts WHERE student_id=?", learner.id);
+  assert.equal(held.length, 2, "back to two");
+  assert.ok(held.every((a) => a.id !== "ACC-KEY-1" && a.platform === "Kafeel" && a.status === "Available"));
 
   await dbExec("UPDATE users SET scopes=? WHERE email='owner@example.com'", scopes);
-  await dbExec("UPDATE accounts SET student_id=NULL,status='Retired' WHERE id IN ('ACC-KEY-1','ACC-KEY-2','ACC-KEY-EMPTY')");
-  await dbExec("UPDATE accounts SET student_id=NULL WHERE student_id IS NOT NULL");
+  await dbExec("UPDATE accounts SET student_id=NULL,service_link_id=NULL,status='Retired' WHERE id IN ('ACC-KEY-1','ACC-KEY-2','ACC-KEY-3','ACC-KEY-EMPTY')");
+  await dbExec("UPDATE accounts SET student_id=NULL,service_link_id=NULL WHERE student_id IS NOT NULL");
   await dbExec("UPDATE users SET team=? WHERE id=?", team, group.supervisor);
 });
 

@@ -209,7 +209,8 @@ const titles: Row = {
   policy_edit: "Edit policy draft",
   account_status: "Change account status",
   account_state: "Update the account's status",
-  account_unlock: "Unlock the account",
+  account_unlock: "Remove the assignment",
+  account_assign: "Change the assignment",
   refund_credit: "Refund account credit",
   policy_transition: "Progress policy review",
   group_close: "Close group",
@@ -3502,6 +3503,15 @@ See you there!`,
                           return (
                             <span className="account-key">
                               <strong><Lock size={13} /> {name(r.student_id)}</strong>
+                              {(() => {
+                                // The service this account orders for, so the coordinator knows which one.
+                                const link = serviceLinks.find((l) => l.id === r.service_link_id);
+                                return link ? (
+                                  <a className="table-subline text-link" href={link.url} target="_blank" rel="noreferrer">
+                                    {t("For their {v0} service {v1}", { v0: link.platform, v1: link.slot })} <ExternalLink size={11} />
+                                  </a>
+                                ) : null;
+                              })()}
                               <small className="table-subline">{r.linked_by ? t("Linked by {v0}", { v0: owner(r.linked_by) }) : t("Linked automatically")}{r.linked_at ? " · " + fmt(r.linked_at) : ""}</small>
                             </span>
                           );
@@ -3540,9 +3550,14 @@ See you there!`,
                             {r.coordinator_id ? t("Reassign") : t("Assign")}
                           </button>
                         )}
+                        {unlocks && (
+                          <button className="small-btn" onClick={() => open("account_assign", { id: r.id, label: r.label, platform: r.platform, key_student: r.student_id || "", service_link_id: r.service_link_id || "", coordinator_id: r.coordinator_id || "", student_id: "" })}>
+                            {t("Change assignment")}
+                          </button>
+                        )}
                         {unlocks && r.student_id && (
                           <button className="small-btn" onClick={() => open("account_unlock", { id: r.id, label: r.label, platform: r.platform, key_student: r.student_id, reason: "", student_id: "" })}>
-                            <Unlock size={14} /> {t("Unlock")}
+                            <Unlock size={14} /> {t("Remove assignment")}
                           </button>
                         )}
                         {assignsAccounts && r.coordinator_id && (
@@ -6908,6 +6923,54 @@ See you there!`,
                   </>
                 );
               }
+              if (a === "account_assign") {
+                // Service Team students; the services offered are the chosen student's approved ones.
+                const pool = students.filter((s) => groups.find((g) => g.id === s.group_id)?.supervisor_team === "Service Team" && s.lifecycle === "Active");
+                const theirLinks = serviceLinks.filter((l) => l.student_id === form.key_student && l.qc_status === "Locked");
+                return (
+                  <>
+                    <div className="account-summary">
+                      <div>
+                        <strong>{modal!.label}</strong>
+                        <small>{modal!.platform}</small>
+                      </div>
+                    </div>
+                    <label className="field">
+                      {t("Student")}
+                      <SearchableSelect
+                        label={t("Student")}
+                        value={form.key_student || ""}
+                        placeholder={t("No student")}
+                        onChange={(v) => setForm({ ...form, key_student: v || "", service_link_id: "", coordinator_id: v ? students.find((s) => s.id === v)?.coordinator || form.coordinator_id : form.coordinator_id })}
+                        options={[{ value: "", label: t("No student") }, ...pool.map((s) => ({ value: s.id, label: `${s.name} · ${s.id} · ${s.group_id}` }))]}
+                      />
+                    </label>
+                    {form.key_student && (
+                      <label className="field">
+                        {t("Service")}
+                        <Pick
+                          bare
+                          label={t("Service")}
+                          value={form.service_link_id || ""}
+                          onChange={(v) => setForm({ ...form, service_link_id: v })}
+                          options={[{ value: "", label: t("Not tied to one service") }, ...theirLinks.map((l) => ({ value: l.id, label: `${l.platform} · ${t("service {v0}", { v0: l.slot })}` }))]}
+                        />
+                      </label>
+                    )}
+                    <label className="field">
+                      {t("Coordinator")}
+                      <SearchableSelect
+                        label={t("Coordinator")}
+                        value={form.coordinator_id || ""}
+                        placeholder={t("No coordinator")}
+                        onChange={(v) => setForm({ ...form, coordinator_id: v || "" })}
+                        options={[{ value: "", label: t("No coordinator") }, ...staff.filter((s: Row) => !(s.active === 0 || s.active === false) && heldRoles(s).includes("Operations Coordinator")).map((s: Row) => ({ value: s.id, label: s.name }))]}
+                      />
+                    </label>
+                    <p className="footnote">{t("A student holds two accounts at most. Choosing a student fills in their coordinator; you can change it.")}</p>
+                  </>
+                );
+              }
               if (a === "account_unlock") {
                 return (
                   <>
@@ -6917,7 +6980,7 @@ See you there!`,
                         <small>{modal!.platform} · {name(modal!.key_student)}</small>
                       </div>
                     </div>
-                    <p className="footnote">{t("The account stops being this student's key and becomes free. The student is linked to another account the next time they qualify.")}</p>
+                    <p className="footnote">{t("The account is no longer this student's and becomes free; its coordinator stays. The student is linked to another account the next time one of their services is approved.")}</p>
                     {field("reason", t("Why it is being released"))}
                   </>
                 );
