@@ -831,5 +831,17 @@
     "note": "text",
     "checked_by": "text",
     "checked_at": "timestamptz"
+  },
+  "quality_reports": {
+    "id": "text",
+    "group_id": "text",
+    "audience": "text",
+    "description": "text",
+    "created_by": "text",
+    "created_at": "timestamptz",
+    "status": "text",
+    "handled_by": "text",
+    "handled_at": "timestamptz",
+    "handled_note": "text"
   }
 }

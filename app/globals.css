@@ -1461,3 +1461,19 @@ td .searchable-select,td .pick-inline{max-width:240px;min-width:0}
 .student-fixed-btn{display:inline-flex;align-items:center;gap:6px;margin:10px 0 8px;padding:8px 13px;font-size:13px}
 .student-fixed-same{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;padding:9px 12px;border-radius:7px;background:#effaf6;border:1px solid #d5f1e7;color:#34846f;font-size:13px}
 .student-link-btn{border:0;background:none;color:#315ce8;font-size:13px;text-decoration:underline;padding:0;cursor:pointer}
+/* Problem reports: the quality team's reports about a group. */
+.qr-form{gap:10px}
+.qr-form h3{margin:0;font-size:15px}
+.qr-form-row{display:flex;flex-wrap:wrap;gap:10px}
+.qr-form-row>*{flex:1 1 220px;min-width:0}
+.qr-form textarea{width:100%;border:1px solid #dfe4ee;border-radius:8px;padding:9px;font:inherit;font-size:14px;resize:vertical}
+.qr-actions{display:flex;justify-content:flex-end}
+.qr-list{display:flex;flex-direction:column;gap:10px}
+.qr-item{border-inline-start:4px solid #3c9a6a}
+.qr-item.is-open{border-inline-start-color:#e0b04f}
+.qr-item header{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.qr-text{margin:0;font-size:14px;color:#26324a}
+.qr-meta{color:#6a7891}
+.qr-done{display:flex;flex-wrap:wrap;align-items:center;gap:6px;color:#34846f;font-size:13px}
+.qr-handle{display:flex;gap:8px;flex-wrap:wrap}
+.qr-handle input{flex:1 1 220px;min-width:0;height:34px;border:1px solid #dfe4ee;border-radius:8px;padding:0 9px;font:inherit;font-size:13px}

@@ -4204,3 +4204,52 @@ test("a rejected link fixed on the same page goes back to the reviewer, and a li
   assert.equal((await dbRow("SELECT revision FROM service_links WHERE student_id=? AND slot=3", pupil.id)).revision, 1);
   current = { id: "owner", email: "owner@example.com" };
 });
+
+test("the quality team reports a group's problem to Coach or Project Operations, who are notified and mark it handled", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  const reports = await route("quality-reports");
+  const get = async () => (await reports.GET()).json();
+  const send = async (body) =>
+    (await reports.POST(new Request("https://test.local/api/quality-reports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }))).json();
+  await dbExec(
+    "INSERT INTO users(id,email,name,roles,scopes,active) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET active=1",
+    "po-reports", "po-reports@example.invalid", "Project Ops Reader", JSON.stringify(["Project Operations"]), "[]", 1,
+  );
+  const group = await dbRow("SELECT id FROM groups WHERE status='Active' AND id NOT LIKE 'DEMO-%' ORDER BY id LIMIT 1");
+
+  current = { id: "staff-quality", email: "staff-quality@example.invalid" };
+  const view = await get();
+  assert.equal(view.error, undefined, view.error);
+  assert.ok(view.reports_problems && view.groups.some((g) => g.id === group.id));
+  assert.match((await send({ action: "report", group_id: group.id, audience: "Coach Operations", description: "" })).error, /Describe/);
+  assert.match((await send({ action: "report", group_id: group.id, audience: "Everyone", description: "Coach late" })).error, /who the report goes to/);
+  const sent = await send({ action: "report", group_id: group.id, audience: "Coach Operations", description: "The coach joined 40 minutes late." });
+  assert.equal(sent.error, undefined, sent.error);
+  assert.ok(sent.notified >= 1);
+  assert.ok(await dbRow("SELECT id FROM notifications WHERE recipient='staff-coach-ops' AND source=?", `quality-report:${sent.id}:staff-coach-ops`));
+  assert.ok(!(await dbRow("SELECT id FROM notifications WHERE recipient='po-reports' AND source LIKE ?", `quality-report:${sent.id}:%`)), "Project Operations was not chosen");
+  const both = await send({ action: "report", group_id: group.id, audience: "Both", description: "Attendance was not taken." });
+  assert.match((await send({ action: "handle", id: sent.id })).error, /sent to/, "the reporter does not mark it handled");
+
+  // Project Operations reads only what was sent to them.
+  current = { id: "po-reports", email: "po-reports@example.invalid" };
+  let theirs = await get();
+  assert.deepEqual(theirs.reports.map((r) => r.id), [both.id]);
+  assert.equal(theirs.reports_problems, false);
+  assert.match((await send({ action: "report", group_id: group.id, audience: "Both", description: "Not mine to send" })).error, /role/);
+
+  // Coach Operations reads theirs and marks one handled; the reporter hears about it.
+  current = { id: "coach-ops-login", email: "staff-coach-ops@example.invalid" };
+  theirs = await get();
+  assert.deepEqual(theirs.reports.map((r) => r.id).sort(), [sent.id, both.id].sort());
+  assert.equal((await send({ action: "handle", id: sent.id, status: "Handled", note: "Spoke with the coach." })).ok, true);
+  const done = await dbRow("SELECT * FROM quality_reports WHERE id=?", sent.id);
+  assert.deepEqual([done.status, done.handled_by, done.handled_note], ["Handled", "staff-coach-ops", "Spoke with the coach."]);
+  assert.ok(await dbRow("SELECT id FROM notifications WHERE recipient='staff-quality' AND source LIKE ?", `quality-report-handled:${sent.id}:%`));
+
+  // Nobody else reads them.
+  current = { id: "coordinator", email: "staff-sara@example.invalid" };
+  assert.match((await get()).error, /role/);
+  current = { id: "owner", email: "owner@example.com" };
+  assert.ok((await get()).reports.length >= 2, "the administrators read them all");
+});

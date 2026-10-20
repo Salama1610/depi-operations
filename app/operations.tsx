@@ -15,6 +15,7 @@ import { PortalView } from "./portal-view";
 // The dashboard and its charts load only when someone opens it.
 const Dashboard = lazy(() => import("./dashboard").then((m) => ({ default: m.Dashboard })));
 const FeedbackReview = lazy(() => import("./feedback-review").then((m) => ({ default: m.FeedbackReview })));
+const QualityReports = lazy(() => import("./quality-reports").then((m) => ({ default: m.QualityReports })));
 const AttendanceCheck = lazy(() => import("./attendance-check").then((m) => ({ default: m.AttendanceCheck })));
 const PortalQc = lazy(() => import("./portal-qc").then((m) => ({ default: m.PortalQc })));
 const CoachAvailability = lazy(() => import("./coach-availability").then((m) => ({ default: m.CoachAvailability })));
@@ -41,6 +42,7 @@ import {
   ShieldCheck,
   ClipboardCheck,
   ClipboardList,
+  TriangleAlert,
   Lock,
   Unlock,
   Link2,
@@ -153,6 +155,7 @@ const nav = [
   ["quality", "Quality review", ShieldCheck],
   ["feedback-review", "Feedback review", MessageSquareText],
   ["attendance-check", "Attendance check", ClipboardList],
+  ["quality-reports", "Problem reports", TriangleAlert],
   ["cases", "Cases", Flag],
   ["reports", "Reports", ChartNoAxesCombined],
   ["administration", "Administration", Settings2],
@@ -708,11 +711,18 @@ export default function Operations({ module: initialModule }: { module: string }
       (Array.isArray(user.scopes) && (user.scopes.includes("account-owner") || user.scopes.includes("revoke-students"))));
   const shownNav = nav.filter(([m]) =>
     qualityOnly
-      ? m === "quality" || m === "feedback-review" || m === "attendance-check" || ((m === "portal" || m === "portal-qc") && !demoAccount)
+      ? m === "quality" || m === "feedback-review" || m === "attendance-check" || (m === "quality-reports" && !demoAccount) || ((m === "portal" || m === "portal-qc") && !demoAccount)
       : m === "feedback-review"
         ? // Students' session feedback, given out to the quality team to review;
           // a coach reads their own sessions' feedback there, read-only.
           can(user.roles, ["Quality Lead", "Quality Member", "Operations Systems / Admin", "Coach"])
+      : m === "quality-reports"
+        ? // The quality team reports a group's problems; Coach and Project
+          // Operations read the ones sent to them (the server checks the same).
+          !demoAccount && can(user.roles, ["Quality Lead", "Quality Member", "Coach Operations", "Project Operations", "Operations Systems / Admin"])
+      : m === "work"
+        ? // Coaches have no task list (20 October 2026).
+          !onlyCoach
       : m === "attendance-check"
         ? // The quality team checks each held session's register; Coach and
           // Project Operations read their checks and notes.
@@ -3136,6 +3146,12 @@ See you there!`,
     content = (
       <Suspense fallback={<div className="dash-loading">{t("Loading…")}</div>}>
         <FeedbackReview />
+      </Suspense>
+    );
+  } else if (module === "quality-reports") {
+    content = (
+      <Suspense fallback={<div className="dash-loading">{t("Loading…")}</div>}>
+        <QualityReports />
       </Suspense>
     );
   } else if (module === "attendance-check") {

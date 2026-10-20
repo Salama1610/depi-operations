@@ -1370,3 +1370,25 @@ export const attendanceChecks = sqliteTable(
   },
   (t) => [index("attendance_checks_status_idx").on(t.status)],
 );
+// A problem the quality team reports about a group, sent to Coach Operations,
+// Project Operations or both (20 October 2026).
+export const qualityReports = sqliteTable(
+  "quality_reports",
+  {
+    id: text("id").primaryKey(),
+    groupId: text("group_id")
+      .notNull()
+      .references(() => groups.id),
+    audience: text("audience").notNull(),
+    description: text("description").notNull(),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: text("created_at").notNull(),
+    status: text("status").notNull().default("Open"),
+    handledBy: text("handled_by").references(() => users.id),
+    handledAt: text("handled_at"),
+    handledNote: text("handled_note"),
+  },
+  (t) => [index("quality_reports_status_idx").on(t.status, t.createdAt)],
+);
