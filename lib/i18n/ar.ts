@@ -2769,4 +2769,18 @@ export const ar: Record<string, string> = {
   "Keep the description under 2,000 characters.": "اجعل الوصف أقل من 2000 حرف.",
   "Only the people this report was sent to can mark it handled.": "لا يحدد البلاغ كمُعالَج إلا من أُرسل إليهم.",
   "Choose a report action.": "اختر إجراءً للبلاغ.",
+  // Sessions marked done early; a coordinator as a session's coach (21 Oct 2026)
+  "Marked done {v0}": "انتهت {v0}",
+  "Ends the session now so students can give their feedback straight away.": "ينهي الجلسة الآن ليتمكن الطلاب من تقييمها فورًا.",
+  "Mark session done": "إنهاء الجلسة",
+  "Who held it": "من قدّم الجلسة",
+  "This session has already taken place: choose who actually held it, such as the coordinator who stood in, so it is paid to them.": "هذه الجلسة تمت بالفعل: اختر من قدّمها فعلًا، مثل المنسق الذي قام بها بدلًا من الكوتش، لتُحسب له في المستحقات.",
+  "Coach or coordinator": "كوتش أو منسق",
+  "A cancelled session has no coach to change.": "الجلسة الملغاة ليس لها كوتش لتغييره.",
+  "Choose an active coach or coordinator.": "اختر كوتش أو منسقًا نشطًا.",
+  "Only the group's coordinator can mark this session done.": "لا ينهي الجلسة إلا منسق المجموعة.",
+  "This session was not marked done.": "هذه الجلسة لم تُنهَ.",
+  "Students have already given feedback on this session, so it stays done.": "قيّم الطلاب هذه الجلسة بالفعل، لذا تبقى منتهية.",
+  "A session can be marked done once it has started.": "يمكن إنهاء الجلسة بعد أن تبدأ فقط.",
+  "This session has already ended.": "هذه الجلسة انتهت بالفعل.",
 };

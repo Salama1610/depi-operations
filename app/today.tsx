@@ -6,6 +6,7 @@
 // first; Project Operations the graduation funnel, spend and blockers; Coach
 // Operations this week's sessions and coverage; a coach their own sessions.
 
+import { sessionEnded } from "@/lib/domain/session-time";
 import { AlertTriangle, CalendarDays, Check, Clock3, ExternalLink, MessageCircle, UserCog } from "lucide-react";
 import { useT } from "@/lib/i18n/context";
 
@@ -43,7 +44,7 @@ const time = (iso: string) =>
 const pct = (part: number, whole: number) => (whole ? Math.round((100 * part) / whole) : null);
 const tone = (value: number | null, good = 85, fair = 65) =>
   value === null ? "neutral" : value >= good ? "green" : value >= fair ? "amber" : "red";
-const ended = (s: Row) => s.status !== "Cancelled" && Date.parse(s.starts_at) + Number(s.duration_minutes || 180) * 60000 <= Date.now();
+const ended = (s: Row) => s.status !== "Cancelled" && sessionEnded(s as any);
 
 /** A KPI card: the figure, its word, and what it measures. */
 function Kpi({ label, value, unit = "%", note, good, fair }: { label: string; value: number | null; unit?: string; note?: string; good?: number; fair?: number }) {

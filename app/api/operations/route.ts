@@ -103,7 +103,7 @@ const demoActions = new Set([
   "gig", "gig_transition", "evidence", "review", "transfer", "account_request", "student",
   "account_coordinator",
   "session", "session_attendance", "session_cancel", "session_check", "session_coach", "session_confirm",
-  "session_reschedule", "session_unavailable", "session_unconfirm",
+  "session_reschedule", "session_unavailable", "session_unconfirm", "session_done",
 ]);
 
 /**
@@ -1387,8 +1387,10 @@ export async function POST(req: Request) {
         // who actually held each session.
         permit(u, ["Coach Operations"]);
         const session: any = await stmt("SELECT * FROM sessions WHERE id=?", id).first();
-        ensure(session && ["Scheduled", "Confirmed"].includes(session.status), "Only a session still to come can change its coach.");
-        ensure(Date.parse(session.starts_at) > Date.now(), "A session that has started keeps the coach who held it.");
+        ensure(session && session.status !== "Cancelled", "A cancelled session has no coach to change.");
+        // A session already held can be given to whoever actually held it,
+        // such as the group's coordinator stepping in, so it is paid to them.
+        const held = Date.parse(session.starts_at) <= Date.now();
         ensure(x.reason?.trim().length >= 5, "Say why this session needs another coach.");
         let coachId = String(x.coach_id || "").trim();
         if (!coachId) {
@@ -1419,7 +1421,9 @@ export async function POST(req: Request) {
           signIn = { email, nationalId, name, active: true, reset: false };
         } else {
           const coach: any = await stmt("SELECT * FROM users WHERE id=? AND active=1", coachId).first();
-          ensure(coach && JSON.parse(coach.roles || "[]").includes("Coach"), "Choose an active coach.");
+          // A coordinator can stand in as the coach for a session (21 October 2026).
+          const roles = JSON.parse(coach?.roles || "[]");
+          ensure(coach && (roles.includes("Coach") || roles.includes("Operations Coordinator")), "Choose an active coach or coordinator.");
         }
         ensure(coachId !== session.coach_id, "This coach is already on the session.");
         const clash: any = await stmt(
@@ -1431,12 +1435,15 @@ export async function POST(req: Request) {
         ensure(!clash, `This coach already has a session that day (${clash?.group_id}).`);
         auditPrevious = session;
         jobs.push(
-          stmt(
-            "UPDATE sessions SET coach_id=?,coach_confirmed_at=NULL,coach_unavailable=NULL,status='Scheduled',confirmed_at=NULL,updated_at=? WHERE id=?",
-            coachId,
-            t,
-            id,
-          ),
+          held
+            ? // Held: only who held it changes; its confirmations stay as they were.
+              stmt("UPDATE sessions SET coach_id=?,updated_at=? WHERE id=?", coachId, t, id)
+            : stmt(
+                "UPDATE sessions SET coach_id=?,coach_confirmed_at=NULL,coach_unavailable=NULL,status='Scheduled',confirmed_at=NULL,updated_at=? WHERE id=?",
+                coachId,
+                t,
+                id,
+              ),
           // The backup coach can see the group's students, to take the session's attendance.
           stmt(
             `INSERT INTO group_coaches(id,group_id,user_id,coach_type,status,onboarding_status,checklist,assigned_by,assigned_at,onboarded_at)
@@ -1453,7 +1460,38 @@ export async function POST(req: Request) {
             t,
           ),
         );
-        auditValue = { session_id: id, from: session.coach_id, to: coachId, reason: x.reason.trim(), new_coach: !x.coach_id };
+        auditValue = { session_id: id, from: session.coach_id, to: coachId, reason: x.reason.trim(), new_coach: !x.coach_id, held };
+        break;
+      }
+      case "session_done": {
+        // The coordinator marks a session done once it has started, so its
+        // students' feedback opens straight away; or takes that back.
+        permit(u, ["Operations Coordinator", ...sessionLeaders]);
+        const session: any = await stmt("SELECT * FROM sessions WHERE id=?", id).first();
+        ensure(session && session.status !== "Cancelled", "Session not found.");
+        const group: any = await stmt("SELECT coordinator FROM groups WHERE id=?", session.group_id).first();
+        ensure(
+          can(u.roles, sessionLeaders) || group?.coordinator === u.id || session.coordinator_id === u.id,
+          "Only the group's coordinator can mark this session done.",
+        );
+        auditPrevious = { ended_at: session.ended_at, ended_by: session.ended_by };
+        if (x.undo) {
+          ensure(session.ended_at, "This session was not marked done.");
+          ensure(
+            !(await stmt("SELECT id FROM session_feedback WHERE session_id=?", id).first()),
+            "Students have already given feedback on this session, so it stays done.",
+          );
+          jobs.push(stmt("UPDATE sessions SET ended_at=NULL,ended_by=NULL,updated_at=? WHERE id=?", t, id));
+          auditValue = { session_id: id, ended_at: null };
+          break;
+        }
+        ensure(Date.parse(session.starts_at) <= Date.now(), "A session can be marked done once it has started.");
+        ensure(
+          !session.ended_at && Date.parse(session.starts_at) + Number(session.duration_minutes || 180) * 60000 > Date.now(),
+          "This session has already ended.",
+        );
+        jobs.push(stmt("UPDATE sessions SET ended_at=?,ended_by=?,updated_at=? WHERE id=?", t, u.id, t, id));
+        auditValue = { session_id: id, ended_at: t };
         break;
       }
       case "session_attendance": {

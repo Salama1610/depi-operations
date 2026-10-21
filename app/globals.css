@@ -1477,3 +1477,5 @@ td .searchable-select,td .pick-inline{max-width:240px;min-width:0}
 .qr-done{display:flex;flex-wrap:wrap;align-items:center;gap:6px;color:#34846f;font-size:13px}
 .qr-handle{display:flex;gap:8px;flex-wrap:wrap}
 .qr-handle input{flex:1 1 220px;min-width:0;height:34px;border:1px solid #dfe4ee;border-radius:8px;padding:0 9px;font:inherit;font-size:13px}
+/* A session its coordinator marked done early. */
+.session-done{display:inline-flex;align-items:center;gap:6px;color:#34846f;font-size:12px}

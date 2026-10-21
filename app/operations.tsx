@@ -135,6 +135,7 @@ import {
 import { readSheet, toCSV, toWorkbook, toXLSX } from "@/lib/spreadsheet";
 import { guessKeyColumn, guessMapping, normalizePhone } from "@/lib/domain/sheet-mapping";
 import { whatsappInvite } from "@/lib/domain/whatsapp";
+import { sessionEnded } from "@/lib/domain/session-time";
 type Row = Record<string, any>;
 const nav = [
   ["home", "Overview", Home],
@@ -1705,7 +1706,7 @@ See you there!`,
     const dayOf = (iso: string) => programDay(new Date(iso));
     const live = sessions.filter((s) => s.status !== "Cancelled");
     const mine = (s: Row) => role !== "coach" || s.coach_id === user.id || sessionGroupOf(s)?.coach === user.id;
-    const ended = (s: Row) => Date.parse(s.starts_at) + Number(s.duration_minutes || 180) * 60000 <= Date.now();
+    const ended = (s: Row) => sessionEnded(s as any);
     const today = live.filter((s) => mine(s) && dayOf(s.starts_at) === todayDay).sort((a, b) => a.starts_at.localeCompare(b.starts_at));
     const week = live.filter((s) => mine(s) && dayOf(s.starts_at) >= weekFrom && dayOf(s.starts_at) < weekTo);
     const held = week.filter(ended);
@@ -2554,7 +2555,7 @@ See you there!`,
       .filter((session) => sessionFilters.time === "All" || sessionTime(session) === sessionFilters.time)
       .sort((a, b) => a.starts_at.localeCompare(b.starts_at));
     // What happened in the sessions: attendance, feedback and who held them.
-    const ended = (x: Row) => x.status !== "Cancelled" && Date.parse(x.starts_at) + Number(x.duration_minutes || 180) * 60000 <= Date.now();
+    const ended = (x: Row) => x.status !== "Cancelled" && sessionEnded(x as any);
     const inRange = (iso: string) =>
       (!insightFilters.from || iso.slice(0, 10) >= insightFilters.from) && (!insightFilters.to || iso.slice(0, 10) <= insightFilters.to);
     const insightSessions = sessions
@@ -2618,7 +2619,10 @@ See you there!`,
       const row = groupCoaches.find((c) => c.user_id === coachId && c.group_id === groupId && ["Outcome Coach", "Support Coach"].includes(c.coach_type));
       if (row) return row.coach_type;
       const title = staff.find((x: Row) => x.id === coachId)?.title || "";
-      return ["Outcome Coach", "Support Coach"].includes(title) ? title : title || "Coach";
+      if (["Outcome Coach", "Support Coach"].includes(title)) return title;
+      // A coordinator or backup coach standing in is paid at the group's own coach type.
+      const groupType = groupCoaches.find((c) => c.group_id === groupId && c.status === "Active" && ["Outcome Coach", "Support Coach"].includes(c.coach_type))?.coach_type;
+      return groupType || title || "Coach";
     };
     const coachPay = (r: Row) => {
       const types = r.sessions.map((x: Row) => coachTypeFor(r.person, x.group_id));
@@ -3016,13 +3020,27 @@ See you there!`,
                 {t("Attendance")}
               </button>
             )}
-            {can(user.roles, ["Coach Operations", "Operations Systems / Admin"]) &&
-              ["Scheduled", "Confirmed"].includes(r.status) &&
-              Date.parse(r.starts_at) > Date.now() && (
-                <button className="small-btn" onClick={() => open("session_coach", { ...r, mode: "existing", coach_id: "" })}>
-                  {t("Change coach")}
-                </button>
-              )}
+            {/* The coordinator marks a session done once it has started, so its feedback opens at once. */}
+            {r.status !== "Cancelled" &&
+              (can(user.roles, ["Coach Operations", "Project Operations", "Operations Systems / Admin"]) || sessionGroupOf(r)?.coordinator === user.id || r.coordinator_id === user.id) &&
+              (r.ended_at ? (
+                <span className="session-done">
+                  <Check size={13} /> {t("Marked done {v0}", { v0: fmt(r.ended_at) })}
+                  <button className="student-link-btn" disabled={busy} onClick={() => quick("session_done", { id: r.id, undo: true })}>{t("Undo")}</button>
+                </span>
+              ) : (
+                Date.parse(r.starts_at) <= Date.now() &&
+                Date.parse(r.starts_at) + Number(r.duration_minutes || 180) * 60000 > Date.now() && (
+                  <button className="small-btn" disabled={busy} title={t("Ends the session now so students can give their feedback straight away.")} onClick={() => quick("session_done", { id: r.id })}>
+                    <Check size={14} /> {t("Mark session done")}
+                  </button>
+                )
+              ))}
+            {can(user.roles, ["Coach Operations", "Operations Systems / Admin"]) && r.status !== "Cancelled" && (
+              <button className="small-btn" onClick={() => open("session_coach", { ...r, mode: "existing", coach_id: "" })}>
+                {Date.parse(r.starts_at) > Date.now() ? t("Change coach") : t("Who held it")}
+              </button>
+            )}
           </div>
             ),
           ),
@@ -6016,19 +6034,29 @@ See you there!`,
                 );
               }
               if (a === "session_coach") {
+                // Coaches, and coordinators who can stand in as the session's coach.
                 const coaches = staff
                   .filter((u: Row) => {
                     const held = Array.isArray(u.roles) ? u.roles : JSON.parse(u.roles || "[]");
-                    return held.includes("Coach") && u.active !== false && u.active !== 0 && u.id !== modal!.coach_id;
+                    return (held.includes("Coach") || held.includes("Operations Coordinator")) && u.active !== false && u.active !== 0 && u.id !== modal!.coach_id;
                   })
                   .sort((a: Row, b: Row) => String(a.name).localeCompare(String(b.name)));
+                const isCoordinator = (u: Row) => {
+                  const held = Array.isArray(u.roles) ? u.roles : JSON.parse(u.roles || "[]");
+                  return held.includes("Operations Coordinator") && !held.includes("Coach");
+                };
+                const alreadyHeld = Date.parse(modal!.starts_at) <= Date.now();
                 return (
                   <>
                     <div className="info-box">
                       <strong>{modal!.title}</strong>
                       <small>{modal!.group_id} · {fmt(modal!.starts_at)} · {t("now")}: {owner(modal!.coach_id)}</small>
                     </div>
-                    <p className="footnote">{t("Only this session changes coach. The sessions before and after it keep theirs, so each session is paid to the coach who held it.")}</p>
+                    <p className="footnote">
+                      {alreadyHeld
+                        ? t("This session has already taken place: choose who actually held it, such as the coordinator who stood in, so it is paid to them.")
+                        : t("Only this session changes coach. The sessions before and after it keep theirs, so each session is paid to the coach who held it.")}
+                    </p>
                     {choice("mode", t("Coach for this session"), [
                       { value: "existing", label: t("A coach already in the system") },
                       { value: "new", label: t("A new coach") },
@@ -6043,7 +6071,7 @@ See you there!`,
                         </div>
                       </>
                     ) : (
-                      choice("coach_id", t("Coach"), coaches.map((c: Row) => ({ value: c.id, label: c.name + (c.title ? " · " + c.title : "") })))
+                      choice("coach_id", t("Coach or coordinator"), coaches.map((c: Row) => ({ value: c.id, label: c.name + (isCoordinator(c) ? " · " + t("Coordinator") : c.title ? " · " + c.title : "") })))
                     )}
                     {field("reason", t("Why this session needs another coach"))}
                   </>

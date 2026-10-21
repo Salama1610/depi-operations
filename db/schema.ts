@@ -351,6 +351,9 @@ export const sessions = sqliteTable(
     confirmedAt: text("confirmed_at"),
     cancelReason: text("cancel_reason"),
     updatedAt: text("updated_at"),
+    // When the coordinator marked it done, before its scheduled end.
+    endedAt: text("ended_at"),
+    endedBy: text("ended_by"),
   },
   (t) => [
     uniqueIndex("one_active_session_per_group_week")

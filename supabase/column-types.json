@@ -222,7 +222,9 @@
     "coach_confirmed_at": "timestamptz",
     "coordinator_unavailable": "text",
     "coach_unavailable": "text",
-    "coordinator_id": "text"
+    "coordinator_id": "text",
+    "ended_at": "timestamptz",
+    "ended_by": "text"
   },
   "attendance": {
     "id": "text",

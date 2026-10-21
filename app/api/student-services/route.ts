@@ -1,4 +1,5 @@
 import { linkAccountKey, serviceFixStatements } from "@/lib/service-followup";
+import { sessionEnd, sessionEnded } from "@/lib/domain/session-time";
 import {
   all,
   auditStmt,
@@ -116,7 +117,7 @@ async function sessionsForFeedback(studentId: string) {
   const learner: any = await stmt("SELECT group_id FROM students WHERE id=?", studentId).first();
   if (!learner?.group_id) return [];
   const rows = await all(
-    `SELECT t.id,t.title,t.week,t.starts_at,t.duration_minutes,u.name coach_name,
+    `SELECT t.id,t.title,t.week,t.starts_at,t.duration_minutes,t.ended_at,u.name coach_name,
             f.id feedback_id,f.satisfaction,f.clarity,f.usefulness,f.searched_gig,f.liked,f.comments,f.created_at feedback_at
      FROM sessions t LEFT JOIN users u ON u.id=t.coach_id
      LEFT JOIN session_feedback f ON f.session_id=t.id AND f.student_id=?
@@ -127,7 +128,7 @@ async function sessionsForFeedback(studentId: string) {
     now(),
   );
   return rows
-    .filter((r: any) => Date.parse(r.starts_at) + Number(r.duration_minutes || 180) * 60000 <= Date.now())
+    .filter((r: any) => sessionEnded(r))
     .map((r: any) => ({
       id: r.id,
       title: r.title,
@@ -135,8 +136,9 @@ async function sessionsForFeedback(studentId: string) {
       starts_at: r.starts_at,
       coach_name: r.coach_name && !/unassigned/i.test(r.coach_name) ? r.coach_name : null,
       given: Boolean(r.feedback_id),
-      // Feedback opens by itself when the session ends and stays open for a week.
-      open: Date.now() - (Date.parse(r.starts_at) + Number(r.duration_minutes || 180) * 60000) <= FEEDBACK_DAYS * 86400000,
+      // Feedback opens by itself when the session ends (or its coordinator
+      // marks it done) and stays open for a week.
+      open: Date.now() - sessionEnd(r) <= FEEDBACK_DAYS * 86400000,
       // What the student answered, so they can look back at it.
       mine: r.feedback_id
         ? {
@@ -179,7 +181,7 @@ async function sessionFeedback(x: any) {
   const session: any = await stmt("SELECT * FROM sessions WHERE id=?", x.session_id).first();
   if (!session || session.group_id !== s.group_id) throw new Error("This session is not one of your group's.");
   if (session.status === "Cancelled") throw new Error("This session was cancelled.");
-  const ended = Date.parse(session.starts_at) + Number(session.duration_minutes || 180) * 60000;
+  const ended = sessionEnd(session);
   if (ended > Date.now()) throw new Error("Feedback opens once the session has ended.");
   if (Date.now() - ended > FEEDBACK_DAYS * 86400000) throw new Error("Feedback on this session has closed.");
   if (await stmt("SELECT id FROM session_feedback WHERE session_id=? AND student_id=?", session.id, s.id).first())

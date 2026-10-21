@@ -3082,7 +3082,8 @@ test("a backup coach takes one session, and a group's new coach or coordinator t
   assert.equal((await dbRow("SELECT coordinator_id FROM sessions WHERE id='SES-PAY-PAST'")).coordinator_id, group.coordinator, "a session remembers its coordinator");
   // A backup coach for one session, created on the spot by Coach Operations.
   current = { id: "staff-coach-ops", email: "staff-coach-ops@example.invalid" };
-  assert.match((await post("session_coach", { id: "SES-PAY-PAST", coach_id: "staff-support-coach", reason: "Cover" })).error, /has started keeps the coach/);
+  // A held session can be given to whoever actually held it (21 October 2026), still with a reason.
+  assert.match((await post("session_coach", { id: "SES-PAY-PAST", coach_id: "staff-support-coach", reason: "x" })).error, /Say why/);
   assert.match((await post("session_coach", { id: "SES-PAY-NEXT", new_name: "Backup Coach", new_email: "backup.coach@example.org", new_national_id: "123", reason: "Mariam is travelling" })).error, /national ID/i);
   await check("session_coach", { id: "SES-PAY-NEXT", new_name: "Backup Coach", new_email: "backup.coach@example.org", new_national_id: "29901011234567", new_phone: "1012345678", reason: "Mariam is travelling" });
   const backup = await dbRow("SELECT * FROM users WHERE email='backup.coach@example.org'");
@@ -4252,4 +4253,56 @@ test("the quality team reports a group's problem to Coach or Project Operations,
   assert.match((await get()).error, /role/);
   current = { id: "owner", email: "owner@example.com" };
   assert.ok((await get()).reports.length >= 2, "the administrators read them all");
+});
+
+test("a coordinator marks a session done so feedback opens early, and Coach Operations records a coordinator as the coach who held one", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const group = await dbRow(
+    `SELECT g.id,g.coordinator,u.email FROM groups g JOIN users u ON u.id=g.coordinator
+     WHERE g.status='Active' AND g.id NOT LIKE 'DEMO-%' AND coalesce(g.delivery_model,'Regular')<>'Industry'
+       AND (SELECT count(DISTINCT week) FROM sessions x WHERE x.group_id=g.id AND x.status<>'Cancelled')<8
+       AND EXISTS (SELECT 1 FROM students s WHERE s.group_id=g.id AND s.lifecycle='Active' AND s.email IS NOT NULL AND s.email<>'')
+     ORDER BY g.id LIMIT 1`,
+  );
+  const used = new Set((await dbRows("SELECT week FROM sessions WHERE group_id=? AND status<>'Cancelled'", group.id)).map((r) => Number(r.week)));
+  const week = [1, 2, 3, 4, 5, 6, 7, 8].find((w) => !used.has(w));
+  await check("session", { id: "SES-DONE-1", group_id: group.id, title: "Coaching", starts_at: new Date(Date.now() - 30 * 60000).toISOString(), week, duration_minutes: 180 });
+  const pupil = await dbRow("SELECT id,email FROM students WHERE group_id=? AND lifecycle='Active' AND email IS NOT NULL AND email<>'' ORDER BY id LIMIT 1", group.id);
+  const services = await route("student-services");
+  const studentGet = async () => (await services.GET(new Request("https://test.local/api/student-services"))).json();
+  const feedback = (body) =>
+    services.POST(new Request("https://test.local/api/student-services", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "session_feedback", ...body }) })).then((r) => r.json());
+  const answers = { session_id: "SES-DONE-1", satisfaction: 5, clarity: 5, usefulness: 4, searched_gig: true };
+
+  // Still running: no feedback yet.
+  current = { id: pupil.id, email: pupil.email };
+  assert.ok(!(await studentGet()).feedback_sessions?.some((s) => s.id === "SES-DONE-1"));
+  assert.match((await feedback(answers)).error, /once the session has ended/);
+
+  // Only the group's coordinator (or the leaders) end it.
+  current = { id: "coordinator-other", email: "staff-quality@example.invalid" };
+  assert.ok((await post("session_done", { id: "SES-DONE-1" })).error);
+  current = { id: group.coordinator, email: group.email };
+  await check("session_done", { id: "SES-DONE-1" });
+  assert.ok((await dbRow("SELECT ended_at FROM sessions WHERE id='SES-DONE-1'")).ended_at);
+  assert.match((await post("session_done", { id: "SES-DONE-1" })).error, /already ended/);
+
+  // The feedback opens at once.
+  current = { id: pupil.id, email: pupil.email };
+  const open = (await studentGet()).feedback_sessions?.find((s) => s.id === "SES-DONE-1");
+  assert.ok(open && open.open, "the form is open");
+  assert.equal((await feedback(answers)).error, undefined);
+  current = { id: group.coordinator, email: group.email };
+  assert.match((await post("session_done", { id: "SES-DONE-1", undo: true })).error, /already given feedback/);
+
+  // Coach Operations records the coordinator as the coach who held it.
+  current = { id: "coach-ops-login", email: "staff-coach-ops@example.invalid" };
+  const before = await dbRow("SELECT status,coach_confirmed_at FROM sessions WHERE id='SES-DONE-1'");
+  await check("session_coach", { id: "SES-DONE-1", coach_id: group.coordinator, reason: "The coordinator ran the session." });
+  const after = await dbRow("SELECT coach_id,status,coach_confirmed_at FROM sessions WHERE id='SES-DONE-1'");
+  assert.equal(after.coach_id, group.coordinator);
+  assert.deepEqual([after.status, after.coach_confirmed_at], [before.status, before.coach_confirmed_at], "a held session keeps its confirmations");
+  assert.match((await post("session_coach", { id: "SES-DONE-1", coach_id: "staff-quality", reason: "Not a coach at all" })).error, /coach or coordinator/);
+  current = { id: "owner", email: "owner@example.com" };
 });
