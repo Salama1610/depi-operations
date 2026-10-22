@@ -845,5 +845,22 @@
     "handled_by": "text",
     "handled_at": "timestamptz",
     "handled_note": "text"
+  },
+  "account_orders": {
+    "id": "text",
+    "account_id": "text",
+    "student_id": "text",
+    "service_link_id": "text",
+    "coordinator": "text",
+    "order_ref": "text",
+    "amount": "numeric(12,2)",
+    "note": "text",
+    "status": "text",
+    "proof_id": "text",
+    "created_at": "timestamptz",
+    "updated_at": "timestamptz",
+    "done_at": "timestamptz",
+    "proof_at": "timestamptz",
+    "cancelled_at": "timestamptz"
   }
 }

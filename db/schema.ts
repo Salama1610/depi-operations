@@ -1234,6 +1234,32 @@ export const coachAvailability = sqliteTable("coach_availability", {
   updatedBy: text("updated_by").references(() => users.id),
   updatedAt: text("updated_at").notNull(),
 });
+// Orders placed through a Service Team student's client account. See migration 202610220042.
+export const accountOrders = sqliteTable(
+  "account_orders",
+  {
+    id: text("id").primaryKey(),
+    accountId: text("account_id").notNull().references(() => accounts.id),
+    studentId: text("student_id").notNull().references(() => students.id),
+    serviceLinkId: text("service_link_id").references(() => serviceLinks.id),
+    coordinator: text("coordinator").notNull().references(() => users.id),
+    orderRef: text("order_ref"),
+    amount: real("amount"),
+    note: text("note"),
+    status: text("status").notNull().default("In Progress"),
+    proofId: text("proof_id").references(() => attachments.id),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    doneAt: text("done_at"),
+    proofAt: text("proof_at"),
+    cancelledAt: text("cancelled_at"),
+  },
+  (t) => [
+    index("account_orders_account_idx").on(t.accountId),
+    index("account_orders_student_idx").on(t.studentId),
+    index("account_orders_status_idx").on(t.status, t.updatedAt),
+  ],
+);
 export const joinAccounts = sqliteTable("join_accounts", {
   id: text("id").primaryKey(),
   kind: text("kind").notNull(),

@@ -289,6 +289,12 @@ export function scopeSql(u: any, alias = "g", studentAlias: string | null = "s")
     `(${alias}.coordinator=? OR ${alias}.supervisor=? OR ${alias}.coach=? OR ${alias}.account_manager=? OR EXISTS (SELECT 1 FROM group_coaches gc WHERE gc.group_id=${alias}.id AND gc.user_id=? AND gc.status='Active'))`,
   ];
   const args: string[] = [u.id, u.id, u.id, u.id, u.id];
+  // A coordinator also sees the students whose client accounts they hold,
+  // to record orders on them and upload their proof.
+  if (studentAlias && can(u.roles, ["Operations Coordinator"])) {
+    clauses.push(`EXISTS (SELECT 1 FROM accounts ac WHERE ac.student_id=${studentAlias}.id AND (ac.coordinator_id=? OR ac.coordinator_2_id=?))`);
+    args.push(u.id, u.id);
+  }
   // A quality reviewer sees the students whose work is assigned to them —
   // their services or their gig evidence, handed out automatically or by the
   // Quality Lead — and nobody else.
@@ -304,6 +310,24 @@ export function scopeSql(u: any, alias = "g", studentAlias: string | null = "s")
     args.push(u.id, u.id);
   }
   return { sql: `(${shown} AND ${clauses.length > 1 ? `(${clauses.join(" OR ")})` : clauses[0]})`, args };
+}
+/**
+ * Orders placed through client accounts that this person may follow: the
+ * leaders, account keepers and supervisors see them all (a supervisor only
+ * their own groups'); a coordinator the ones on the accounts they hold.
+ */
+export async function accountOrdersFor(u: any) {
+  const select = `SELECT o.*,s.name student_name,s.group_id,a.label account_label,a.platform account_platform,l.url service_url,l.platform service_platform,l.slot service_slot
+    FROM account_orders o JOIN accounts a ON a.id=o.account_id JOIN students s ON s.id=o.student_id JOIN groups g ON g.id=s.group_id
+    LEFT JOIN service_links l ON l.id=o.service_link_id`;
+  const side = `${sameSide(u, "a.id")} AND ${notRevoked(u, "o.student_id")}`;
+  if (can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin"]) || keepsAccounts(u))
+    return all(`${select} WHERE ${side} ORDER BY o.updated_at DESC LIMIT 3000`);
+  if (can(u.roles, ["Team Supervisor"]))
+    return all(`${select} WHERE ${side} AND g.supervisor=? ORDER BY o.updated_at DESC LIMIT 3000`, u.id);
+  if (can(u.roles, ["Operations Coordinator"]))
+    return all(`${select} WHERE ${side} AND (a.coordinator_id=? OR a.coordinator_2_id=? OR o.coordinator=?) ORDER BY o.updated_at DESC LIMIT 3000`, u.id, u.id, u.id);
+  return [];
 }
 export async function student(u: any, id: string) {
   const q = scopeSql(u);
@@ -739,7 +763,9 @@ export async function loadData(u: any) {
     // A student's national ID is their first password: only an administrator
     // sees it. Everyone else learns only whether one is on record.
     hideNationalId(u, s);
-    const group = groupMap.get(s.group_id);
+    // A student seen through a client account the coordinator holds may be in
+    // a group they do not run; the student's row carries that group's policy.
+    const group = groupMap.get(s.group_id) || s;
     s.policy = policyMap[group.policy_id];
     {
       // Contact is weekly (decided 10 Oct 2026): every active student is
@@ -916,6 +942,7 @@ export async function loadData(u: any) {
     serviceLinkReviews,
     serviceSubmissionStatus,
     accounts,
+    accountOrders: await accountOrdersFor(u),
     staff: visibleStaff,
     // Who this person may make a group's coordinator; null means anyone.
     teamCoordinators: await teamCoordinators(u),

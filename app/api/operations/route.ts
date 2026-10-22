@@ -3075,6 +3075,66 @@ export async function POST(req: Request) {
         jobs.push(stmt("UPDATE accounts SET student_id=NULL,service_link_id=NULL,linked_at=NULL,linked_by=NULL WHERE id=?", id));
         break;
       }
+      case "account_order":
+      case "account_order_status": {
+        // A coordinator records each order they place through a Service Team
+        // student's client account, and follows it: In Progress, Done, then
+        // Proof Uploaded once the proof is in; or Cancelled, with a note. The
+        // account's coordinators, its keepers and the leaders can do this.
+        const mayOrder = (a: any) =>
+          can(u.roles, ["Project Operations", "Operations Systems / Admin"]) || keepsAccounts(u) || a.coordinator_id === u.id || a.coordinator_2_id === u.id;
+        if (x.action === "account_order") {
+          const a: any = await stmt("SELECT * FROM accounts WHERE id=?", String(x.account_id || "")).first();
+          ensure(a, "Account not found.");
+          ensure(mayOrder(a), "Only this account's coordinator, its keepers or the leaders record its orders.");
+          ensure(a.student_id, "Link the account to a student before recording an order.");
+          const pupil = await student(u, a.student_id);
+          const orderRef = String(x.order_ref || "").trim();
+          ensure(orderRef.length <= 120, "Keep the order number under 120 characters.");
+          const amount = x.amount === "" || x.amount === null || x.amount === undefined ? null : Number(x.amount);
+          ensure(amount === null || (Number.isFinite(amount) && amount >= 0), "Enter the amount as a number, or leave it empty.");
+          const note = String(x.note || "").trim().slice(0, 1000) || null;
+          jobs.push(
+            stmt(
+              "INSERT INTO account_orders(id,account_id,student_id,service_link_id,coordinator,order_ref,amount,note,status,proof_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,'In Progress',NULL,?,?)",
+              id, a.id, pupil.id, a.service_link_id || null, u.id, orderRef || null, amount, note, t, t,
+            ),
+          );
+          break;
+        }
+        const order: any = await stmt("SELECT * FROM account_orders WHERE id=?", id).first();
+        ensure(order, "Order not found.");
+        const a: any = await stmt("SELECT * FROM accounts WHERE id=?", order.account_id).first();
+        ensure(a && (mayOrder(a) || order.coordinator === u.id), "Only this account's coordinator, its keepers or the leaders update its orders.");
+        const to = String(x.status || "");
+        const allowed: Record<string, string[]> = {
+          "In Progress": ["Done", "Cancelled"],
+          Done: ["Proof Uploaded", "Cancelled", "In Progress"],
+          Cancelled: ["In Progress"],
+          "Proof Uploaded": [],
+        };
+        ensure((allowed[order.status] || []).includes(to), `An order that is ${order.status} cannot become ${to}.`);
+        const note = String(x.note || "").trim().slice(0, 1000);
+        if (to === "Cancelled") ensure(note.length >= 3, "Say why the order was cancelled.");
+        let proofId: string | null = order.proof_id;
+        if (to === "Proof Uploaded") {
+          ensure(x.proof_id, "Upload the proof first.");
+          await proof(u, String(x.proof_id), order.student_id);
+          proofId = String(x.proof_id);
+        }
+        auditPrevious = order;
+        jobs.push(
+          stmt(
+            `UPDATE account_orders SET status=?,proof_id=?,note=COALESCE(?,note),updated_at=?,
+               done_at=CASE WHEN ?='Done' THEN ? ELSE done_at END,
+               proof_at=CASE WHEN ?='Proof Uploaded' THEN ? ELSE proof_at END,
+               cancelled_at=CASE WHEN ?='Cancelled' THEN ? WHEN ?='In Progress' THEN NULL ELSE cancelled_at END
+             WHERE id=?`,
+            to, proofId, note || null, t, to, t, to, t, to, t, to, id,
+          ),
+        );
+        break;
+      }
       case "account_assign": {
         // Taha, Abdelrahman Salama and whoever else holds "account-unlock"
         // give an account to a student (and one of their approved services)
@@ -3094,6 +3154,9 @@ export async function POST(req: Request) {
           ensure(pupil.lifecycle === "Active", "Choose an active student.");
           // A real account never goes to a demo student, nor a demo account to a real one.
           ensure(String(pupil.id).startsWith("DEMO-") === String(id).startsWith("DEMO-"), "Demo accounts are for demo students only, and real accounts for real students.");
+          // Client accounts are for the Service Team's students only.
+          const team: any = await stmt("SELECT u.team FROM students s JOIN groups g ON g.id=s.group_id JOIN users u ON u.id=g.supervisor WHERE s.id=?", studentId).first();
+          ensure(team?.team === "Service Team", "Client accounts are for Service Team students only.");
           const others = Number((await stmt("SELECT count(*) n FROM accounts WHERE student_id=? AND id<>?", studentId, id).first() as any)?.n || 0);
           ensure(others < accountsPerStudent, "This student already has two accounts. Remove one of them first.");
           if (x.service_link_id) {

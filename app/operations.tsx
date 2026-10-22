@@ -195,6 +195,8 @@ const titles: Row = {
   engagement: "Review engagement status",
   lifecycle: "Update lifecycle status",
   student_revoke: "Revoke or restore a student",
+  account_order: "Record an order on this account",
+  account_order_status: "Update the order",
   student_services_submit: "Submit service links for this student",
   staff: "Manage staff access",
   account_topup: "Record a top-up",
@@ -542,6 +544,7 @@ export default function Operations({ module: initialModule }: { module: string }
     [groupMessage, setGroupMessage] = useState<Row | null>(null),
     [feedbackFor, setFeedbackFor] = useState<string | null>(null),
     [sessionTab, setSessionTab] = useState("schedule"),
+    [orderFilter, setOrderFilter] = useState("All"),
     [accountFilters, setAccountFilters] = useState<Row>({ platform: "All", status: "All", request: "Open", ledger: "All", coordinator: "All", owner: "All", linked: "All", word: "All", sort: "platform" }),
     [insightFilters, setInsightFilters] = useState<Row>({
       group: "All", coach: "All", from: "", to: "", absentOnly: false,
@@ -616,6 +619,8 @@ export default function Operations({ module: initialModule }: { module: string }
   const attendance: Row[] = d.attendance || [];
   const groupCoaches: Row[] = d.groupCoaches || [];
   const serviceLinks: Row[] = d.serviceLinks || [];
+  // Orders placed through client accounts (lib/server.ts accountOrdersFor).
+  const accountOrders: Row[] = d.accountOrders || [];
   const serviceLinkReviews: Row[] = d.serviceLinkReviews || [];
   // The server sends only per-student counts; identity fields come from the
   // student list already in memory, so the same facts are not shipped twice.
@@ -1747,6 +1752,22 @@ See you there!`,
         <small>{detail}</small>
       </div>
     );
+    // Orders placed through the Service Team's client accounts, by where they stand.
+    const ordersRow = () => {
+      const count = (status: string) => accountOrders.filter((o) => o.status === status).length;
+      const thisWeek = accountOrders.filter((o) => programDay(new Date(o.created_at)) >= weekFrom).length;
+      return (
+        <>
+          <h2 className="dash-section-title">{t("Orders on client accounts")}</h2>
+          <div className="stats">
+            {tile("Orders in progress", count("In Progress"), t("{v0} placed this week", { v0: thisWeek }))}
+            {tile("Done, proof still to upload", count("Done"), t("Waiting for the coordinator's proof"))}
+            {tile("Proof uploaded", count("Proof Uploaded"), t("Finished orders with their proof"))}
+            {tile("Cancelled orders", count("Cancelled"), t("{v0} orders in all", { v0: accountOrders.length }))}
+          </div>
+        </>
+      );
+    };
     const sessionList = (list: Row[], empty: string, extra?: (s: Row) => any) =>
       list.length ? (
         generic(
@@ -1924,6 +1945,7 @@ See you there!`,
             {readsFeedback ? tile("Feedback this week", score(feedbackIn(held)), t("Average of the three ratings")) : null}
             {tile("Service links submitted", share(linksIn, submissions.length), t("{v0} students with 3 approved", { v0: linksDone }))}
           </div>
+          {user.team === "Service Team" && ordersRow()}
           {panel(t("Today's sessions"), sessionList(today, "No session today"))}
           {soon.length > 0 && panel(t("Coach not confirmed within 27 hours"), sessionList(soon, "Every coach has confirmed"))}
           {panel(t("Your coordinators this week"), perPerson(coordinators, (id) => new Set(groups.filter((g) => g.coordinator === id).map((g) => g.id)), "Coordinator", true))}
@@ -1955,6 +1977,7 @@ See you there!`,
           {tile("Coach not confirmed (27 hours)", soon.length, t("Sessions starting soon"))}
           {tile("Urgent open cases", urgentCases.length, t("{v0} open in all", { v0: openCases.length }))}
         </div>
+        {ordersRow()}
         {panel(t("Today's sessions"), sessionList(today, "No session today"))}
         {soon.length > 0 && panel(t("Coach not confirmed within 27 hours"), sessionList(soon, "Every coach has confirmed"))}
         {panel(t("Teams this week"), perPerson(supervisors, (id) => new Set(groups.filter((g) => g.supervisor === id).map((g) => g.id)), "Supervisor", true))}
@@ -3228,6 +3251,9 @@ See you there!`,
       word: (x, y) => text(y.coordinator_state_at).localeCompare(text(x.coordinator_state_at)),
     };
     const unlocks = Array.isArray(user.scopes) && user.scopes.includes("account-unlock");
+    const shownOrders = accountOrders.filter((o) => orderFilter === "All" || o.status === orderFilter);
+    const orderWord = (status: string) =>
+      status === "In Progress" ? t("In progress") : status === "Done" ? t("Done, proof still to upload") : status === "Proof Uploaded" ? t("Proof uploaded") : t("Cancelled");
     const wordOn = (r: Row) => r.coordinator_id === user.id || r.coordinator_2_id === user.id || keepsAccounts;
     // Status changes, unblocking included, belong to the people who keep the accounts.
     const managesAccounts = keepsAccounts;
@@ -3312,6 +3338,9 @@ See you there!`,
             </TabsTrigger>
             <TabsTrigger value="requests">
               {t("Requests")}{" "}<span className="count">{openRequests.length}</span>
+            </TabsTrigger>
+            <TabsTrigger value="orders">
+              {t("Orders")}{" "}<span className="count">{accountOrders.filter((o) => o.status === "In Progress" || o.status === "Done").length}</span>
             </TabsTrigger>
             {(keepsAccounts || can(user.roles, ["Project Operations"])) && (
               <TabsTrigger value="credit">
@@ -3588,6 +3617,16 @@ See you there!`,
                             {r.coordinator_id ? t("Reassign") : t("Assign")}
                           </button>
                         )}
+                        {r.student_id && (wordOn(r) || can(user.roles, ["Project Operations", "Operations Systems / Admin"])) && (
+                          <button
+                            className="small-btn"
+                            onClick={() =>
+                              open("account_order", { account_id: r.id, label: r.label, platform: r.platform, student_name: r.student_name || name(r.student_id), order_ref: "", amount: "", note: "", student_id: "" })
+                            }
+                          >
+                            {t("Record an order")}
+                          </button>
+                        )}
                         {unlocks && (
                           <button className="small-btn" onClick={() => open("account_assign", { id: r.id, label: r.label, platform: r.platform, key_student: r.student_id || "", service_link_id: r.service_link_id || "", coordinator_id: r.coordinator_id || "", student_id: "" })}>
                             {t("Change assignment")}
@@ -3624,6 +3663,105 @@ See you there!`,
                   <button className="small-btn" onClick={() => open("task_bank")} title={t("A ready-made service order coordinators pick when they request a client account")}>{t("Add approved task")}</button>
                 )}
               </div>,
+            )}
+          </TabsContent>
+          <TabsContent value="orders">
+            {/* Each order a coordinator places through a student's client account, and how it ended. */}
+            <div className="filter-row">
+              <Pick
+                label={t("Showing")}
+                value={orderFilter}
+                onChange={setOrderFilter}
+                options={[
+                  { value: "All", label: t("All orders") },
+                  { value: "In Progress", label: t("In progress") },
+                  { value: "Done", label: t("Done, proof still to upload") },
+                  { value: "Proof Uploaded", label: t("Proof uploaded") },
+                  { value: "Cancelled", label: t("Cancelled") },
+                ]}
+              />
+            </div>
+            <div className="mini-stats">
+              <span><strong>{accountOrders.filter((o) => o.status === "In Progress").length}</strong>{t("In progress")}</span>
+              <span><strong>{accountOrders.filter((o) => o.status === "Done").length}</strong>{t("Done, proof still to upload")}</span>
+              <span><strong>{accountOrders.filter((o) => o.status === "Proof Uploaded").length}</strong>{t("Proof uploaded")}</span>
+              <span><strong>{accountOrders.filter((o) => o.status === "Cancelled").length}</strong>{t("Cancelled")}</span>
+            </div>
+            {panel(
+              t("Orders on client accounts · {v0}", { v0: shownOrders.length }),
+              shownOrders.length ? (
+                generic(
+                  shownOrders,
+                  [
+                    {
+                      key: "student_name",
+                      label: t("Student"),
+                      render: (o: Row) => (
+                        <span>
+                          <strong>{o.student_name}</strong>
+                          <small className="table-subline"><bdi>{o.student_id} · {o.group_id}</bdi></small>
+                          {o.service_url && (
+                            <a className="table-subline text-link service-open" href={o.service_url} target="_blank" rel="noreferrer" title={o.service_url}>
+                              <span>{t("For their {v0} service {v1}", { v0: o.service_platform, v1: o.service_slot })} <ExternalLink size={11} /></span>
+                              <small className="service-url" dir="ltr">{o.service_url}</small>
+                            </a>
+                          )}
+                        </span>
+                      ),
+                    },
+                    {
+                      key: "account_label",
+                      label: t("Account"),
+                      render: (o: Row) => (
+                        <span>
+                          {o.account_label}
+                          <small className="table-subline">
+                            {o.account_platform}
+                            {o.order_ref ? " · " + t("Order {v0}", { v0: o.order_ref }) : ""}
+                            {o.amount !== null && o.amount !== undefined ? " · " + money(o.amount) : ""}
+                          </small>
+                        </span>
+                      ),
+                    },
+                    { key: "coordinator", label: t("Coordinator"), render: (o: Row) => owner(o.coordinator) },
+                    {
+                      key: "status",
+                      label: t("State"),
+                      render: (o: Row) => (
+                        <span>
+                          <Cue tone={o.status === "Proof Uploaded" ? "ok" : o.status === "Cancelled" ? "bad" : o.status === "Done" ? "warn" : "info"}>
+                            {orderWord(o.status)}
+                          </Cue>
+                          <small className="table-subline">{fmt(o.updated_at)}</small>
+                          {o.note && <small className="table-subline">{o.note}</small>}
+                          {o.proof_id && (
+                            <a className="table-subline text-link" href={"/api/files?id=" + o.proof_id} target="_blank" rel="noreferrer">
+                              {t("Open the proof")} <ExternalLink size={11} />
+                            </a>
+                          )}
+                        </span>
+                      ),
+                    },
+                  ],
+                  (o: Row) => {
+                    const acct = accounts.find((a) => a.id === o.account_id);
+                    const may = o.coordinator === user.id || (acct && wordOn(acct)) || can(user.roles, ["Project Operations", "Operations Systems / Admin"]);
+                    if (!may) return null;
+                    const go = (status: string) =>
+                      open("account_order_status", { id: o.id, status, student_id: o.student_id, student_name: o.student_name, account_label: o.account_label, note: "", proof_id: "" });
+                    return (
+                      <div className="detail-actions">
+                        {o.status === "In Progress" && <button className="small-btn" onClick={() => go("Done")}>{t("Mark done")}</button>}
+                        {o.status === "Done" && <button className="small-btn" onClick={() => go("Proof Uploaded")}>{t("Upload proof")}</button>}
+                        {(o.status === "In Progress" || o.status === "Done") && <button className="small-btn" onClick={() => go("Cancelled")}>{t("Cancel order")}</button>}
+                        {(o.status === "Cancelled" || o.status === "Done") && <button className="small-btn" onClick={() => go("In Progress")}>{t("Back to in progress")}</button>}
+                      </div>
+                    );
+                  },
+                )
+              ) : (
+                <Empty title={t("No orders yet. Record one from an account linked to a student, on the Account pool tab.")} />
+              ),
             )}
           </TabsContent>
           <TabsContent value="requests">
@@ -6659,6 +6797,45 @@ See you there!`,
                         style={{ border: "1px solid #dae2ef", borderRadius: 6, padding: "9px 11px", font: "inherit", fontSize: 13 }}
                       />
                     </label>
+                  </>
+                );
+              if (a === "account_order")
+                return (
+                  <>
+                    <div className="account-summary">
+                      <div>
+                        <strong>{form.label}</strong>
+                        <small>{form.platform} · {form.student_name}</small>
+                      </div>
+                    </div>
+                    <div className="form-grid">
+                      {field("order_ref", t("Order number on the marketplace"), "text", false)}
+                      {field("amount", t("Amount paid ($)"), "number", false)}
+                    </div>
+                    {field("note", t("Note"), "text", false)}
+                    <p className="footnote">{t("The order starts as In progress. Mark it done when the work is delivered, then upload the proof.")}</p>
+                  </>
+                );
+              if (a === "account_order_status")
+                return (
+                  <>
+                    <div className="account-summary">
+                      <div>
+                        <strong>{form.student_name}</strong>
+                        <small>{form.account_label}</small>
+                      </div>
+                    </div>
+                    <p className="footnote">
+                      {form.status === "Done"
+                        ? t("The work is delivered. Upload the proof next.")
+                        : form.status === "Proof Uploaded"
+                          ? t("Upload the proof that the order was completed.")
+                          : form.status === "Cancelled"
+                            ? t("The order is cancelled. Say why.")
+                            : t("The order goes back to In progress.")}
+                    </p>
+                    {form.status === "Proof Uploaded" && proofField("proof_id", t("Proof"))}
+                    {field("note", form.status === "Cancelled" ? t("Why it was cancelled") : t("Note"), "text", form.status === "Cancelled")}
                   </>
                 );
               if (a === "student_revoke")

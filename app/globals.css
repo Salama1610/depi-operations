@@ -1479,3 +1479,5 @@ td .searchable-select,td .pick-inline{max-width:240px;min-width:0}
 .qr-handle input{flex:1 1 220px;min-width:0;height:34px;border:1px solid #dfe4ee;border-radius:8px;padding:0 9px;font:inherit;font-size:13px}
 /* A session its coordinator marked done early. */
 .session-done{display:inline-flex;align-items:center;gap:6px;color:#34846f;font-size:12px}
+/* Role overviews: a titled row of counts, such as the orders on client accounts. */
+.dash-section-title{font-size:15px;color:#33496d;margin:6px 0 12px}

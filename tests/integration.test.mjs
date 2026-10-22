@@ -4326,6 +4326,7 @@ test("an account's coordinator sees the service it is for, with the student and 
   await dbExec("UPDATE accounts SET coordinator_id=?,student_id=?,service_link_id=? WHERE id=?", other.id, pupil.id, "SLK-ACCT-VIEW", account.id);
   current = { id: other.id, email: other.email };
   const view = await (await api.GET()).json();
+  assert.equal(view.error, undefined, view.error);
   const row = view.accounts.find((a) => a.id === account.id);
   assert.ok(row, "the coordinator sees the account given to them");
   assert.equal(row.service_link_id, "SLK-ACCT-VIEW");
@@ -4383,4 +4384,69 @@ test("an approved Khamsat service earns no client account", async () => {
   await dbExec("UPDATE accounts SET status='Retired' WHERE id='ACC-KHAMSAT-1'");
   await dbExec("DELETE FROM service_links WHERE id='SLK-KHAMSAT-KEY'");
   await dbExec("UPDATE users SET team=? WHERE id=?", team, pupil.supervisor);
+});
+
+test("coordinators follow each order on a student's client account, and the leaders count them", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const pupil = await dbRow(
+    `SELECT s.id,s.group_id,g.coordinator,g.supervisor,c.email FROM students s JOIN groups g ON g.id=s.group_id JOIN users c ON c.id=g.coordinator JOIN users v ON v.id=g.supervisor
+     WHERE s.lifecycle='Active' AND g.status='Active' AND v.team='Service Team' AND g.id NOT LIKE 'DEMO-%' ORDER BY s.id LIMIT 1`,
+  );
+  assert.ok(pupil, "a Service Team student");
+  await check("account", { id: "ACC-ORDER-1", label: "orders@example.org", platform: "Kafeel", credits: 50 });
+  await dbExec("UPDATE accounts SET student_id=?,coordinator_id=? WHERE id='ACC-ORDER-1'", pupil.id, pupil.coordinator);
+
+  // Someone else's coordinator cannot record on it.
+  const other = await dbRow("SELECT id,email FROM users WHERE roles LIKE '%Operations Coordinator%' AND active=1 AND id<>? AND id NOT LIKE 'DEMO-%' ORDER BY id LIMIT 1", pupil.coordinator);
+  current = { id: other.id, email: other.email };
+  assert.match((await post("account_order", { account_id: "ACC-ORDER-1", order_ref: "K-1" })).error, /Only this account's coordinator/);
+
+  current = { id: pupil.coordinator, email: pupil.email };
+  await check("account_order", { id: "ORD-1", account_id: "ACC-ORDER-1", order_ref: "K-1001", amount: 5, note: "Logo" });
+  let order = await dbRow("SELECT * FROM account_orders WHERE id='ORD-1'");
+  assert.equal(order.status, "In Progress");
+  assert.equal(order.student_id, pupil.id);
+  assert.match((await post("account_order_status", { id: "ORD-1", status: "Proof Uploaded" })).error, /cannot become/, "proof comes after Done");
+  await check("account_order_status", { id: "ORD-1", status: "Done" });
+  assert.match((await post("account_order_status", { id: "ORD-1", status: "Proof Uploaded" })).error, /Upload the proof first/);
+  await dbExec(
+    "INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)",
+    "FILE-ORD-1", pupil.id, "evidence/ord-1", "proof.png", "image/png", 10, "hash-ord-1", pupil.coordinator, new Date().toISOString(),
+  );
+  await check("account_order_status", { id: "ORD-1", status: "Proof Uploaded", proof_id: "FILE-ORD-1" });
+  order = await dbRow("SELECT * FROM account_orders WHERE id='ORD-1'");
+  assert.equal(order.status, "Proof Uploaded");
+  assert.equal(order.proof_id, "FILE-ORD-1");
+  assert.ok(order.done_at && order.proof_at);
+  assert.match((await post("account_order_status", { id: "ORD-1", status: "Cancelled", note: "No" })).error, /cannot become/, "a finished order stays finished");
+
+  await check("account_order", { id: "ORD-2", account_id: "ACC-ORDER-1" });
+  assert.match((await post("account_order_status", { id: "ORD-2", status: "Cancelled" })).error, /Say why/);
+  await check("account_order_status", { id: "ORD-2", status: "Cancelled", note: "Client withdrew" });
+  const mine = await (await api.GET()).json();
+  assert.deepEqual(mine.accountOrders.filter((o) => o.account_id === "ACC-ORDER-1").map((o) => o.status).sort(), ["Cancelled", "Proof Uploaded"]);
+
+  // Project Operations and the group's supervisor read them for their overview.
+  current = { id: "owner", email: "owner@example.com" };
+  assert.ok((await (await api.GET()).json()).accountOrders.some((o) => o.id === "ORD-1"));
+  const sup = await dbRow("SELECT id,email FROM users WHERE id=?", pupil.supervisor);
+  current = { id: sup.id, email: sup.email };
+  const theirs = (await (await api.GET()).json()).accountOrders;
+  assert.ok(theirs.some((o) => o.id === "ORD-1") && theirs.every((o) => o.group_id), "the supervisor sees their groups' orders");
+
+  // Client accounts are for Service Team students only.
+  current = { id: "owner", email: "owner@example.com" };
+  const scopes = (await dbRow("SELECT scopes FROM users WHERE email='owner@example.com'")).scopes;
+  await dbExec("UPDATE users SET scopes=? WHERE email='owner@example.com'", JSON.stringify([...new Set([...JSON.parse(scopes || "[]"), "account-unlock"])]));
+  const outsider = await dbRow(
+    "SELECT s.id FROM students s JOIN groups g ON g.id=s.group_id JOIN users v ON v.id=g.supervisor WHERE s.lifecycle='Active' AND COALESCE(v.team,'')<>'Service Team' AND g.id NOT LIKE 'DEMO-%' ORDER BY s.id LIMIT 1",
+  );
+  if (outsider) {
+    await check("account", { id: "ACC-ORDER-2", label: "orders-2@example.org", platform: "Kafeel", credits: 10 });
+    assert.match((await post("account_assign", { id: "ACC-ORDER-2", key_student: outsider.id })).error, /Service Team students only/);
+  }
+  await dbExec("UPDATE users SET scopes=? WHERE email='owner@example.com'", scopes);
+  await dbExec("DELETE FROM account_orders WHERE account_id='ACC-ORDER-1'");
+  await dbExec("UPDATE accounts SET student_id=NULL WHERE id='ACC-ORDER-1'");
 });
