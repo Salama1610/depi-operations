@@ -4337,3 +4337,26 @@ test("an account's coordinator sees the service it is for, with the student and 
   await dbExec("UPDATE accounts SET coordinator_id=?,student_id=?,service_link_id=? WHERE id=?", before.coordinator_id, before.student_id, before.service_link_id, account.id);
   await dbExec("DELETE FROM service_links WHERE id='SLK-ACCT-VIEW'");
 });
+
+test("a demo student never takes a real client account", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const demo = await dbRow("SELECT s.id,s.group_id,g.supervisor FROM students s JOIN groups g ON g.id=s.group_id WHERE g.id LIKE 'DEMO-%' AND s.lifecycle='Active' ORDER BY s.id LIMIT 1");
+  if (!demo) return;
+  const team = (await dbRow("SELECT team FROM users WHERE id=?", demo.supervisor)).team;
+  await dbExec("UPDATE users SET team='Service Team' WHERE id=?", demo.supervisor);
+  const at = new Date().toISOString();
+  await dbExec(
+    "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,account_id,submitted_at,updated_at) VALUES(?,?,?,?,?,'Kafiil','Needs Review','{}',?,'Locked',NULL,'staff-quality',?,1,NULL,?,?)",
+    "SLK-DEMO-KEY", demo.id, 9, "https://kafiil.com/kafiil/service/demo-key", "kafiil.com/kafiil/service/demo-key", at, at, at, at,
+  );
+  await check("account", { id: "ACC-REAL-RICH", label: "real-rich@example.org", platform: "Kafeel", credits: 999999 });
+  await check("account_link_sweep", {});
+  const theirs = await dbRows("SELECT id FROM accounts WHERE student_id=?", demo.id);
+  assert.ok(theirs.every((a) => a.id.startsWith("DEMO-")), "only demo accounts, if any");
+  assert.equal((await dbRow("SELECT student_id FROM accounts WHERE id='ACC-REAL-RICH'")).student_id === demo.id, false);
+  await dbExec("UPDATE accounts SET student_id=NULL,service_link_id=NULL WHERE student_id=?", demo.id);
+  await dbExec("UPDATE accounts SET student_id=NULL,service_link_id=NULL,status='Retired' WHERE id='ACC-REAL-RICH'");
+  await dbExec("DELETE FROM service_links WHERE id='SLK-DEMO-KEY'");
+  await dbExec("UPDATE users SET team=? WHERE id=?", team, demo.supervisor);
+});

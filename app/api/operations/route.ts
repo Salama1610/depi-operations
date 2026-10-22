@@ -3092,6 +3092,8 @@ export async function POST(req: Request) {
           ).first();
           ensure(pupil, "Student not found.");
           ensure(pupil.lifecycle === "Active", "Choose an active student.");
+          // A real account never goes to a demo student, nor a demo account to a real one.
+          ensure(String(pupil.id).startsWith("DEMO-") === String(id).startsWith("DEMO-"), "Demo accounts are for demo students only, and real accounts for real students.");
           const others = Number((await stmt("SELECT count(*) n FROM accounts WHERE student_id=? AND id<>?", studentId, id).first() as any)?.n || 0);
           ensure(others < accountsPerStudent, "This student already has two accounts. Remove one of them first.");
           if (x.service_link_id) {

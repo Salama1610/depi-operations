@@ -90,6 +90,8 @@ export async function linkAccountKey(studentId: string, actor: any | null) {
      ORDER BY l.qc_at,l.updated_at,l.slot`,
     studentId,
   );
+  // Demo students try things out on demo accounts only; real students never get one (22 Oct).
+  const side = String(s.group_id).startsWith("DEMO-") ? "id LIKE 'DEMO-%'" : "id NOT LIKE 'DEMO-%'";
   let linked = 0;
   let count = held;
   const missing: string[] = [];
@@ -99,7 +101,7 @@ export async function linkAccountKey(studentId: string, actor: any | null) {
     const platform = marketplace[link.platform];
     if (!platform) continue;
     const account: any = await stmt(
-      `SELECT id,label FROM accounts WHERE platform=? AND status='Available' AND student_id IS NULL AND active_assignment IS NULL
+      `SELECT id,label FROM accounts WHERE platform=? AND status='Available' AND student_id IS NULL AND active_assignment IS NULL AND ${side}
        ORDER BY credits DESC,id LIMIT 1`,
       platform,
     ).first();
