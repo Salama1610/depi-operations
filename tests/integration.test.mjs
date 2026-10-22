@@ -4360,3 +4360,27 @@ test("a demo student never takes a real client account", async () => {
   await dbExec("DELETE FROM service_links WHERE id='SLK-DEMO-KEY'");
   await dbExec("UPDATE users SET team=? WHERE id=?", team, demo.supervisor);
 });
+
+test("an approved Khamsat service earns no client account", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const pupil = await dbRow(
+    `SELECT s.id,g.supervisor FROM students s JOIN groups g ON g.id=s.group_id
+     WHERE s.lifecycle='Active' AND g.id NOT LIKE 'DEMO-%' AND g.coordinator IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=s.id) AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.student_id=s.id)
+     ORDER BY s.id LIMIT 1`,
+  );
+  const team = (await dbRow("SELECT team FROM users WHERE id=?", pupil.supervisor)).team;
+  await dbExec("UPDATE users SET team='Service Team' WHERE id=?", pupil.supervisor);
+  const at = new Date().toISOString();
+  await dbExec(
+    "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,account_id,submitted_at,updated_at) VALUES(?,?,?,?,?,'Khamsat','Needs Review','{}',?,'Locked',NULL,'staff-quality',?,1,NULL,?,?)",
+    "SLK-KHAMSAT-KEY", pupil.id, 1, "https://khamsat.com/design/logo/9901-logo", "khamsat.com/design/logo/9901-logo", at, at, at, at,
+  );
+  await check("account", { id: "ACC-KHAMSAT-1", label: "khamsat-one@example.org", platform: "Khamsat", credits: 50 });
+  await check("account_link_sweep", {});
+  assert.ok(!(await dbRow("SELECT id FROM accounts WHERE student_id=?", pupil.id)), "Khamsat is not covered");
+  await dbExec("UPDATE accounts SET status='Retired' WHERE id='ACC-KHAMSAT-1'");
+  await dbExec("DELETE FROM service_links WHERE id='SLK-KHAMSAT-KEY'");
+  await dbExec("UPDATE users SET team=? WHERE id=?", team, pupil.supervisor);
+});

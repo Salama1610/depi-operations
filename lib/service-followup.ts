@@ -13,8 +13,8 @@ function notify(recipient: string, title: string, entityType: string, entityId: 
 // until the quality team approves the corrected link; a new correction comment
 // replaces it with a new task.
 //
-// Each approved service of a Service Team student (on Kafiil, Nafezly or
-// Khamsat) earns an available client account on the same marketplace (the one
+// Each approved service of a Service Team student on Kafiil or Nafezly (not
+// Khamsat, which is not covered) earns an available client account on the same marketplace (the one
 // with the most credit; a $0 account once none with credit is free, 22 Oct), linked to the student, that service and the student's
 // coordinator: up to two accounts per student, so a third approved service
 // earns none (19 October 2026). It is the coordinator's key: the account to
@@ -30,7 +30,8 @@ export const accountsPerStudent = 2;
 
 // Service-link platforms are spelled as students see them; client accounts as
 // the accounts sheet does.
-const marketplace: Record<string, string> = { Kafiil: "Kafeel", Nafezly: "Nafezly", Khamsat: "Khamsat" };
+// Khamsat services get no client account (22 October 2026): only Kafiil and Nafezly.
+const marketplace: Record<string, string> = { Kafiil: "Kafeel", Nafezly: "Nafezly" };
 
 const fixSource = (linkId: string) => `service-fix:${linkId}:`;
 
@@ -163,7 +164,7 @@ export async function serviceFollowUpSweep(actor: any) {
   }
   const candidates = await all(
     `SELECT DISTINCT l.student_id FROM service_links l JOIN students s ON s.id=l.student_id
-     WHERE l.qc_status='Locked' AND s.lifecycle='Active' AND l.platform IN ('Kafiil','Nafezly','Khamsat')
+     WHERE l.qc_status='Locked' AND s.lifecycle='Active' AND l.platform IN ('Kafiil','Nafezly')
        AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.service_link_id=l.id)
        AND (SELECT count(*) FROM accounts a WHERE a.student_id=l.student_id)<?`,
     accountsPerStudent,
