@@ -2830,4 +2830,7 @@ export const ar: Record<string, string> = {
   "Services with a client account · {v0}": "خدمات لها حساب عميل · {v0}",
   "Student, ID, account or link": "الطالب أو الرقم أو الحساب أو الرابط",
   "{v0} orders on this account": "{v0} طلب على هذا الحساب",
+  "Done": "تم",
+  "Choose the order's status.": "اختر حالة الطلب.",
+  "The service is already at that status.": "الخدمة بالفعل على هذه الحالة.",
 };

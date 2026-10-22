@@ -3076,13 +3076,60 @@ export async function POST(req: Request) {
         break;
       }
       case "account_order":
-      case "account_order_status": {
+      case "account_order_status":
+      case "account_service_status": {
         // A coordinator records each order they place through a Service Team
         // student's client account, and follows it: In Progress, Done, then
         // Proof Uploaded once the proof is in; or Cancelled, with a note. The
         // account's coordinators, its keepers and the leaders can do this.
         const mayOrder = (a: any) =>
           can(u.roles, ["Project Operations", "Operations Systems / Admin"]) || keepsAccounts(u) || a.coordinator_id === u.id || a.coordinator_2_id === u.id;
+        if (x.action === "account_service_status") {
+          // The status picker on a service row: it sets where the service's
+          // current order stands, any of the four, and starts a new order when
+          // there is none yet or the last one is finished with its proof.
+          const a: any = await stmt("SELECT * FROM accounts WHERE id=?", String(x.account_id || "")).first();
+          ensure(a, "Account not found.");
+          ensure(mayOrder(a), "Only this account's coordinator, its keepers or the leaders update its orders.");
+          ensure(a.student_id, "Link the account to a student before recording an order.");
+          const to = String(x.status || "");
+          ensure(["In Progress", "Done", "Proof Uploaded", "Cancelled"].includes(to), "Choose the order's status.");
+          const note = String(x.note || "").trim().slice(0, 1000);
+          if (to === "Cancelled") ensure(note.length >= 3, "Say why the order was cancelled.");
+          if (to === "Proof Uploaded") {
+            ensure(x.proof_id, "Upload the proof first.");
+            await proof(u, String(x.proof_id), a.student_id);
+          }
+          const current: any = await stmt(
+            "SELECT * FROM account_orders WHERE account_id=? AND status<>'Proof Uploaded' ORDER BY created_at DESC LIMIT 1",
+            a.id,
+          ).first();
+          const stamps = (from: any) => ({
+            done: to === "Done" || to === "Proof Uploaded" ? from?.done_at || t : from?.done_at || null,
+            proof: to === "Proof Uploaded" ? t : null,
+            cancelled: to === "Cancelled" ? t : null,
+          });
+          if (!current) {
+            const at = stamps(null);
+            jobs.push(
+              stmt(
+                "INSERT INTO account_orders(id,account_id,student_id,service_link_id,coordinator,order_ref,amount,note,status,proof_id,created_at,updated_at,done_at,proof_at,cancelled_at) VALUES(?,?,?,?,?,NULL,NULL,?,?,?,?,?,?,?,?)",
+                id, a.id, a.student_id, a.service_link_id || null, u.id, note || null, to, to === "Proof Uploaded" ? String(x.proof_id) : null, t, t, at.done, at.proof, at.cancelled,
+              ),
+            );
+          } else {
+            ensure(current.status !== to, "The service is already at that status.");
+            const at = stamps(current);
+            auditPrevious = current;
+            jobs.push(
+              stmt(
+                "UPDATE account_orders SET status=?,proof_id=?,note=COALESCE(?,note),updated_at=?,done_at=?,proof_at=?,cancelled_at=? WHERE id=?",
+                to, to === "Proof Uploaded" ? String(x.proof_id) : current.proof_id, note || null, t, at.done, at.proof, at.cancelled, current.id,
+              ),
+            );
+          }
+          break;
+        }
         if (x.action === "account_order") {
           const a: any = await stmt("SELECT * FROM accounts WHERE id=?", String(x.account_id || "")).first();
           ensure(a, "Account not found.");

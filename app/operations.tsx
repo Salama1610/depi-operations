@@ -197,6 +197,7 @@ const titles: Row = {
   student_revoke: "Revoke or restore a student",
   account_order: "Record an order on this account",
   account_order_status: "Update the order",
+  account_service_status: "Service status",
   student_services_submit: "Submit service links for this student",
   staff: "Manage staff access",
   account_topup: "Record a top-up",
@@ -3253,6 +3254,41 @@ See you there!`,
     };
     const unlocks = Array.isArray(user.scopes) && user.scopes.includes("account-unlock");
     const shownOrders = accountOrders.filter((o) => orderFilter === "All" || o.status === orderFilter);
+    // The status picker on each service row: where the service's order stands.
+    const latestOrderOf = (accountId: string) =>
+      accountOrders.filter((o) => o.account_id === accountId).sort((x, y) => String(y.updated_at).localeCompare(String(x.updated_at)))[0] || null;
+    const setsServiceStatus = (r: Row) => Boolean(r.student_id) && (wordOn(r) || can(user.roles, ["Project Operations", "Operations Systems / Admin"]));
+    const servicePicker = (r: Row) => {
+      const latest = latestOrderOf(r.id);
+      const choose = (status: string) => {
+        if (!status || status === latest?.status) return;
+        if (status === "Proof Uploaded" || status === "Cancelled")
+          open("account_service_status", { account_id: r.id, status, student_id: r.student_id, student_name: r.student_name || name(r.student_id), account_label: r.label, note: "", proof_id: "" });
+        else quick("account_service_status", { account_id: r.id, status });
+      };
+      return (
+        <span className="service-status-pick">
+          <Pick
+            bare
+            label={t("Service status")}
+            value={latest?.status || ""}
+            onChange={choose}
+            options={[
+              { value: "", label: t("No order yet") },
+              { value: "In Progress", label: t("In progress") },
+              { value: "Done", label: t("Done") },
+              { value: "Proof Uploaded", label: latest?.status === "Proof Uploaded" ? t("Proof uploaded") : t("Upload proof") },
+              { value: "Cancelled", label: t("Cancelled") },
+            ]}
+          />
+          {latest?.proof_id && (
+            <a className="table-subline text-link" href={"/api/files?id=" + latest.proof_id} target="_blank" rel="noreferrer">
+              {t("Open the proof")} <ExternalLink size={11} />
+            </a>
+          )}
+        </span>
+      );
+    };
     // Service status (supervisors and Project Operations): one row per service
     // that has a client account, with where its latest order stands.
     const followsServices = can(user.roles, ["Team Supervisor", "Project Operations", "Operations Systems / Admin"]);
@@ -3617,6 +3653,7 @@ See you there!`,
                               ) : r.service_link_id ? null : (
                                 <small className="table-subline">{t("Not tied to one service")}</small>
                               )}
+                              {setsServiceStatus(r) && servicePicker(r)}
                               <small className="table-subline">{r.linked_by ? t("Linked by {v0}", { v0: owner(r.linked_by) }) : t("Linked automatically")}{r.linked_at ? " · " + fmt(r.linked_at) : ""}</small>
                             </span>
                           );
@@ -3830,7 +3867,7 @@ See you there!`,
                       label: t("Order state"),
                       render: (r: Row) => (
                         <span>
-                          <Cue tone={stateTone(r.state)}>{stateWord(r.state)}</Cue>
+                          {setsServiceStatus(r) ? servicePicker(r) : <Cue tone={stateTone(r.state)}>{stateWord(r.state)}</Cue>}
                           {r.latest && (
                             <small className="table-subline">
                               {fmt(r.latest.updated_at)}
@@ -7005,7 +7042,7 @@ See you there!`,
                     <p className="footnote">{t("The order starts as In progress. Mark it done when the work is delivered, then upload the proof.")}</p>
                   </>
                 );
-              if (a === "account_order_status")
+              if (a === "account_order_status" || a === "account_service_status")
                 return (
                   <>
                     <div className="account-summary">

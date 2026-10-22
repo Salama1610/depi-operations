@@ -4450,3 +4450,30 @@ test("coordinators follow each order on a student's client account, and the lead
   await dbExec("DELETE FROM account_orders WHERE account_id='ACC-ORDER-1'");
   await dbExec("UPDATE accounts SET student_id=NULL WHERE id='ACC-ORDER-1'");
 });
+
+test("each service row's status picker sets where its order stands, in one step", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const pupil = await dbRow(
+    `SELECT s.id,g.coordinator,c.email FROM students s JOIN groups g ON g.id=s.group_id JOIN users c ON c.id=g.coordinator JOIN users v ON v.id=g.supervisor
+     WHERE s.lifecycle='Active' AND g.status='Active' AND v.team='Service Team' AND g.id NOT LIKE 'DEMO-%' ORDER BY s.id DESC LIMIT 1`,
+  );
+  await check("account", { id: "ACC-PICK-1", label: "pick@example.org", platform: "Nafezly", credits: 20 });
+  await dbExec("UPDATE accounts SET student_id=?,coordinator_id=? WHERE id='ACC-PICK-1'", pupil.id, pupil.coordinator);
+  current = { id: pupil.coordinator, email: pupil.email };
+  const state = async () => (await dbRows("SELECT status FROM account_orders WHERE account_id='ACC-PICK-1' ORDER BY created_at")).map((r) => r.status);
+  await check("account_service_status", { account_id: "ACC-PICK-1", status: "Done" });
+  assert.deepEqual(await state(), ["Done"], "choosing a status with no order starts one there");
+  assert.match((await post("account_service_status", { account_id: "ACC-PICK-1", status: "Cancelled" })).error, /Say why/);
+  await check("account_service_status", { account_id: "ACC-PICK-1", status: "In Progress" });
+  assert.match((await post("account_service_status", { account_id: "ACC-PICK-1", status: "Proof Uploaded" })).error, /Upload the proof first/);
+  await dbExec("INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)", "FILE-PICK-1", pupil.id, "evidence/pick-1", "p.png", "image/png", 10, "hash-pick-1", pupil.coordinator, new Date().toISOString());
+  await check("account_service_status", { account_id: "ACC-PICK-1", status: "Proof Uploaded", proof_id: "FILE-PICK-1" });
+  assert.deepEqual(await state(), ["Proof Uploaded"]);
+  // After a finished order, the next pick starts a new one.
+  await check("account_service_status", { account_id: "ACC-PICK-1", status: "In Progress" });
+  assert.deepEqual(await state(), ["Proof Uploaded", "In Progress"]);
+  current = { id: "owner", email: "owner@example.com" };
+  await dbExec("DELETE FROM account_orders WHERE account_id='ACC-PICK-1'");
+  await dbExec("UPDATE accounts SET student_id=NULL WHERE id='ACC-PICK-1'");
+});
