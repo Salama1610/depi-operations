@@ -2783,4 +2783,5 @@ export const ar: Record<string, string> = {
   "Students have already given feedback on this session, so it stays done.": "قيّم الطلاب هذه الجلسة بالفعل، لذا تبقى منتهية.",
   "A session can be marked done once it has started.": "يمكن إنهاء الجلسة بعد أن تبدأ فقط.",
   "This session has already ended.": "هذه الجلسة انتهت بالفعل.",
+  "Student's coordinator: {v0}": "منسق الطالب: {v0}",
 };

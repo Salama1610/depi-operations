@@ -635,11 +635,23 @@ export async function loadData(u: any) {
     // the accounts and the supervisors who assign them; a coordinator sees the
     // accounts assigned to them. The owner column only for its keeper.
     (() => {
-      const columns = `id,label,platform,status,credits,pending_credits,comments,coordinator_id,coordinator_2_id,student_id,linked_at,linked_by,coordinator_state,coordinator_note,coordinator_state_at,coordinator_state_by${seesAccountOwner(u) ? ",owner_name" : ""}`;
+      const columns = `id,label,platform,status,credits,pending_credits,comments,coordinator_id,coordinator_2_id,student_id,service_link_id,linked_at,linked_by,coordinator_state,coordinator_note,coordinator_state_at,coordinator_state_by${seesAccountOwner(u) ? ",owner_name" : ""}`
+        .split(",")
+        .map((c) => "a." + c)
+        .join(",");
+      // The student the account is linked to, their group's coordinator and the
+      // service it is for, joined here so the account's coordinator sees them
+      // even when the student is in another coordinator's group.
+      const linked = `SELECT ${columns},s.name student_name,s.group_id student_group,c.name student_coordinator_name,l.url service_url,l.platform service_platform,l.slot service_slot
+        FROM accounts a
+        LEFT JOIN students s ON s.id=a.student_id AND ${revokesStudents(u) ? "1=1" : "s.lifecycle<>'Revoked'"}
+        LEFT JOIN groups g ON g.id=s.group_id
+        LEFT JOIN users c ON c.id=g.coordinator
+        LEFT JOIN service_links l ON l.id=a.service_link_id AND l.student_id=s.id`;
       if (can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin", "Team Supervisor"]) || keepsAccounts(u))
-        return all(`SELECT ${columns} FROM accounts WHERE ${sameSide(u, "id")}`);
+        return all(`${linked} WHERE ${sameSide(u, "a.id")}`);
       if (can(u.roles, ["Operations Coordinator"]))
-        return all(`SELECT ${columns} FROM accounts WHERE (coordinator_id=? OR coordinator_2_id=?) AND ${sameSide(u, "id")}`, u.id, u.id);
+        return all(`${linked} WHERE (a.coordinator_id=? OR a.coordinator_2_id=?) AND ${sameSide(u, "a.id")}`, u.id, u.id);
       return none;
     })(),
     // Everyone sees who their colleagues are and how to reach them; the

@@ -4306,3 +4306,34 @@ test("a coordinator marks a session done so feedback opens early, and Coach Oper
   assert.match((await post("session_coach", { id: "SES-DONE-1", coach_id: "staff-quality", reason: "Not a coach at all" })).error, /coach or coordinator/);
   current = { id: "owner", email: "owner@example.com" };
 });
+
+test("an account's coordinator sees the service it is for, with the student and their coordinator", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const pupil = await dbRow(
+    "SELECT s.id,s.name,s.group_id,g.coordinator,c.name coordinator_name FROM students s JOIN groups g ON g.id=s.group_id JOIN users c ON c.id=g.coordinator WHERE s.lifecycle='Active' AND g.status='Active' AND g.id NOT LIKE 'DEMO-%' AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=s.id) ORDER BY s.id LIMIT 1",
+  );
+  // The account's coordinator is someone else: the student is outside their groups.
+  const other = await dbRow("SELECT id,email FROM users WHERE roles LIKE '%Operations Coordinator%' AND active=1 AND id<>? AND id NOT LIKE 'DEMO-%' ORDER BY id LIMIT 1", pupil.coordinator);
+  const created = new Date().toISOString();
+  const url = "https://kafiil.com/service/770001-" + encodeURIComponent("تصميم-شعار");
+  await dbExec(
+    "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,account_id,submitted_at,updated_at) VALUES(?,?,1,?,?,'Kafiil','Needs Review','{}',?,'Locked',NULL,NULL,?,1,NULL,?,?)",
+    "SLK-ACCT-VIEW", pupil.id, url, url, created, created, created, created,
+  );
+  const account = await dbRow("SELECT id FROM accounts WHERE id NOT LIKE 'DEMO-%' AND student_id IS NULL ORDER BY id LIMIT 1");
+  const before = await dbRow("SELECT coordinator_id,student_id,service_link_id FROM accounts WHERE id=?", account.id);
+  await dbExec("UPDATE accounts SET coordinator_id=?,student_id=?,service_link_id=? WHERE id=?", other.id, pupil.id, "SLK-ACCT-VIEW", account.id);
+  current = { id: other.id, email: other.email };
+  const view = await (await api.GET()).json();
+  const row = view.accounts.find((a) => a.id === account.id);
+  assert.ok(row, "the coordinator sees the account given to them");
+  assert.equal(row.service_link_id, "SLK-ACCT-VIEW");
+  assert.equal(row.service_url, url);
+  assert.equal(row.service_platform, "Kafiil");
+  assert.equal(row.student_name, pupil.name);
+  assert.equal(row.student_coordinator_name, pupil.coordinator_name);
+  current = { id: "owner", email: "owner@example.com" };
+  await dbExec("UPDATE accounts SET coordinator_id=?,student_id=?,service_link_id=? WHERE id=?", before.coordinator_id, before.student_id, before.service_link_id, account.id);
+  await dbExec("DELETE FROM service_links WHERE id='SLK-ACCT-VIEW'");
+});

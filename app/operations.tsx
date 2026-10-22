@@ -3536,16 +3536,20 @@ See you there!`,
                         if (r.student_id)
                           return (
                             <span className="account-key">
-                              <strong><Lock size={13} /> {name(r.student_id)}</strong>
-                              {(() => {
-                                // The service this account orders for, so the coordinator knows which one.
-                                const link = serviceLinks.find((l) => l.id === r.service_link_id);
-                                return link ? (
-                                  <a className="table-subline text-link" href={link.url} target="_blank" rel="noreferrer">
-                                    {t("For their {v0} service {v1}", { v0: link.platform, v1: link.slot })} <ExternalLink size={11} />
-                                  </a>
-                                ) : null;
-                              })()}
+                              <strong><Lock size={13} /> {r.student_name || name(r.student_id)}</strong>
+                              {r.student_group && <small className="table-subline"><bdi>{r.student_id} · {r.student_group}</bdi></small>}
+                              {r.student_coordinator_name && (
+                                <small className="table-subline">{t("Student's coordinator: {v0}", { v0: r.student_coordinator_name })}</small>
+                              )}
+                              {/* The service this account orders for, so the coordinator opens the right one. */}
+                              {r.service_url ? (
+                                <a className="table-subline text-link service-open" href={r.service_url} target="_blank" rel="noreferrer" title={r.service_url}>
+                                  <span>{t("For their {v0} service {v1}", { v0: r.service_platform, v1: r.service_slot })} <ExternalLink size={11} /></span>
+                                  <small className="service-url" dir="ltr">{r.service_url}</small>
+                                </a>
+                              ) : r.service_link_id ? null : (
+                                <small className="table-subline">{t("Not tied to one service")}</small>
+                              )}
                               <small className="table-subline">{r.linked_by ? t("Linked by {v0}", { v0: owner(r.linked_by) }) : t("Linked automatically")}{r.linked_at ? " · " + fmt(r.linked_at) : ""}</small>
                             </span>
                           );
