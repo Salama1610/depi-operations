@@ -195,7 +195,6 @@ const titles: Row = {
   engagement: "Review engagement status",
   lifecycle: "Update lifecycle status",
   student_revoke: "Revoke or restore a student",
-  account_order: "Record an order on this account",
   account_order_status: "Update the order",
   account_service_status: "Service status",
   student_services_submit: "Submit service links for this student",
@@ -545,7 +544,6 @@ export default function Operations({ module: initialModule }: { module: string }
     [groupMessage, setGroupMessage] = useState<Row | null>(null),
     [feedbackFor, setFeedbackFor] = useState<string | null>(null),
     [sessionTab, setSessionTab] = useState("schedule"),
-    [orderFilter, setOrderFilter] = useState("All"),
     [svcFilters, setSvcFilters] = useState<Row>({ q: "", status: "All", coordinator: "All", supervisor: "All", group: "All", platform: "All" }),
     [accountFilters, setAccountFilters] = useState<Row>({ platform: "All", status: "All", request: "Open", ledger: "All", coordinator: "All", owner: "All", linked: "All", word: "All", sort: "platform" }),
     [insightFilters, setInsightFilters] = useState<Row>({
@@ -3253,7 +3251,6 @@ See you there!`,
       word: (x, y) => text(y.coordinator_state_at).localeCompare(text(x.coordinator_state_at)),
     };
     const unlocks = Array.isArray(user.scopes) && user.scopes.includes("account-unlock");
-    const shownOrders = accountOrders.filter((o) => orderFilter === "All" || o.status === orderFilter);
     // The status picker on each service row: where the service's order stands.
     const latestOrderOf = (accountId: string) =>
       accountOrders.filter((o) => o.account_id === accountId).sort((x, y) => String(y.updated_at).localeCompare(String(x.updated_at)))[0] || null;
@@ -3413,9 +3410,6 @@ See you there!`,
                 {t("Service status")}{" "}<span className="count">{serviceRows.length}</span>
               </TabsTrigger>
             )}
-            <TabsTrigger value="orders">
-              {t("Orders")}{" "}<span className="count">{accountOrders.filter((o) => o.status === "In Progress" || o.status === "Done").length}</span>
-            </TabsTrigger>
             {(keepsAccounts || can(user.roles, ["Project Operations"])) && (
               <TabsTrigger value="credit">
                 {t("Credit tracker")}{" "}<span className="count">{(d.creditLedger || []).length}</span>
@@ -3692,16 +3686,6 @@ See you there!`,
                             {r.coordinator_id ? t("Reassign") : t("Assign")}
                           </button>
                         )}
-                        {r.student_id && (wordOn(r) || can(user.roles, ["Project Operations", "Operations Systems / Admin"])) && (
-                          <button
-                            className="small-btn"
-                            onClick={() =>
-                              open("account_order", { account_id: r.id, label: r.label, platform: r.platform, student_name: r.student_name || name(r.student_id), order_ref: "", amount: "", note: "", student_id: "" })
-                            }
-                          >
-                            {t("Record an order")}
-                          </button>
-                        )}
                         {unlocks && (
                           <button className="small-btn" onClick={() => open("account_assign", { id: r.id, label: r.label, platform: r.platform, key_student: r.student_id || "", service_link_id: r.service_link_id || "", coordinator_id: r.coordinator_id || "", student_id: "" })}>
                             {t("Change assignment")}
@@ -3891,105 +3875,6 @@ See you there!`,
               )}
             </TabsContent>
           )}
-          <TabsContent value="orders">
-            {/* Each order a coordinator places through a student's client account, and how it ended. */}
-            <div className="filter-row">
-              <Pick
-                label={t("Showing")}
-                value={orderFilter}
-                onChange={setOrderFilter}
-                options={[
-                  { value: "All", label: t("All orders") },
-                  { value: "In Progress", label: t("In progress") },
-                  { value: "Done", label: t("Done, proof still to upload") },
-                  { value: "Proof Uploaded", label: t("Proof uploaded") },
-                  { value: "Cancelled", label: t("Cancelled") },
-                ]}
-              />
-            </div>
-            <div className="mini-stats">
-              <span><strong>{accountOrders.filter((o) => o.status === "In Progress").length}</strong>{t("In progress")}</span>
-              <span><strong>{accountOrders.filter((o) => o.status === "Done").length}</strong>{t("Done, proof still to upload")}</span>
-              <span><strong>{accountOrders.filter((o) => o.status === "Proof Uploaded").length}</strong>{t("Proof uploaded")}</span>
-              <span><strong>{accountOrders.filter((o) => o.status === "Cancelled").length}</strong>{t("Cancelled")}</span>
-            </div>
-            {panel(
-              t("Orders on client accounts · {v0}", { v0: shownOrders.length }),
-              shownOrders.length ? (
-                generic(
-                  shownOrders,
-                  [
-                    {
-                      key: "student_name",
-                      label: t("Student"),
-                      render: (o: Row) => (
-                        <span>
-                          <strong>{o.student_name}</strong>
-                          <small className="table-subline"><bdi>{o.student_id} · {o.group_id}</bdi></small>
-                          {o.service_url && (
-                            <a className="table-subline text-link service-open" href={o.service_url} target="_blank" rel="noreferrer" title={o.service_url}>
-                              <span>{t("For their {v0} service {v1}", { v0: o.service_platform, v1: o.service_slot })} <ExternalLink size={11} /></span>
-                              <small className="service-url" dir="ltr">{o.service_url}</small>
-                            </a>
-                          )}
-                        </span>
-                      ),
-                    },
-                    {
-                      key: "account_label",
-                      label: t("Account"),
-                      render: (o: Row) => (
-                        <span>
-                          {o.account_label}
-                          <small className="table-subline">
-                            {o.account_platform}
-                            {o.order_ref ? " · " + t("Order {v0}", { v0: o.order_ref }) : ""}
-                            {o.amount !== null && o.amount !== undefined ? " · " + money(o.amount) : ""}
-                          </small>
-                        </span>
-                      ),
-                    },
-                    { key: "coordinator", label: t("Coordinator"), render: (o: Row) => owner(o.coordinator) },
-                    {
-                      key: "status",
-                      label: t("State"),
-                      render: (o: Row) => (
-                        <span>
-                          <Cue tone={o.status === "Proof Uploaded" ? "ok" : o.status === "Cancelled" ? "bad" : o.status === "Done" ? "warn" : "info"}>
-                            {orderWord(o.status)}
-                          </Cue>
-                          <small className="table-subline">{fmt(o.updated_at)}</small>
-                          {o.note && <small className="table-subline">{o.note}</small>}
-                          {o.proof_id && (
-                            <a className="table-subline text-link" href={"/api/files?id=" + o.proof_id} target="_blank" rel="noreferrer">
-                              {t("Open the proof")} <ExternalLink size={11} />
-                            </a>
-                          )}
-                        </span>
-                      ),
-                    },
-                  ],
-                  (o: Row) => {
-                    const acct = accounts.find((a) => a.id === o.account_id);
-                    const may = o.coordinator === user.id || (acct && wordOn(acct)) || can(user.roles, ["Project Operations", "Operations Systems / Admin"]);
-                    if (!may) return null;
-                    const go = (status: string) =>
-                      open("account_order_status", { id: o.id, status, student_id: o.student_id, student_name: o.student_name, account_label: o.account_label, note: "", proof_id: "" });
-                    return (
-                      <div className="detail-actions">
-                        {o.status === "In Progress" && <button className="small-btn" onClick={() => go("Done")}>{t("Mark done")}</button>}
-                        {o.status === "Done" && <button className="small-btn" onClick={() => go("Proof Uploaded")}>{t("Upload proof")}</button>}
-                        {(o.status === "In Progress" || o.status === "Done") && <button className="small-btn" onClick={() => go("Cancelled")}>{t("Cancel order")}</button>}
-                        {(o.status === "Cancelled" || o.status === "Done") && <button className="small-btn" onClick={() => go("In Progress")}>{t("Back to in progress")}</button>}
-                      </div>
-                    );
-                  },
-                )
-              ) : (
-                <Empty title={t("No orders yet. Record one from an account linked to a student, on the Account pool tab.")} />
-              ),
-            )}
-          </TabsContent>
           <TabsContent value="requests">
             <div className="filter-row">
               <Pick label={t("Marketplace")} value={accountFilters.platform} onChange={(platform) => setAccountFilters({ ...accountFilters, platform })} options={["All", ...controlledPlatforms]} />
@@ -7023,23 +6908,6 @@ See you there!`,
                         style={{ border: "1px solid #dae2ef", borderRadius: 6, padding: "9px 11px", font: "inherit", fontSize: 13 }}
                       />
                     </label>
-                  </>
-                );
-              if (a === "account_order")
-                return (
-                  <>
-                    <div className="account-summary">
-                      <div>
-                        <strong>{form.label}</strong>
-                        <small>{form.platform} · {form.student_name}</small>
-                      </div>
-                    </div>
-                    <div className="form-grid">
-                      {field("order_ref", t("Order number on the marketplace"), "text", false)}
-                      {field("amount", t("Amount paid ($)"), "number", false)}
-                    </div>
-                    {field("note", t("Note"), "text", false)}
-                    <p className="footnote">{t("The order starts as In progress. Mark it done when the work is delivered, then upload the proof.")}</p>
                   </>
                 );
               if (a === "account_order_status" || a === "account_service_status")
