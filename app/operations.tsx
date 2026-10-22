@@ -545,6 +545,7 @@ export default function Operations({ module: initialModule }: { module: string }
     [feedbackFor, setFeedbackFor] = useState<string | null>(null),
     [sessionTab, setSessionTab] = useState("schedule"),
     [orderFilter, setOrderFilter] = useState("All"),
+    [svcFilters, setSvcFilters] = useState<Row>({ q: "", status: "All", coordinator: "All", supervisor: "All", group: "All", platform: "All" }),
     [accountFilters, setAccountFilters] = useState<Row>({ platform: "All", status: "All", request: "Open", ledger: "All", coordinator: "All", owner: "All", linked: "All", word: "All", sort: "platform" }),
     [insightFilters, setInsightFilters] = useState<Row>({
       group: "All", coach: "All", from: "", to: "", absentOnly: false,
@@ -3252,6 +3253,38 @@ See you there!`,
     };
     const unlocks = Array.isArray(user.scopes) && user.scopes.includes("account-unlock");
     const shownOrders = accountOrders.filter((o) => orderFilter === "All" || o.status === orderFilter);
+    // Service status (supervisors and Project Operations): one row per service
+    // that has a client account, with where its latest order stands.
+    const followsServices = can(user.roles, ["Team Supervisor", "Project Operations", "Operations Systems / Admin"]);
+    const leadsAll = can(user.roles, ["Project Operations", "Operations Systems / Admin"]);
+    const groupOfRow = (id: string) => groups.find((g) => g.id === id);
+    const serviceRows: Row[] = accounts
+      .filter((a) => a.student_id)
+      .filter((a) => leadsAll || groupOfRow(a.student_group)?.supervisor === user.id)
+      .map((a) => {
+        const orders = accountOrders.filter((o) => o.account_id === a.id).sort((x, y) => String(y.updated_at).localeCompare(String(x.updated_at)));
+        return {
+          ...a,
+          orders,
+          latest: orders[0] || null,
+          state: orders[0]?.status || "No order yet",
+          supervisor: groupOfRow(a.student_group)?.supervisor || "",
+        };
+      });
+    const svcShown = serviceRows.filter((r) => {
+      const q = String(svcFilters.q || "").trim().toLowerCase();
+      return (
+        (!q || [r.student_name, r.student_id, r.label, r.service_url].some((v) => String(v || "").toLowerCase().includes(q))) &&
+        (svcFilters.status === "All" || r.state === svcFilters.status) &&
+        (svcFilters.coordinator === "All" || r.coordinator_id === svcFilters.coordinator || r.coordinator_2_id === svcFilters.coordinator) &&
+        (svcFilters.supervisor === "All" || r.supervisor === svcFilters.supervisor) &&
+        (svcFilters.group === "All" || r.student_group === svcFilters.group) &&
+        (svcFilters.platform === "All" || r.platform === svcFilters.platform)
+      );
+    });
+    const stateWord = (state: string) => (state === "No order yet" ? t("No order yet") : orderWord(state));
+    const stateTone = (state: string) =>
+      state === "Proof Uploaded" ? "ok" : state === "Cancelled" ? "bad" : state === "Done" ? "warn" : state === "In Progress" ? "info" : "info";
     const orderWord = (status: string) =>
       status === "In Progress" ? t("In progress") : status === "Done" ? t("Done, proof still to upload") : status === "Proof Uploaded" ? t("Proof uploaded") : t("Cancelled");
     const wordOn = (r: Row) => r.coordinator_id === user.id || r.coordinator_2_id === user.id || keepsAccounts;
@@ -3339,6 +3372,11 @@ See you there!`,
             <TabsTrigger value="requests">
               {t("Requests")}{" "}<span className="count">{openRequests.length}</span>
             </TabsTrigger>
+            {followsServices && (
+              <TabsTrigger value="service-status">
+                {t("Service status")}{" "}<span className="count">{serviceRows.length}</span>
+              </TabsTrigger>
+            )}
             <TabsTrigger value="orders">
               {t("Orders")}{" "}<span className="count">{accountOrders.filter((o) => o.status === "In Progress" || o.status === "Done").length}</span>
             </TabsTrigger>
@@ -3665,6 +3703,157 @@ See you there!`,
               </div>,
             )}
           </TabsContent>
+          {followsServices && (
+            <TabsContent value="service-status">
+              {/* Every service with a client account, and where its coordinator's latest order stands. */}
+              <div className="filter-row">
+                <label className="search-box">
+                  <Search size={15} />
+                  <input value={svcFilters.q} placeholder={t("Student, ID, account or link")} onChange={(e) => setSvcFilters({ ...svcFilters, q: e.target.value })} />
+                </label>
+                <Pick
+                  label={t("Order state")}
+                  value={svcFilters.status}
+                  onChange={(status) => setSvcFilters({ ...svcFilters, status })}
+                  options={[
+                    { value: "All", label: t("Every state") },
+                    { value: "No order yet", label: t("No order yet") },
+                    { value: "In Progress", label: t("In progress") },
+                    { value: "Done", label: t("Done, proof still to upload") },
+                    { value: "Proof Uploaded", label: t("Proof uploaded") },
+                    { value: "Cancelled", label: t("Cancelled") },
+                  ]}
+                />
+                <Pick
+                  label={t("Coordinator")}
+                  value={svcFilters.coordinator}
+                  onChange={(coordinator) => setSvcFilters({ ...svcFilters, coordinator })}
+                  options={[
+                    { value: "All", label: t("Every coordinator") },
+                    ...[...new Set(serviceRows.flatMap((r) => [r.coordinator_id, r.coordinator_2_id]).filter(Boolean))]
+                      .map((id) => ({ value: String(id), label: owner(String(id)) }))
+                      .sort((a, b) => a.label.localeCompare(b.label)),
+                  ]}
+                />
+                {leadsAll && (
+                  <Pick
+                    label={t("Supervisor")}
+                    value={svcFilters.supervisor}
+                    onChange={(supervisor) => setSvcFilters({ ...svcFilters, supervisor })}
+                    options={[
+                      { value: "All", label: t("All supervisors") },
+                      ...[...new Set(serviceRows.map((r) => r.supervisor).filter(Boolean))].map((id) => ({ value: String(id), label: owner(String(id)) })),
+                    ]}
+                  />
+                )}
+                <Pick
+                  label={t("Group")}
+                  value={svcFilters.group}
+                  onChange={(group) => setSvcFilters({ ...svcFilters, group })}
+                  options={[{ value: "All", label: t("All groups") }, ...[...new Set(serviceRows.map((r) => r.student_group).filter(Boolean))].sort().map((g) => ({ value: String(g), label: String(g) }))]}
+                />
+                <Pick
+                  label={t("Marketplace")}
+                  value={svcFilters.platform}
+                  onChange={(platform) => setSvcFilters({ ...svcFilters, platform })}
+                  options={[{ value: "All", label: t("All") }, ...[...new Set(serviceRows.map((r) => r.platform).filter(Boolean))].map((v) => ({ value: String(v), label: String(v) }))]}
+                />
+                {JSON.stringify(svcFilters) !== JSON.stringify({ q: "", status: "All", coordinator: "All", supervisor: "All", group: "All", platform: "All" }) && (
+                  <button type="button" className="small-btn" onClick={() => setSvcFilters({ q: "", status: "All", coordinator: "All", supervisor: "All", group: "All", platform: "All" })}>
+                    {t("Clear filters")}
+                  </button>
+                )}
+              </div>
+              <div className="mini-stats service-status-stats">
+                {["No order yet", "In Progress", "Done", "Proof Uploaded", "Cancelled"].map((state) => (
+                  <button
+                    key={state}
+                    type="button"
+                    className="mini-stat-btn"
+                    aria-pressed={svcFilters.status === state}
+                    onClick={() => setSvcFilters({ ...svcFilters, status: svcFilters.status === state ? "All" : state })}
+                  >
+                    <strong>{svcShown.filter((r) => r.state === state).length}</strong>
+                    {stateWord(state)}
+                  </button>
+                ))}
+              </div>
+              {panel(
+                t("Services with a client account · {v0}", { v0: svcShown.length }),
+                svcShown.length ? (
+                  generic(svcShown, [
+                    {
+                      key: "student_name",
+                      label: t("Student"),
+                      render: (r: Row) => (
+                        <span>
+                          <strong>{r.student_name || name(r.student_id)}</strong>
+                          <small className="table-subline"><bdi>{r.student_id} · {r.student_group}</bdi></small>
+                        </span>
+                      ),
+                    },
+                    {
+                      key: "service_url",
+                      label: t("Service"),
+                      render: (r: Row) =>
+                        r.service_url ? (
+                          <a className="text-link service-open" href={r.service_url} target="_blank" rel="noreferrer" title={r.service_url}>
+                            <span>{t("For their {v0} service {v1}", { v0: r.service_platform, v1: r.service_slot })} <ExternalLink size={11} /></span>
+                            <small className="service-url" dir="ltr">{r.service_url}</small>
+                          </a>
+                        ) : (
+                          <small className="table-subline">{t("Not tied to one service")}</small>
+                        ),
+                    },
+                    {
+                      key: "label",
+                      label: t("Account"),
+                      render: (r: Row) => (
+                        <span>
+                          {r.label}
+                          <small className="table-subline">{r.platform} · {money(r.credits)}</small>
+                        </span>
+                      ),
+                    },
+                    {
+                      key: "coordinator_id",
+                      label: t("Coordinator"),
+                      render: (r: Row) => (
+                        <span>
+                          {r.coordinator_id ? owner(r.coordinator_id) : "—"}
+                          {r.supervisor && <small className="table-subline">{t("Supervisor")} {owner(r.supervisor)}</small>}
+                        </span>
+                      ),
+                    },
+                    {
+                      key: "state",
+                      label: t("Order state"),
+                      render: (r: Row) => (
+                        <span>
+                          <Cue tone={stateTone(r.state)}>{stateWord(r.state)}</Cue>
+                          {r.latest && (
+                            <small className="table-subline">
+                              {fmt(r.latest.updated_at)}
+                              {r.latest.order_ref ? " · " + t("Order {v0}", { v0: r.latest.order_ref }) : ""}
+                            </small>
+                          )}
+                          {r.latest?.note && <small className="table-subline">{r.latest.note}</small>}
+                          {r.latest?.proof_id && (
+                            <a className="table-subline text-link" href={"/api/files?id=" + r.latest.proof_id} target="_blank" rel="noreferrer">
+                              {t("Open the proof")} <ExternalLink size={11} />
+                            </a>
+                          )}
+                          {r.orders.length > 1 && <small className="table-subline">{t("{v0} orders on this account", { v0: r.orders.length })}</small>}
+                        </span>
+                      ),
+                    },
+                  ])
+                ) : (
+                  <Empty title={serviceRows.length ? t("No service matches these filters") : t("No service has a client account yet.")} />
+                ),
+              )}
+            </TabsContent>
+          )}
           <TabsContent value="orders">
             {/* Each order a coordinator places through a student's client account, and how it ended. */}
             <div className="filter-row">

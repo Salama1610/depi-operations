@@ -2822,4 +2822,12 @@ export const ar: Record<string, string> = {
   "Say why the order was cancelled.": "اذكر سبب إلغاء الطلب.",
   "Upload the proof first.": "ارفع الإثبات أولًا.",
   "Client accounts are for Service Team students only.": "حسابات العملاء لطلاب فريق الخدمات فقط.",
+  "No order yet": "لا يوجد طلب بعد",
+  "No service has a client account yet.": "لا توجد خدمة لها حساب عميل بعد.",
+  "No service matches these filters": "لا توجد خدمة تطابق هذه الفلاتر",
+  "Order state": "حالة الطلب",
+  "Service status": "حالة الخدمات",
+  "Services with a client account · {v0}": "خدمات لها حساب عميل · {v0}",
+  "Student, ID, account or link": "الطالب أو الرقم أو الحساب أو الرابط",
+  "{v0} orders on this account": "{v0} طلب على هذا الحساب",
 };
