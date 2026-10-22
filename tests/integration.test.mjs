@@ -3992,7 +3992,7 @@ test("a service link sent back is the coordinator's task until approved, and eac
       "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,account_id,submitted_at,updated_at) VALUES(?,?,?,?,?,'Kafiil','Needs Review','{}',?,'Pending',NULL,'staff-quality',NULL,1,NULL,?,?)",
       id, learner.id, i + 1, `https://kafiil.com/kafiil/service/key-${i}`, `kafiil.com/kafiil/service/key-${i}`, at, at, at,
     );
-  // An empty account is never chosen; the one with the most credit is.
+  // The account with the most credit is chosen first; an empty one only when none with credit is free.
   await check("account", { id: "ACC-KEY-EMPTY", label: "empty-key@example.org", platform: "Kafeel", credits: 0 });
   await check("account", { id: "ACC-KEY-1", label: "key-one@example.org", platform: "Kafeel", credits: 99999 });
 

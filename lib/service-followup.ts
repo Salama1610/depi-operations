@@ -14,8 +14,8 @@ function notify(recipient: string, title: string, entityType: string, entityId: 
 // replaces it with a new task.
 //
 // Each approved service of a Service Team student (on Kafiil, Nafezly or
-// Khamsat) earns an available client account with credit on the same
-// marketplace, linked to the student, that service and the student's
+// Khamsat) earns an available client account on the same marketplace (the one
+// with the most credit; a $0 account once none with credit is free, 22 Oct), linked to the student, that service and the student's
 // coordinator: up to two accounts per student, so a third approved service
 // earns none (19 October 2026). It is the coordinator's key: the account to
 // order that service from. The student never sees it. One student per account,
@@ -99,7 +99,7 @@ export async function linkAccountKey(studentId: string, actor: any | null) {
     const platform = marketplace[link.platform];
     if (!platform) continue;
     const account: any = await stmt(
-      `SELECT id,label FROM accounts WHERE platform=? AND status='Available' AND student_id IS NULL AND active_assignment IS NULL AND credits>0
+      `SELECT id,label FROM accounts WHERE platform=? AND status='Available' AND student_id IS NULL AND active_assignment IS NULL
        ORDER BY credits DESC,id LIMIT 1`,
       platform,
     ).first();
@@ -133,7 +133,7 @@ export async function linkAccountKey(studentId: string, actor: any | null) {
     await db().batch(
       [...new Set(missing)].flatMap((platform) =>
         keepers.map((k: any) =>
-          notify(k.id, `No ${platform} account with credit for ${s.name}: add or top up one`, "student", studentId, "Action Required", `account-key-missing:${studentId}:${platform}:${k.id}`),
+          notify(k.id, `No free ${platform} account for ${s.name}: add one`, "student", studentId, "Action Required", `account-key-missing:${studentId}:${platform}:${k.id}`),
         ),
       ),
     );
