@@ -3093,7 +3093,8 @@ export async function POST(req: Request) {
           ensure(mayOrder(a), "Only this account's coordinator, its keepers or the leaders update its orders.");
           ensure(a.student_id, "Link the account to a student before recording an order.");
           const to = String(x.status || "");
-          ensure(["In Progress", "Done", "Proof Uploaded", "Cancelled"].includes(to), "Choose the order's status.");
+          // Buy (bought through the account) comes first, as on the team's sheet (23 October 2026).
+          ensure(["Buy", "In Progress", "Done", "Proof Uploaded", "Cancelled"].includes(to), "Choose the order's status.");
           const note = String(x.note || "").trim().slice(0, 1000);
           if (to === "Cancelled") ensure(note.length >= 3, "Say why the order was cancelled.");
           if (to === "Proof Uploaded") {
@@ -3155,6 +3156,7 @@ export async function POST(req: Request) {
         ensure(a && (mayOrder(a) || order.coordinator === u.id), "Only this account's coordinator, its keepers or the leaders update its orders.");
         const to = String(x.status || "");
         const allowed: Record<string, string[]> = {
+          Buy: ["In Progress", "Done", "Cancelled"],
           "In Progress": ["Done", "Cancelled"],
           Done: ["Proof Uploaded", "Cancelled", "In Progress"],
           Cancelled: ["In Progress"],

@@ -1487,3 +1487,16 @@ td .searchable-select,td .pick-inline{max-width:240px;min-width:0}
 /* The order-status picker on each service row. */
 .service-status-pick{display:flex;flex-direction:column;gap:3px;margin-top:6px;max-width:220px}
 .service-status-pick .pick{height:32px!important;min-width:150px;font-size:12px!important}
+/* Accounts > Service status: the team's sheet, one row per student (23 Oct 2026). */
+.svc-sheet-wrap{width:100%;overflow-x:auto;border:1px solid #e4e9f2;border-radius:10px;background:#fff}
+.svc-sheet{border-collapse:collapse;min-width:1500px;width:100%;font-size:13px}
+.svc-sheet th{position:sticky;top:0;background:#f6f8fb;color:#4a5876;font-weight:600;text-align:start;padding:9px 10px;border-bottom:1px solid #e4e9f2;white-space:nowrap}
+.svc-sheet td{padding:8px 10px;border-bottom:1px solid #eef1f6;vertical-align:top}
+.svc-sheet tr:hover td{background:#fafbfd}
+.svc-sheet th.svc-kafiil{background:#e7f3e2}
+.svc-sheet th.svc-nafezly{background:#e3eefa}
+.svc-sheet th.svc-state{background:#f7e9f1}
+.svc-cell{display:flex;flex-direction:column;gap:5px;min-width:0}
+.svc-link{white-space:nowrap}
+.svc-platform{color:#6a7891;font-size:11px;text-transform:capitalize}
+.svc-sheet .account-login-line{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}

@@ -1760,6 +1760,7 @@ See you there!`,
         <>
           <h2 className="dash-section-title">{t("Orders on client accounts")}</h2>
           <div className="stats">
+            {tile("Bought", count("Buy"), t("Bought, the student has not started"))}
             {tile("Orders in progress", count("In Progress"), t("{v0} placed this week", { v0: thisWeek }))}
             {tile("Done, proof still to upload", count("Done"), t("Waiting for the coordinator's proof"))}
             {tile("Proof uploaded", count("Proof Uploaded"), t("Finished orders with their proof"))}
@@ -3272,10 +3273,11 @@ See you there!`,
             onChange={choose}
             options={[
               { value: "", label: t("No order yet") },
+              { value: "Buy", label: t("Buy") },
               { value: "In Progress", label: t("In progress") },
               { value: "Done", label: t("Done") },
-              { value: "Proof Uploaded", label: latest?.status === "Proof Uploaded" ? t("Proof uploaded") : t("Upload proof") },
-              { value: "Cancelled", label: t("Cancelled") },
+              { value: "Proof Uploaded", label: latest?.status === "Proof Uploaded" ? t("POH uploaded") : t("Upload POH") },
+              { value: "Cancelled", label: t("Canceled") },
             ]}
           />
           {latest?.proof_id && (
@@ -3288,12 +3290,15 @@ See you there!`,
     };
     // Service status (supervisors and Project Operations): one row per service
     // that has a client account, with where its latest order stands.
-    const followsServices = can(user.roles, ["Team Supervisor", "Project Operations", "Operations Systems / Admin"]);
     const leadsAll = can(user.roles, ["Project Operations", "Operations Systems / Admin"]);
+    const coordinatesAccount = (a: Row) => a.coordinator_id === user.id || a.coordinator_2_id === user.id;
+    const followsServices =
+      can(user.roles, ["Team Supervisor", "Project Operations", "Operations Systems / Admin"]) ||
+      accounts.some((a) => a.student_id && coordinatesAccount(a));
     const groupOfRow = (id: string) => groups.find((g) => g.id === id);
     const serviceRows: Row[] = accounts
       .filter((a) => a.student_id)
-      .filter((a) => leadsAll || groupOfRow(a.student_group)?.supervisor === user.id)
+      .filter((a) => leadsAll || groupOfRow(a.student_group)?.supervisor === user.id || coordinatesAccount(a))
       .map((a) => {
         const orders = accountOrders.filter((o) => o.account_id === a.id).sort((x, y) => String(y.updated_at).localeCompare(String(x.updated_at)));
         return {
@@ -3316,10 +3321,117 @@ See you there!`,
       );
     });
     const stateWord = (state: string) => (state === "No order yet" ? t("No order yet") : orderWord(state));
+    const downloadSheet = (rows: Row[], file: string, shape: (r: Row) => Row) => {
+      const data = toWorkbook([{ name: "Service status", rows: rows.map(shape) }]);
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(new Blob([data as BlobPart], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+      link.download = `${file}-${today()}.xlsx`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    };
+    // The status words of the team's sheet, for the download.
+    const orderSheetWord = (state: string) =>
+      ({ Buy: "Buy", "In Progress": "In Progress", Done: "Done", "Proof Uploaded": "Upload POH", Cancelled: "Canceled" } as Record<string, string>)[state] || "";
     const stateTone = (state: string) =>
-      state === "Proof Uploaded" ? "ok" : state === "Cancelled" ? "bad" : state === "Done" ? "warn" : state === "In Progress" ? "info" : "info";
+      state === "Proof Uploaded" ? "ok" : state === "Cancelled" ? "bad" : state === "Done" ? "warn" : "info";
     const orderWord = (status: string) =>
-      status === "In Progress" ? t("In progress") : status === "Done" ? t("Done, proof still to upload") : status === "Proof Uploaded" ? t("Proof uploaded") : t("Cancelled");
+      status === "Buy"
+        ? t("Buy")
+        : status === "In Progress"
+          ? t("In progress")
+          : status === "Done"
+            ? t("Done, POH still to upload")
+            : status === "Proof Uploaded"
+              ? t("POH uploaded")
+              : t("Canceled");
+    // The team's service-status sheet (System.xlsx, 23 October 2026): one row per
+    // student with their Kafiil and Nafezly services, accounts and passwords,
+    // and where each service's order stands.
+    const svcMatched = new Set(svcShown.map((r) => r.student_id));
+    const studentLines = [...svcMatched].map((id) => {
+      const s = students.find((x) => x.id === id) || {};
+      const rows = serviceRows
+        .filter((r) => r.student_id === id)
+        .sort((x, y) => String(x.linked_at || "").localeCompare(String(y.linked_at || "")) || String(x.id).localeCompare(String(y.id)));
+      const first = rows[0] || {};
+      return {
+        id,
+        name: s.name || first.student_name || name(id),
+        phone: s.phone || "",
+        email: s.email || "",
+        group: s.group_id || first.student_group || "",
+        provider: groupOfRow(s.group_id || first.student_group)?.provider || "",
+        coordinator: s.coordinator_name || first.student_coordinator_name || (first.coordinator_id ? owner(first.coordinator_id) : ""),
+        rows,
+        kafeel: rows.filter((r) => r.platform === "Kafeel"),
+        nafezly: rows.filter((r) => r.platform === "Nafezly"),
+      };
+    }).sort((a, b) => String(a.coordinator).localeCompare(String(b.coordinator)) || String(a.name).localeCompare(String(b.name)));
+    const copyValue = async (value: string, done: string) => {
+      try {
+        await navigator.clipboard.writeText(value);
+        toast.success(done);
+      } catch {
+        toast.error(t("Copy did not work. Select the text and copy it."));
+      }
+    };
+    const serviceLinksCell = (rows: Row[]) =>
+      rows.length ? (
+        <span className="svc-cell">
+          {rows.map((r) =>
+            r.service_url ? (
+              <a key={r.id} className="text-link svc-link" href={r.service_url} target="_blank" rel="noreferrer" title={r.service_url}>
+                {t("Service {v0}", { v0: r.service_slot })} <ExternalLink size={11} />
+              </a>
+            ) : (
+              <small key={r.id} className="table-subline">{t("Not tied to one service")}</small>
+            ),
+          )}
+        </span>
+      ) : (
+        "—"
+      );
+    const accountsCell = (rows: Row[]) =>
+      rows.length ? (
+        <span className="svc-cell">
+          {rows.map((r) => (
+            <span key={r.id} className="account-login-line">
+              <bdi dir="ltr">{r.label}</bdi>
+              <button type="button" className="icon-btn" title={t("Copy the email")} aria-label={t("Copy the email")} onClick={() => copyValue(r.label, t("Email copied"))}><Copy size={12} /></button>
+            </span>
+          ))}
+        </span>
+      ) : (
+        "—"
+      );
+    const passwordsCell = (rows: Row[]) =>
+      rows.length ? (
+        <span className="svc-cell">
+          {rows.map((r) => {
+            const secret = accountSecrets?.[r.id];
+            return secret ? (
+              <span key={r.id} className="account-login-line">
+                <code dir="ltr">{secret.password}</code>
+                <button type="button" className="icon-btn" title={t("Copy the password")} aria-label={t("Copy the password")} onClick={() => copyValue(secret.password, t("Password copied"))}><Copy size={12} /></button>
+              </span>
+            ) : (
+              <small key={r.id} className="table-subline">{accountSecrets ? "—" : t("Loading passwords…")}</small>
+            );
+          })}
+        </span>
+      ) : (
+        "—"
+      );
+    const serviceStateCell = (r?: Row) =>
+      r ? (
+        <span className="svc-cell">
+          <small className="svc-platform">{r.service_platform || (r.platform === "Kafeel" ? "Kafiil" : r.platform)}</small>
+          {setsServiceStatus(r) ? servicePicker(r) : <Cue tone={stateTone(r.state)}>{stateWord(r.state)}</Cue>}
+          {r.latest?.note && r.latest?.status === "Cancelled" && <small className="table-subline wrap-text">{r.latest.note}</small>}
+        </span>
+      ) : (
+        "—"
+      );
     const wordOn = (r: Row) => r.coordinator_id === user.id || r.coordinator_2_id === user.id || keepsAccounts;
     // Status changes, unblocking included, belong to the people who keep the accounts.
     const managesAccounts = keepsAccounts;
@@ -3739,10 +3851,11 @@ See you there!`,
                   options={[
                     { value: "All", label: t("Every state") },
                     { value: "No order yet", label: t("No order yet") },
+                    { value: "Buy", label: t("Buy") },
                     { value: "In Progress", label: t("In progress") },
-                    { value: "Done", label: t("Done, proof still to upload") },
-                    { value: "Proof Uploaded", label: t("Proof uploaded") },
-                    { value: "Cancelled", label: t("Cancelled") },
+                    { value: "Done", label: t("Done, POH still to upload") },
+                    { value: "Proof Uploaded", label: t("POH uploaded") },
+                    { value: "Cancelled", label: t("Canceled") },
                   ]}
                 />
                 <Pick
@@ -3779,6 +3892,33 @@ See you there!`,
                   onChange={(platform) => setSvcFilters({ ...svcFilters, platform })}
                   options={[{ value: "All", label: t("All") }, ...[...new Set(serviceRows.map((r) => r.platform).filter(Boolean))].map((v) => ({ value: String(v), label: String(v) }))]}
                 />
+                <button
+                  type="button"
+                  className="small-btn"
+                  disabled={!studentLines.length}
+                  onClick={() =>
+                    // The sheet's layout, without the passwords.
+                    downloadSheet(studentLines, "service-status", (s: Row) => ({
+                      Coordinator: s.coordinator,
+                      NameEn: s.name,
+                      "Student ID": s.id,
+                      Phone: s.phone,
+                      Email: s.email,
+                      "Current Group Code": s.group,
+                      "Training Provider": s.provider,
+                      "Kafiil Services URL": s.kafeel.map((r: Row) => r.service_url || "").join(" | "),
+                      "Kafeel Account": s.kafeel.map((r: Row) => r.label).join(" | "),
+                      "Nafezly Services URL": s.nafezly.map((r: Row) => r.service_url || "").join(" | "),
+                      "Nafezly Account": s.nafezly.map((r: Row) => r.label).join(" | "),
+                      "Service 1 Platform": s.rows[0]?.service_platform || s.rows[0]?.platform || "",
+                      "Service 1 Status": s.rows[0] ? orderSheetWord(s.rows[0].state) : "",
+                      "Service 2 Platform": s.rows[1]?.service_platform || s.rows[1]?.platform || "",
+                      "Service 2 Status": s.rows[1] ? orderSheetWord(s.rows[1].state) : "",
+                    }))
+                  }
+                >
+                  <Download size={14} /> {t("Download as Excel")}
+                </button>
                 {JSON.stringify(svcFilters) !== JSON.stringify({ q: "", status: "All", coordinator: "All", supervisor: "All", group: "All", platform: "All" }) && (
                   <button type="button" className="small-btn" onClick={() => setSvcFilters({ q: "", status: "All", coordinator: "All", supervisor: "All", group: "All", platform: "All" })}>
                     {t("Clear filters")}
@@ -3786,7 +3926,7 @@ See you there!`,
                 )}
               </div>
               <div className="mini-stats service-status-stats">
-                {["No order yet", "In Progress", "Done", "Proof Uploaded", "Cancelled"].map((state) => (
+                {["No order yet", "Buy", "In Progress", "Done", "Proof Uploaded", "Cancelled"].map((state) => (
                   <button
                     key={state}
                     type="button"
@@ -3800,75 +3940,55 @@ See you there!`,
                 ))}
               </div>
               {panel(
-                t("Services with a client account · {v0}", { v0: svcShown.length }),
-                svcShown.length ? (
-                  generic(svcShown, [
-                    {
-                      key: "student_name",
-                      label: t("Student"),
-                      render: (r: Row) => (
-                        <span>
-                          <strong>{r.student_name || name(r.student_id)}</strong>
-                          <small className="table-subline"><bdi>{r.student_id} · {r.student_group}</bdi></small>
-                        </span>
-                      ),
-                    },
-                    {
-                      key: "service_url",
-                      label: t("Service"),
-                      render: (r: Row) =>
-                        r.service_url ? (
-                          <a className="text-link service-open" href={r.service_url} target="_blank" rel="noreferrer" title={r.service_url}>
-                            <span>{t("For their {v0} service {v1}", { v0: r.service_platform, v1: r.service_slot })} <ExternalLink size={11} /></span>
-                            <small className="service-url" dir="ltr">{r.service_url}</small>
-                          </a>
-                        ) : (
-                          <small className="table-subline">{t("Not tied to one service")}</small>
-                        ),
-                    },
-                    {
-                      key: "label",
-                      label: t("Account"),
-                      render: (r: Row) => (
-                        <span>
-                          {r.label}
-                          <small className="table-subline">{r.platform} · {money(r.credits)}</small>
-                        </span>
-                      ),
-                    },
-                    {
-                      key: "coordinator_id",
-                      label: t("Coordinator"),
-                      render: (r: Row) => (
-                        <span>
-                          {r.coordinator_id ? owner(r.coordinator_id) : "—"}
-                          {r.supervisor && <small className="table-subline">{t("Supervisor")} {owner(r.supervisor)}</small>}
-                        </span>
-                      ),
-                    },
-                    {
-                      key: "state",
-                      label: t("Order state"),
-                      render: (r: Row) => (
-                        <span>
-                          {setsServiceStatus(r) ? servicePicker(r) : <Cue tone={stateTone(r.state)}>{stateWord(r.state)}</Cue>}
-                          {r.latest && (
-                            <small className="table-subline">
-                              {fmt(r.latest.updated_at)}
-                              {r.latest.order_ref ? " · " + t("Order {v0}", { v0: r.latest.order_ref }) : ""}
-                            </small>
-                          )}
-                          {r.latest?.note && <small className="table-subline">{r.latest.note}</small>}
-                          {r.latest?.proof_id && (
-                            <a className="table-subline text-link" href={"/api/files?id=" + r.latest.proof_id} target="_blank" rel="noreferrer">
-                              {t("Open the proof")} <ExternalLink size={11} />
-                            </a>
-                          )}
-                          {r.orders.length > 1 && <small className="table-subline">{t("{v0} orders on this account", { v0: r.orders.length })}</small>}
-                        </span>
-                      ),
-                    },
-                  ])
+                t("Students with a client account · {v0}", { v0: studentLines.length }),
+                studentLines.length ? (
+                  <div className="svc-sheet-wrap">
+                    <table className="svc-sheet">
+                      <thead>
+                        <tr>
+                          <th>{t("Coordinator")}</th>
+                          <th>{t("Student")}</th>
+                          <th>{t("Phone")}</th>
+                          <th>{t("Email")}</th>
+                          <th>{t("Group code")}</th>
+                          <th>{t("Training provider")}</th>
+                          <th className="svc-kafiil">{t("Kafiil service")}</th>
+                          <th className="svc-kafiil">{t("Kafeel account")}</th>
+                          <th className="svc-kafiil">{t("Password")}</th>
+                          <th className="svc-nafezly">{t("Nafezly service")}</th>
+                          <th className="svc-nafezly">{t("Nafezly account")}</th>
+                          <th className="svc-nafezly">{t("Password")}</th>
+                          <th className="svc-state">{t("Service 1")}</th>
+                          <th className="svc-state">{t("Service 2")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {studentLines.map((s) => (
+                          <tr key={s.id}>
+                            <td>{s.coordinator || "—"}</td>
+                            <td>
+                              <button type="button" className="text-link" onClick={() => setSelected(students.find((x) => x.id === s.id) || null)}>
+                                <strong>{s.name}</strong>
+                              </button>
+                              <small className="table-subline"><bdi>{s.id}</bdi></small>
+                            </td>
+                            <td><bdi dir="ltr">{s.phone || "—"}</bdi></td>
+                            <td><bdi dir="ltr">{s.email || "—"}</bdi></td>
+                            <td><bdi>{s.group || "—"}</bdi></td>
+                            <td>{s.provider || "—"}</td>
+                            <td>{serviceLinksCell(s.kafeel)}</td>
+                            <td>{accountsCell(s.kafeel)}</td>
+                            <td>{passwordsCell(s.kafeel)}</td>
+                            <td>{serviceLinksCell(s.nafezly)}</td>
+                            <td>{accountsCell(s.nafezly)}</td>
+                            <td>{passwordsCell(s.nafezly)}</td>
+                            <td>{serviceStateCell(s.rows[0])}</td>
+                            <td>{serviceStateCell(s.rows[1])}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 ) : (
                   <Empty title={serviceRows.length ? t("No service matches these filters") : t("No service has a client account yet.")} />
                 ),

@@ -4477,3 +4477,22 @@ test("each service row's status picker sets where its order stands, in one step"
   await dbExec("DELETE FROM account_orders WHERE account_id='ACC-PICK-1'");
   await dbExec("UPDATE accounts SET student_id=NULL WHERE id='ACC-PICK-1'");
 });
+
+test("a coordinator marks a service Buy first, then follows it on", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const pupil = await dbRow(
+    `SELECT s.id,g.coordinator,u.email FROM students s JOIN groups g ON g.id=s.group_id JOIN users u ON u.id=g.coordinator
+     WHERE s.lifecycle='Active' AND g.id NOT LIKE 'DEMO-%' AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.student_id=s.id) ORDER BY s.id LIMIT 1`,
+  );
+  await check("account", { id: "ACC-BUY-1", label: "buy-one@example.org", platform: "Nafezly", credits: 10 });
+  await dbExec("UPDATE accounts SET student_id=?,coordinator_id=?,linked_at=? WHERE id='ACC-BUY-1'", pupil.id, pupil.coordinator, new Date().toISOString());
+  current = { id: pupil.coordinator, email: pupil.email };
+  await check("account_service_status", { account_id: "ACC-BUY-1", status: "Buy" });
+  assert.equal((await dbRow("SELECT status FROM account_orders WHERE account_id='ACC-BUY-1'")).status, "Buy");
+  await check("account_service_status", { account_id: "ACC-BUY-1", status: "In Progress" });
+  assert.equal((await dbRow("SELECT status FROM account_orders WHERE account_id='ACC-BUY-1'")).status, "In Progress", "the same order moves on");
+  assert.equal((await dbRow("SELECT count(*) n FROM account_orders WHERE account_id='ACC-BUY-1'")).n, 1);
+  current = { id: "owner", email: "owner@example.com" };
+  await dbExec("UPDATE accounts SET student_id=NULL,status='Retired' WHERE id='ACC-BUY-1'");
+});
