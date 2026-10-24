@@ -3413,6 +3413,9 @@ test("a coach sees their own students' progress, and nothing about how a gig was
     );
     assert.ok(view.students.length > 0);
     assert.ok(view.students.every((s) => coached.has(s.group_id)), "only the groups this person coaches");
+    // Coaches see their students' phone numbers (decided 24 Oct 2026).
+    const phone = (await dbRow("SELECT phone FROM students WHERE id=?", learner.id)).phone;
+    assert.equal(view.students.find((s) => s.id === learner.id).phone, phone || null);
     const gig = view.students.find((s) => s.id === learner.id).gigs.find((g) => g.id === "GIG-COACHVIEW");
     assert.ok(gig, "the gig is listed");
     assert.equal(gig.usd, 12);

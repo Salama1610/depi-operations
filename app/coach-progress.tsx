@@ -164,6 +164,16 @@ export function CoachProgress() {
                 <span className="coach-progress-name">
                   <strong>{s.name}</strong>
                   <small>{s.group_id}</small>
+                  {/* The student's phone, tap to call (a student may have two, split by "/"). */}
+                  {String(s.phone || "")
+                    .split("/")
+                    .map((n: string) => n.trim())
+                    .filter(Boolean)
+                    .map((n: string) => (
+                      <a key={n} className="coach-progress-phone" href={`tel:${n.replace(/[^\d+]/g, "")}`} dir="ltr" onClick={(e) => e.stopPropagation()}>
+                        {n}
+                      </a>
+                    ))}
                 </span>
                 {/* The portal sheet's summary: gigs accepted and rejected, of all its gigs. */}
                 <span className="coach-progress-portal-sum" title={t("On the ministry portal")}>

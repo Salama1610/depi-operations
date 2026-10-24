@@ -1500,3 +1500,5 @@ td .searchable-select,td .pick-inline{max-width:240px;min-width:0}
 .svc-link{white-space:nowrap}
 .svc-platform{color:#6a7891;font-size:11px;text-transform:capitalize}
 .svc-sheet .account-login-line{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+/* Coach progress: the student's phone under their name. */
+.coach-progress-phone{font-size:12px;color:#4265ce;text-decoration:none;align-self:flex-start}

@@ -27,7 +27,7 @@ export async function GET() {
     permit(u, ["Coach"]);
     await rateLimit("coach-progress:" + u.id, 60, 60);
     const students = await all(
-      `SELECT s.id,s.name,s.group_id FROM students s JOIN groups g ON g.id=s.group_id
+      `SELECT s.id,s.name,s.group_id,s.phone FROM students s JOIN groups g ON g.id=s.group_id
        WHERE s.lifecycle='Active' AND COALESCE(g.delivery_model,'Regular')<>'Industry' AND ${sameSide(u, "g.id")}
          AND (g.coach=? OR EXISTS (SELECT 1 FROM group_coaches gc WHERE gc.group_id=g.id AND gc.user_id=? AND gc.status='Active' AND gc.coach_type IN ('Outcome Coach','Support Coach')))
        ORDER BY s.group_id,s.name`,
@@ -107,6 +107,7 @@ export async function GET() {
         id: s.id,
         name: s.name,
         group_id: s.group_id,
+        phone: s.phone || null,
         attendance: attendance
           .filter((a: any) => a.student_id === s.id)
           .map((a: any) => ({ at: a.starts_at, week: a.week, present: a.status !== "Absent" })),

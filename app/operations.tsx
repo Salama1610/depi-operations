@@ -5497,7 +5497,8 @@ See you there!`,
                     {selectedStudent.track}
                   </p>
                   {/* How to reach the student directly: their phone (tap to call) and email. */}
-                  {!onlyCoach && (selectedStudent.phone || selectedStudent.email) && (
+                  {/* Coaches see the phone too (decided 24 Oct 2026), not the email. */}
+                  {(selectedStudent.phone || (!onlyCoach && selectedStudent.email)) && (
                     <p className="contact-line">
                       {String(selectedStudent.phone || "")
                         .split("/")
@@ -5511,7 +5512,7 @@ See you there!`,
                             </a>
                           );
                         })}
-                      {selectedStudent.email && (
+                      {!onlyCoach && selectedStudent.email && (
                         <a className="text-link" href={`mailto:${selectedStudent.email}`} dir="ltr">
                           <Mail size={13} /> {selectedStudent.email}
                         </a>
