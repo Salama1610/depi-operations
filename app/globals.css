@@ -1511,3 +1511,7 @@ td .searchable-select,td .pick-inline{max-width:240px;min-width:0}
 .portal-link-form{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px}
 .portal-link-form input{height:32px;width:170px;border:1px solid #dae2ef;border-radius:6px;padding:0 8px;font:inherit;font-size:13px}
 .portal-link-error{flex-basis:100%;padding:6px 8px}
+/* The link-by-national-ID button: blue, and filled where a row still needs a link. */
+.small-btn.portal-link-btn{border-color:#315ce8;color:#315ce8;font-weight:600}
+.small-btn.portal-link-btn.is-needed{background:#315ce8;color:#fff}
+.small-btn.portal-link-btn.is-needed:hover{background:#244ac8;color:#fff}

@@ -7,7 +7,7 @@
 // away. Coordinators see their own linked students.
 
 import { useEffect, useMemo, useState } from "react";
-import { ExternalLink, FileUp, RefreshCw } from "lucide-react";
+import { ExternalLink, FileUp, RefreshCw, Link2 } from "lucide-react";
 import { useLocale, useT } from "@/lib/i18n/context";
 import { SearchableSelect } from "@/components/searchable-select";
 import { readSheet } from "@/lib/spreadsheet";
@@ -571,8 +571,8 @@ function PortalRow({
           )}
           {canLink && !linking && (
             <span className="portal-link-actions">
-              <button type="button" className="text-link" onClick={() => setLinking(true)}>
-                {s.student_id ? t("Change link") : t("Link by national ID")}
+              <button type="button" className={"small-btn portal-link-btn" + (s.student_id ? "" : " is-needed")} onClick={() => setLinking(true)}>
+                <Link2 size={14} /> {s.student_id ? t("Change link") : t("Link by national ID")}
               </button>
               {Number(s.linked_by_hand) === 1 && (
                 <button type="button" className="text-link" disabled={busy} onClick={() => link("unlink")}>
@@ -592,7 +592,7 @@ function PortalRow({
                 onChange={(e) => setNid(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && nid.trim() && link("link")}
               />
-              <button type="button" className="small-btn" disabled={busy || !nid.trim()} onClick={() => link("link")}>{t("Link")}</button>
+              <button type="button" className="small-btn portal-link-btn is-needed" disabled={busy || !nid.trim()} onClick={() => link("link")}><Link2 size={14} /> {t("Link")}</button>
               <button type="button" className="small-btn" disabled={busy} onClick={() => { setLinking(false); setLinkError(""); }}>{t("Cancel")}</button>
               {linkError && <small className="form-error portal-link-error">{linkError}</small>}
             </span>
