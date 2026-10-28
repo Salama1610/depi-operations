@@ -175,6 +175,8 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
     const mapped = draft.rows.map((row) => {
       const out: Row = Object.fromEntries(pairs.map(([h, f]) => [f, row[h] ?? ""]));
       if (!nidMapped && draft.nidColumn) out.national_id = row[draft.nidColumn] ?? "";
+      // Every cell, so an email, phone or national ID in any column can find the student.
+      if (draft.sheet === "students") out._cells = Object.values(row).map((v) => String(v ?? "")).filter(Boolean);
       return out;
     });
     setProgress({ sent: 0, total: mapped.length });

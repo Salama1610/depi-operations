@@ -178,19 +178,54 @@ export function portalGigRow(row: Record<string, unknown>) {
   };
 }
 
+/** A name reduced for comparison: lower case, no tashkeel or tatweel, one spelling of alef, taa marbuta and yaa. */
+export function nameKey(value: unknown) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[\u064B-\u0652\u0640]/g, "")
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ة/g, "ه")
+    .replace(/ى/g, "ي")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+/** The key for a student's name within their group; the same name twice in a group is not used. */
+export const nameInGroup = (group: unknown, name: unknown) => `${String(group ?? "").trim().toUpperCase()}|${nameKey(name)}`;
+
 /**
- * The application student a portal row belongs to: the same national ID first
- * (when the sheet has one), then the same email, then the same mobile.
- * `byNationalId`, `byEmail` and `byPhone` map to student ids.
+ * The application student a portal row belongs to, from the surest sign to the
+ * weakest: the same national ID, email or mobile in the mapped columns; then a
+ * national ID, email or mobile found in any other cell of the row (`cells`);
+ * last, the same name as exactly one of our students in the group the row's
+ * round code names (`byNameInGroup`, where an ambiguous name maps to "").
  */
 export function linkStudent(
-  row: { email?: string | null; phone?: string | null; national_id?: unknown },
+  row: { email?: string | null; phone?: string | null; national_id?: unknown; full_name?: string | null; round_code?: string | null },
   byEmail: Map<string, string>,
   byPhone: Map<string, string>,
   byNationalId: Map<string, string> = new Map(),
+  more: { cells?: unknown[]; byNameInGroup?: Map<string, string> } = {},
 ) {
   const nid = normalizeNationalId(row.national_id);
   if (isNationalId(nid) && byNationalId.has(nid)) return byNationalId.get(nid)!;
+  const direct = linkByContact(row, byEmail, byPhone);
+  if (direct) return direct;
+  // Any other cell of the row: a national ID, an email or a mobile wherever it is.
+  for (const cell of more.cells || []) {
+    const text = normalizeDigits(cell);
+    for (const n of text.match(/\d{14}/g) || []) if (byNationalId.has(n)) return byNationalId.get(n)!;
+    for (const e of text.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g) || []) if (byEmail.has(e.toLowerCase())) return byEmail.get(e.toLowerCase())!;
+    for (const p of String(normalizePhone(text)).split(" / ")) if (p && byPhone.has(p)) return byPhone.get(p)!;
+  }
+  if (more.byNameInGroup && row.full_name && row.round_code) {
+    const id = more.byNameInGroup.get(nameInGroup(row.round_code, row.full_name));
+    if (id) return id;
+  }
+  return null;
+}
+
+function linkByContact(row: { email?: string | null; phone?: string | null }, byEmail: Map<string, string>, byPhone: Map<string, string>) {
   if (row.email && byEmail.has(row.email)) return byEmail.get(row.email)!;
   for (const phone of String(row.phone || "").split(" / "))
     if (phone && byPhone.has(phone)) return byPhone.get(phone)!;

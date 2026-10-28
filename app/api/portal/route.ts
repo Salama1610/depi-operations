@@ -3,6 +3,7 @@ import { can, ensure } from "@/lib/domain/rules";
 import { isNationalId, normalizeNationalId } from "@/lib/domain/sheet-mapping";
 import {
   linkStudent,
+  nameInGroup,
   mappingProblems,
   portalFields,
   portalGigRow,
@@ -237,7 +238,13 @@ export async function POST(req: Request) {
       ensure(rows.length > 0 && rows.length <= chunkLimit, `Send between 1 and ${chunkLimit} rows at a time.`);
       const jobs: any[] = [];
       if (sheet === "students") {
-        const people = await all("SELECT id,email,phone,national_id FROM students");
+        const people = await all("SELECT id,email,phone,national_id,name,group_id FROM students");
+        // Our students' names within their group; a name twice in one group is not used.
+        const byNameInGroup = new Map<string, string>();
+        for (const p of people) {
+          const key = nameInGroup(p.group_id, p.name);
+          byNameInGroup.set(key, byNameInGroup.has(key) ? "" : p.id);
+        }
         const byEmail = new Map<string, string>();
         const byPhone = new Map<string, string>();
         const byNationalId = new Map<string, string>();
@@ -249,7 +256,7 @@ export async function POST(req: Request) {
         }
         // The national ID only finds the student; the stored row does not keep it.
         const clean = rows
-          .map((raw: any) => ({ row: portalStudentRow(raw), nationalId: raw?.national_id }))
+          .map((raw: any) => ({ row: portalStudentRow(raw), nationalId: raw?.national_id, cells: Array.isArray(raw?._cells) ? raw._cells.slice(0, 60) : [] }))
           .filter((r: any) => r.row.portal_id);
         const columns = ["id", "batch_id", "student_id", ...Object.keys(portalStudentRow({}))];
         for (let i = 0; i < clean.length; i += 200) {
@@ -260,7 +267,7 @@ export async function POST(req: Request) {
               ...part.flatMap((r: any) => [
                 uid("PST"),
                 upload.batch_id,
-                linkStudent({ ...r.row, national_id: r.nationalId }, byEmail, byPhone, byNationalId),
+                linkStudent({ ...r.row, national_id: r.nationalId }, byEmail, byPhone, byNationalId, { cells: r.cells, byNameInGroup }),
                 ...Object.values(r.row),
               ]),
             ),

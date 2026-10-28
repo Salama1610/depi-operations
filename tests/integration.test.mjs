@@ -4531,4 +4531,27 @@ test("a portal row is matched to our student by national ID first, and the ID is
   const row = await dbRow("SELECT * FROM portal_students WHERE batch_id=? AND portal_id='NID-1'", begun.batch);
   assert.equal(row.student_id, ours.id);
   assert.ok(!JSON.stringify(row).includes(ours.national_id), "the national ID is not stored with the sheet");
+
+  // Any column, then the name within the round code's group.
+  const byMail = await dbRow("SELECT id,email FROM students WHERE lifecycle='Active' AND email IS NOT NULL AND trim(email)<>'' AND id NOT LIKE 'DEMO-%' AND id<>? ORDER BY id DESC LIMIT 1", ours.id);
+  const named = await dbRow(
+    `SELECT s.id,s.name,s.group_id FROM students s WHERE s.lifecycle='Active' AND s.id NOT LIKE 'DEMO-%' AND s.id NOT IN (?,?)
+       AND (SELECT count(*) FROM students t WHERE t.group_id=s.group_id AND lower(trim(t.name))=lower(trim(s.name)))=1 ORDER BY s.id LIMIT 1`,
+    ours.id, byMail.id,
+  );
+  const again = await (await post({ action: "begin", sheet: "students", mapping: { ID: "portal_id", Email: "email", Name: "full_name", Round: "round_code" }, total: 3, file_name: "students.xlsx" })).json();
+  await post({
+    action: "chunk",
+    batch: again.batch,
+    rows: [
+      { portal_id: "ANY-1", email: "portal-only@example.org", full_name: "Someone", round_code: "X", _cells: ["ANY-1", "portal-only@example.org", "Profile: " + byMail.email.toUpperCase()] },
+      { portal_id: "NAME-1", email: "elsewhere@example.org", full_name: "  " + named.name.toUpperCase() + " ", round_code: named.group_id.toLowerCase(), _cells: [] },
+      { portal_id: "NAME-2", email: "elsewhere2@example.org", full_name: named.name, round_code: "SOME_OTHER_GROUP", _cells: [] },
+    ],
+  });
+  await post({ action: "commit", batch: again.batch });
+  const linkOf = async (id) => (await dbRow("SELECT student_id FROM portal_students WHERE batch_id=? AND portal_id=?", again.batch, id)).student_id;
+  assert.equal(await linkOf("ANY-1"), byMail.id, "an email in any column finds the student");
+  assert.equal(await linkOf("NAME-1"), named.id, "the same name in the round code's group finds the student");
+  assert.equal(await linkOf("NAME-2"), null, "a name in another group does not");
 });
