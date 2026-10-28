@@ -1294,6 +1294,22 @@ export const portalUploads = sqliteTable(
   },
   (t) => [uniqueIndex("portal_uploads_batch").on(t.batchId), index("portal_uploads_sheet_idx").on(t.sheet, t.status)],
 );
+// Portal students linked to ours by hand, through a national ID. See migration 202610280044.
+export const portalLinks = sqliteTable(
+  "portal_links",
+  {
+    portalId: text("portal_id").primaryKey(),
+    email: text("email"),
+    studentId: text("student_id")
+      .notNull()
+      .references(() => students.id),
+    linkedBy: text("linked_by")
+      .notNull()
+      .references(() => users.id),
+    linkedAt: text("linked_at").notNull(),
+  },
+  (t) => [index("portal_links_email_idx").on(t.email)],
+);
 export const portalStudents = sqliteTable(
   "portal_students",
   {

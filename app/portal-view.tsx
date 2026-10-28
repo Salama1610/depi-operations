@@ -445,7 +445,7 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
                 </thead>
                 <tbody>
                   {rows.slice(0, shown).map((s) => (
-                    <PortalRow key={s.portal_id} s={s} c={counts.get(s.portal_id)} open={open === s.portal_id} gigs={gigs[s.portal_id]} error={gigErrors[s.portal_id]} onToggle={() => toggle(s.portal_id)} />
+                    <PortalRow key={s.portal_id} s={s} c={counts.get(s.portal_id)} open={open === s.portal_id} gigs={gigs[s.portal_id]} error={gigErrors[s.portal_id]} onToggle={() => toggle(s.portal_id)} canLink={Boolean(data?.canLink)} onLinked={load} />
                   ))}
                 </tbody>
               </table>
@@ -466,7 +466,7 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
                 {rows.slice(0, shown).map((s) => {
                   const c = counts.get(s.portal_id);
                   return (
-                    <PortalRow key={s.portal_id} s={s} c={c} open={open === s.portal_id} gigs={gigs[s.portal_id]} error={gigErrors[s.portal_id]} onToggle={() => toggle(s.portal_id)} />
+                    <PortalRow key={s.portal_id} s={s} c={c} open={open === s.portal_id} gigs={gigs[s.portal_id]} error={gigErrors[s.portal_id]} onToggle={() => toggle(s.portal_id)} canLink={Boolean(data?.canLink)} onLinked={load} />
                   );
                 })}
               </tbody>
@@ -500,8 +500,45 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
   );
 }
 
-function PortalRow({ s, c, open, gigs, error, onToggle }: { s: Row; c?: Row; open: boolean; gigs?: Row[]; error?: string; onToggle: () => void }) {
+function PortalRow({
+  s,
+  c,
+  open,
+  gigs,
+  error,
+  onToggle,
+  canLink,
+  onLinked,
+}: {
+  s: Row;
+  c?: Row;
+  open: boolean;
+  gigs?: Row[];
+  error?: string;
+  onToggle: () => void;
+  canLink?: boolean;
+  onLinked?: () => void;
+}) {
   const t = useT();
+  // Linking by hand: Project Operations and administrators type our student's national ID.
+  const [linking, setLinking] = useState(false);
+  const [nid, setNid] = useState("");
+  const [linkError, setLinkError] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function link(action: "link" | "unlink") {
+    setBusy(true);
+    setLinkError("");
+    try {
+      await call({ action, portal_id: s.portal_id, national_id: nid }, t("The link was not saved."));
+      setLinking(false);
+      setNid("");
+      onLinked?.();
+    } catch (e: any) {
+      setLinkError(t(e.message));
+    } finally {
+      setBusy(false);
+    }
+  }
   // Dates in the page's language, with Latin digits like the rest of the app.
   const tag = useLocale() === "ar" ? "ar-EG-u-nu-latn" : "en-GB";
   const tone = (v?: string) => (/Graduat|Approved/.test(v || "") ? "green" : /Reject|Not/.test(v || "") ? "red" : /Pending|Started/.test(v || "") ? "amber" : "neutral");
@@ -522,9 +559,43 @@ function PortalRow({ s, c, open, gigs, error, onToggle }: { s: Row; c?: Row; ope
         <td>{s.total_revenue != null ? "$" + Number(s.total_revenue).toLocaleString("en-US", { maximumFractionDigits: 2 }) : "—"}</td>
         <td>
           {s.student_id ? (
-            <span>{s.app_name}<small className="table-subline">{s.group_id} · {s.coordinator_name}</small></span>
+            <span>
+              {s.app_name}
+              <small className="table-subline">{s.group_id} · {s.coordinator_name}</small>
+              {Number(s.linked_by_hand) === 1 && (
+                <small className="table-subline">{t("Linked by hand by {v0}", { v0: s.linked_by_name || "—" })}</small>
+              )}
+            </span>
           ) : (
             <small>{t("Not linked")}</small>
+          )}
+          {canLink && !linking && (
+            <span className="portal-link-actions">
+              <button type="button" className="text-link" onClick={() => setLinking(true)}>
+                {s.student_id ? t("Change link") : t("Link by national ID")}
+              </button>
+              {Number(s.linked_by_hand) === 1 && (
+                <button type="button" className="text-link" disabled={busy} onClick={() => link("unlink")}>
+                  {t("Remove link")}
+                </button>
+              )}
+            </span>
+          )}
+          {canLink && linking && (
+            <span className="portal-link-form">
+              <input
+                dir="ltr"
+                inputMode="numeric"
+                maxLength={20}
+                placeholder={t("14-digit national ID")}
+                value={nid}
+                onChange={(e) => setNid(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && nid.trim() && link("link")}
+              />
+              <button type="button" className="small-btn" disabled={busy || !nid.trim()} onClick={() => link("link")}>{t("Link")}</button>
+              <button type="button" className="small-btn" disabled={busy} onClick={() => { setLinking(false); setLinkError(""); }}>{t("Cancel")}</button>
+              {linkError && <small className="form-error portal-link-error">{linkError}</small>}
+            </span>
           )}
         </td>
         <td><button className="small-btn" onClick={onToggle}>{open ? t("Hide gigs") : t("Gigs")}</button></td>

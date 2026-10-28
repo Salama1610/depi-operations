@@ -1505,3 +1505,9 @@ td .searchable-select,td .pick-inline{max-width:240px;min-width:0}
 /* Portal upload: whether a national-ID column was found for matching. */
 .portal-nid{display:block;margin-top:4px;color:#a06b1f}
 .portal-nid.is-ok{color:#2f7a6d}
+/* Portal view: linking a portal student to ours by national ID. */
+.portal-link-actions{display:flex;gap:10px;margin-top:4px;flex-wrap:wrap}
+.portal-link-actions .text-link{font-size:12px}
+.portal-link-form{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px}
+.portal-link-form input{height:32px;width:170px;border:1px solid #dae2ef;border-radius:6px;padding:0 8px;font:inherit;font-size:13px}
+.portal-link-error{flex-basis:100%;padding:6px 8px}

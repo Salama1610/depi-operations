@@ -26,6 +26,8 @@ const chunkLimit = 1000;
 const mappingName = "DEPI portal export";
 
 const uploads = (u: any) => can(u.roles, ["Operations Systems / Admin", ...portalUploadRoles]);
+// Linking a portal student to ours by hand, through a national ID.
+const linksByHand = (u: any) => can(u.roles, ["Project Operations", "Operations Systems / Admin"]);
 
 /** The rows a person may read: the whole cohort for leaders, their own linked students otherwise. */
 async function scopedStudentIds(u: any) {
@@ -108,9 +110,12 @@ export async function GET(req: Request) {
       ? await all(
           `SELECT p.portal_id,p.email,p.full_name,p.phone,p.round_code,p.provider,p.track,p.profile,p.status,p.final_status,
                   p.graduate_type,p.total_gigs,p.approved_gigs,p.rejected_gigs,p.total_revenue,p.student_id,
-                  s.name app_name,s.group_id,g.coordinator,c.name coordinator_name
+                  s.name app_name,s.group_id,g.coordinator,c.name coordinator_name,
+                  CASE WHEN pl.student_id=p.student_id THEN 1 ELSE 0 END linked_by_hand,lu.name linked_by_name
            FROM portal_students p
            LEFT JOIN students s ON s.id=p.student_id
+           LEFT JOIN portal_links pl ON pl.portal_id=p.portal_id
+           LEFT JOIN users lu ON lu.id=pl.linked_by
            LEFT JOIN groups g ON g.id=s.group_id
            LEFT JOIN users c ON c.id=g.coordinator
            WHERE p.batch_id=?`,
@@ -156,6 +161,7 @@ export async function GET(req: Request) {
     );
     return Response.json({
       canUpload: uploads(u),
+      canLink: linksByHand(u),
       fields: portalFields,
       mappings,
       active: { students, gigs },
@@ -177,6 +183,45 @@ export async function POST(req: Request) {
     await rateLimit("portal-upload:" + u.id, 120, 60);
     const x = await req.json();
     const t = now();
+
+    // 0. Project Operations or an administrator links a portal student to ours
+    // by our student's national ID; the link holds for every later upload.
+    if (x.action === "link" || x.action === "unlink") {
+      ensure(linksByHand(u), "Only Project Operations and administrators link portal students by hand.");
+      const active = await activeBatch("students");
+      ensure(active, "Upload the students sheet first.");
+      const portalId = String(x.portal_id || "").trim();
+      const row: any = await stmt("SELECT portal_id,email,student_id FROM portal_students WHERE batch_id=? AND portal_id=?", active.batch_id, portalId).first();
+      ensure(row, "This portal student is not in the current students sheet.");
+      if (x.action === "unlink") {
+        const saved: any = await stmt("SELECT * FROM portal_links WHERE portal_id=?", portalId).first();
+        ensure(saved, "This student was not linked by hand.");
+        await db().batch([
+          stmt("DELETE FROM portal_links WHERE portal_id=?", portalId),
+          stmt("UPDATE portal_students SET student_id=NULL WHERE batch_id=? AND portal_id=? AND student_id=?", active.batch_id, portalId, saved.student_id),
+          auditStmt(u, "Portal student unlinked", portalId, { student_id: saved.student_id }, null, uid("REQ")),
+        ]);
+        return Response.json({ ok: true });
+      }
+      const nid = normalizeNationalId(x.national_id);
+      ensure(isNationalId(nid), "Enter the student's 14-digit national ID.");
+      const ours: any = await stmt(
+        "SELECT id,name,group_id FROM students WHERE trim(national_id)=? AND id NOT LIKE 'DEMO-%'",
+        nid,
+      ).first();
+      ensure(ours, "No student of ours has this national ID.");
+      await db().batch([
+        stmt(
+          `INSERT INTO portal_links(portal_id,email,student_id,linked_by,linked_at) VALUES(?,?,?,?,?)
+           ON CONFLICT(portal_id) DO UPDATE SET email=excluded.email,student_id=excluded.student_id,linked_by=excluded.linked_by,linked_at=excluded.linked_at`,
+          portalId, row.email || null, ours.id, u.id, t,
+        ),
+        stmt("UPDATE portal_students SET student_id=? WHERE batch_id=? AND portal_id=?", ours.id, active.batch_id, portalId),
+        // Only our student is recorded, never the national ID that was typed.
+        auditStmt(u, "Portal student linked by hand", portalId, { student_id: ours.id, previous_student_id: row.student_id || null }, null, uid("REQ")),
+      ]);
+      return Response.json({ ok: true, student: ours });
+    }
 
     // 1. A new upload: the sheet, its column mapping and how many rows will come.
     if (x.action === "begin") {
@@ -239,6 +284,10 @@ export async function POST(req: Request) {
       const jobs: any[] = [];
       if (sheet === "students") {
         const people = await all("SELECT id,email,phone,national_id,name,group_id FROM students");
+        // Links made by hand win over every other rule: by the portal's ID, then its email.
+        const handLinks = await all("SELECT portal_id,email,student_id FROM portal_links");
+        const byHand = new Map<string, string>(handLinks.map((l: any) => [String(l.portal_id), l.student_id]));
+        const byHandEmail = new Map<string, string>(handLinks.filter((l: any) => l.email).map((l: any) => [String(l.email).toLowerCase(), l.student_id]));
         // Our students' names within their group; a name twice in one group is not used.
         const byNameInGroup = new Map<string, string>();
         for (const p of people) {
@@ -267,7 +316,9 @@ export async function POST(req: Request) {
               ...part.flatMap((r: any) => [
                 uid("PST"),
                 upload.batch_id,
-                linkStudent({ ...r.row, national_id: r.nationalId }, byEmail, byPhone, byNationalId, { cells: r.cells, byNameInGroup }),
+                byHand.get(String(r.row.portal_id)) ||
+                  (r.row.email ? byHandEmail.get(String(r.row.email).toLowerCase()) : undefined) ||
+                  linkStudent({ ...r.row, national_id: r.nationalId }, byEmail, byPhone, byNationalId, { cells: r.cells, byNameInGroup }),
                 ...Object.values(r.row),
               ]),
             ),

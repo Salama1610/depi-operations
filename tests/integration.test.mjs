@@ -4554,4 +4554,33 @@ test("a portal row is matched to our student by national ID first, and the ID is
   assert.equal(await linkOf("ANY-1"), byMail.id, "an email in any column finds the student");
   assert.equal(await linkOf("NAME-1"), named.id, "the same name in the round code's group finds the student");
   assert.equal(await linkOf("NAME-2"), null, "a name in another group does not");
+
+  // Project Operations or an administrator links a row by hand, by national ID, and it holds for later uploads.
+  const picked = await dbRow("SELECT id,national_id FROM students WHERE lifecycle='Active' AND id NOT LIKE 'DEMO-%' AND id NOT IN (?,?,?) ORDER BY id DESC LIMIT 1", ours.id, byMail.id, named.id);
+  await dbExec("UPDATE students SET national_id='30001012345678' WHERE id=?", picked.id);
+  const other = { id: picked.id, national_id: "30001012345678" };
+  const coordinator = await dbRow("SELECT id,email FROM users WHERE roles LIKE '%Operations Coordinator%' AND active=1 AND id NOT LIKE 'DEMO-%' LIMIT 1");
+  current = { id: coordinator.id, email: coordinator.email };
+  assert.ok((await (await post({ action: "link", portal_id: "NAME-2", national_id: other.national_id })).json()).error, "not for coordinators");
+  current = { id: "owner", email: "owner@example.com" };
+  assert.match((await (await post({ action: "link", portal_id: "NAME-2", national_id: "123" })).json()).error, /14-digit/);
+  assert.match((await (await post({ action: "link", portal_id: "NAME-2", national_id: "29901019999999" })).json()).error, /No student of ours/);
+  const linkedNow = await (await post({ action: "link", portal_id: "NAME-2", national_id: other.national_id })).json();
+  assert.equal(linkedNow.error, undefined, linkedNow.error);
+  assert.equal(await linkOf("NAME-2"), other.id, "linked at once");
+  const saved = await dbRow("SELECT * FROM portal_links WHERE portal_id='NAME-2'");
+  assert.equal(saved.student_id, other.id);
+  assert.ok(!JSON.stringify(saved).includes(other.national_id), "the national ID typed is not kept");
+  const viewNow = await (await portal.GET(new Request("https://test.local/api/portal"))).json();
+  assert.equal(Number(viewNow.students.find((r) => r.portal_id === "NAME-2").linked_by_hand), 1);
+  // The next upload links that portal student the same way, whatever else it says.
+  const third = await (await post({ action: "begin", sheet: "students", mapping: { ID: "portal_id", Email: "email" }, total: 1, file_name: "students.xlsx" })).json();
+  await post({ action: "chunk", batch: third.batch, rows: [{ portal_id: "NAME-2", email: "changed@example.org", _cells: [] }] });
+  await post({ action: "commit", batch: third.batch });
+  assert.equal((await dbRow("SELECT student_id FROM portal_students WHERE batch_id=? AND portal_id='NAME-2'", third.batch)).student_id, other.id);
+  // And it can be removed.
+  assert.equal((await (await post({ action: "unlink", portal_id: "NAME-2" })).json()).ok, true);
+  assert.equal((await dbRow("SELECT student_id FROM portal_students WHERE batch_id=? AND portal_id='NAME-2'", third.batch)).student_id, null);
+  assert.equal(await dbRow("SELECT * FROM portal_links WHERE portal_id='NAME-2'"), null);
+  await dbExec("UPDATE students SET national_id=? WHERE id=?", picked.national_id, picked.id);
 });

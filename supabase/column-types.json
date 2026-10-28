@@ -862,5 +862,12 @@
     "done_at": "timestamptz",
     "proof_at": "timestamptz",
     "cancelled_at": "timestamptz"
+  },
+  "portal_links": {
+    "portal_id": "text",
+    "email": "text",
+    "student_id": "text",
+    "linked_by": "text",
+    "linked_at": "timestamptz"
   }
 }
