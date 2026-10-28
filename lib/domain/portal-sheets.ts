@@ -8,7 +8,7 @@
 // coordinators record in the app are internal validation; these sheets are
 // the cohort's official one.
 
-import { normalizeDigits, normalizeHeader, normalizePhone } from "./sheet-mapping";
+import { isNationalId, normalizeDigits, normalizeHeader, normalizeNationalId, normalizePhone } from "./sheet-mapping";
 
 export type PortalSheet = "students" | "gigs";
 
@@ -19,6 +19,8 @@ export const portalFields: Record<PortalSheet, FieldSpec[]> = {
   students: [
     { field: "portal_id", label: "Portal student ID", aliases: ["id", "student id", "portal id", "user id"], required: true },
     { field: "email", label: "Email", aliases: ["email", "e-mail", "student email", "mail"] },
+    // Used only to find our student; it is a first password, so it is never stored with the sheet.
+    { field: "national_id", label: "National ID", aliases: ["national id", "national number", "nid", "national_id", "الرقم القومي", "رقم قومي", "الرقم القومى"] },
     { field: "full_name", label: "Full name", aliases: ["full name", "name", "student name"] },
     { field: "phone", label: "Phone", aliases: ["phone", "mobile", "phone number"] },
     { field: "round_code", label: "Round code", aliases: ["round code", "group code", "round"] },
@@ -80,6 +82,21 @@ export function guessPortalMapping(sheet: PortalSheet, headers: string[]) {
     used.add(spec.field);
   }
   return mapping;
+}
+
+/**
+ * The column of a students sheet that holds national IDs, whatever its header
+ * says (even the portal's own "ID"): the first whose filled cells are mostly
+ * valid 14-digit Egyptian national IDs. Null when there is none.
+ */
+export function nationalIdColumn(headers: string[], rows: Record<string, unknown>[]) {
+  for (const header of headers) {
+    const filled = rows.map((r) => r[header]).filter((v) => String(v ?? "").trim());
+    if (filled.length < 3) continue;
+    const ids = filled.filter((v) => isNationalId(v)).length;
+    if (ids / filled.length >= 0.6) return header;
+  }
+  return null;
 }
 
 /** What a mapping is missing before the sheet can be read. */
@@ -162,14 +179,18 @@ export function portalGigRow(row: Record<string, unknown>) {
 }
 
 /**
- * The application student a portal row belongs to: the same email first,
- * then the same mobile. `byEmail` and `byPhone` map to student ids.
+ * The application student a portal row belongs to: the same national ID first
+ * (when the sheet has one), then the same email, then the same mobile.
+ * `byNationalId`, `byEmail` and `byPhone` map to student ids.
  */
 export function linkStudent(
-  row: { email?: string | null; phone?: string | null },
+  row: { email?: string | null; phone?: string | null; national_id?: unknown },
   byEmail: Map<string, string>,
   byPhone: Map<string, string>,
+  byNationalId: Map<string, string> = new Map(),
 ) {
+  const nid = normalizeNationalId(row.national_id);
+  if (isNationalId(nid) && byNationalId.has(nid)) return byNationalId.get(nid)!;
   if (row.email && byEmail.has(row.email)) return byEmail.get(row.email)!;
   for (const phone of String(row.phone || "").split(" / "))
     if (phone && byPhone.has(phone)) return byPhone.get(phone)!;

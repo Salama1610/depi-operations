@@ -4505,3 +4505,30 @@ test("a coordinator marks a service Buy first, then follows it on", async () => 
   current = { id: "owner", email: "owner@example.com" };
   await dbExec("UPDATE accounts SET student_id=NULL,status='Retired' WHERE id='ACC-BUY-1'");
 });
+
+test("a portal row is matched to our student by national ID first, and the ID is not kept with the sheet", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const portal = await route("portal");
+  const post = (body) => portal.POST(new Request("https://test.local/api/portal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
+  const ours = await dbRow("SELECT id,national_id FROM students WHERE lifecycle='Active' AND length(trim(national_id))=14 AND id NOT LIKE 'DEMO-%' ORDER BY id LIMIT 1");
+  assert.ok(ours, "a student with a national ID");
+  const begun = await (await post({ action: "begin", sheet: "students", mapping: { ID: "portal_id", Email: "email", NID: "national_id" }, total: 2, file_name: "students.xlsx" })).json();
+  assert.ok(begun.batch, JSON.stringify(begun));
+  assert.equal(
+    (await post({
+      action: "chunk",
+      batch: begun.batch,
+      rows: [
+        { portal_id: "NID-1", email: "a-different-address@example.org", national_id: " " + ours.national_id },
+        { portal_id: "NID-2", email: "nobody@example.org", national_id: "29901010000000" },
+      ],
+    })).status,
+    200,
+  );
+  const done = await (await post({ action: "commit", batch: begun.batch })).json();
+  assert.equal(done.linked, 1, "linked by national ID although the email differs");
+  const row = await dbRow("SELECT * FROM portal_students WHERE batch_id=? AND portal_id='NID-1'", begun.batch);
+  assert.equal(row.student_id, ours.id);
+  assert.ok(!JSON.stringify(row).includes(ours.national_id), "the national ID is not stored with the sheet");
+});

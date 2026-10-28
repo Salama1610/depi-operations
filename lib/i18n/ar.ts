@@ -2853,4 +2853,7 @@ export const ar: Record<string, string> = {
   "In our records, not in the sheet · {v0} students": "في سجلاتنا وغير موجودين في الشيت · {v0} طالب",
   "Our active students that no row of the uploaded students sheet matches, by email or phone. Either they are not on the portal, or the portal has them under another email and phone.": "طلابنا النشطون الذين لا يطابقهم أي صف في شيت الطلاب المرفوع، بالبريد أو الهاتف. إما أنهم غير موجودين على البوابة، أو أن البوابة تسجّلهم ببريد وهاتف مختلفين.",
   "Not linked: students in the portal sheet whose email and phone match none of our students. Usually a different email or phone on the portal, or someone who is not in our records.": "غير مرتبط: طلاب في شيت البوابة لا يطابق بريدهم أو هاتفهم أيًّا من طلابنا. غالبًا بسبب بريد أو هاتف مختلف على البوابة، أو شخص غير موجود في سجلاتنا.",
+  "National IDs found in the column «{v0}»: students are matched by national ID first, then email and phone.": "تم العثور على الأرقام القومية في عمود «{v0}»: تتم مطابقة الطلاب بالرقم القومي أولًا، ثم البريد والهاتف.",
+  "No column of 14-digit national IDs was found, so students are matched by email and phone only.": "لم يتم العثور على عمود بأرقام قومية من 14 رقمًا، لذلك تتم المطابقة بالبريد والهاتف فقط.",
+  "National ID": "الرقم القومي",
 };

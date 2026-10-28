@@ -11,10 +11,10 @@ import { ExternalLink, FileUp, RefreshCw } from "lucide-react";
 import { useLocale, useT } from "@/lib/i18n/context";
 import { SearchableSelect } from "@/components/searchable-select";
 import { readSheet } from "@/lib/spreadsheet";
-import { guessPortalMapping, mappingProblems, type PortalSheet } from "@/lib/domain/portal-sheets";
+import { guessPortalMapping, mappingProblems, nationalIdColumn, type PortalSheet } from "@/lib/domain/portal-sheets";
 
 type Row = Record<string, any>;
-type Draft = { sheet: PortalSheet; fileName: string; headers: string[]; rows: Row[]; mapping: Record<string, string> };
+type Draft = { sheet: PortalSheet; fileName: string; headers: string[]; rows: Row[]; mapping: Record<string, string>; nidColumn: string | null };
 
 const CHUNK = 800;
 
@@ -159,7 +159,10 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
         saved && Object.keys(saved).some((h) => headers.includes(h))
           ? Object.fromEntries(Object.entries(saved).filter(([h]) => headers.includes(h)))
           : guessPortalMapping(sheet, headers);
-      setDraft({ sheet, fileName: file.name, headers, rows, mapping });
+      // The column holding national IDs, found from its values: it matches a
+      // portal student to ours first, before email and phone.
+      const nidColumn = sheet === "students" ? nationalIdColumn(headers, rows) : null;
+      setDraft({ sheet, fileName: file.name, headers, rows, mapping, nidColumn });
     } catch (e: any) {
       setError(e.message);
     }
@@ -168,7 +171,12 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
   async function upload() {
     if (!draft) return;
     const pairs = Object.entries(draft.mapping).filter(([, f]) => f);
-    const mapped = draft.rows.map((row) => Object.fromEntries(pairs.map(([h, f]) => [f, row[h] ?? ""])));
+    const nidMapped = pairs.some(([, f]) => f === "national_id");
+    const mapped = draft.rows.map((row) => {
+      const out: Row = Object.fromEntries(pairs.map(([h, f]) => [f, row[h] ?? ""]));
+      if (!nidMapped && draft.nidColumn) out.national_id = row[draft.nidColumn] ?? "";
+      return out;
+    });
     setProgress({ sent: 0, total: mapped.length });
     setError("");
     const failed = t("The upload failed.");
@@ -282,6 +290,15 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
           <div className="portal-mapping-head">
             <strong>{draft.sheet === "students" ? t("Students sheet") : t("Gigs sheet")}: {draft.fileName}</strong>
             <small>{t("{v0} rows. Check which column fills each field; this is remembered for the next upload.", { v0: draft.rows.length })}</small>
+            {draft.sheet === "students" && (
+              <small className={draft.nidColumn || Object.values(draft.mapping).includes("national_id") ? "portal-nid is-ok" : "portal-nid"}>
+                {draft.nidColumn || Object.values(draft.mapping).includes("national_id")
+                  ? t("National IDs found in the column «{v0}»: students are matched by national ID first, then email and phone.", {
+                      v0: Object.entries(draft.mapping).find(([, f]) => f === "national_id")?.[0] || draft.nidColumn,
+                    })
+                  : t("No column of 14-digit national IDs was found, so students are matched by email and phone only.")}
+              </small>
+            )}
           </div>
           <table className="portal-mapping-table">
             <thead>

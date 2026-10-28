@@ -1,5 +1,6 @@
 import { actor, all, auditStmt, db, now, rateLimit, refuseDemo, scopeSql, stmt, uid } from "@/lib/server";
 import { can, ensure } from "@/lib/domain/rules";
+import { isNationalId, normalizeNationalId } from "@/lib/domain/sheet-mapping";
 import {
   linkStudent,
   mappingProblems,
@@ -236,21 +237,32 @@ export async function POST(req: Request) {
       ensure(rows.length > 0 && rows.length <= chunkLimit, `Send between 1 and ${chunkLimit} rows at a time.`);
       const jobs: any[] = [];
       if (sheet === "students") {
-        const people = await all("SELECT id,email,phone FROM students");
+        const people = await all("SELECT id,email,phone,national_id FROM students");
         const byEmail = new Map<string, string>();
         const byPhone = new Map<string, string>();
+        const byNationalId = new Map<string, string>();
         for (const p of people) {
+          const nid = normalizeNationalId(p.national_id);
+          if (isNationalId(nid)) byNationalId.set(nid, p.id);
           if (p.email) byEmail.set(String(p.email).trim().toLowerCase(), p.id);
           for (const phone of String(p.phone || "").split(" / ")) if (phone) byPhone.set(phone.trim(), p.id);
         }
-        const clean = rows.map(portalStudentRow).filter((r: any) => r.portal_id);
+        // The national ID only finds the student; the stored row does not keep it.
+        const clean = rows
+          .map((raw: any) => ({ row: portalStudentRow(raw), nationalId: raw?.national_id }))
+          .filter((r: any) => r.row.portal_id);
         const columns = ["id", "batch_id", "student_id", ...Object.keys(portalStudentRow({}))];
         for (let i = 0; i < clean.length; i += 200) {
           const part = clean.slice(i, i + 200);
           jobs.push(
             stmt(
               `INSERT INTO portal_students(${columns.join(",")}) VALUES ${part.map(() => `(${columns.map(() => "?").join(",")})`).join(",")}`,
-              ...part.flatMap((r: any) => [uid("PST"), upload.batch_id, linkStudent(r, byEmail, byPhone), ...Object.values(r)]),
+              ...part.flatMap((r: any) => [
+                uid("PST"),
+                upload.batch_id,
+                linkStudent({ ...r.row, national_id: r.nationalId }, byEmail, byPhone, byNationalId),
+                ...Object.values(r.row),
+              ]),
             ),
           );
         }
