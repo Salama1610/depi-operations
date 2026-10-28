@@ -3045,6 +3045,10 @@ test("leaders upload the portal's students and gigs sheets, which replace the la
   assert.equal(view.students.length, 3);
   const linked = view.students.find((s) => s.portal_id === "P-1");
   assert.equal(linked.student_id, ours.id);
+  // Our active students the sheet does not have are listed apart; the linked one is not among them.
+  assert.ok(Array.isArray(view.notInSheet) && view.notInSheet.length > 0, "students missing from the sheet are listed");
+  assert.ok(!view.notInSheet.some((r) => r.id === ours.id), "a student the sheet links to is not missing");
+  assert.ok(view.notInSheet.every((r) => !String(r.id).startsWith("DEMO-")), "no demo students");
   assert.deepEqual(
     (({ total, approved, rejected, audit_pending }) => ({ total: Number(total), approved: Number(approved), rejected: Number(rejected), audit_pending: Number(audit_pending) }))(view.gigCounts.find((g) => g.portal_student_id === "P-1")),
     { total: 2, approved: 1, rejected: 1, audit_pending: 1 },
@@ -3849,8 +3853,10 @@ test("coach availability: Coach Operations sees every coach with free and booked
   assert.ok(!/national_id/.test(JSON.stringify(first)), "no national IDs");
   const s = coach.sessions.find((x) => x.group_id === group.id && x.day === weekday);
   assert.ok(s, "the upcoming session is in the coach's week");
-  assert.equal(s.time, "19:00");
-  assert.deepEqual(s.keys, [`${weekday}-19`, `${weekday}-20`, `${weekday}-21`]);
+  // 16:00 UTC is 19:00 in Cairo in summer and 18:00 once Egypt's summer time ends.
+  const hour = Number(new Date(day + "T16:00:00.000Z").toLocaleTimeString("en-GB", { timeZone: "Africa/Cairo", hour: "2-digit", hour12: false }));
+  assert.equal(s.time, `${hour}:00`);
+  assert.deepEqual(s.keys, [`${weekday}-${hour}`, `${weekday}-${hour + 1}`, `${weekday}-${hour + 2}`]);
 
   // Free hours are recorded, cleaned of anything outside the grid, and audited.
   const saved = await send({ action: "save", user_id: "staff-coach", slots: ["Sat-17", "Sat-18", "Sat-17", "Xyz-3", "Sun-30"], note: "Prefers evenings" });

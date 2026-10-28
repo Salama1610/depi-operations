@@ -129,6 +129,20 @@ export async function GET(req: Request) {
           gigs.batch_id,
         )
       : [];
+    // Our active students that no row of the students sheet links to: in our
+    // records, missing from the portal (or there under another email and phone).
+    const notInSheet = students
+      ? (
+          await all(
+            `SELECT s.id,s.name,s.email,s.phone,s.group_id,g.track,g.provider,c.name coordinator_name
+             FROM students s JOIN groups g ON g.id=s.group_id LEFT JOIN users c ON c.id=g.coordinator
+             WHERE s.lifecycle='Active' AND COALESCE(g.delivery_model,'Regular')<>'Industry' AND g.id NOT LIKE 'DEMO-%'
+               AND NOT EXISTS (SELECT 1 FROM portal_students p WHERE p.batch_id=? AND p.student_id=s.id)
+             ORDER BY s.group_id,s.name`,
+            students.batch_id,
+          )
+        ).filter((r: any) => scope === null || scope.has(r.id))
+      : [];
     const history = await all("SELECT id,sheet,status,file_name,rows_total,rows_linked,uploaded_by,created_at,committed_at FROM portal_uploads ORDER BY created_at DESC LIMIT 20");
     const mappings = Object.fromEntries(
       await Promise.all(
@@ -145,6 +159,7 @@ export async function GET(req: Request) {
       active: { students, gigs },
       history,
       students: scope === null ? studentRows : studentRows.filter((r: any) => r.student_id && scope.has(r.student_id)),
+      notInSheet,
       gigCounts: scope === null ? gigCounts : gigCounts.filter((g: any) => studentRows.some((r: any) => r.portal_id === g.portal_student_id && r.student_id && scope.has(r.student_id))),
     });
   } catch (e: any) {

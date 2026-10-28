@@ -204,7 +204,11 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
     .filter((s) => filters.final === "All" || s.final_status === filters.final)
     .filter((s) => filters.type === "All" || s.graduate_type === filters.type)
     .filter((s) => filters.provider === "All" || s.provider === filters.provider)
-    .filter((s) => filters.link === "All" || (filters.link === "Linked" ? !!s.student_id : !s.student_id));
+    .filter((s) => filters.link === "All" || filters.link === "Missing" || (filters.link === "Linked" ? !!s.student_id : !s.student_id));
+  // Our students that no row of the uploaded students sheet links to.
+  const missing: Row[] = (data?.notInSheet || []).filter(
+    (s: Row) => !query || JSON.stringify([s.name, s.email, s.phone, s.group_id, s.id]).toLowerCase().includes(query.toLowerCase()),
+  );
   const gigTotals = (data?.gigCounts || []).reduce(
     (n: Row, g: Row) => ({ total: n.total + Number(g.total), approved: n.approved + Number(g.approved), rejected: n.rejected + Number(g.rejected), pending: n.pending + Number(g.audit_pending) }),
     { total: 0, approved: 0, rejected: 0, pending: 0 },
@@ -364,14 +368,71 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
               { value: "All", label: t("All") },
               { value: "Linked", label: t("Linked") },
               { value: "Unlinked", label: t("Not linked") },
+              { value: "Missing", label: t("In our records, not in the sheet ({v0})", { v0: missing.length }) },
             ]}
           />
         </label>
         {filtered && <button className="small-btn" onClick={clearFilters}>{t("Clear filters")}</button>}
       </div>
       <div className="panel">
-        <h3>{t("Cohort in the portal · {v0} students", { v0: rows.length })}</h3>
-        {!students.length ? (
+        <h3>
+          {filters.link === "Missing"
+            ? t("In our records, not in the sheet · {v0} students", { v0: missing.length })
+            : t("Cohort in the portal · {v0} students", { v0: rows.length })}
+        </h3>
+        {filters.link === "Missing" ? (
+          <>
+            <p className="footnote">
+              {t("Our active students that no row of the uploaded students sheet matches, by email or phone. Either they are not on the portal, or the portal has them under another email and phone.")}
+            </p>
+            <div className="table-wrap">
+              <table className="portal-table">
+                <thead>
+                  <tr>
+                    <th>{t("Student")}</th><th>{t("Group")}</th><th>{t("Track")}</th><th>{t("Coordinator")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {missing.slice(0, shown).map((s) => (
+                    <tr key={s.id}>
+                      <td>
+                        <strong>{s.name}</strong>
+                        <small className="table-subline"><bdi dir="ltr">{s.id}{s.email ? " · " + s.email : ""}{s.phone ? " · " + s.phone : ""}</bdi></small>
+                      </td>
+                      <td><bdi>{s.group_id}</bdi></td>
+                      <td>{s.track}<small className="table-subline">{s.provider}</small></td>
+                      <td>{s.coordinator_name || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {missing.length > shown && (
+                <button className="small-btn portal-more" onClick={() => setShown(shown + 200)}>{t("Show more ({v0} left)", { v0: missing.length - shown })}</button>
+              )}
+            </div>
+          </>
+        ) : filters.link === "Unlinked" && students.length ? (
+          <>
+            <p className="footnote">
+              {t("Not linked: students in the portal sheet whose email and phone match none of our students. Usually a different email or phone on the portal, or someone who is not in our records.")}
+            </p>
+            <div className="table-wrap">
+              <table className="portal-table">
+                <thead>
+                  <tr>
+                    <th>{t("Student")}</th><th>{t("Round")}</th><th>{t("Final status")}</th><th>{t("Graduate type")}</th>
+                    <th>{t("Gigs")}</th><th>{t("Revenue")}</th><th>{t("Our record")}</th><th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.slice(0, shown).map((s) => (
+                    <PortalRow key={s.portal_id} s={s} c={counts.get(s.portal_id)} open={open === s.portal_id} gigs={gigs[s.portal_id]} error={gigErrors[s.portal_id]} onToggle={() => toggle(s.portal_id)} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : !students.length ? (
           <p className="footnote">{data?.canUpload ? t("Upload the students sheet and the gigs sheet to see the cohort.") : t("The leaders have not uploaded the portal sheets yet.")}</p>
         ) : (
           <div className="table-wrap">
