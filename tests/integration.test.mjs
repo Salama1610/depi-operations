@@ -3090,6 +3090,10 @@ test("a backup coach takes one session, and a group's new coach or coordinator t
   assert.match((await post("session_coach", { id: "SES-PAY-PAST", coach_id: "staff-support-coach", reason: "x" })).error, /Say why/);
   assert.match((await post("session_coach", { id: "SES-PAY-NEXT", new_name: "Backup Coach", new_email: "backup.coach@example.org", new_national_id: "123", reason: "Mariam is travelling" })).error, /national ID/i);
   await check("session_coach", { id: "SES-PAY-NEXT", new_name: "Backup Coach", new_email: "backup.coach@example.org", new_national_id: "29901011234567", new_phone: "1012345678", reason: "Mariam is travelling" });
+  // Any other member of staff can stand in for one session, a quality reviewer for one.
+  await check("session_coach", { id: "SES-PAY-LATER", coach_id: "staff-quality", reason: "The coach is ill today" });
+  assert.equal((await dbRow("SELECT coach_id FROM sessions WHERE id='SES-PAY-LATER'")).coach_id, "staff-quality");
+  await check("session_coach", { id: "SES-PAY-LATER", coach_id: "staff-coach", reason: "The coach is back" });
   const backup = await dbRow("SELECT * FROM users WHERE email='backup.coach@example.org'");
   assert.ok(JSON.parse(backup.roles).includes("Coach"));
   assert.equal(backup.title, "Backup Coach");
@@ -4312,7 +4316,8 @@ test("a coordinator marks a session done so feedback opens early, and Coach Oper
   const after = await dbRow("SELECT coach_id,status,coach_confirmed_at FROM sessions WHERE id='SES-DONE-1'");
   assert.equal(after.coach_id, group.coordinator);
   assert.deepEqual([after.status, after.coach_confirmed_at], [before.status, before.coach_confirmed_at], "a held session keeps its confirmations");
-  assert.match((await post("session_coach", { id: "SES-DONE-1", coach_id: "staff-quality", reason: "Not a coach at all" })).error, /coach or coordinator/);
+  // Since 29 Oct 2026 any active member of staff can stand in; a placeholder or an inactive person cannot.
+  assert.match((await post("session_coach", { id: "SES-DONE-1", coach_id: "system-unassigned-coach", reason: "Not a real person" })).error, /active member of staff/);
   current = { id: "owner", email: "owner@example.com" };
 });
 

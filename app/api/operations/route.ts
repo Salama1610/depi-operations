@@ -1422,8 +1422,9 @@ export async function POST(req: Request) {
         } else {
           const coach: any = await stmt("SELECT * FROM users WHERE id=? AND active=1", coachId).first();
           // A coordinator can stand in as the coach for a session (21 October 2026).
-          const roles = JSON.parse(coach?.roles || "[]");
-          ensure(coach && (roles.includes("Coach") || roles.includes("Operations Coordinator")), "Choose an active coach or coordinator.");
+          // Any active member of staff can stand in for one session: a coach, a
+          // coordinator, or someone else on the team (decided 29 Oct 2026).
+          ensure(coach && !String(coach.id).startsWith("system-"), "Choose an active member of staff.");
         }
         ensure(coachId !== session.coach_id, "This coach is already on the session.");
         const clash: any = await stmt(

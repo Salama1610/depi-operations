@@ -2868,4 +2868,7 @@ export const ar: Record<string, string> = {
   "This student was not linked by hand.": "هذا الطالب لم يُربط يدويًا.",
   "Enter the student's 14-digit national ID.": "أدخل الرقم القومي للطالب (14 رقمًا).",
   "No student of ours has this national ID.": "لا يوجد طالب لدينا بهذا الرقم القومي.",
+  "Another member of staff": "موظف آخر من الفريق",
+  "Member of staff": "الموظف",
+  "Choose an active member of staff.": "اختر موظفًا نشطًا.",
 };

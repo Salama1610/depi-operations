@@ -6419,6 +6419,11 @@ See you there!`,
                   const held = Array.isArray(u.roles) ? u.roles : JSON.parse(u.roles || "[]");
                   return held.includes("Operations Coordinator") && !held.includes("Coach");
                 };
+                // Anyone else on the staff can stand in for one session too.
+                const otherStaff = staff
+                  .filter((u: Row) => u.active !== false && u.active !== 0 && u.id !== modal!.coach_id && !String(u.id).startsWith("system-") && !coaches.some((c: Row) => c.id === u.id))
+                  .sort((a: Row, b: Row) => String(a.name).localeCompare(String(b.name)));
+                const roleWords = (u: Row) => (Array.isArray(u.roles) ? u.roles : JSON.parse(u.roles || "[]")).map((r: string) => t(r)).join("، ");
                 const alreadyHeld = Date.parse(modal!.starts_at) <= Date.now();
                 return (
                   <>
@@ -6433,6 +6438,7 @@ See you there!`,
                     </p>
                     {choice("mode", t("Coach for this session"), [
                       { value: "existing", label: t("A coach already in the system") },
+                      { value: "staff", label: t("Another member of staff") },
                       { value: "new", label: t("A new coach") },
                     ])}
                     {form.mode === "new" ? (
@@ -6444,6 +6450,8 @@ See you there!`,
                           {field("new_phone", t("Phone"), "text", false)}
                         </div>
                       </>
+                    ) : form.mode === "staff" ? (
+                      choice("coach_id", t("Member of staff"), otherStaff.map((u: Row) => ({ value: u.id, label: `${u.name} · ${roleWords(u)}` })))
                     ) : (
                       choice("coach_id", t("Coach or coordinator"), coaches.map((c: Row) => ({ value: c.id, label: c.name + (isCoordinator(c) ? " · " + t("Coordinator") : c.title ? " · " + c.title : "") })))
                     )}
