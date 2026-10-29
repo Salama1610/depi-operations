@@ -6,7 +6,7 @@
 // or Has problems with a comment. The marks themselves are not changed here;
 // Coach Operations and Project Operations read the checks and act on them.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Download, RefreshCw, X } from "lucide-react";
 import { toast } from "sonner";
 import { useLocale, useT } from "@/lib/i18n/context";
@@ -117,7 +117,7 @@ export function AttendanceCheck() {
     }
   }
 
-  const sessions: Row[] = useMemo(() => data?.sessions || [], [data]);
+  const sessions: Row[] = data?.sessions || [];
   const dateTag = ar ? "ar-EG-u-nu-latn" : "en-GB";
   const when = (iso: string) =>
     new Date(iso).toLocaleString(dateTag, { timeZone: "Africa/Cairo", weekday: "short", day: "numeric", month: "short", hour: "numeric", hour12: true, minute: "2-digit" });
