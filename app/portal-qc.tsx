@@ -23,6 +23,9 @@ function GigCheck({ g, canDecide, busy, send }: { g: Row; canDecide: boolean; bu
   const tag = useLocale() === "ar" ? "ar-EG-u-nu-latn" : "en-GB";
   const [comment, setComment] = useState(g.comment || "");
   const [editing, setEditing] = useState(g.status === "Pending");
+  // The proof is checked before any decision: opening it unlocks the buttons.
+  const [proofOpened, setProofOpened] = useState(false);
+  const needsProof = Boolean(g.proof_url) && !proofOpened;
   useEffect(() => {
     setComment(g.comment || "");
     setEditing(g.status === "Pending");
@@ -32,7 +35,11 @@ function GigCheck({ g, canDecide, busy, send }: { g: Row; canDecide: boolean; bu
       toast.error(t("Write why the gig is rejected, so the coach can tell the student."));
       return;
     }
-    if (await send({ action: "decide", portal_gig_id: g.portal_gig_id, status, comment })) setEditing(status === "Pending");
+    if (needsProof && status !== "Pending") {
+      toast.error(t("Open the proof before you approve or reject the gig."));
+      return;
+    }
+    if (await send({ action: "decide", portal_gig_id: g.portal_gig_id, status, comment, proof_checked: proofOpened })) setEditing(status === "Pending");
   };
   const tone = g.status === "Approved" ? "is-ok" : g.status === "Rejected" ? "is-bad" : "is-warn";
   return (
@@ -53,8 +60,15 @@ function GigCheck({ g, canDecide, busy, send }: { g: Row; canDecide: boolean; bu
             </a>
           )}
           {g.proof_url && (
-            <a className="text-link" href={g.proof_url} target="_blank" rel="noreferrer">
-              {t("Proof")} <ExternalLink size={12} />
+            <a
+              className={"text-link" + (needsProof && editing && canDecide ? " pqc-proof-due" : "")}
+              href={g.proof_url}
+              target="_blank"
+              rel="noreferrer"
+              onClick={() => setProofOpened(true)}
+              onAuxClick={() => setProofOpened(true)}
+            >
+              {proofOpened ? <Check size={12} /> : null} {t("Proof")} <ExternalLink size={12} />
             </a>
           )}
         </div>
@@ -63,6 +77,12 @@ function GigCheck({ g, canDecide, busy, send }: { g: Row; canDecide: boolean; bu
         <span className="cue is-info" title={t("Coach on the portal")}>{t("Coach")}: {g.provider_status ? t(g.provider_status) : t("Pending")}</span>
         <span className="cue is-info" title={t("Auditor")}>{t("Auditor")}: {g.auditor_status ? t(g.auditor_status) : "—"}</span>
         {!Number(g.in_sheet) && <span className="cue is-warn">{t("No longer in the latest gigs sheet")}</span>}
+        {(g.same_proof || []).length > 0 && (
+          <span className="cue is-bad">{t("Same proof as gig {v0}", { v0: g.same_proof.join(", ") })}</span>
+        )}
+        {(g.same_link_day || []).length > 0 && (
+          <span className="cue is-warn">{t("Same link entered the same day as gig {v0}", { v0: g.same_link_day.join(", ") })}</span>
+        )}
         {g.portal_comment && <small className="wrap-text">{g.portal_comment}</small>}
       </div>
       {editing && canDecide ? (
@@ -74,11 +94,12 @@ function GigCheck({ g, canDecide, busy, send }: { g: Row; canDecide: boolean; bu
             value={comment}
             onChange={(e) => setComment(e.target.value)}
           />
+          {needsProof && <small className="pqc-proof-hint">{t("Open the proof first. Approve and Reject unlock once you have opened it.")}</small>}
           <div className="pqc-actions">
-            <button type="button" className="small-btn pqc-approve" disabled={busy} onClick={() => decide("Approved")}>
+            <button type="button" className="small-btn pqc-approve" disabled={busy || needsProof} onClick={() => decide("Approved")}>
               <Check size={14} /> {t("Approve")}
             </button>
-            <button type="button" className="small-btn pqc-reject" disabled={busy} onClick={() => decide("Rejected")}>
+            <button type="button" className="small-btn pqc-reject" disabled={busy || needsProof} onClick={() => decide("Rejected")}>
               <X size={14} /> {t("Reject")}
             </button>
             {g.status !== "Pending" && (

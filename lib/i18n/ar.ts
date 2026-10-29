@@ -2874,4 +2874,8 @@ export const ar: Record<string, string> = {
   "No student enters the same link twice on one day.": "لا يوجد طالب أدخل نفس الرابط مرتين في يوم واحد.",
   "Several students entering the same link on one day ({v0})": "عدة طلاب أدخلوا نفس الرابط في يوم واحد ({v0})",
   "No link is entered by several students on one day.": "لا يوجد رابط أدخله عدة طلاب في يوم واحد.",
+  "Open the proof before you approve or reject the gig.": "افتح الإثبات قبل اعتماد العمل أو رفضه.",
+  "Open the proof first. Approve and Reject unlock once you have opened it.": "افتح الإثبات أولاً. زرّا الاعتماد والرفض يعملان بعد فتحه.",
+  "Same proof as gig {v0}": "نفس إثبات العمل {v0}",
+  "Same link entered the same day as gig {v0}": "نفس الرابط أُدخل في نفس يوم العمل {v0}",
 };

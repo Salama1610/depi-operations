@@ -144,6 +144,27 @@ export async function GET() {
       gigsBatch?.batch_id || "",
       ...(leads ? [] : [u.id]),
     );
+    // What else in the sheet repeats this gig: the same proof on another row,
+    // or the same link entered again on the same day. Shown on the card, so
+    // the reviewer checks the proof against them before deciding.
+    if (gigsBatch && reviews.length) {
+      const sheet = await all(
+        "SELECT portal_gig_id,lower(trim(url)) link,lower(trim(proof_url)) proof,substr(CAST(created_on AS TEXT),1,10) AS gig_day FROM portal_gigs WHERE batch_id=?",
+        gigsBatch.batch_id,
+      );
+      const byProof = new Map<string, string[]>();
+      const byLinkDay = new Map<string, string[]>();
+      for (const g of sheet) {
+        if (g.proof) byProof.set(g.proof, [...(byProof.get(g.proof) || []), g.portal_gig_id]);
+        if (g.link && g.gig_day) byLinkDay.set(g.link + " " + g.gig_day, [...(byLinkDay.get(g.link + " " + g.gig_day) || []), g.portal_gig_id]);
+      }
+      const others = (list: string[] | undefined, id: string) => (list || []).filter((x) => x !== id);
+      for (const r of reviews as any[]) {
+        const z = sheet.find((g: any) => g.portal_gig_id === r.portal_gig_id);
+        r.same_proof = z?.proof ? others(byProof.get(z.proof), r.portal_gig_id) : [];
+        r.same_link_day = z?.link && z.gig_day ? others(byLinkDay.get(z.link + " " + z.gig_day), r.portal_gig_id) : [];
+      }
+    }
     return Response.json(
       {
         reviews,
@@ -190,12 +211,20 @@ export async function POST(req: Request) {
       ensure(comment.length <= 2000, "Keep the comment under 2,000 characters.");
       ensure(status !== "Rejected" || comment.length >= 3, "Write why the gig is rejected, so the coach can tell the student.");
       const done = status !== "Pending";
+      // A decision is taken on the proof: the reviewer opens it first.
+      if (done) {
+        const sheet: any = await activeGigsBatch();
+        const gig: any = sheet
+          ? await stmt("SELECT proof_url FROM portal_gigs WHERE batch_id=? AND portal_gig_id=?", sheet.batch_id, row.portal_gig_id).first()
+          : null;
+        if (String(gig?.proof_url || "").trim()) ensure(x.proof_checked === true, "Open the proof before you approve or reject the gig.");
+      }
       await db().batch([
         stmt(
           "UPDATE portal_gig_reviews SET status=?,comment=?,reviewed_by=?,reviewed_at=? WHERE portal_gig_id=?",
           status, comment || null, done ? u.id : null, done ? t : null, row.portal_gig_id,
         ),
-        auditStmt(u, done ? `Portal gig ${status.toLowerCase()} by quality` : "Portal gig review reopened", row.portal_gig_id, { status, comment: comment || null }, row, requestId),
+        auditStmt(u, done ? `Portal gig ${status.toLowerCase()} by quality` : "Portal gig review reopened", row.portal_gig_id, { status, comment: comment || null, proof_checked: x.proof_checked === true }, row, requestId),
       ]);
       return Response.json({ ok: true });
     }

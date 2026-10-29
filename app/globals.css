@@ -1515,3 +1515,6 @@ td .searchable-select,td .pick-inline{max-width:240px;min-width:0}
 .small-btn.portal-link-btn{border-color:#315ce8;color:#315ce8;font-weight:600}
 .small-btn.portal-link-btn.is-needed{background:#315ce8;color:#fff}
 .small-btn.portal-link-btn.is-needed:hover{background:#244ac8;color:#fff}
+
+.pqc-proof-due{font-weight:700;outline:2px solid #ef5a12;outline-offset:3px;border-radius:5px;padding:0 4px}
+.pqc-proof-hint{display:block;color:#a8781f;margin:4px 0 6px}
