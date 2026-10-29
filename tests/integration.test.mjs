@@ -2103,6 +2103,14 @@ async function route(name) {
     format: "esm",
     outfile: output,
     plugins: [
+      // The native image library is loaded from node_modules, as Next.js loads
+      // it, rather than bundled into the test build.
+      {
+        name: "native-sharp",
+        setup(b) {
+          b.onResolve({ filter: /^sharp$/ }, () => ({ path: import.meta.resolve("sharp"), external: true }));
+        },
+      },
       supabaseAuthMock,
       {
         name: "test-bindings",
@@ -3920,6 +3928,78 @@ test("coach availability: Coach Operations sees every coach with free and booked
   assert.match((await send({ action: "save", user_id: "staff-coach", slots: [] })).error, /role/);
   current = { id: "owner", email: "owner@example.com" };
   await dbExec("DELETE FROM sessions WHERE id='SES-CA-1'");
+});
+
+test("the quality queue fingerprints proof screenshots and flags one picture behind two gigs", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const portal = await route("portal");
+  const qc = await route("portal-qc");
+  const { default: sharp } = await import("sharp");
+  const upload = async (sheet, mapping, rows) => {
+    const post = async (body) =>
+      (await portal.POST(new Request("https://test.local/api/portal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }))).json();
+    const begun = await post({ action: "begin", sheet, mapping, total: rows.length, file_name: sheet + ".xlsx" });
+    assert.equal((await post({ action: "chunk", batch: begun.batch, rows })).error, undefined);
+    assert.equal((await post({ action: "commit", batch: begun.batch })).error, undefined);
+  };
+  const send = async (body) =>
+    (await qc.POST(new Request("https://test.local/api/portal-qc", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }))).json();
+  const picture = async (colour, quality) =>
+    sharp({ create: { width: 600, height: 400, channels: 3, background: "#ffffff" } })
+      .composite([{ input: await sharp({ create: { width: 300, height: 120, channels: 3, background: colour } }).png().toBuffer(), left: colour === "#315ce8" ? 40 : 260, top: colour === "#315ce8" ? 40 : 240 }])
+      .jpeg({ quality })
+      .toBuffer();
+  const host = "https://depiback.eyouthlearning.com/media/status_proof_screenshot/";
+  const files = {
+    [host + "first.jpg"]: await picture("#315ce8", 90),
+    // The same screenshot uploaded again, saved at another quality, under a new link.
+    [host + "again.jpg"]: await picture("#315ce8", 60),
+    [host + "other.jpg"]: await picture("#ef5a12", 90),
+  };
+  const realFetch = globalThis.fetch;
+  const asked = [];
+  globalThis.fetch = async (input, init) => {
+    const href = String(input instanceof URL ? input.href : input.url || input);
+    asked.push(href);
+    if (files[href]) return new Response(files[href], { status: 200, headers: { "content-type": "image/jpeg" } });
+    return realFetch(input, init);
+  };
+  try {
+    await upload("students", { ID: "portal_id", Email: "email", "Full Name": "full_name" }, [
+      { portal_id: "PP-1", email: "pp1@example.org", full_name: "Proof One" },
+      { portal_id: "PP-2", email: "pp2@example.org", full_name: "Proof Two" },
+    ]);
+    await upload("gigs", { ID: "portal_gig_id", "Student ID": "portal_student_id", Title: "title", Proof: "proof_url", "Provider Status": "provider_status" }, [
+      { portal_gig_id: "PG-1", portal_student_id: "PP-1", title: "Logo", proof_url: host + "first.jpg", provider_status: "Pending" },
+      { portal_gig_id: "PG-2", portal_student_id: "PP-2", title: "Banner", proof_url: host + "again.jpg", provider_status: "Pending" },
+      { portal_gig_id: "PG-3", portal_student_id: "PP-2", title: "Deck", proof_url: host + "other.jpg", provider_status: "Pending" },
+      // A link to anywhere else is never fetched.
+      { portal_gig_id: "PG-4", portal_student_id: "PP-2", title: "Elsewhere", proof_url: "https://example.org/private.jpg", provider_status: "Pending" },
+    ]);
+    current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+    let view = await (await qc.GET()).json();
+    assert.equal(view.error, undefined, view.error);
+    assert.deepEqual([Number(view.proofs.total), Number(view.proofs.checked)], [4, 0]);
+    const done = await send({ action: "check_proofs" });
+    assert.equal(done.error, undefined, done.error);
+    assert.deepEqual([done.checked, done.failed, done.remaining], [4, 1, 0], JSON.stringify(await dbRows("SELECT proof_url,error FROM proof_images")));
+    assert.ok(!asked.includes("https://example.org/private.jpg"), "only the portal's own server is fetched");
+    view = await (await qc.GET()).json();
+    const card = (id) => view.reviews.find((r) => r.portal_gig_id === id);
+    assert.deepEqual(card("PG-1").same_picture, ["PG-2"], "the same screenshot under another link");
+    assert.deepEqual(card("PG-2").same_picture, ["PG-1"]);
+    assert.deepEqual(card("PG-3").same_picture, []);
+    assert.equal(card("PG-4").proof_checked, false);
+    assert.match((await dbRow("SELECT error FROM proof_images WHERE proof_url=?", "https://example.org/private.jpg")).error, /Not a portal proof link/);
+    // A second call has nothing left to do.
+    assert.equal((await send({ action: "check_proofs" })).checked, 0);
+  } finally {
+    globalThis.fetch = realFetch;
+    current = { id: "owner", email: "owner@example.com" };
+    // Leave the queue as the next test expects it.
+    await dbExec("DELETE FROM portal_gig_reviews WHERE portal_gig_id LIKE 'PG-%'");
+  }
 });
 
 test("portal gigs waiting for the coach go to the quality team, whose verdict the coach and coordinator read", async () => {

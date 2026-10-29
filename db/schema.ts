@@ -1437,3 +1437,15 @@ export const qualityReports = sqliteTable(
   },
   (t) => [index("quality_reports_status_idx").on(t.status, t.createdAt)],
 );
+export const proofImages = sqliteTable(
+  "proof_images",
+  {
+    proofUrl: text("proof_url").primaryKey(),
+    sha256: text("sha256"),
+    dhash: text("dhash"),
+    bytes: integer("bytes"),
+    error: text("error"),
+    checkedAt: text("checked_at").notNull(),
+  },
+  (t) => [index("proof_images_sha256_idx").on(t.sha256)],
+);

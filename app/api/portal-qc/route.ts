@@ -1,6 +1,7 @@
 import { actor, all, auditStmt, db, now, permit, rateLimit, refuseDemo, revokesStudents, stmt, uid } from "@/lib/server";
 import { sameSide } from "@/lib/demo";
 import { can, ensure } from "@/lib/domain/rules";
+import { fingerprint, samePicture, type ProofPrint } from "@/lib/domain/proof-image";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,28 @@ function draw(pool: { id: string; pending: number }[], count: number) {
   const chosen = tied[Math.floor(Math.random() * tied.length)];
   chosen.pending += count;
   return chosen.id;
+}
+
+// Proof screenshots are fetched only from the portal's own server, so a link
+// in an uploaded sheet cannot point the app at anything else.
+const proofHosts = /(^|\.)eyouthlearning\.com$/i;
+// Each request stays well under the hosting time limit; the page calls again.
+const proofBudgetMs = 7000;
+
+/** Fetches and fingerprints one proof screenshot; the error is kept when it cannot. */
+async function printProof(link: string, timeoutMs: number) {
+  try {
+    const at = new URL(link);
+    if (!/^https?:$/.test(at.protocol) || !proofHosts.test(at.hostname)) return { error: "Not a portal proof link" };
+    const res = await fetch(at, { headers: { "User-Agent": "Mozilla/5.0 (DEPI quality check)" }, redirect: "follow", signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) return { error: "HTTP " + res.status };
+    if (!/^image\//i.test(res.headers.get("content-type") || "")) return { error: "Not an image" };
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes.byteLength > 15 * 1024 * 1024) return { error: "Image too large" };
+    return await fingerprint(bytes);
+  } catch (e: any) {
+    return { error: String(e?.name === "TimeoutError" ? "Timed out" : e?.message || e).slice(0, 120) };
+  }
 }
 
 async function activeGigsBatch() {
@@ -152,6 +175,14 @@ export async function GET() {
         "SELECT portal_gig_id,lower(trim(url)) link,lower(trim(proof_url)) proof,substr(CAST(created_on AS TEXT),1,10) AS gig_day FROM portal_gigs WHERE batch_id=?",
         gigsBatch.batch_id,
       );
+      // The same picture under another link, from the fingerprints already taken.
+      const prints = await all(
+        `SELECT z.portal_gig_id,trim(z.proof_url) proof_url,i.sha256,i.dhash FROM portal_gigs z
+         JOIN proof_images i ON i.proof_url=trim(z.proof_url)
+         WHERE z.batch_id=? AND (i.sha256 IS NOT NULL OR i.dhash IS NOT NULL)`,
+        gigsBatch.batch_id,
+      );
+      const printOf = new Map<string, any>(prints.map((p: any) => [p.portal_gig_id, p]));
       const byProof = new Map<string, string[]>();
       const byLinkDay = new Map<string, string[]>();
       for (const g of sheet) {
@@ -163,6 +194,13 @@ export async function GET() {
         const z = sheet.find((g: any) => g.portal_gig_id === r.portal_gig_id);
         r.same_proof = z?.proof ? others(byProof.get(z.proof), r.portal_gig_id) : [];
         r.same_link_day = z?.link && z.gig_day ? others(byLinkDay.get(z.link + " " + z.gig_day), r.portal_gig_id) : [];
+        const mine = printOf.get(r.portal_gig_id);
+        r.proof_checked = Boolean(mine);
+        r.same_picture = mine
+          ? samePicture(mine as ProofPrint, prints as ProofPrint[])
+              .map((p: any) => p.portal_gig_id)
+              .filter((id: string) => id !== r.portal_gig_id && !r.same_proof.includes(id))
+          : [];
       }
     }
     return Response.json(
@@ -172,6 +210,15 @@ export async function GET() {
         lead: leads,
         me: u.id,
         sheet: Boolean(gigsBatch),
+        proofs: gigsBatch
+          ? await stmt(
+              `SELECT count(DISTINCT trim(z.proof_url)) total,
+                      count(DISTINCT CASE WHEN i.proof_url IS NOT NULL THEN trim(z.proof_url) END) checked
+               FROM portal_gigs z LEFT JOIN proof_images i ON i.proof_url=trim(z.proof_url)
+               WHERE z.batch_id=? AND coalesce(trim(z.proof_url),'')<>''`,
+              gigsBatch.batch_id,
+            ).first()
+          : null,
         team: pool.length,
       },
       noStore,
@@ -200,6 +247,49 @@ export async function POST(req: Request) {
       ensure(row, "This gig is not in the quality queue.");
       return row;
     };
+
+    if (x.action === "check_proofs") {
+      // A few proof screenshots fingerprinted per call, the ones still waiting
+      // for a verdict first; the page calls again until none is left.
+      const sheet: any = await activeGigsBatch();
+      if (!sheet) return Response.json({ ok: true, checked: 0, remaining: 0 });
+      const due = await all(
+        `SELECT DISTINCT trim(z.proof_url) proof_url, CASE WHEN r.status='Pending' THEN 0 ELSE 1 END waiting
+         FROM portal_gigs z LEFT JOIN portal_gig_reviews r ON r.portal_gig_id=z.portal_gig_id
+         LEFT JOIN proof_images i ON i.proof_url=trim(z.proof_url)
+         WHERE z.batch_id=? AND coalesce(trim(z.proof_url),'')<>''
+           AND (i.proof_url IS NULL OR (i.sha256 IS NULL AND i.checked_at < ?))
+         ORDER BY 2 LIMIT 12`,
+        sheet.batch_id,
+        // A proof that could not be fetched is tried again an hour later.
+        new Date(Date.now() - 3600000).toISOString(),
+      );
+      const started = Date.now();
+      const results: any[] = [];
+      for (let i = 0; i < due.length; i += 4) {
+        const left = proofBudgetMs - (Date.now() - started);
+        if (left < 1500) break;
+        const chunk = due.slice(i, i + 4);
+        const prints = await Promise.all(chunk.map((d: any) => printProof(d.proof_url, left)));
+        chunk.forEach((d: any, k: number) => results.push({ url: d.proof_url, ...prints[k] }));
+      }
+      if (results.length)
+        await db().batch(
+          results.map((p) =>
+            stmt(
+              `INSERT INTO proof_images(proof_url,sha256,dhash,bytes,error,checked_at) VALUES(?,?,?,?,?,?)
+               ON CONFLICT(proof_url) DO UPDATE SET sha256=excluded.sha256,dhash=excluded.dhash,bytes=excluded.bytes,error=excluded.error,checked_at=excluded.checked_at`,
+              p.url, p.sha256 || null, p.dhash || null, p.bytes || null, p.error || null, t,
+            ),
+          ),
+        );
+      const left: any = await stmt(
+        `SELECT count(DISTINCT trim(z.proof_url)) n FROM portal_gigs z LEFT JOIN proof_images i ON i.proof_url=trim(z.proof_url)
+         WHERE z.batch_id=? AND coalesce(trim(z.proof_url),'')<>'' AND i.proof_url IS NULL`,
+        sheet.batch_id,
+      ).first();
+      return Response.json({ ok: true, checked: results.length, failed: results.filter((p) => p.error).length, remaining: Number(left?.n || 0) });
+    }
 
     if (x.action === "decide") {
       // Approve or reject (with the reason), or put it back to pending.

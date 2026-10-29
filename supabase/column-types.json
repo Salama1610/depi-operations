@@ -869,5 +869,13 @@
     "student_id": "text",
     "linked_by": "text",
     "linked_at": "timestamptz"
+  },
+  "proof_images": {
+    "proof_url": "text",
+    "sha256": "text",
+    "dhash": "text",
+    "bytes": "integer",
+    "error": "text",
+    "checked_at": "timestamptz"
   }
 }

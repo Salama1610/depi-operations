@@ -2878,4 +2878,6 @@ export const ar: Record<string, string> = {
   "Open the proof first. Approve and Reject unlock once you have opened it.": "افتح الإثبات أولاً. زرّا الاعتماد والرفض يعملان بعد فتحه.",
   "Same proof as gig {v0}": "نفس إثبات العمل {v0}",
   "Same link entered the same day as gig {v0}": "نفس الرابط أُدخل في نفس يوم العمل {v0}",
+  "Same picture as the proof of gig {v0}": "نفس صورة إثبات العمل {v0}",
+  "Comparing proof pictures for duplicates: {v0} left": "جارٍ مقارنة صور الإثبات بحثًا عن التكرار: متبقٍ {v0}",
 };

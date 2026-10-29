@@ -80,6 +80,9 @@ function GigCheck({ g, canDecide, busy, send }: { g: Row; canDecide: boolean; bu
         {(g.same_proof || []).length > 0 && (
           <span className="cue is-bad">{t("Same proof as gig {v0}", { v0: g.same_proof.join(", ") })}</span>
         )}
+        {(g.same_picture || []).length > 0 && (
+          <span className="cue is-bad">{t("Same picture as the proof of gig {v0}", { v0: g.same_picture.join(", ") })}</span>
+        )}
         {(g.same_link_day || []).length > 0 && (
           <span className="cue is-warn">{t("Same link entered the same day as gig {v0}", { v0: g.same_link_day.join(", ") })}</span>
         )}
@@ -156,6 +159,38 @@ export function PortalQc() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Proof screenshots not fingerprinted yet are checked in the background, a
+  // few at a time, and the queue reloads with what was found.
+  const [scan, setScan] = useState<{ remaining: number; running: boolean } | null>(null);
+  const remainingProofs = data?.proofs ? Number(data.proofs.total) - Number(data.proofs.checked) : 0;
+  useEffect(() => {
+    if (!data || remainingProofs <= 0 || scan?.running) return;
+    let stop = false;
+    (async () => {
+      setScan({ remaining: remainingProofs, running: true });
+      let rounds = 0;
+      while (!stop && rounds++ < 200) {
+        const res = await fetch("/api/portal-qc", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "check_proofs", request_id: crypto.randomUUID() }),
+        }).catch(() => null);
+        const body = res ? await res.json().catch(() => null) : null;
+        if (!res?.ok || !body || body.error || !body.checked) break;
+        setScan({ remaining: body.remaining, running: true });
+        if (!body.remaining) break;
+      }
+      if (!stop) {
+        setScan({ remaining: 0, running: false });
+        load();
+      }
+    })();
+    return () => {
+      stop = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.proofs?.total]);
+
   async function send(values: Row) {
     setBusy(true);
     try {
@@ -206,6 +241,9 @@ export function PortalQc() {
       <div className="fr-head">
         <div>
           <h2>{t("Portal gigs QC")}</h2>
+          {scan?.running && (
+            <small className="pqc-proof-hint">{t("Comparing proof pictures for duplicates: {v0} left", { v0: scan.remaining })}</small>
+          )}
           <small>
             {t("Gigs uploaded on the ministry portal that the coach has not decided on yet. Check each one by the team's SOP; the coach and the coordinator see your verdict and the coach acts on the portal.")}
           </small>
