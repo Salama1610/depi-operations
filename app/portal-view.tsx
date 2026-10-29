@@ -28,9 +28,10 @@ async function call(body: Row, failed: string) {
 }
 
 /**
- * Possible duplicates in the gigs sheet, for review: one gig link or one
- * proof claimed by several students, and a student listing the same link
- * more than once. Nothing is removed from here.
+ * Possible duplicates in the gigs sheet, for review: one proof used on more
+ * than one row, and one link entered more than once on the same day. A link
+ * repeated on different days is a repeat sale, not a duplicate. Nothing is
+ * removed from here.
  */
 function PortalDuplicates() {
   const t = useT();
@@ -55,13 +56,15 @@ function PortalDuplicates() {
     ) : (
       <table className="portal-gigs">
         <thead>
-          <tr><th>{t("Link")}</th><th>{t("Students")}</th><th>{t("Rows")}</th></tr>
+          <tr><th>{t("Link")}</th><th>{t("Date")}</th><th>{t("Students")}</th><th>{t("Gig IDs")}</th><th>{t("Rows")}</th></tr>
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.link}>
+            <tr key={r.link + (r.day || "")}>
               <td><a className="text-link" href={r.link} target="_blank" rel="noreferrer" dir="ltr">{r.link.length > 70 ? r.link.slice(0, 70) + "…" : r.link}</a></td>
+              <td>{r.day || "—"}</td>
               <td><bdi>{people(r.students)}</bdi></td>
+              <td dir="ltr">{(r.gig_ids || []).join(", ")}</td>
               <td>{r.count}</td>
             </tr>
           ))}
@@ -85,29 +88,33 @@ function PortalDuplicates() {
         <small>{t("Loading…")}</small>
       ) : (
         <>
-          <h3>{t("The same gig link claimed by several students ({v0})", { v0: data.shared.length })}</h3>
-          {cluster(data.shared, "No gig link is claimed by more than one student.")}
-          <h3>{t("The same proof used by several students ({v0})", { v0: data.proofs.length })}</h3>
-          {cluster(data.proofs, "No proof is used by more than one student.")}
-          <h3>{t("A student listing the same link more than once ({v0})", { v0: data.repeats.length })}</h3>
+          <p className="footnote">{t("A gig is flagged when its proof is used on another row, or when its link is entered again on the same day. The same link on different days is a repeat sale and is not flagged.")}</p>
+          <h3>{t("The same proof on more than one row ({v0})", { v0: data.proofs.length })}</h3>
+          {cluster(data.proofs, "No proof is used twice.")}
+          <h3>{t("A student entering the same link twice on one day ({v0})", { v0: data.repeats.length })}</h3>
           {!data.repeats.length ? (
-            <p className="footnote">{t("No student lists the same link twice.")}</p>
+            <p className="footnote">{t("No student enters the same link twice on one day.")}</p>
           ) : (
             <table className="portal-gigs">
               <thead>
-                <tr><th>{t("Student")}</th><th>{t("Link")}</th><th>{t("Times")}</th></tr>
+                <tr><th>{t("Student")}</th><th>{t("Link")}</th><th>{t("Date")}</th><th>{t("Gig IDs")}</th><th>{t("Portal status")}</th><th>{t("Times")}</th></tr>
               </thead>
               <tbody>
                 {data.repeats.slice(0, 200).map((r: Row) => (
-                  <tr key={r.portal_id + r.link}>
+                  <tr key={r.portal_id + r.link + r.day}>
                     <td><bdi>{r.name}</bdi></td>
                     <td><a className="text-link" href={r.link} target="_blank" rel="noreferrer" dir="ltr">{r.link.length > 70 ? r.link.slice(0, 70) + "…" : r.link}</a></td>
+                    <td>{r.day}</td>
+                    <td dir="ltr">{(r.gig_ids || []).join(", ")}</td>
+                    <td>{(r.statuses || []).map((x: string) => t(x)).join(" · ")}</td>
                     <td>{r.count}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
+          <h3>{t("Several students entering the same link on one day ({v0})", { v0: data.shared.length })}</h3>
+          {cluster(data.shared, "No link is entered by several students on one day.")}
         </>
       )}
     </details>

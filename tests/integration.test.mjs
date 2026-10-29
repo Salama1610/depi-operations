@@ -3072,6 +3072,46 @@ test("leaders upload the portal's students and gigs sheets, which replace the la
   current = { id: "owner", email: "owner@example.com" };
 });
 
+test("the portal flags a gig as a possible duplicate by its proof, or by its link on the same day", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const portal = await route("portal");
+  const post = (body) => portal.POST(new Request("https://test.local/api/portal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
+  const send = async (sheet, mapping, rows) => {
+    const begun = await (await post({ action: "begin", sheet, mapping, total: rows.length, file_name: sheet + ".xlsx" })).json();
+    assert.ok(begun.batch, JSON.stringify(begun));
+    assert.equal((await post({ action: "chunk", batch: begun.batch, rows })).status, 200);
+    return (await post({ action: "commit", batch: begun.batch })).json();
+  };
+  await send("students", { ID: "portal_id", Email: "email", "Full Name": "full_name" }, [
+    { portal_id: "D-1", email: "d1@example.org", full_name: "Dup One" },
+    { portal_id: "D-2", email: "d2@example.org", full_name: "Dup Two" },
+    { portal_id: "D-3", email: "d3@example.org", full_name: "Dup Three" },
+  ]);
+  const gig = (id, student, link, day, proof) => ({ portal_gig_id: id, portal_student_id: student, title: "Gig " + id, url: link, created_on: day, proof_url: proof, status: "Pending" });
+  await send("gigs", { ID: "portal_gig_id", "Student ID": "portal_student_id", Title: "title", Link: "url", "Created On": "created_on", Proof: "proof_url", Status: "status" }, [
+    gig("DG-1", "D-1", "https://nafezly.com/service/1", "2026-05-01", "https://proof/a"),
+    gig("DG-2", "D-1", "https://nafezly.com/service/1", "2026-05-01", "https://proof/b"),
+    // The same service sold again another day is a repeat sale, not a duplicate.
+    gig("DG-3", "D-1", "https://nafezly.com/service/1", "2026-05-09", "https://proof/c"),
+    // One proof on two rows, whatever the links.
+    gig("DG-4", "D-2", "https://kafiil.com/service/9", "2026-05-02", "https://proof/a"),
+    // One general site address for two students on one day, and again another day.
+    gig("DG-5", "D-2", "https://outlier.ai", "2026-05-03", "https://proof/e"),
+    gig("DG-6", "D-3", "https://outlier.ai", "2026-05-03", "https://proof/f"),
+    gig("DG-7", "D-3", "https://outlier.ai", "2026-05-04", "https://proof/g"),
+  ]);
+  const found = await (await portal.GET(new Request("https://test.local/api/portal?duplicates=1"))).json();
+  assert.ok(!found.error, found.error);
+  assert.equal(found.repeats.length, 1, JSON.stringify(found.repeats));
+  assert.deepEqual([found.repeats[0].portal_id, found.repeats[0].day, found.repeats[0].count], ["D-1", "2026-05-01", 2]);
+  assert.deepEqual(found.repeats[0].gig_ids.sort(), ["DG-1", "DG-2"]);
+  assert.equal(found.proofs.length, 1);
+  assert.deepEqual(found.proofs[0].gig_ids.sort(), ["DG-1", "DG-4"]);
+  assert.equal(found.shared.length, 1);
+  assert.deepEqual([found.shared[0].day, found.shared[0].students.map((x) => x.name).sort()], ["2026-05-03", ["Dup Three", "Dup Two"]]);
+});
+
 test("a backup coach takes one session, and a group's new coach or coordinator takes only the sessions to come", async () => {
   current = { id: "owner", email: "owner@example.com" };
   // The group with the most free weeks, and three of them.

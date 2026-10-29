@@ -72,9 +72,11 @@ export async function GET(req: Request) {
         : [];
       return Response.json({ gigs: rows });
     }
-    // Possible duplicates in the gigs sheet: one gig link or one proof claimed
-    // by two or more students, and a student listing the same link more than
-    // once. Shown for review; nothing is removed.
+    // Possible duplicates in the gigs sheet. A student may sell the same
+    // service many times, and many gigs share a general site address, so a
+    // repeated link alone is not a duplicate. Flagged: one proof used on more
+    // than one row, and one link entered more than once on the same day, by
+    // one student or by several. Shown for review; nothing is removed.
     if (url.searchParams.get("duplicates")) {
       if (!gigs) return Response.json({ shared: [], proofs: [], repeats: [] });
       const names = students
@@ -84,27 +86,54 @@ export async function GET(req: Request) {
         : new Map<string, any>();
       const inScope = (portalId: string) => scope === null || (names.get(String(portalId))?.student_id && scope.has(names.get(String(portalId)).student_id));
       const who = (portalId: string) => ({ portal_id: portalId, name: names.get(String(portalId))?.full_name || portalId, student_id: names.get(String(portalId))?.student_id || null });
-      const cluster = async (column: "url" | "proof_url") =>
-        (
-          await all(
-            `SELECT lower(trim(${column})) link, group_concat(portal_student_id) people, count(*) n
-             FROM portal_gigs WHERE batch_id=? AND coalesce(trim(${column}),'')<>''
-             GROUP BY 1 HAVING count(DISTINCT portal_student_id)>1 ORDER BY 3 DESC LIMIT 300`,
-            gigs.batch_id,
-          )
+      const day = "substr(CAST(created_on AS TEXT),1,10)";
+      const ids = (v: unknown) => String(v || "").split(",").filter(Boolean);
+      const group = (r: any) => ({
+        link: r.link,
+        day: r.gig_day || null,
+        count: Number(r.n),
+        gig_ids: ids(r.ids),
+        students: [...new Set(String(r.people).split(","))].map(who),
+      });
+      const visible = (r: any) => r.students.some((x: any) => inScope(x.portal_id));
+      // One proof on more than one row, whoever entered it.
+      const proofs = (
+        await all(
+          `SELECT lower(trim(proof_url)) link, group_concat(portal_student_id) people, group_concat(portal_gig_id) ids, count(*) n
+           FROM portal_gigs WHERE batch_id=? AND coalesce(trim(proof_url),'')<>''
+           GROUP BY 1 HAVING count(*)>1 ORDER BY 4 DESC LIMIT 300`,
+          gigs.batch_id,
         )
-          .map((r: any) => ({ link: r.link, count: Number(r.n), students: [...new Set(String(r.people).split(","))].map(who) }))
-          .filter((r: any) => r.students.some((s: any) => inScope(s.portal_id)));
+      ).map(group).filter(visible);
+      // One link on the same day for several students.
+      const shared = (
+        await all(
+          `SELECT lower(trim(url)) link, ${day} AS gig_day, group_concat(portal_student_id) people, group_concat(portal_gig_id) ids, count(*) n
+           FROM portal_gigs WHERE batch_id=? AND coalesce(trim(url),'')<>''
+           GROUP BY 1,2 HAVING count(DISTINCT portal_student_id)>1 ORDER BY 5 DESC LIMIT 300`,
+          gigs.batch_id,
+        )
+      ).map(group).filter(visible);
+      // One student entering the same link more than once on the same day.
       const repeats = (
         await all(
-          `SELECT portal_student_id, lower(trim(url)) link, count(*) n FROM portal_gigs
-           WHERE batch_id=? AND coalesce(trim(url),'')<>'' GROUP BY 1,2 HAVING count(*)>1 ORDER BY 3 DESC LIMIT 500`,
+          `SELECT portal_student_id, lower(trim(url)) link, ${day} AS gig_day, group_concat(portal_gig_id) ids,
+                  group_concat(status) statuses, count(*) n
+           FROM portal_gigs WHERE batch_id=? AND coalesce(trim(url),'')<>''
+           GROUP BY 1,2,3 HAVING count(*)>1 ORDER BY 6 DESC LIMIT 500`,
           gigs.batch_id,
         )
       )
         .filter((r: any) => inScope(r.portal_student_id))
-        .map((r: any) => ({ ...who(r.portal_student_id), link: r.link, count: Number(r.n) }));
-      return Response.json({ shared: await cluster("url"), proofs: await cluster("proof_url"), repeats });
+        .map((r: any) => ({
+          ...who(r.portal_student_id),
+          link: r.link,
+          day: r.gig_day,
+          count: Number(r.n),
+          gig_ids: ids(r.ids),
+          statuses: ids(r.statuses),
+        }));
+      return Response.json({ shared, proofs, repeats });
     }
     const studentRows = students
       ? await all(
