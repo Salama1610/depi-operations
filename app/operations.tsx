@@ -1305,7 +1305,7 @@ export default function Operations({ module: initialModule }: { module: string }
               <TableHead key={c.key}>{t(c.label)}</TableHead>
             ))}
             {action && (
-              <TableHead>
+              <TableHead className="row-actions">
                 <span className="sr-only">{t("Actions")}</span>
               </TableHead>
             )}
@@ -1319,7 +1319,7 @@ export default function Operations({ module: initialModule }: { module: string }
                   {c.render ? c.render(r) : String(r[c.key] ?? "—")}
                 </TableCell>
               ))}
-              {action && <TableCell>{action(r)}</TableCell>}
+              {action && <TableCell className="row-actions">{action(r)}</TableCell>}
             </TableRow>
           ))}
         </TableBody>

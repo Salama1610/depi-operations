@@ -506,6 +506,19 @@ input:focus-visible {
   margin: 0;
   flex-wrap: nowrap;
 }
+/* A wide table scrolls sideways, and on a Mac the scrollbar is hidden: the
+   row's buttons (Review…) stay pinned at the row's end instead of off screen. */
+.panel th.row-actions,
+.panel td.row-actions {
+  position: sticky;
+  inset-inline-end: 0;
+  z-index: 1;
+  background: #fff;
+  border-inline-start: 1px solid #edf1f7;
+}
+.panel th.row-actions {
+  background: #fbfcff;
+}
 /* Thirteen navigation entries fit without a hidden scroll on a 900px screen. */
 .app-sidebar [data-slot="sidebar-header"] {
   padding: 22px 20px 6px;
@@ -1287,7 +1300,7 @@ td .searchable-select,td .pick-inline{max-width:240px;min-width:0}
 .portal-duplicates summary{cursor:pointer;font-weight:600;color:#33496d}
 .portal-duplicates h3{font-size:14px;margin:16px 0 8px;color:#4a5f82}
 .portal-duplicates .portal-gigs td{overflow-wrap:anywhere}
-.dash-people{display:flex;flex-direction:column;max-width:220px;white-space:normal;overflow-wrap:anywhere}
+.dash-people{display:flex;flex-direction:column;min-width:12ch;max-width:220px;white-space:normal;overflow-wrap:anywhere}
 .service-open-name{display:inline-flex;align-items:center;gap:5px}
 .service-open .service-url{max-width:260px}
 .dash-people .table-subline{white-space:normal;overflow-wrap:anywhere}
