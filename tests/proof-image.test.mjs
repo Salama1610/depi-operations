@@ -45,3 +45,39 @@ test("one screenshot saved again, smaller or recompressed, is the same picture",
   assert.deepEqual(samePicture(prints[0], prints).map((p) => p.proof_url), ["u2"]);
   assert.deepEqual(samePicture(prints[2], prints), []);
 });
+
+/** A minimal PDF holding the given JPEG files as pictures, as phones and Word save them. */
+function pdfOf(...jpegs) {
+  const parts = [Buffer.from("%PDF-1.4\n")];
+  jpegs.forEach((j, i) => {
+    parts.push(Buffer.from(`${i + 1} 0 obj << /Type /XObject /Subtype /Image /Filter /DCTDecode /Length ${j.length} >>\nstream\r\n`));
+    parts.push(Buffer.from(j));
+    parts.push(Buffer.from("\r\nendstream\nendobj\n"));
+  });
+  parts.push(Buffer.from("%%EOF\n"));
+  return new Uint8Array(Buffer.concat(parts));
+}
+
+test("a PDF proof is read picture by picture, and small icons inside it are left out", async () => {
+  const icon = new Uint8Array(await sharp({ create: { width: 80, height: 80, channels: 3, background: "#315ce8" } }).jpeg().toBuffer());
+  const pdf = pdfOf(icon, await screenshot("a", "jpeg", 80), await screenshot("b", "jpeg", 80));
+  const print = await fingerprint(pdf);
+  assert.equal(print.dhash.split(" ").length, 2, "two screenshots; the 80-pixel icon is not one");
+  // The same screenshot sent again inside another PDF, next to a different one.
+  const image = await fingerprint(await screenshot("a", "jpeg", 50, 700));
+  const prints = [
+    { proof_url: "pdf", student: "S1", ...print },
+    { proof_url: "img", student: "S2", ...image },
+  ];
+  assert.deepEqual(samePicture(prints[1], prints).map((p) => p.proof_url), ["pdf"]);
+  const empty = await fingerprint(pdfOf(icon));
+  assert.equal(empty.dhash, null);
+  assert.match(empty.error, /No screenshot/);
+});
+
+test("a picture in the proofs of five or more students is a template, not a duplicate", async () => {
+  const logo = await fingerprint(await screenshot("a"));
+  const prints = ["S1", "S2", "S3", "S4", "S5"].map((student, i) => ({ proof_url: "u" + i, student, sha256: "x" + i, dhash: logo.dhash }));
+  assert.deepEqual(samePicture(prints[0], prints), [], "the same header in five students' proofs is ignored");
+  assert.equal(samePicture(prints[0], prints.slice(0, 4)).length, 3, "but four students sharing it are flagged");
+});

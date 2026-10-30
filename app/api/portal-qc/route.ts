@@ -61,9 +61,10 @@ async function printProof(link: string, timeoutMs: number) {
     if (!/^https?:$/.test(at.protocol) || !proofHosts.test(at.hostname)) return { error: "Not a portal proof link" };
     const res = await fetch(at, { headers: { "User-Agent": "Mozilla/5.0 (DEPI quality check)" }, redirect: "follow", signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) return { error: "HTTP " + res.status };
-    if (!/^image\//i.test(res.headers.get("content-type") || "")) return { error: "Not an image" };
+    // A screenshot, or a PDF of screenshots.
+    if (!/^(image\/|application\/pdf)/i.test(res.headers.get("content-type") || "")) return { error: "Not an image or a PDF" };
     const bytes = new Uint8Array(await res.arrayBuffer());
-    if (bytes.byteLength > 15 * 1024 * 1024) return { error: "Image too large" };
+    if (bytes.byteLength > 30 * 1024 * 1024) return { error: "File too large" };
     return await fingerprint(bytes);
   } catch (e: any) {
     return { error: String(e?.name === "TimeoutError" ? "Timed out" : e?.message || e).slice(0, 120) };
@@ -177,11 +178,12 @@ export async function GET() {
       );
       // The same picture under another link, from the fingerprints already taken.
       const prints = await all(
-        `SELECT z.portal_gig_id,trim(z.proof_url) proof_url,i.sha256,i.dhash FROM portal_gigs z
+        `SELECT z.portal_gig_id,z.portal_student_id student,trim(z.proof_url) proof_url,i.sha256,i.dhash FROM portal_gigs z
          JOIN proof_images i ON i.proof_url=trim(z.proof_url)
          WHERE z.batch_id=? AND (i.sha256 IS NOT NULL OR i.dhash IS NOT NULL)`,
         gigsBatch.batch_id,
       );
+      for (const p of prints as any[]) p.student = String(p.student || "");
       const printOf = new Map<string, any>(prints.map((p: any) => [p.portal_gig_id, p]));
       const byProof = new Map<string, string[]>();
       const byLinkDay = new Map<string, string[]>();
