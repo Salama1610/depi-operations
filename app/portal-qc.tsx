@@ -10,7 +10,7 @@
 // The Quality Lead sees everyone's queue, moves a student to another member,
 // or shares the students waiting out again.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ExternalLink, MessageSquarePlus, RefreshCw, RotateCcw, Shuffle, X } from "lucide-react";
 import { toast } from "sonner";
 import { useLocale, useT } from "@/lib/i18n/context";
@@ -177,17 +177,35 @@ export function PortalQc() {
   const [provider, setProvider] = useState("All");
   const [limit, setLimit] = useState(pageSize);
 
+  // A decision shows on its card at once and the queue reloads behind it. A
+  // reload that began before a later decision was saved would bring that card
+  // back as waiting, so its answer is dropped and the queue is read again;
+  // reloads asked for while one runs become one more after it.
+  const saved = useRef(0);
+  const reloading = useRef(false);
+  const reloadAgain = useRef(false);
   async function load() {
+    if (reloading.current) {
+      reloadAgain.current = true;
+      return;
+    }
+    reloading.current = true;
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/portal-qc", { cache: "no-store" });
-      const body = await res.json().catch(() => null);
-      if (!res.ok || !body || body.error) throw new Error(body?.error || t("Request failed"));
-      setData(body);
+      do {
+        reloadAgain.current = false;
+        const seen = saved.current;
+        const res = await fetch("/api/portal-qc", { cache: "no-store" });
+        const body = await res.json().catch(() => null);
+        if (!res.ok || !body || body.error) throw new Error(body?.error || t("Request failed"));
+        if (seen === saved.current) setData(body);
+        else reloadAgain.current = true;
+      } while (reloadAgain.current);
     } catch (e: any) {
       setError(e.message);
     } finally {
+      reloading.current = false;
       setLoading(false);
     }
   }
@@ -239,7 +257,18 @@ export function PortalQc() {
       const body = await res.json().catch(() => null);
       if (!res.ok || !body || body.error) throw new Error(body?.error || t("Request failed"));
       toast.success(t("Saved to the activity history"));
-      await load();
+      saved.current++;
+      // The decision on its card now; who decided, the thread and the rest come with the reload.
+      if (values.action === "decide")
+        setData((d) =>
+          d && {
+            ...d,
+            reviews: (d.reviews || []).map((r: Row) =>
+              r.portal_gig_id === values.portal_gig_id ? { ...r, status: values.status, comment: String(values.comment || "").trim() || null } : r,
+            ),
+          },
+        );
+      void load();
       return true;
     } catch (e: any) {
       toast.error(t(e.message));

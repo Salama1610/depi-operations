@@ -137,6 +137,28 @@ import { readSheet, toCSV, toWorkbook, toXLSX } from "@/lib/spreadsheet";
 import { guessKeyColumn, guessMapping, normalizePhone } from "@/lib/domain/sheet-mapping";
 import { whatsappInvite } from "@/lib/domain/whatsapp";
 import { sessionEnded } from "@/lib/domain/session-time";
+import { reportWorkspaceLoad } from "./speed-check";
+
+/** Runs a job now, or once more after the run in progress: many asks while one runs become a single further run. */
+function coalesced() {
+  let running = false;
+  let again = false;
+  return async function run(job: () => Promise<void>) {
+    if (running) {
+      again = true;
+      return;
+    }
+    running = true;
+    try {
+      do {
+        again = false;
+        await job();
+      } while (again);
+    } finally {
+      running = false;
+    }
+  };
+}
 type Row = Record<string, any>;
 const nav = [
   ["home", "Overview", Home],
@@ -591,13 +613,24 @@ export default function Operations({ module: initialModule }: { module: string }
       setBusy(false);
     }
   }
+  // After an action the workspace reloads in the background: the action is
+  // done once the server has saved it, so the buttons free up at once instead
+  // of waiting for the whole workspace (megabytes for programme-wide staff).
+  // Reloads asked for while one runs become one more reload after it, so the
+  // page ends on the latest data without loading it once per click.
+  const [reloadQueue] = useState(coalesced);
+  const refreshSoon = () => void reloadQueue(refresh);
   async function refresh() {
     try {
       setError("");
+      const started = performance.now();
       const r = await fetch("/api/operations");
-      const d = await r.json();
+      const text = await r.text();
+      const d = JSON.parse(text);
       if (d.error) throw Error(d.error);
       setData(d);
+      // The Speed check: how long this load took, for the administrators.
+      if (!d.setup) reportWorkspaceLoad(r, started, text.length);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -911,7 +944,7 @@ export default function Operations({ module: initialModule }: { module: string }
       await mutate(modal!.action, f);
       toast.success(t("Saved to the activity history"));
       setModal(null);
-      await refresh();
+      refreshSoon();
     } catch (e: any) {
       setFormError(e.message);
     } finally {
@@ -933,7 +966,7 @@ export default function Operations({ module: initialModule }: { module: string }
             ? t("Synthetic pilot loaded · {v0} students across {v1} groups", { v0: result.summary.students, v1: result.summary.groups })
           : t("Updated"),
       );
-      await refresh();
+      refreshSoon();
       return true;
     } catch (e: any) {
       toast.error(e.message);
@@ -5974,7 +6007,7 @@ See you there!`,
                   if (!res.ok) throw new Error(body.error || t("Request failed"));
                   toast.success(t("Login saved"));
                   setJoinEdit(null);
-                  await refresh();
+                  refreshSoon();
                 } catch (error: any) {
                   toast.error(error.message);
                 } finally {
@@ -8080,7 +8113,7 @@ See you there!`,
                     const v = await r.json();
                     if (v.error) throw Error(v.error);
                     setPreview(v);
-                    await refresh();
+                    refreshSoon();
                     toast.success(t("Import reconciliation ready"));
                   } catch (e: any) {
                     toast.error(e.message);
