@@ -751,9 +751,9 @@ export default function Operations({ module: initialModule }: { module: string }
       : m === "administration"
         ? can(user.roles, ["Operations Systems / Admin"])
         : m === "gigs"
-          ? // Coaches have no Services page, and Project Operations does not
-            // use it (Taha, 2 November 2026).
-            !onlyCoach && !can(user.roles, ["Project Operations"])
+          ? // Gone for everyone: the Accounts tab holds each service's details
+            // and its uploads (2 November 2026).
+            false
         : m === "portal"
           ? // The portal sheets hold real students, so demo sign-ins do not open them.
             !demoAccount && can(user.roles, [
