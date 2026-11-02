@@ -1395,6 +1395,23 @@ export const portalGigReviews = sqliteTable(
     uniqueIndex("portal_gig_reviews_proof_key").on(t.proofKey),
   ],
 );
+// The quality team's decisions and comments on each portal gig, in order, so
+// earlier comments are read next to new ones. Kept under the review's proof
+// key; a new proof from the student is an entry too.
+export const portalGigReviewNotes = sqliteTable(
+  "portal_gig_review_notes",
+  {
+    id: text("id").primaryKey(),
+    proofKey: text("proof_key").notNull(),
+    portalGigId: text("portal_gig_id"),
+    kind: text("kind").notNull(),
+    status: text("status"),
+    comment: text("comment"),
+    author: text("author").references(() => users.id),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [index("portal_gig_review_notes_key_idx").on(t.proofKey, t.createdAt)],
+);
 // Where a coordinator stands on an open task, such as having contacted the
 // student about a service link the quality team sent back.
 export const taskProgress = sqliteTable("task_progress", {

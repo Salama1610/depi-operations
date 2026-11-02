@@ -1,7 +1,8 @@
 import { actor, all, permit, rateLimit } from "@/lib/server";
 import { graduation, policy } from "@/lib/domain/rules";
 import { sameSide } from "@/lib/demo";
-import { proofKeySql } from "@/lib/domain/portal-review";
+import { proofKey, proofKeySql } from "@/lib/domain/portal-review";
+import { reviewNotes } from "@/lib/portal-review-notes";
 
 export const dynamic = "force-dynamic";
 
@@ -76,7 +77,7 @@ export async function GET() {
     const portalGigs = gigsBatch && portalIds.length
       ? await inChunks(portalIds, (slice) =>
           all(
-            `SELECT z.portal_gig_id,z.portal_student_id,z.title,z.url,z.price,z.created_on,z.status,z.provider_status,z.auditor_status,
+            `SELECT z.portal_gig_id,z.portal_student_id,z.title,z.url,z.proof_url,z.price,z.created_on,z.status,z.provider_status,z.auditor_status,
                     r.status qc_status,r.comment qc_comment,r.reviewed_at qc_reviewed_at
              FROM portal_gigs z LEFT JOIN portal_gig_reviews r ON r.proof_key=${proofKeySql("z")}
              WHERE z.batch_id=? AND z.portal_student_id IN (${marks(slice)}) ORDER BY z.created_on`,
@@ -86,6 +87,8 @@ export async function GET() {
         )
       : [];
 
+    // Our quality team's comments on each gig, the earlier ones with the new (without the reviewers' names).
+    const qcNotes = await reviewNotes(portalGigs.map((p: any) => proofKey(p)), false);
     const portalOf = new Map(portalStudents.map((p: any) => [p.student_id, p]));
     const result = students.map((s: any) => {
       const theirs = gigs
@@ -140,6 +143,7 @@ export async function GET() {
                   qc_status: p.qc_status || null,
                   qc_comment: p.qc_comment || null,
                   qc_at: p.qc_reviewed_at || null,
+                  qc_notes: qcNotes.get(proofKey(p)) || [],
                 })),
             }
           : null,

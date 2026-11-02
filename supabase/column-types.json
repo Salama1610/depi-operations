@@ -821,6 +821,16 @@
     "reviewed_at": "timestamptz",
     "proof_key": "text"
   },
+  "portal_gig_review_notes": {
+    "id": "text",
+    "proof_key": "text",
+    "portal_gig_id": "text",
+    "kind": "text",
+    "status": "text",
+    "comment": "text",
+    "author": "text",
+    "created_at": "timestamptz"
+  },
   "task_progress": {
     "task_id": "text",
     "status": "text",

@@ -3,6 +3,7 @@ import { sameSide } from "@/lib/demo";
 import { can, ensure } from "@/lib/domain/rules";
 import { fingerprint, samePicture, type ProofPrint } from "@/lib/domain/proof-image";
 import { proofKey, waitsForCoach } from "@/lib/domain/portal-review";
+import { noteStmt, reviewNotes } from "@/lib/portal-review-notes";
 
 export const dynamic = "force-dynamic";
 
@@ -169,6 +170,9 @@ async function syncQueue(u: any, pool: Member[], gigsBatch: string, studentsBatc
         "UPDATE portal_gig_reviews SET proof_key=?,title=?,url=?,status='Pending',comment=NULL,reviewed_by=NULL,reviewed_at=NULL,assigned_at=? WHERE portal_gig_id=?",
         key, g.title || null, g.url || null, t, id,
       ),
+      // The comments so far stay with the gig, next to the new proof.
+      stmt("UPDATE portal_gig_review_notes SET proof_key=? WHERE proof_key=?", key, old.proof_key),
+      noteStmt(key, id, "new_proof", null, null, null, t),
       auditStmt(u, "Portal gig proof replaced: checked again", id, { proof_key: key, was: old.proof_key, status: old.status }, null),
     );
     byKey.delete(old.proof_key);
@@ -281,6 +285,9 @@ export async function GET() {
           : [];
       }
     }
+    // Every comment so far, the earlier ones next to the new.
+    const notes = await reviewNotes(reviews.map((r: any) => r.proof_key));
+    for (const r of reviews as any[]) r.notes = notes.get(r.proof_key) || [];
     return Response.json(
       {
         reviews,
@@ -387,7 +394,23 @@ export async function POST(req: Request) {
           "UPDATE portal_gig_reviews SET status=?,comment=?,reviewed_by=?,reviewed_at=? WHERE portal_gig_id=?",
           status, comment || null, done ? u.id : null, done ? t : null, row.portal_gig_id,
         ),
+        // Kept with the earlier ones, never written over.
+        noteStmt(row.proof_key || "gig:" + row.portal_gig_id, row.portal_gig_id, "decision", status, comment || null, u.id, t),
         auditStmt(u, done ? `Portal gig ${status.toLowerCase()} by quality` : "Portal gig review reopened", row.portal_gig_id, { status, comment: comment || null, proof_checked: x.proof_checked === true }, row, requestId),
+      ]);
+      return Response.json({ ok: true });
+    }
+
+    if (x.action === "comment") {
+      // A comment on its own, the decision unchanged, added to the ones before.
+      const row = await review(String(x.portal_gig_id || ""));
+      ensure(leads || row.reviewer === u.id, "Only the reviewer it was given to, or the Quality Lead, can comment on it.");
+      const comment = String(x.comment || "").trim();
+      ensure(comment.length >= 3, "Write the comment first.");
+      ensure(comment.length <= 2000, "Keep the comment under 2,000 characters.");
+      await db().batch([
+        noteStmt(row.proof_key || "gig:" + row.portal_gig_id, row.portal_gig_id, "comment", null, comment, u.id, t),
+        auditStmt(u, "Portal gig commented by quality", row.portal_gig_id, { comment }, null, requestId),
       ]);
       return Response.json({ ok: true });
     }

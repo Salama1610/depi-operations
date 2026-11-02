@@ -4115,6 +4115,29 @@ test("portal gigs waiting for the coach go to the quality team, whose verdict th
   const again = await dbRow("SELECT * FROM portal_gig_reviews WHERE portal_gig_id='QG-2'");
   assert.deepEqual([again.proof_key, again.status, again.reviewer, again.comment], ["https://proof.example.org/two-new", "Pending", owner, null]);
 
+  // Every comment is kept: the earlier ones are read with the new ones.
+  const notesOf = async (id) => (await get()).reviews.find((r) => r.portal_gig_id === id).notes;
+  assert.deepEqual((await notesOf("QG-2")).map((n) => [n.kind, n.status]), [["decision", "Approved"], ["new_proof", null]], "the thread moves with the gig to its new proof");
+  assert.match((await send({ action: "comment", portal_gig_id: "QG-11", comment: " " })).error, /Write the comment first/);
+  assert.equal((await send({ action: "comment", portal_gig_id: "QG-11", comment: "Please send the contract too." })).ok, true);
+  assert.equal((await send({ action: "decide", portal_gig_id: "QG-11", status: "Approved", comment: "Contract received.", proof_checked: true })).ok, true);
+  const thread = await notesOf("QG-11");
+  assert.deepEqual(
+    thread.map((n) => [n.kind, n.status, n.comment]),
+    [["decision", "Rejected", "The link shows another seller."], ["comment", null, "Please send the contract too."], ["decision", "Approved", "Contract received."]],
+  );
+  assert.ok(thread.every((n) => n.author_name), "the QC page shows who wrote each one");
+  current = { id: coordinator.id, email: coordinator.email };
+  const read = (await portal.GET(new Request("https://test.local/api/portal?student=PQ-1")).then((r) => r.json())).gigs;
+  assert.deepEqual(read.find((g) => g.portal_gig_id === "QG-11").qc_notes.map((n) => n.comment), ["The link shows another seller.", "Please send the contract too.", "Contract received."]);
+  assert.equal(read.find((g) => g.portal_gig_id === "QG-50").qc_notes.length, 3, "the same proof on another gig shows the same thread");
+  current = { id: coach.id, email: coach.email };
+  const coached = (await (await route("coach-progress")).GET().then((r) => r.json())).students.find((s) => s.id === ours.id);
+  const coachThread = coached.portal.gigs.find((g) => g.id === "QG-11").qc_notes;
+  assert.equal(coachThread.length, 3);
+  assert.ok(coachThread.every((n) => !("author_name" in n)), "the coach reads the comments, not the reviewers' names");
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+
   // The lead moves the whole student, decided gigs too.
   const membersOf = async (student) => (await dbRows("SELECT DISTINCT reviewer FROM portal_gig_reviews WHERE portal_student_id=?", student)).map((r) => r.reviewer);
   assert.equal((await send({ action: "reassign", portal_student_id: "PQ-1", reviewer: other })).moved, 3);
@@ -4129,6 +4152,7 @@ test("portal gigs waiting for the coach go to the quality team, whose verdict th
   for (const student of ["PQ-1", "PQ-2"]) assert.equal((await membersOf(student)).length, 1);
 
   current = { id: "owner", email: "owner@example.com" };
+  await dbExec("DELETE FROM portal_gig_review_notes");
   await dbExec("DELETE FROM portal_gig_reviews");
   await dbExec("UPDATE users SET active=0 WHERE id='staff-quality-2'");
 });

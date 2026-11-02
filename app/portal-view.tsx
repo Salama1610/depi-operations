@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ExternalLink, FileUp, RefreshCw, Link2 } from "lucide-react";
 import { useLocale, useT } from "@/lib/i18n/context";
 import { SearchableSelect } from "@/components/searchable-select";
+import { QcThread } from "@/components/qc-thread";
 import { readSheet } from "@/lib/spreadsheet";
 import { guessPortalMapping, mappingProblems, nationalIdColumn, type PortalSheet } from "@/lib/domain/portal-sheets";
 
@@ -632,8 +633,14 @@ function PortalRow({
                       <td>
                         {/* Our quality team's check, done before the coach decides on the portal. */}
                         <span className={"badge " + tone(g.qc_status)}>{g.qc_status ? t(g.qc_status) : t("Not checked")}</span>
-                        {g.qc_comment && <small className="table-subline wrap-text">{g.qc_comment}</small>}
-                        {g.qc_reviewer && <small className="table-subline">{g.qc_reviewer}</small>}
+                        {(g.qc_notes || []).length ? (
+                          <QcThread notes={g.qc_notes} />
+                        ) : (
+                          <>
+                            {g.qc_comment && <small className="table-subline wrap-text">{g.qc_comment}</small>}
+                            {g.qc_reviewer && <small className="table-subline">{g.qc_reviewer}</small>}
+                          </>
+                        )}
                       </td>
                       <td><small>{g.comment}</small></td>
                       <td>

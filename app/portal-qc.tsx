@@ -11,10 +11,11 @@
 // or shares the students waiting out again.
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, ExternalLink, RefreshCw, RotateCcw, Shuffle, X } from "lucide-react";
+import { Check, ExternalLink, MessageSquarePlus, RefreshCw, RotateCcw, Shuffle, X } from "lucide-react";
 import { toast } from "sonner";
 import { useLocale, useT } from "@/lib/i18n/context";
 import { SearchableSelect } from "@/components/searchable-select";
+import { QcThread } from "@/components/qc-thread";
 
 type Row = Record<string, any>;
 const pageSize = 25;
@@ -23,13 +24,16 @@ const pageSize = 25;
 function GigCheck({ g, canDecide, busy, send }: { g: Row; canDecide: boolean; busy: boolean; send: (v: Row) => Promise<boolean> }) {
   const t = useT();
   const tag = useLocale() === "ar" ? "ar-EG-u-nu-latn" : "en-GB";
-  const [comment, setComment] = useState(g.comment || "");
+  // A new decision brings a new comment; the earlier ones stay in the thread above.
+  const [comment, setComment] = useState("");
   const [editing, setEditing] = useState(g.status === "Pending");
+  const [noting, setNoting] = useState(false);
+  const [note, setNote] = useState("");
   // The proof is checked before any decision: opening it unlocks the buttons.
   const [proofOpened, setProofOpened] = useState(false);
   const needsProof = Boolean(g.proof_url) && !proofOpened;
   useEffect(() => {
-    setComment(g.comment || "");
+    setComment("");
     setEditing(g.status === "Pending");
   }, [g.status, g.comment]);
   const decide = async (status: string) => {
@@ -42,6 +46,16 @@ function GigCheck({ g, canDecide, busy, send }: { g: Row; canDecide: boolean; bu
       return;
     }
     if (await send({ action: "decide", portal_gig_id: g.portal_gig_id, status, comment, proof_checked: proofOpened })) setEditing(status === "Pending");
+  };
+  const addNote = async () => {
+    if (note.trim().length < 3) {
+      toast.error(t("Write the comment first."));
+      return;
+    }
+    if (await send({ action: "comment", portal_gig_id: g.portal_gig_id, comment: note })) {
+      setNote("");
+      setNoting(false);
+    }
   };
   const tone = g.status === "Approved" ? "is-ok" : g.status === "Rejected" ? "is-bad" : "is-warn";
   return (
@@ -90,6 +104,7 @@ function GigCheck({ g, canDecide, busy, send }: { g: Row; canDecide: boolean; bu
         )}
         {g.portal_comment && <small className="wrap-text">{g.portal_comment}</small>}
       </div>
+      <QcThread notes={g.notes} />
       {editing && canDecide ? (
         <div className="pqc-decide">
           <textarea
@@ -118,11 +133,31 @@ function GigCheck({ g, canDecide, busy, send }: { g: Row; canDecide: boolean; bu
         <div className="pqc-verdict">
           <span className={"cue " + tone}>{g.status === "Pending" ? t("Waiting for review") : t(g.status)}</span>
           {g.reviewed_by_name && <small>{g.reviewed_by_name}{g.reviewed_at ? " · " + new Date(g.reviewed_at).toLocaleDateString(tag) : ""}</small>}
-          {g.comment && <p className="wrap-text">{g.comment}</p>}
+          {g.comment && !(g.notes || []).length && <p className="wrap-text">{g.comment}</p>}
           {canDecide && g.status !== "Pending" && (
-            <button type="button" className="small-btn" disabled={busy} onClick={() => setEditing(true)}>
-              <RotateCcw size={14} /> {t("Change the decision")}
-            </button>
+            <div className="pqc-actions">
+              <button type="button" className="small-btn" disabled={busy} onClick={() => setEditing(true)}>
+                <RotateCcw size={14} /> {t("Change the decision")}
+              </button>
+              {!noting && (
+                <button type="button" className="small-btn" disabled={busy} onClick={() => setNoting(true)}>
+                  <MessageSquarePlus size={14} /> {t("Add a comment")}
+                </button>
+              )}
+            </div>
+          )}
+          {noting && (
+            <div className="pqc-decide">
+              <textarea rows={2} maxLength={2000} placeholder={t("A new comment, kept with the earlier ones")} value={note} onChange={(e) => setNote(e.target.value)} />
+              <div className="pqc-actions">
+                <button type="button" className="small-btn" disabled={busy} onClick={addNote}>
+                  <Check size={14} /> {t("Save comment")}
+                </button>
+                <button type="button" className="small-btn" disabled={busy} onClick={() => setNoting(false)}>
+                  {t("Cancel")}
+                </button>
+              </div>
+            </div>
           )}
         </div>
       )}

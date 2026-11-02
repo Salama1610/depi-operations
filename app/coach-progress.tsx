@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { useDir, useLocale, useT } from "@/lib/i18n/context";
 import { SearchableSelect } from "@/components/searchable-select";
+import { QcThread } from "@/components/qc-thread";
 import { GraduationDots } from "./today";
 
 type Row = Record<string, any>;
@@ -338,7 +339,11 @@ export function CoachProgress() {
                             </span>
                             {g.url && <a className="text-link" href={g.url} target="_blank" rel="noreferrer">{t("Gig")}</a>}
                           </span>
-                          {g.qc_comment && <small className="coach-progress-qc wrap-text">{g.qc_comment}</small>}
+                          {(g.qc_notes || []).length ? (
+                            <QcThread notes={g.qc_notes} className="coach-progress-qc" />
+                          ) : (
+                            g.qc_comment && <small className="coach-progress-qc wrap-text">{g.qc_comment}</small>
+                          )}
                         </li>
                       ))}
                     </ul>

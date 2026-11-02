@@ -2920,4 +2920,13 @@ export const ar: Record<string, string> = {
   "Share students out again": "إعادة توزيع الطلاب",
   "{v0}: {v1} students waiting": "{v0}: {v1} طالب في الانتظار",
   "This student is not in the quality queue.": "هذا الطالب ليس في قائمة مراجعة الجودة.",
+  // Portal gigs QC: every comment kept (2 Nov 2026)
+  "Quality comments": "تعليقات الجودة",
+  "New proof uploaded": "تم رفع إثبات جديد",
+  "Back to waiting for review": "رجع لانتظار المراجعة",
+  "Add a comment": "إضافة تعليق",
+  "Save comment": "حفظ التعليق",
+  "A new comment, kept with the earlier ones": "تعليق جديد، يتحفظ مع التعليقات اللي قبله",
+  "Write the comment first.": "اكتب التعليق الأول.",
+  "Only the reviewer it was given to, or the Quality Lead, can comment on it.": "يعلق عليه المراجع المكلف به أو قائد الجودة فقط.",
 };
