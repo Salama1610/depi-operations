@@ -23,7 +23,7 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { Progress } from "@/components/ui/progress";
 import { GraduationDots } from "./today";
 import { FeedbackAlertCard, FeedbackScore, FeedbackView } from "./feedback-view";
-import { CoachProgress } from "./coach-progress";
+import { CoachProgress, CoachQcHome } from "./coach-progress";
 import { AccountsSheetUpload } from "./accounts-sheet";
 import { Opportunities } from "./opportunities";
 import { scoreOf } from "@/lib/domain/feedback";
@@ -1858,6 +1858,8 @@ See you there!`,
       return (
         <>
           {heading}
+          {/* Gigs our quality team checked, for the coach to carry out on the portal: first thing they see. */}
+          <CoachQcHome />
           <div className="stats">
             {tile("Sessions this week", week.length, t("{v0} held so far", { v0: held.length }))}
             {tile("Waiting for your confirmation", week.filter((s) => s.status === "Scheduled" && !s.coach_confirmed_at && Date.parse(s.starts_at) > Date.now()).length, t("Confirm at least 27 hours before"))}
