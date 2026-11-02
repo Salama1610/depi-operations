@@ -11,6 +11,8 @@ import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContai
 import { Download, RefreshCw, X } from "lucide-react";
 import { useLocale, useT } from "@/lib/i18n/context";
 import { useLiveReload } from "@/lib/use-live-reload";
+import { servicesComplete } from "@/lib/domain/service-links";
+import { sessionEnded } from "@/lib/domain/session-time";
 import { SearchableSelect } from "@/components/searchable-select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { scoreOf } from "@/lib/domain/feedback";
@@ -192,7 +194,8 @@ export function Dashboard() {
 
   const sessions = allSessions.filter((s) => inRange(s.starts_at));
   const now = Date.now();
-  const held = sessions.filter((s) => s.status !== "Cancelled" && Date.parse(s.starts_at) + 3 * 3600000 <= now);
+  // Held as on the Overview and the Sessions page: ended by its length, or marked done early.
+  const held = sessions.filter((s) => s.status !== "Cancelled" && sessionEnded(s as any, now));
   const attendance = bySession(data?.attendance).filter((a) => inRange(sessionById.get(a.session_id)?.starts_at));
   const contacts = byStudent(data?.contacts).filter((c) => inRange(c.occurred_at));
   const tasks = byStudent(data?.tasks);
@@ -210,7 +213,10 @@ export function Dashboard() {
 
   // ---- figures ------------------------------------------------------------
   const active = students.filter((s) => s.lifecycle === "Active");
-  const contactedIds = new Set(contacts.map((c) => c.student_id));
+  // Active students reached: the same people the share divides by, so it
+  // can no longer pass 100% with students who have since left.
+  const activeNow = new Set(active.map((s) => s.id));
+  const contactedIds = new Set(contacts.map((c) => c.student_id).filter((id) => activeNow.has(id)));
   const present = attendance.filter((a) => a.status === "Present").length;
   const upcoming = allSessions.filter((s) => s.status !== "Cancelled" && Date.parse(s.starts_at) > now && Date.parse(s.starts_at) < now + 2 * DAY);
   const bothConfirmed = (s: Row) => !!s.coordinator_confirmed_at && !!s.coach_confirmed_at;
@@ -229,10 +235,13 @@ export function Dashboard() {
     if (l.auto_status === "Failed") linkCounts.failed++;
     if (l.qc_status === "Pending" && now - Date.parse(l.updated_at) > 48 * 3600000) linkCounts.late++;
   }
-  const approvedPerStudent = new Map<string, number>();
-  for (const l of links) if (l.qc_status === "Locked") approvedPerStudent.set(l.student_id, (approvedPerStudent.get(l.student_id) || 0) + 1);
-  const completeStudents = [...approvedPerStudent.values()].filter((n) => n >= 3).length;
-  const submittedStudents = new Set(links.map((l) => l.student_id)).size;
+  // Active students only, the population the percentages divide by, and
+  // complete by the one rule the Overview and Reports use too.
+  const activeIds = new Set(active.map((s) => s.id));
+  const linksOf = new Map<string, Row[]>();
+  for (const l of links) if (activeIds.has(l.student_id)) linksOf.set(l.student_id, [...(linksOf.get(l.student_id) || []), l]);
+  const completeStudents = [...linksOf.values()].filter((mine) => servicesComplete(mine)).length;
+  const submittedStudents = linksOf.size;
   // The same rule as the feedback screens: a session's score is the average of
   // all its ratings; below 3 it is a red flag, open until someone handles it.
   const avgFeedback = scoreOf(feedback as any);
@@ -642,7 +651,7 @@ export function Dashboard() {
         <TabsContent value="followups">
           <div className="dash-kpis">
             <Kpi label={t("Contacts logged")} value={num(contacts.length)} sub={t("{v0} students reached", { v0: num(contactedIds.size) })} />
-            <Kpi label={t("Not contacted in the period")} value={num(active.length - [...contactedIds].filter((id) => active.some((s) => s.id === id)).length)} tone="warn" />
+            <Kpi label={t("Not contacted in the period")} value={num(active.length - contactedIds.size)} tone="warn" />
             <Kpi label={t("Open actions")} value={num(openTasks.length)} />
             <Kpi label={t("Overdue actions")} value={num(overdueTasks.length)} tone={overdueTasks.length ? "bad" : "good"} />
             <Kpi label={t("Open cases")} value={num(openCases.length)} sub={t("{v0} urgent", { v0: num(openCases.filter((c) => /S1|S2/.test(c.severity || "")).length) })} />

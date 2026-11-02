@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, CalendarRange } from "lucide-react";
 import { useLocale, useT } from "@/lib/i18n/context";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { can } from "@/lib/domain/rules";
+import { sessionEnded } from "@/lib/domain/session-time";
 import { SearchableSelect } from "@/components/searchable-select";
 
 type Row = Record<string, any>;
@@ -138,7 +139,9 @@ export function WeeklyProgress({ data, onStudent }: { data: Row; onStudent: (id:
     const measure = (list: Row[], gids: Set<string>, ownerIds: string[]) => {
       const ids = new Set(list.map((s) => s.id));
       const weekSessions = sessions.filter((s) => gids.has(s.group_id));
-      const held = weekSessions.filter((s) => s.status === "Completed").length;
+      // Held as on the Overview: ended by its length, or marked done early
+      // (only some sessions were ever set to "Completed").
+      const held = weekSessions.filter((s) => s.status !== "Cancelled" && sessionEnded(s as any)).length;
       const marks = attendance.filter((a) => ids.has(a.student_id));
       return {
         students: list.length,

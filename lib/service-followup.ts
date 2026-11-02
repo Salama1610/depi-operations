@@ -178,3 +178,32 @@ export async function serviceFollowUpSweep(actor: any) {
   }
   return { tasks, linked, candidates: candidates.length, no_account_on: [...missing] };
 }
+
+/**
+ * A submission's state, read from its links. It is Complete when at least
+ * three Kafiil or Nafezly links are approved and nothing is waiting for QC;
+ * links in "Other" are reviewed but are not needed for it. Approved links short of that are In Progress: the
+ * student has more to add. The student's own submissions and the staff
+ * QC decision both write it with this (2 November 2026).
+ */
+export function submissionStatus(studentId: string, t: string, completedAt: "now" | "latest") {
+  const done = `(NOT EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status='Pending')
+    AND (SELECT count(*) FROM service_links WHERE student_id=? AND platform IN ('Kafiil','Nafezly') AND qc_status='Locked')>=3)`;
+  const doneArgs = [studentId, studentId];
+  return stmt(
+    `UPDATE service_submissions SET status=CASE
+       WHEN ${done} THEN 'Complete'
+       WHEN EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status='Needs Correction') THEN 'Needs Correction'
+       WHEN EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status='Pending') THEN 'Pending QC'
+       ELSE 'In Progress' END,
+       qc_completed_at=CASE WHEN ${done} THEN ${completedAt === "now" ? "?" : "(SELECT max(qc_at) FROM service_links WHERE student_id=?)"} ELSE NULL END,
+       updated_at=? WHERE student_id=?`,
+    ...doneArgs,
+    studentId,
+    studentId,
+    ...doneArgs,
+    completedAt === "now" ? t : studentId,
+    t,
+    studentId,
+  );
+}

@@ -1,4 +1,5 @@
 import { loadData } from './server';
+import { servicesComplete } from './domain/service-links';
 export function reportData(d:any,from?:string,to?:string){const active=d.students.filter((s:any)=>s.lifecycle==='Active');const inside=(at:string)=>!!at&&(!from||at>=from)&&(!to||at<=to+'T23:59:59.999Z');const accepted=d.evidence.filter((e:any)=>e.status==='Accepted');const reviews=d.evidence.filter((e:any)=>['Coach Review','Coordinator L1','Quality Review','L3 Review'].includes(e.status));const sla=(e:any)=>{const p=e.applied_policy;return p?(e.status==='Coach Review'?p.coachHours:e.status==='Coordinator L1'?p.l1Hours:e.status==='Quality Review'?p.qualityHours:null):null};// A graduate stays a graduate once their record is closed, so graduation is
 // measured over the students still in the programme or closed as graduates.
 const isGraduate=(s:any)=>s.lifecycle==='Graduate Closed'||['Graduated','$300 Graduate'].includes(s.graduation)
@@ -6,7 +7,7 @@ const cohort=d.students.filter((s:any)=>s.lifecycle==='Active'||s.lifecycle==='G
 const graduates=cohort.filter(isGraduate);const compliant=active.filter((s:any)=>!s.contact_due);
 // A student's services are done when at least three Kafiil or Nafezly links
 // are approved and nothing is waiting for review; other sites are optional.
-const serviceDone=(mine:any[])=>!mine.some((x:any)=>x.qc_status==='Pending')&&mine.filter((x:any)=>(x.platform==='Kafiil'||x.platform==='Nafezly')&&x.qc_status==='Locked').length>=3;
+const serviceDone=servicesComplete;
 const activeIds=new Set(active.map((s:any)=>s.id))
 // Only active students, the same population the percentages divide by.
 const links=(d.serviceLinks||[]).filter((l:any)=>activeIds.has(l.student_id)),serviceReviews=d.serviceLinkReviews||[],linkCounts=new Map<string,number>();for(const link of links)linkCounts.set(link.student_id,(linkCounts.get(link.student_id)||0)+1);const submittedStudents=new Set(links.map((l:any)=>l.student_id));// Each student's links, gathered once (checking every link against every

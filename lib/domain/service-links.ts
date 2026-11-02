@@ -166,6 +166,19 @@ export const maxServiceLinks = serviceCategories.length * maxLinksPerPlatform;
 /** The platform recorded for a link on a site that is not a marketplace. */
 export const openLinkPlatform = "External service";
 
+/**
+ * A student's services are complete when at least three Kafiil or Nafezly
+ * links are approved and none is still waiting for review. The one rule for
+ * the stored submission status, the Overview, the Dashboard and Reports
+ * (2 November 2026; they had three different ones).
+ */
+export function servicesComplete(links: { platform?: string | null; qc_status?: string | null }[]) {
+  return (
+    !links.some((l) => l.qc_status === "Pending") &&
+    links.filter((l) => (l.platform === "Kafiil" || l.platform === "Nafezly") && l.qc_status === "Locked").length >= minServiceLinks
+  );
+}
+
 /** The section a link belongs to, from the platform its address is on. */
 export function serviceCategory(platform: string): ServiceCategory {
   return platform === "Kafiil" || platform === "Nafezly" ? platform : "Other";

@@ -1831,7 +1831,8 @@ See you there!`,
     const contacted = active.filter((s) => !s.contact_due).length;
     const submissions = serviceSubmissionStatus.filter((r) => r.lifecycle === "Active" || !r.lifecycle);
     const linksIn = submissions.filter((r) => Number(r.links_submitted) > 0).length;
-    const linksDone = submissions.filter((r) => Number(r.links_locked) >= 3).length;
+    // Complete as everywhere else: three approved Kafiil or Nafezly links, none waiting.
+    const linksDone = submissions.filter((r) => Number(r.links_done) >= 3 && !Number(r.links_pending)).length;
     const openCases = (d.cases || []).filter((c: Row) => !["Closed", "Resolved"].includes(c.status));
     const urgentCases = openCases.filter((c: Row) => /S1|S2/.test(String(c.severity)));
     const time = (iso: string) =>
@@ -2111,7 +2112,7 @@ See you there!`,
     const stats = [
       {
         label: t("Active students"),
-        value: students.length,
+        value: students.filter((s) => s.lifecycle === "Active").length,
         detail: t("{v0} assigned groups", { v0: groups.length }),
         icon: Users,
         q: "All",
@@ -2747,7 +2748,9 @@ See you there!`,
       const type = types.includes("Outcome Coach") ? "Outcome Coach" : types.includes("Support Coach") ? "Support Coach" : types[0];
 
       const outcomeGroups = new Set(groupCoaches.filter((c) => c.user_id === r.person && c.coach_type === "Outcome Coach" && c.status === "Active").map((c) => c.group_id));
-      const purchased = new Set(gigs.filter((g) => g.account_id).map((g) => g.student_id));
+      // Purchased: a paid service recorded on a client account, or a service
+      // bought through one on the Accounts tab (2 November 2026: these were missed).
+      const purchased = new Set([...gigs.filter((g) => g.account_id).map((g) => g.student_id), ...(d.purchasedStudents || [])]);
       const graduates = students.filter((x) => outcomeGroups.has(x.group_id) && /Graduat/.test(x.graduation || "") && !purchased.has(x.id)).length;
       const pay = coachPayout(types, graduates);
       return { type, rate: (coachRates as Row)[type] || 0, graduates, ...pay };
@@ -3349,8 +3352,11 @@ See you there!`,
     };
     const unlocks = Array.isArray(user.scopes) && user.scopes.includes("account-unlock");
     // The status picker on each service row: where the service's order stands.
+    // An account's orders for the student it is linked to now; one placed for
+    // an earlier student is theirs, not the new student's (2 November 2026).
+    const ordersOf = (a: Row) => accountOrders.filter((o) => o.account_id === a.id && o.student_id === a.student_id);
     const latestOrderOf = (accountId: string) =>
-      accountOrders.filter((o) => o.account_id === accountId).sort((x, y) => String(y.updated_at).localeCompare(String(x.updated_at)))[0] || null;
+      ordersOf(accounts.find((a) => a.id === accountId) || { id: accountId }).sort((x, y) => String(y.updated_at).localeCompare(String(x.updated_at)))[0] || null;
     const setsServiceStatus = (r: Row) => Boolean(r.student_id) && (wordOn(r) || can(user.roles, ["Project Operations", "Operations Systems / Admin"]));
     const servicePicker = (r: Row) => {
       const latest = latestOrderOf(r.id);
@@ -3396,7 +3402,7 @@ See you there!`,
       .filter((a) => a.student_id)
       .filter((a) => leadsAll || groupOfRow(a.student_group)?.supervisor === user.id || coordinatesAccount(a))
       .map((a) => {
-        const orders = accountOrders.filter((o) => o.account_id === a.id).sort((x, y) => String(y.updated_at).localeCompare(String(x.updated_at)));
+        const orders = ordersOf(a).sort((x, y) => String(y.updated_at).localeCompare(String(x.updated_at)));
         return {
           ...a,
           orders,

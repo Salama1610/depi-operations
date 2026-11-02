@@ -43,7 +43,7 @@ export async function GET() {
       all(`SELECT id,name,roles,team,title,active FROM users WHERE ${real("id")} AND id NOT LIKE 'system-%'`),
       all(`SELECT g.id,g.track,g.provider,g.pathway,g.coordinator,g.supervisor,g.coach,g.status,g.start_date FROM groups g WHERE ${shownGroup}`),
       all(`SELECT s.id,s.name,s.group_id,s.lifecycle,s.engagement,s.milestone,s.last_contact,s.created_at FROM students s JOIN groups g ON g.id=s.group_id WHERE ${shownGroup}`),
-      all(`SELECT se.id,se.group_id,se.coach_id,se.coordinator_id,se.starts_at,se.status,se.week,se.coordinator_confirmed_at,se.coach_confirmed_at,
+      all(`SELECT se.id,se.group_id,se.coach_id,se.coordinator_id,se.starts_at,se.duration_minutes,se.ended_at,se.status,se.week,se.coordinator_confirmed_at,se.coach_confirmed_at,
               CASE WHEN se.coordinator_unavailable IS NULL THEN 0 ELSE 1 END coordinator_away,
               CASE WHEN se.coach_unavailable IS NULL THEN 0 ELSE 1 END coach_away
          FROM sessions se JOIN groups g ON g.id=se.group_id WHERE ${shownGroup}`),

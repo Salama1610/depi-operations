@@ -673,6 +673,7 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
                   ss.submitted_at,ss.updated_at submission_updated_at,ss.qc_completed_at,
                   ifnull(agg.total,0) links_submitted,
                   ifnull(agg.locked,0) links_locked,
+                  ifnull(agg.done,0) links_done,
                   ifnull(agg.needs_correction,0) links_need_correction,
                   ifnull(agg.pending,0) links_pending,
                   ifnull(agg.failed,0) links_failed,
@@ -684,6 +685,7 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
            LEFT JOIN service_submissions ss ON ss.student_id=s.id
            LEFT JOIN (SELECT student_id,count(*) total,
                              sum(CASE WHEN qc_status='Locked' THEN 1 ELSE 0 END) locked,
+                             sum(CASE WHEN qc_status='Locked' AND platform IN ('Kafiil','Nafezly') THEN 1 ELSE 0 END) done,
                              sum(CASE WHEN qc_status='Needs Correction' THEN 1 ELSE 0 END) needs_correction,
                              sum(CASE WHEN qc_status='Pending' THEN 1 ELSE 0 END) pending,
                              sum(CASE WHEN auto_status='Failed' THEN 1 ELSE 0 END) failed,
@@ -1026,6 +1028,15 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
     serviceSubmissionStatus,
     accounts,
     accountOrders: await accountOrdersFor(u),
+    // Students in scope with a service bought through a client account (any
+    // order not cancelled): the coach pay screen reads only these ids, for the
+    // graduate bonus, which is for graduates without a purchased service.
+    purchasedStudents: (
+      await all(
+        `SELECT DISTINCT o.student_id FROM account_orders o JOIN students s ON s.id=o.student_id JOIN groups g ON g.id=s.group_id WHERE o.status<>'Cancelled' AND ${q.sql}`,
+        ...q.args,
+      )
+    ).map((r: any) => r.student_id),
     staff: visibleStaff,
     // Who this person may make a group's coordinator; null means anyone.
     teamCoordinators: await teamCoordinators(u),

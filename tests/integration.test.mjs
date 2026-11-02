@@ -1716,6 +1716,14 @@ test("safe bulk controls are atomic and dangerous approvals stay individual", as
     (await dbRow("SELECT count(*) n FROM students WHERE id IN ('S10002','S10003') AND engagement='At Risk'")).n,
     2,
   );
+  const handed = await dbRow("SELECT s.id,g.coordinator FROM students s JOIN groups g ON g.id=s.group_id WHERE g.id='G101' AND g.coordinator<>'staff-sara' ORDER BY s.id LIMIT 1");
+  assert.ok(handed, "a G101 student whose coordinator changes");
+  {
+    await dbExec("INSERT INTO tasks VALUES(?,?,?,?,?,?,?,?,?,?)", "TSK-HANDOVER-1", handed.id, "Call about the gig", handed.coordinator, "2027-01-01T00:00:00Z", "Follow-up", "Normal", "Open", "test-handover", new Date().toISOString());
+    await dbExec("INSERT INTO tasks VALUES(?,?,?,?,?,?,?,?,?,?)", "TSK-HANDOVER-2", handed.id, "Supervisor review", "staff-coach-ops", "2027-01-01T00:00:00Z", "Follow-up", "Normal", "Open", "test-handover-2", new Date().toISOString());
+    await check("account", { id: "ACC-HANDOVER-1", label: "handover@example.org", platform: "Nafezly", credits: 5 });
+    await dbExec("UPDATE accounts SET student_id=?,coordinator_id=? WHERE id='ACC-HANDOVER-1'", handed.id, handed.coordinator);
+  }
   await programCheck("bulk_group_owner", {
     group_ids: ["G101", "G102"],
     owner_type: "Coordinator",
@@ -1726,6 +1734,15 @@ test("safe bulk controls are atomic and dangerous approvals stay individual", as
     (await dbRow("SELECT count(*) n FROM groups WHERE id IN ('G101','G102') AND coordinator='staff-sara'")).n,
     2,
   );
+  {
+    // The old coordinator's open tasks and client accounts for the group move
+    // to the new one; work owned by someone else stays (2 November 2026).
+    assert.equal((await dbRow("SELECT owner FROM tasks WHERE id='TSK-HANDOVER-1'")).owner, "staff-sara");
+    assert.equal((await dbRow("SELECT owner FROM tasks WHERE id='TSK-HANDOVER-2'")).owner, "staff-coach-ops");
+    assert.equal((await dbRow("SELECT coordinator_id FROM accounts WHERE id='ACC-HANDOVER-1'")).coordinator_id, "staff-sara");
+    await dbExec("DELETE FROM tasks WHERE id IN ('TSK-HANDOVER-1','TSK-HANDOVER-2')");
+    await dbExec("UPDATE accounts SET student_id=NULL,status='Retired' WHERE id='ACC-HANDOVER-1'");
+  }
   // Coach Operations own the coaching tier: they may hand groups to a coach,
   // and doing so creates the functional assignment a session needs, so the
   // coach is not merely named on the record.
@@ -4260,7 +4277,16 @@ test("a service link sent back is the coordinator's task until approved, and eac
   await check("account_assign", { id: "ACC-KEY-2", key_student: learner.id, service_link_id: "SLK-KEY-3", coordinator_id: group.coordinator });
   assert.equal((await dbRow("SELECT service_link_id FROM accounts WHERE id='ACC-KEY-2'")).service_link_id, "SLK-KEY-3", "moved to another of their services");
   assert.match((await post("account_unlock", { id: "ACC-KEY-1", reason: "" })).error, /why/);
+  const orderOn = await dbRow("SELECT student_id FROM accounts WHERE id='ACC-KEY-1'");
+  await dbExec(
+    "INSERT INTO account_orders(id,account_id,student_id,coordinator,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+    "ORD-RELEASE-1", "ACC-KEY-1", orderOn.student_id, group.coordinator, "In Progress", new Date().toISOString(), new Date().toISOString(),
+  );
   await check("account_unlock", { id: "ACC-KEY-1", reason: "Broken login" });
+  const closed = await dbRow("SELECT status,note FROM account_orders WHERE id='ORD-RELEASE-1'");
+  assert.equal(closed.status, "Cancelled", "an order still open when the account is released closes");
+  assert.match(closed.note, /released/);
+  await dbExec("DELETE FROM account_orders WHERE id='ORD-RELEASE-1'");
   const freed = await dbRow("SELECT student_id,service_link_id,coordinator_id FROM accounts WHERE id='ACC-KEY-1'");
   assert.deepEqual([freed.student_id, freed.service_link_id], [null, null]);
   assert.equal(freed.coordinator_id, group.coordinator, "the coordinator stays");

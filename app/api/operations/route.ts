@@ -28,7 +28,7 @@ import {
   revokesStudents,
   unlocksAccounts,
 } from "@/lib/server";
-import { accountStates, accountsPerStudent, linkAccountKey, serviceFixCategory, serviceFixStatements, serviceFollowUpSweep, taskProgressStates } from "@/lib/service-followup";
+import { accountStates, accountsPerStudent, linkAccountKey, serviceFixCategory, serviceFixStatements, serviceFollowUpSweep, submissionStatus, taskProgressStates } from "@/lib/service-followup";
 import { demoPeople, demoPlan, demoStudentEmail, isDemo, sameSide } from "@/lib/demo";
 import {
   ensure,
@@ -850,6 +850,16 @@ export async function POST(req: Request) {
             t,
           ),
         );
+        // A student who has left takes nobody's time: their open tasks close
+        // (no more overdue notices to the coordinator) and their services
+        // leave the reviewers' queues, as when a student is revoked
+        // (2 November 2026).
+        if (x.status === "Withdrawn" || x.status === "Removed")
+          jobs.push(
+            stmt("UPDATE tasks SET status='Closed' WHERE student_id=? AND status='Open'", sid),
+            stmt("UPDATE service_links SET qc_actor=NULL,updated_at=? WHERE student_id=? AND qc_status<>'Locked'", t, sid),
+            stmt("UPDATE evidence SET qc_actor=NULL WHERE student_id=? AND status='Quality Review'", sid),
+          );
         break;
       }
       case "student_revoke": {
@@ -985,13 +995,19 @@ export async function POST(req: Request) {
           );
         }
         auditPrevious = s;
+        // The new group's coordinator takes what the old one held for this
+        // student: open tasks and the client accounts linked to them. Work
+        // owned by others (supervisors, quality) stays where it is.
+        const before: any = await stmt("SELECT coordinator FROM groups WHERE id=?", s.group_id).first();
         jobs.push(
           stmt("UPDATE students SET group_id=? WHERE id=?", x.group_id, sid),
           stmt(
-            "UPDATE tasks SET owner=? WHERE student_id=? AND status='Open'",
+            "UPDATE tasks SET owner=? WHERE student_id=? AND status='Open' AND owner=?",
             g.coordinator,
             sid,
+            before?.coordinator || "",
           ),
+          stmt("UPDATE accounts SET coordinator_id=? WHERE student_id=? AND coordinator_id=?", g.coordinator, sid, before?.coordinator || ""),
         );
         break;
       }
@@ -3029,20 +3045,8 @@ export async function POST(req: Request) {
             u.id,
             t,
           ),
-          stmt(
-            `UPDATE service_submissions SET status=CASE
-               WHEN (SELECT count(*) FROM service_links WHERE student_id=? AND qc_status='Locked')=3 THEN 'Complete'
-               WHEN EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status='Needs Correction') THEN 'Needs Correction'
-               ELSE 'Pending QC' END,
-               qc_completed_at=CASE WHEN (SELECT count(*) FROM service_links WHERE student_id=? AND qc_status='Locked')=3 THEN ? ELSE NULL END,
-               updated_at=? WHERE student_id=?`,
-            link.student_id,
-            link.student_id,
-            link.student_id,
-            t,
-            t,
-            link.student_id,
-          ),
+          // The same rule as the student's own page (2 November 2026).
+          submissionStatus(link.student_id, t, "now"),
           stmt(
             `INSERT OR IGNORE INTO notifications(id,recipient,title,entity_type,entity_id,severity,source,created_at,read_at)
              SELECT ?||'-'||id,id,?,'student',?,'Information',?||':'||id,?,NULL
@@ -3131,7 +3135,19 @@ export async function POST(req: Request) {
         ensure(reason.length >= 3, "Say why the account is being released.");
         auditPrevious = { student_id: a.student_id, service_link_id: a.service_link_id, linked_at: a.linked_at, linked_by: a.linked_by, coordinator_id: a.coordinator_id };
         auditValue = { account_id: id, student_id: null, service_link_id: null };
-        jobs.push(stmt("UPDATE accounts SET student_id=NULL,service_link_id=NULL,linked_at=NULL,linked_by=NULL WHERE id=?", id));
+        jobs.push(
+          stmt("UPDATE accounts SET student_id=NULL,service_link_id=NULL,linked_at=NULL,linked_by=NULL WHERE id=?", id),
+          // An order belongs to the student it was placed for: one still open
+          // when the account is released is closed, with why (2 November 2026).
+          stmt(
+            "UPDATE account_orders SET status='Cancelled',note=COALESCE(note||' · ','')||?,cancelled_at=?,updated_at=? WHERE account_id=? AND student_id=? AND status NOT IN ('Proof Uploaded','Cancelled')",
+            "Closed: the account was released from this student.",
+            t,
+            t,
+            id,
+            a.student_id,
+          ),
+        );
         break;
       }
       case "account_order":
@@ -3161,8 +3177,9 @@ export async function POST(req: Request) {
             await proof(u, String(x.proof_id), a.student_id);
           }
           const current: any = await stmt(
-            "SELECT * FROM account_orders WHERE account_id=? AND status<>'Proof Uploaded' ORDER BY created_at DESC LIMIT 1",
+            "SELECT * FROM account_orders WHERE account_id=? AND student_id=? AND status<>'Proof Uploaded' ORDER BY created_at DESC LIMIT 1",
             a.id,
+            a.student_id,
           ).first();
           const stamps = (from: any) => ({
             done: to === "Done" || to === "Proof Uploaded" ? from?.done_at || t : from?.done_at || null,
@@ -3271,7 +3288,7 @@ export async function POST(req: Request) {
           values.push(where || null);
         }
         ensure(sets.length, "Enter the price or the marketplace.");
-        const current: any = await stmt("SELECT * FROM account_orders WHERE account_id=? ORDER BY created_at DESC LIMIT 1", a.id).first();
+        const current: any = await stmt("SELECT * FROM account_orders WHERE account_id=? AND student_id=? ORDER BY created_at DESC LIMIT 1", a.id, a.student_id).first();
         if (current) {
           auditPrevious = { amount: current.amount, bought_on: current.bought_on };
           jobs.push(stmt(`UPDATE account_orders SET ${sets.join(",")},updated_at=? WHERE id=?`, ...values, t, current.id));
@@ -3326,6 +3343,16 @@ export async function POST(req: Request) {
         auditPrevious = { student_id: a.student_id, service_link_id: a.service_link_id, coordinator_id: a.coordinator_id };
         auditValue = { account_id: id, student_id: studentId, service_link_id: serviceId, coordinator_id: coordinatorId };
         const sameStudent = studentId && studentId === a.student_id;
+        // Moved to another student: the previous student's unfinished order closes.
+        if (a.student_id && !sameStudent)
+          jobs.push(stmt(
+            "UPDATE account_orders SET status='Cancelled',note=COALESCE(note||' · ','')||?,cancelled_at=?,updated_at=? WHERE account_id=? AND student_id=? AND status NOT IN ('Proof Uploaded','Cancelled')",
+            "Closed: the account was moved to another student.",
+            t,
+            t,
+            id,
+            a.student_id,
+          ));
         jobs.push(
           stmt(
             `UPDATE accounts SET student_id=?,service_link_id=?,linked_at=?,linked_by=?,coordinator_id=?,

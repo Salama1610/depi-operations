@@ -1169,12 +1169,28 @@ export async function POST(req: Request) {
             ? can(u.roles, ["Project Operations", "Operations Systems / Admin"])
             : can(u.roles, ["Project Operations", "Coach Operations", "Operations Systems / Admin"]);
         const scoped = global
-          ? await all(`SELECT id,status FROM groups WHERE id IN (${marks})`, ...groupIds)
-          : await all(`SELECT id,status FROM groups WHERE id IN (${marks}) AND supervisor=?`, ...groupIds, u.id);
+          ? await all(`SELECT id,status,coordinator FROM groups WHERE id IN (${marks})`, ...groupIds)
+          : await all(`SELECT id,status,coordinator FROM groups WHERE id IN (${marks}) AND supervisor=?`, ...groupIds, u.id);
         ensure(scoped.length === groupIds.length, "One or more groups are missing, archived, or outside your scope.");
         ensure(scoped.every((g) => g.status !== "Archived"), "Archived groups are read-only.");
         const column =
           x.owner_type === "Coordinator" ? "coordinator" : x.owner_type === "Coach" ? "coach" : "supervisor";
+        // The new coordinator takes over what the old one held for these
+        // groups' students: open tasks (contact, recovery, service
+        // corrections), the client accounts linked to them, and open cases.
+        // Work owned by others (supervisors, quality) stays with them
+        // (2 November 2026: these stayed with the old coordinator).
+        if (x.owner_type === "Coordinator")
+          for (const group of scoped as any[]) {
+            if (!group.coordinator || group.coordinator === owner.id) continue;
+            const inGroup = "SELECT id FROM students WHERE group_id=?";
+            jobs.push(
+              stmt(`UPDATE tasks SET owner=? WHERE status='Open' AND owner=? AND student_id IN (${inGroup})`, owner.id, group.coordinator, group.id),
+              stmt(`UPDATE accounts SET coordinator_id=? WHERE coordinator_id=? AND student_id IN (${inGroup})`, owner.id, group.coordinator, group.id),
+              stmt(`UPDATE accounts SET coordinator_2_id=? WHERE coordinator_2_id=? AND student_id IN (${inGroup})`, owner.id, group.coordinator, group.id),
+              stmt(`UPDATE cases SET owner=? WHERE owner=? AND status NOT IN ('Closed','Resolved') AND student_id IN (${inGroup})`, owner.id, group.coordinator, group.id),
+            );
+          }
         jobs.push(stmt(
           `UPDATE groups SET ${column}=? WHERE id IN (${marks})`,
           owner.id,
