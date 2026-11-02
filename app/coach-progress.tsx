@@ -63,6 +63,8 @@ export function CoachProgress() {
   const [error, setError] = useState("");
   const [group, setGroup] = useState("All");
   const [query, setQuery] = useState("");
+  // The quality team's verdicts still to carry out on the portal: approved, rejected or both.
+  const [qcShow, setQcShow] = useState<"Approved" | "Rejected" | "All">("Approved");
   // The programme week shown, Friday to Thursday: 0 is this week.
   const [week, setWeek] = useState(0);
   const dir = useDir();
@@ -146,6 +148,80 @@ export function CoachProgress() {
           {week !== 0 && <button type="button" className="small-btn" onClick={() => setWeek(0)}>{t("This week")}</button>}
         </div>
       </div>
+      {(() => {
+        // Every gig of the shown students that our quality team has checked and
+        // that still waits for the coach on the portal: the coach reads the
+        // verdict and its comment here, then approves or rejects it there.
+        const waiting = shown
+          .flatMap((s) =>
+            (s.portal?.gigs || [])
+              .filter((g: Row) => (g.qc_status === "Approved" || g.qc_status === "Rejected") && /^(pending)?$/i.test(String(g.provider_status || "").trim()))
+              .map((g: Row) => ({ ...g, student: s })),
+          )
+          .sort((a: Row, b: Row) => String(a.qc_at || "").localeCompare(String(b.qc_at || "")));
+        const approved = waiting.filter((g: Row) => g.qc_status === "Approved");
+        const rejected = waiting.filter((g: Row) => g.qc_status === "Rejected");
+        const list = qcShow === "All" ? waiting : qcShow === "Approved" ? approved : rejected;
+        return (
+          <section className="panel coach-qc-ready">
+            <div className="coach-qc-head">
+              <h3>{t("Checked by our quality team · do it on the portal")}</h3>
+              <small>
+                {t("Gigs our quality team has checked that still wait for your decision on the ministry portal. Read the verdict and the comment, then approve or reject the gig there. A gig leaves this list once the next portal sheet shows your decision.")}
+              </small>
+            </div>
+            <div className="coach-qc-tabs" role="group" aria-label={t("Our QC")}>
+              {(
+                [
+                  ["Approved", t("Approved by QC · {v0}", { v0: approved.length })],
+                  ["Rejected", t("Rejected by QC · {v0}", { v0: rejected.length })],
+                  ["All", t("All · {v0}", { v0: waiting.length })],
+                ] as const
+              ).map(([value, label]) => (
+                <button key={value} type="button" className={"small-btn" + (qcShow === value ? " is-on" : "")} aria-pressed={qcShow === value} onClick={() => setQcShow(value)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {list.length ? (
+              <ul className="coach-qc-list">
+                {list.map((g: Row) => (
+                  <li key={g.id} className={g.qc_status === "Approved" ? "is-ok" : "is-bad"}>
+                    <div className="coach-qc-who">
+                      <strong>{g.student.name}</strong>
+                      <small>{g.student.group_id}</small>
+                    </div>
+                    <div className="coach-qc-gig">
+                      {g.url ? (
+                        <a className="text-link wrap-text" href={g.url} target="_blank" rel="noreferrer">
+                          {g.title || t("Gig")}
+                        </a>
+                      ) : (
+                        <span className="wrap-text">{g.title || t("Gig")}</span>
+                      )}
+                      <small>
+                        {g.price !== null && g.price !== undefined ? "$" + g.price + " · " : ""}
+                        {day(g.date)}
+                      </small>
+                    </div>
+                    <div className="coach-qc-verdict">
+                      <span className={"cue " + (g.qc_status === "Approved" ? "is-ok" : "is-bad")}>
+                        {g.qc_status === "Approved" ? t("Approve it on the portal") : t("Reject it on the portal")}
+                      </span>
+                      {g.qc_comment && <small className="coach-progress-qc wrap-text" dir="auto">{g.qc_comment}</small>}
+                      {g.qc_at && <small>{t("Checked {v0}", { v0: day(g.qc_at) })}</small>}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="footnote">
+                {waiting.length ? t("Nothing in this list.") : t("Nothing waiting for you: every gig our quality team checked has your decision on the portal.")}
+              </p>
+            )}
+          </section>
+        );
+      })()}
       <div className="mini-stats">
         <span><strong>{shown.length}</strong>{t("Students")}</span>
         <span><strong>{graduated}</strong>{t("Graduated")}</span>
