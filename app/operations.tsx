@@ -1227,6 +1227,8 @@ export default function Operations({ module: initialModule }: { module: string }
               <small>
                 {s.id} <span>·</span> {s.track}
                 {s.provider ? <> <span>·</span> {s.provider}</> : null}
+                {/* Sent only to Project Operations, the group's supervisor and administrators. */}
+                {s.national_id ? <> <span>·</span> {t("National ID")} <bdi dir="ltr">{s.national_id}</bdi></> : null}
                 {s.round_1 && s.round_1 !== "Current Round" ? (
                   <> <span className="badge muted">{t(s.round_1)}</span></>
                 ) : null}
