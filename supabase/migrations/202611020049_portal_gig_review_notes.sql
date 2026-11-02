@@ -5,10 +5,10 @@
 -- each new proof the student uploads is now one entry here, kept in order, so
 -- the old comments and the new ones are read together: on the Portal gigs QC
 -- card, by the coach and by the coordinator. Entries follow the review's proof
--- key (see 202611020047); when the student replaces the proof they move to the
+-- key (see 202611020048); when the student replaces the proof they move to the
 -- new one, so the reason for a rejection stays next to the new proof.
 -- Filled from the decisions already in the activity history.
--- Mirrors drizzle/0049.
+-- Mirrors drizzle/0050.
 
 create table if not exists public.portal_gig_review_notes (
   id text primary key,

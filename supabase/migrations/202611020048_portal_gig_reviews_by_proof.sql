@@ -7,7 +7,7 @@
 -- same Quality Member with its verdict, whatever ID its row carries. A gig
 -- without a proof link falls back to 'gig:' and its ID. portal_gig_id stays,
 -- pointing at the row of the latest sheet that carries the proof.
--- Mirrors drizzle/0048.
+-- Mirrors drizzle/0049.
 
 alter table public.portal_gig_reviews add column if not exists proof_key text;
 
