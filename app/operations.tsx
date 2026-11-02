@@ -750,10 +750,8 @@ export default function Operations({ module: initialModule }: { module: string }
           can(user.roles, ["Operations Systems / Admin"]) && !demoAccount
       : m === "administration"
         ? can(user.roles, ["Operations Systems / Admin"])
-        : m === "gigs"
-          ? // Gone for everyone: the Accounts tab holds each service's details
-            // and its uploads (2 November 2026).
-            false
+        : m === "gigs" && onlyCoach
+          ? false
         : m === "portal"
           ? // The portal sheets hold real students, so demo sign-ins do not open them.
             !demoAccount && can(user.roles, [
