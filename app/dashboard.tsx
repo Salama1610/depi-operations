@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Download, RefreshCw, X } from "lucide-react";
 import { useLocale, useT } from "@/lib/i18n/context";
+import { useLiveReload } from "@/lib/use-live-reload";
 import { SearchableSelect } from "@/components/searchable-select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { scoreOf } from "@/lib/domain/feedback";
@@ -124,6 +125,7 @@ export function Dashboard() {
   const [sortBy, setSortBy] = useState("actions");
 
   async function load() {
+    if (loading) return;
     setLoading(true);
     setError("");
     try {
@@ -141,6 +143,8 @@ export function Dashboard() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // A dashboard left open keeps up with everyone's work.
+  useLiveReload(() => void load());
 
   const staff: Row[] = useMemo(() => data?.staff || [], [data]);
   const staffById = useMemo(() => new Map(staff.map((p) => [p.id, p])), [staff]);
