@@ -3310,8 +3310,8 @@ test("demo accounts work on the demo groups only, and nobody else sees them", as
     assert.deepEqual(view.groups.map((g) => g.id).sort(), ["DEMO-G1", "DEMO-G2"]);
     assert.ok(view.students.length && view.students.every((s) => s.id.startsWith("DEMO-")));
     assert.ok(view.staff.every((p) => p.id.startsWith("DEMO-")), "only the demo team");
-    // A student's national ID is their first password: staff other than administrators never receive it.
-    assert.ok(view.students.every((s) => !("national_id" in s)), "no student national IDs for a coordinator");
+    // Every member of staff reads a student's national ID since 2 November 2026; it marks whether one is recorded.
+    assert.ok(view.students.every((s) => "has_national_id" in s), "each student says whether a national ID is recorded");
     // This week's session started half an hour ago, so attendance can be taken now.
     const live = view.sessions.find((s) => s.id === "DEMO-G1-W2");
     assert.ok(Date.parse(live.starts_at) <= Date.now());
