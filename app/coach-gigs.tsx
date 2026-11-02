@@ -11,6 +11,7 @@ import { Copy, ExternalLink, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { useLocale, useT } from "@/lib/i18n/context";
 import { SearchableSelect } from "@/components/searchable-select";
+import { QcThread } from "@/components/qc-thread";
 
 type Row = Record<string, any>;
 
@@ -197,7 +198,11 @@ export function CoachGigs() {
                 <span className={"cue " + (g.qc_status === "Approved" ? "is-ok" : "is-bad")}>
                   {g.waiting ? (g.qc_status === "Approved" ? t("Approve it on the portal") : t("Reject it on the portal")) : g.qc_status === "Approved" ? t("Approved by QC") : t("Rejected by QC")}
                 </span>
-                {g.qc_comment && <small className="coach-progress-qc wrap-text" dir="auto">{g.qc_comment}</small>}
+                {(g.qc_notes || []).length ? (
+                  <QcThread notes={g.qc_notes} className="coach-progress-qc" />
+                ) : (
+                  g.qc_comment && <small className="coach-progress-qc wrap-text" dir="auto">{g.qc_comment}</small>
+                )}
                 {g.qc_at && <small>{t("Checked {v0}", { v0: day(g.qc_at) })}</small>}
               </div>
             </li>

@@ -1,5 +1,7 @@
 import { actor, all, permit, rateLimit } from "@/lib/server";
 import { sameSide } from "@/lib/demo";
+import { proofKey, proofKeySql } from "@/lib/domain/portal-review";
+import { reviewNotes } from "@/lib/portal-review-notes";
 
 export const dynamic = "force-dynamic";
 
@@ -61,7 +63,7 @@ export async function GET() {
           all(
             `SELECT z.portal_gig_id,z.portal_student_id,z.title,z.url,z.proof_url,z.price,z.created_on,z.status,z.provider_status,z.auditor_status,
                     r.status qc_status,r.comment qc_comment,r.reviewed_at qc_reviewed_at
-             FROM portal_gigs z JOIN portal_gig_reviews r ON r.portal_gig_id=z.portal_gig_id AND r.status IN ('Approved','Rejected')
+             FROM portal_gigs z JOIN portal_gig_reviews r ON r.proof_key=${proofKeySql("z")} AND r.status IN ('Approved','Rejected')
              WHERE z.batch_id=? AND z.portal_student_id IN (${marks(slice)})
              ORDER BY r.reviewed_at`,
             gigsBatch,
@@ -69,6 +71,8 @@ export async function GET() {
           ),
         )
       : [];
+    // Every comment of our quality team on each gig, the earlier ones with the new (without the reviewers' names).
+    const notes = await reviewNotes(rows.map((g: any) => proofKey(g)), false);
     const gigs = rows.map((g: any) => {
       const p: any = portalOf.get(String(g.portal_student_id));
       const ours: any = byId.get(String(p?.student_id));
@@ -87,6 +91,7 @@ export async function GET() {
         qc_status: g.qc_status,
         qc_comment: g.qc_comment || null,
         qc_at: g.qc_reviewed_at || null,
+        qc_notes: notes.get(proofKey(g)) || [],
         student: {
           id: ours?.id || p?.student_id || null,
           name: ours?.name || p?.full_name || null,

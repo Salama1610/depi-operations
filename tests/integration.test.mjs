@@ -4818,10 +4818,11 @@ test("a coach's Gigs tab lists the portal gigs our QC decided, with links and th
     { portal_gig_id: "CG-3", portal_student_id: "GUID-CG-1", title: "Not checked", url: "https://example.org/gig-3", proof_url: "", status: "Pending" },
   ]);
   const at = new Date().toISOString();
-  for (const [id, status, comment] of [["CG-1", "Approved", "Matches the order"], ["CG-2", "Rejected", "Proof is from another account"]])
+  // Each review is kept under its proof link, or the gig's ID when it has none.
+  for (const [id, key, status, comment] of [["CG-1", "https://example.org/proof-1", "Approved", "Matches the order"], ["CG-2", "gig:CG-2", "Rejected", "Proof is from another account"]])
     await dbExec(
-      "INSERT INTO portal_gig_reviews(portal_gig_id,portal_student_id,student_id,reviewer,assigned_at,status,comment,reviewed_by,reviewed_at) VALUES(?,?,?,?,?,?,?,?,?)",
-      id, "GUID-CG-1", pupil.id, "staff-quality", at, status, comment, "staff-quality", at,
+      "INSERT INTO portal_gig_reviews(portal_gig_id,proof_key,portal_student_id,student_id,reviewer,assigned_at,status,comment,reviewed_by,reviewed_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+      id, key, "GUID-CG-1", pupil.id, "staff-quality", at, status, comment, "staff-quality", at,
     );
   current = { id: "coach-login", email: "staff-coach@example.invalid" };
   const view = await (await coachGigs.GET()).json();
@@ -4833,6 +4834,7 @@ test("a coach's Gigs tab lists the portal gigs our QC decided, with links and th
   assert.equal(one.proof_url, "https://example.org/proof-1");
   assert.equal(one.waiting, true);
   assert.equal(one.qc_comment, "Matches the order");
+  assert.deepEqual(one.qc_notes, [], "the comment thread comes with each gig");
   assert.equal(one.student.id, pupil.id);
   assert.equal(one.student.round_code, pupil.group_id);
   assert.deepEqual(one.student.proofs, ["https://example.org/student-proof"]);
