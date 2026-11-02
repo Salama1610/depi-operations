@@ -487,7 +487,7 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
       </div>
       {data?.history?.length > 0 && (
         <details className="panel portal-history">
-          <summary>{t("Upload history")}</summary>
+          <summary>{t("Sheets in use")}</summary>
           <table className="portal-table">
             <tbody>
               {data!.history.map((h: Row) => (

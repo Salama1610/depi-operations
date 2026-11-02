@@ -1514,7 +1514,7 @@ export const ar: Record<string, string> = {
   "Graduate type": "نوع التخرج",
   "Revenue": "الإيرادات",
   "Show more ({v0} left)": "عرض المزيد (متبقٍ {v0})",
-  "Upload history": "سجل الرفع",
+  "Sheets in use": "الشيتات المستخدمة الآن",
   "{v0} rows": "{v0} صفًا",
   "{v0} awaiting the auditor": "{v0} بانتظار المدقق",
   "Hide gigs": "إخفاء الأعمال",

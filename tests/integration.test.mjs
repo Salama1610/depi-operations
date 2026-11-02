@@ -1371,6 +1371,13 @@ test("a student's services go to one quality reviewer, spread evenly, and the le
     holderView.serviceLinks.every((l) => l.qc_actor === holder.id),
     "the queue they load is their own",
   );
+  // The browser's copy leaves out what no screen reads; the check's message and checks stay.
+  assert.ok(holderView.serviceLinks.length > 0);
+  for (const l of holderView.serviceLinks) {
+    for (const gone of ["normalized_url", "student_email", "submission_submitted_at", "qc_completed_at"]) assert.ok(!(gone in l), gone + " is not sent");
+    if (l.auto_result) assert.ok(Object.keys(JSON.parse(l.auto_result)).every((k) => ["message", "checks"].includes(k)), "only the check's message and checks");
+  }
+  for (const s of holderView.students.filter((s) => s.next_task)) assert.deepEqual(Object.keys(s.next_task).sort(), ["due", "id", "owner", "title"]);
   assert.ok(
     holderView.groups.every((g) => holderView.students.some((s) => s.group_id === g.id)),
     "the groups they see are the ones those students are in",
@@ -4107,6 +4114,9 @@ test("portal gigs waiting for the coach go to the quality team, whose verdict th
   const pupil = progress.students.find((s) => s.id === ours.id);
   assert.equal(pupil.portal.gigs.find((g) => g.id === "QG-2").qc_status, "Approved");
 
+  // Each new upload replaces the sheet before it: only the sheet in use keeps an entry, and the activity history keeps every upload.
+  assert.equal(Number((await dbRow("SELECT count(*) n FROM portal_uploads WHERE sheet='gigs'")).n), 1);
+  assert.ok(Number((await dbRow("SELECT count(*) n FROM audit_events WHERE action='Portal sheet uploaded'")).n) >= 3);
   // A gig whose proof was replaced is checked again, by the same member.
   current = { id: "owner", email: "owner@example.com" };
   await upload("gigs", gigMapping, [renamed, { ...gig[2], proof_url: "https://proof.example.org/two-new" }, gig[3], gig[4], gig[5], later]);

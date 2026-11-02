@@ -184,7 +184,8 @@ export async function GET(req: Request) {
           )
         ).filter((r: any) => scope === null || scope.has(r.id))
       : [];
-    const history = await all("SELECT id,sheet,status,file_name,rows_total,rows_linked,uploaded_by,created_at,committed_at FROM portal_uploads ORDER BY created_at DESC LIMIT 20");
+    // The sheets in use now; each upload before them is a line in the activity history.
+    const history = await all("SELECT id,sheet,status,file_name,rows_total,rows_linked,uploaded_by,created_at,committed_at FROM portal_uploads WHERE status='Active' ORDER BY sheet");
     const mappings = Object.fromEntries(
       await Promise.all(
         sheets.map(async (sheet) => {
@@ -272,9 +273,9 @@ export async function POST(req: Request) {
       const saved: any = await stmt("SELECT id FROM import_mappings WHERE module=? AND name=?", "portal_" + sheet, mappingName).first();
       const clean = Object.fromEntries(Object.entries(mapping).filter(([, f]) => f));
       await db().batch([
-        // Staging left behind by an upload that never finished is cleared.
+        // An upload that never finished is cleared, its rows and its entry.
         stmt(`DELETE FROM portal_${sheet} WHERE batch_id IN (SELECT batch_id FROM portal_uploads WHERE sheet=? AND status='Staging' AND created_at<?)`, sheet, new Date(Date.now() - 3600000).toISOString()),
-        stmt("UPDATE portal_uploads SET status='Abandoned' WHERE sheet=? AND status='Staging' AND created_at<?", sheet, new Date(Date.now() - 3600000).toISOString()),
+        stmt("DELETE FROM portal_uploads WHERE sheet=? AND status='Staging' AND created_at<?", sheet, new Date(Date.now() - 3600000).toISOString()),
         stmt(
           "INSERT INTO portal_uploads(id,sheet,batch_id,status,file_name,rows_total,rows_linked,mapping,uploaded_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
           uid("PUP"),
@@ -375,8 +376,9 @@ export async function POST(req: Request) {
       return Response.json({ ok: true, received: jobs.length ? rows.length : 0 });
     }
 
-    // 3. Every row is in: this upload becomes the sheet's current one, and the
-    // one before it is cleared.
+    // 3. Every row is in: this upload becomes the sheet's current one. The one
+    // it replaces goes, its rows and its entry, along with any upload left
+    // unfinished or cancelled; the activity history keeps a line for each.
     if (x.action === "commit") {
       const table = `portal_${sheet}`;
       const count: any = await stmt(`SELECT count(*) n FROM ${table} WHERE batch_id=?`, upload.batch_id).first();
@@ -393,7 +395,7 @@ export async function POST(req: Request) {
       const previous = await all("SELECT batch_id FROM portal_uploads WHERE sheet=? AND status='Active'", sheet);
       await db().batch([
         ...previous.map((p: any) => stmt(`DELETE FROM ${table} WHERE batch_id=?`, p.batch_id)),
-        stmt("UPDATE portal_uploads SET status='Replaced' WHERE sheet=? AND status='Active'", sheet),
+        stmt("DELETE FROM portal_uploads WHERE sheet=? AND status IN ('Active','Replaced','Abandoned') AND batch_id<>?", sheet, upload.batch_id),
         stmt(
           "UPDATE portal_uploads SET status='Active',rows_total=?,rows_linked=?,committed_at=? WHERE batch_id=?",
           Number(count.n),
@@ -406,11 +408,11 @@ export async function POST(req: Request) {
       return Response.json({ ok: true, rows: Number(count.n), linked: Number(linked.n) });
     }
 
-    // An upload given up on: its staged rows go.
+    // An upload given up on: its staged rows and its entry go.
     if (x.action === "cancel") {
       await db().batch([
         stmt(`DELETE FROM portal_${sheet} WHERE batch_id=?`, upload.batch_id),
-        stmt("UPDATE portal_uploads SET status='Abandoned' WHERE batch_id=?", upload.batch_id),
+        stmt("DELETE FROM portal_uploads WHERE batch_id=?", upload.batch_id),
       ]);
       return Response.json({ ok: true });
     }
