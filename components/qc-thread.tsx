@@ -32,7 +32,7 @@ export function QcThread({ notes, className = "" }: { notes?: Note[] | null; cla
             {new Date(n.created_at).toLocaleString(tag, { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true })}
             {n.author_name ? " · " + n.author_name : ""}
           </small>
-          {n.comment && <p className="wrap-text">{n.comment}</p>}
+          {n.comment && <p className="wrap-text" dir="auto">{n.comment}</p>}
         </li>
       ))}
     </ol>
