@@ -315,14 +315,12 @@ async function validateSessionSlot(x: any, excludeId?: string) {
   return { startsAt, day, week, duration };
 }
 /**
- * The workspace payload is a few megabytes of JSON that shrinks more than ten
- * times under gzip. Cloudflare compresses at the edge in production, but the
- * development server does not, and the difference between 4 MB and 0.3 MB on
- * the wire is the difference between a page that feels broken and one that
- * feels quick. Server-Timing reports where the time went so the next slowness
- * can be measured rather than guessed.
+ * The workspace as JSON, with Server-Timing saying where the time went so the
+ * next slowness can be measured rather than guessed. Vercel's edge compresses
+ * it for each browser (Brotli, or gzip), so it is sent as it is: on 2 Nov
+ * 2026 Project Operations' 17.5 MB arrived as about 1.7 MB.
  */
-async function jsonResponse(data: unknown, req: Request | undefined, timings: Record<string, number>) {
+function jsonResponse(data: unknown, timings: Record<string, number>) {
   const started = Date.now();
   const text = JSON.stringify(data);
   timings.serialize = Date.now() - started;
@@ -333,17 +331,44 @@ async function jsonResponse(data: unknown, req: Request | undefined, timings: Re
       .map(([name, ms]) => `${name};dur=${ms}`)
       .join(", "),
   };
-  const accepts = req?.headers.get("accept-encoding") ?? "";
-  if (/gzip/.test(accepts) && typeof CompressionStream === "function") {
-    const stream = new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"));
-    headers["Content-Encoding"] = "gzip";
-    headers["Vary"] = "Accept-Encoding";
-    return new Response(stream, { headers });
-  }
   return new Response(text, { headers });
 }
 
-export async function GET(req?: Request) {
+/**
+ * Leaves out of the browser's copy what no screen reads, so programme-wide
+ * staff download a few megabytes less (2 Nov 2026: 20.7 MB before gzip for
+ * Project Operations, a third of it service links). Server-side callers of
+ * loadData keep the full rows.
+ * - A student's next task: the title, due date and owner it is shown by,
+ *   not a second copy of the whole task.
+ * - A service link: the automatic check's message and checks, not its full
+ *   result; and none of the normalized address, the student's email or the
+ *   submission's own dates, which the screens take from elsewhere.
+ */
+function slimForBrowser(data: any) {
+  for (const s of data.students || []) {
+    if (s.next_task) {
+      const { id, title, due, owner } = s.next_task;
+      s.next_task = { id, title, due, owner };
+    }
+  }
+  for (const l of data.serviceLinks || []) {
+    delete l.normalized_url;
+    delete l.student_email;
+    delete l.submission_submitted_at;
+    delete l.qc_completed_at;
+    if (l.auto_result) {
+      try {
+        const full = typeof l.auto_result === "string" ? JSON.parse(l.auto_result) : l.auto_result;
+        l.auto_result = JSON.stringify({ message: full?.message, checks: full?.checks });
+      } catch {
+        // An unreadable result is passed on as it is; the screen says so.
+      }
+    }
+  }
+}
+
+export async function GET() {
   try {
     const timings: Record<string, number> = {};
     let mark = Date.now();
@@ -381,7 +406,8 @@ export async function GET(req?: Request) {
     // response, so it is stripped at the boundary along with the evidence copy.
     for (const s of data.students) delete s.policy;
     for (const e of data.evidence) delete e.applied_policy;
-    return jsonResponse(data, req, timings);
+    slimForBrowser(data);
+    return jsonResponse(data, timings);
   } catch (e: any) {
     return Response.json({ error: e.message }, { status: 403 });
   }

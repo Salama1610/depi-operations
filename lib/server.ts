@@ -514,6 +514,7 @@ export async function loadData(u: any) {
     sessionChecks,
     sessionFeedback,
     joinLogins,
+    progress,
   ] = await Promise.all([
     all(
       `SELECT g.*,c.name coordinator_name,s.name supervisor_name,s.title supervisor_title,s.team supervisor_team,h.name coach_name,m.name account_manager_name FROM groups g JOIN users c ON c.id=g.coordinator JOIN users s ON s.id=g.supervisor JOIN users h ON h.id=g.coach LEFT JOIN users m ON m.id=g.account_manager WHERE ${qg.sql}`,
@@ -703,6 +704,14 @@ export async function loadData(u: any) {
     isDemo(u)
       ? none
       : all("SELECT id,kind,provider,group_id,updated_by,updated_at FROM join_accounts"),
+    // Where the owner stands on each open task (e.g. "Contacted the student"),
+    // read with the rest rather than 400 tasks at a time afterwards.
+    all(
+      `SELECT p.task_id,p.status,p.note,p.updated_at,w.name updated_by_name FROM task_progress p
+       JOIN tasks t ON t.id=p.task_id AND t.status='Open' JOIN students s ON s.id=t.student_id JOIN groups g ON g.id=s.group_id
+       LEFT JOIN users w ON w.id=p.updated_by WHERE ${q.sql}`,
+      ...q.args,
+    ),
   ]);
   loadTimings.db = Date.now() - loadStarted;
   const initialized: any = initializedRows[0];
@@ -728,18 +737,6 @@ export async function loadData(u: any) {
     }
     return out;
   };
-  // Where the owner stands on each open task (e.g. "Contacted the student").
-  const openIds = tasks.filter((task) => task.status === "Open").map((task) => task.id);
-  const progress: any[] = [];
-  for (let i = 0; i < openIds.length; i += 400) {
-    const slice = openIds.slice(i, i + 400);
-    progress.push(
-      ...(await all(
-        `SELECT p.task_id,p.status,p.note,p.updated_at,u.name updated_by_name FROM task_progress p LEFT JOIN users u ON u.id=p.updated_by WHERE p.task_id IN (${slice.map(() => "?").join(",")})`,
-        ...slice,
-      )),
-    );
-  }
   const progressByTask = new Map(progress.map((p) => [p.task_id, p]));
   for (const task of tasks) if (progressByTask.has(task.id)) task.progress = progressByTask.get(task.id);
   const attendanceByStudent = bucket(attendance, "student_id");
