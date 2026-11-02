@@ -1554,3 +1554,16 @@ td .searchable-select,td .pick-inline{max-width:240px;min-width:0}
 .coach-qc-list li>div{display:flex;flex-direction:column;gap:3px;min-width:0}
 .coach-qc-list small{color:#7b88a0}
 @media(max-width:760px){.coach-qc-list li{grid-template-columns:1fr}}
+/* The coach's Gigs tab and its notice on the Overview. */
+.coach-gigs{display:flex;flex-direction:column;gap:12px}
+.coach-gigs-notice{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:#fff;border:1px solid #d7e0f7;border-inline-start:4px solid #315ce8;border-radius:9px;padding:14px 16px;margin-bottom:18px}
+.coach-gigs-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.coach-gigs-list>li{display:grid;grid-template-columns:minmax(200px,1.2fr) minmax(200px,1.4fr) minmax(200px,1.4fr);gap:14px;align-items:start;background:#fff;border:1px solid #e4e9f2;border-radius:9px;padding:12px 14px;border-inline-start:4px solid #c9d4e4}
+.coach-gigs-list>li.is-ok{border-inline-start-color:#2f7a6d}
+.coach-gigs-list>li.is-bad{border-inline-start-color:#c0453a}
+.coach-gigs-list>li>div{display:flex;flex-direction:column;gap:4px;min-width:0}
+.coach-gigs-list small{color:#6a7891;overflow-wrap:anywhere}
+.coach-gigs-guid{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.coach-gigs-guid code{font-size:11px;background:#f1f4fa;border-radius:4px;padding:2px 6px;overflow-wrap:anywhere}
+.coach-gigs-links{display:flex;gap:8px;flex-wrap:wrap;margin-top:2px}
+@media(max-width:860px){.coach-gigs-list>li{grid-template-columns:1fr}}

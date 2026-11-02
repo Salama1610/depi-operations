@@ -4741,3 +4741,52 @@ test("a portal row is matched to our student by national ID first, and the ID is
   assert.equal(await dbRow("SELECT * FROM portal_links WHERE portal_id='NAME-2'"), null);
   await dbExec("UPDATE students SET national_id=? WHERE id=?", picked.national_id, picked.id);
 });
+
+test("a coach's Gigs tab lists the portal gigs our QC decided, with links and the student's portal record", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const portal = await route("portal");
+  const coachGigs = await route("coach-gigs");
+  const post = (body) => portal.POST(new Request("https://test.local/api/portal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
+  const send = async (sheet, mapping, rows) => {
+    const begun = await (await post({ action: "begin", sheet, mapping, total: rows.length, file_name: sheet + ".xlsx" })).json();
+    await post({ action: "chunk", batch: begun.batch, rows });
+    return (await post({ action: "commit", batch: begun.batch })).json();
+  };
+  const pupil = await dbRow(
+    "SELECT s.id,s.email,s.group_id FROM students s JOIN groups g ON g.id=s.group_id WHERE g.coach='staff-coach' AND s.lifecycle='Active' AND s.email IS NOT NULL AND trim(s.email)<>'' AND g.id NOT LIKE 'DEMO-%' ORDER BY s.id LIMIT 1",
+  );
+  assert.ok(pupil, "a student of staff-coach with an email");
+  await send("students", { ID: "portal_id", Email: "email", Name: "full_name", Round: "round_code", Phone: "phone", P1: "proof_1" }, [
+    { portal_id: "GUID-CG-1", email: pupil.email, full_name: "Portal Name", round_code: pupil.group_id, phone: "01012345678", proof_1: "https://example.org/student-proof" },
+  ]);
+  await send("gigs", { ID: "portal_gig_id", "Student ID": "portal_student_id", Title: "title", Link: "url", Proof: "proof_url", Status: "status" }, [
+    { portal_gig_id: "CG-1", portal_student_id: "GUID-CG-1", title: "Logo", url: "https://example.org/gig-1", proof_url: "https://example.org/proof-1", status: "Pending" },
+    { portal_gig_id: "CG-2", portal_student_id: "GUID-CG-1", title: "Banner", url: "https://example.org/gig-2", proof_url: "", status: "Pending" },
+    { portal_gig_id: "CG-3", portal_student_id: "GUID-CG-1", title: "Not checked", url: "https://example.org/gig-3", proof_url: "", status: "Pending" },
+  ]);
+  const at = new Date().toISOString();
+  for (const [id, status, comment] of [["CG-1", "Approved", "Matches the order"], ["CG-2", "Rejected", "Proof is from another account"]])
+    await dbExec(
+      "INSERT INTO portal_gig_reviews(portal_gig_id,portal_student_id,student_id,reviewer,assigned_at,status,comment,reviewed_by,reviewed_at) VALUES(?,?,?,?,?,?,?,?,?)",
+      id, "GUID-CG-1", pupil.id, "staff-quality", at, status, comment, "staff-quality", at,
+    );
+  current = { id: "coach-login", email: "staff-coach@example.invalid" };
+  const view = await (await coachGigs.GET()).json();
+  assert.equal(view.error, undefined, view.error);
+  const mine = view.gigs.filter((g) => g.student.portal_id === "GUID-CG-1");
+  assert.deepEqual(mine.map((g) => [g.id, g.qc_status]).sort(), [["CG-1", "Approved"], ["CG-2", "Rejected"]], "only the gigs our QC decided");
+  const one = mine.find((g) => g.id === "CG-1");
+  assert.equal(one.url, "https://example.org/gig-1");
+  assert.equal(one.proof_url, "https://example.org/proof-1");
+  assert.equal(one.waiting, true);
+  assert.equal(one.qc_comment, "Matches the order");
+  assert.equal(one.student.id, pupil.id);
+  assert.equal(one.student.round_code, pupil.group_id);
+  assert.deepEqual(one.student.proofs, ["https://example.org/student-proof"]);
+  assert.ok(!/staff-quality|reviewer/.test(JSON.stringify(view)), "no reviewer named");
+  current = { id: "coordinator", email: "staff-sara@example.invalid" };
+  assert.ok((await (await coachGigs.GET()).json()).error, "coaches only");
+  current = { id: "owner", email: "owner@example.com" };
+  await dbExec("DELETE FROM portal_gig_reviews WHERE portal_gig_id IN ('CG-1','CG-2')");
+});

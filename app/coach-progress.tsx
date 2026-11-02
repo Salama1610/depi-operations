@@ -244,7 +244,6 @@ export function CoachProgress() {
           {week !== 0 && <button type="button" className="small-btn" onClick={() => setWeek(0)}>{t("This week")}</button>}
         </div>
       </div>
-      <CoachQcPanel students={shown} />
       <div className="mini-stats">
         <span><strong>{shown.length}</strong>{t("Students")}</span>
         <span><strong>{graduated}</strong>{t("Graduated")}</span>

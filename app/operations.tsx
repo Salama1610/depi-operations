@@ -23,7 +23,8 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { Progress } from "@/components/ui/progress";
 import { GraduationDots } from "./today";
 import { FeedbackAlertCard, FeedbackScore, FeedbackView } from "./feedback-view";
-import { CoachProgress, CoachQcHome } from "./coach-progress";
+import { CoachProgress } from "./coach-progress";
+import { CoachGigs, CoachGigsNotice } from "./coach-gigs";
 import { AccountsSheetUpload } from "./accounts-sheet";
 import { Opportunities } from "./opportunities";
 import { scoreOf } from "@/lib/domain/feedback";
@@ -153,6 +154,7 @@ const nav = [
   ["opportunities", "Opportunities", ExternalLink],
   ["portal", "Gigs portal view", Files],
   ["portal-qc", "Portal gigs QC", ClipboardCheck],
+  ["coach-gigs", "Gigs", ClipboardList],
   ["quality", "Quality review", ShieldCheck],
   ["feedback-review", "Feedback review", MessageSquareText],
   ["attendance-check", "Attendance check", ClipboardList],
@@ -733,6 +735,9 @@ export default function Operations({ module: initialModule }: { module: string }
         ? // The quality team checks each held session's register; Coach and
           // Project Operations read their checks and notes.
           can(user.roles, ["Quality Lead", "Quality Member", "Coach Operations", "Project Operations", "Operations Systems / Admin"])
+      : m === "coach-gigs"
+        ? // The coach's portal gigs our quality team approved or rejected.
+          can(user.roles, ["Coach"]) && !demoAccount
       : m === "portal-qc"
         ? // Our quality team's check of the portal gigs before the coach decides.
           // Coaches and coordinators read the verdicts in their own views.
@@ -1858,8 +1863,8 @@ See you there!`,
       return (
         <>
           {heading}
-          {/* Gigs our quality team checked, for the coach to carry out on the portal: first thing they see. */}
-          <CoachQcHome />
+          {/* Gigs our quality team checked, waiting for the coach on the portal: a way to the Gigs tab. */}
+          <CoachGigsNotice onOpen={() => goTo("coach-gigs")} />
           <div className="stats">
             {tile("Sessions this week", week.length, t("{v0} held so far", { v0: held.length }))}
             {tile("Waiting for your confirmation", week.filter((s) => s.status === "Scheduled" && !s.coach_confirmed_at && Date.parse(s.starts_at) > Date.now()).length, t("Confirm at least 27 hours before"))}
@@ -3205,6 +3210,8 @@ See you there!`,
         <AttendanceCheck />
       </Suspense>
     );
+  } else if (module === "coach-gigs") {
+    content = <CoachGigs />;
   } else if (module === "portal-qc") {
     content = (
       <Suspense fallback={<div className="dash-loading">{t("Loading…")}</div>}>

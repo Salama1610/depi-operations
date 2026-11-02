@@ -28,6 +28,7 @@ const pages = [
   "app/portal-view.tsx",
   "app/dashboard.tsx",
   "app/feedback-review.tsx",
+  "app/coach-gigs.tsx",
   "app/coach-availability.tsx",
   "app/opportunities.tsx",
   "app/student/page.tsx",
