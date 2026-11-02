@@ -5650,6 +5650,12 @@ See you there!`,
                     {selectedStudent.id} · {selectedStudent.group_id} ·{" "}
                     {selectedStudent.track}
                   </p>
+                  {/* Only the people allowed to read it receive it (lib/server.ts hideNationalId). */}
+                  {selectedStudent.national_id && (
+                    <p className="contact-line">
+                      <span>{t("National ID")}: <bdi dir="ltr">{selectedStudent.national_id}</bdi></span>
+                    </p>
+                  )}
                   {/* How to reach the student directly: their phone (tap to call) and email. */}
                   {/* Coaches see the phone too (decided 24 Oct 2026), not the email. */}
                   {(selectedStudent.phone || (!onlyCoach && selectedStudent.email)) && (

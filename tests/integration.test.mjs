@@ -4676,6 +4676,35 @@ test("coordinators follow each order on a student's client account, and the lead
   await dbExec("UPDATE accounts SET student_id=NULL WHERE id='ACC-ORDER-1'");
 });
 
+test("a student's national ID reaches only administrators, Project Operations and the group's supervisor", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const row = await dbRow(
+    `SELECT s.id,s.national_id,g.supervisor,v.email supervisor_email,g.coordinator,c.email coordinator_email FROM students s JOIN groups g ON g.id=s.group_id
+     JOIN users v ON v.id=g.supervisor JOIN users c ON c.id=g.coordinator
+     WHERE s.lifecycle='Active' AND g.status='Active' AND s.id NOT LIKE 'DEMO-%' AND v.roles NOT LIKE '%Project Operations%' AND v.roles NOT LIKE '%Admin%' ORDER BY s.id LIMIT 1`,
+  );
+  const before = row.national_id;
+  await dbExec("UPDATE students SET national_id='29901019999999' WHERE id=?", row.id);
+  const seen = async (who) => {
+    current = who;
+    const data = await (await api.GET()).json();
+    return data.students.find((x) => x.id === row.id);
+  };
+  try {
+    assert.equal((await seen({ id: "owner", email: "owner@example.com" }))?.national_id, "29901019999999", "an administrator");
+    const sup = await seen({ id: row.supervisor, email: row.supervisor_email });
+    assert.equal(sup?.national_id, "29901019999999", "the group's supervisor");
+    const coord = await seen({ id: row.coordinator, email: row.coordinator_email });
+    assert.ok(coord, "the coordinator sees the student");
+    assert.equal(coord.national_id, undefined, "but not their national ID");
+    assert.equal(coord.has_national_id, true, "only that one is recorded");
+  } finally {
+    current = { id: "owner", email: "owner@example.com" };
+    await dbExec("UPDATE students SET national_id=? WHERE id=?", before ?? null, row.id);
+  }
+});
+
 test("each service row's status picker sets where its order stands, in one step", async () => {
   await dbExec("DELETE FROM rate_limits");
   current = { id: "owner", email: "owner@example.com" };

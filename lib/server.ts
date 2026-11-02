@@ -241,10 +241,19 @@ export function refuseDemo(u: any) {
   ensure(!isDemo(u), "This is not available in the demo. Demo accounts work on the demo groups only.");
 }
 
-/** Replaces a student's national ID with whether one is recorded, for anyone but an administrator. */
-export function hideNationalId(u: any, s: any) {
+/**
+ * Replaces a student's national ID with whether one is recorded, except for
+ * the people who may read it on the student's profile: administrators,
+ * Project Operations, and the supervisor of the student's own group (decided
+ * 2 November 2026). It is also the student's first password, so coordinators,
+ * coaches and Quality do not get it.
+ */
+export function hideNationalId(u: any, s: any, groupSupervisor?: string | null) {
   s.has_national_id = /^\d{14}$/.test(String(s.national_id || ""));
-  if (!can(u.roles, ["Operations Systems / Admin"])) delete s.national_id;
+  const reads =
+    can(u.roles, ["Operations Systems / Admin", "Project Operations"]) ||
+    (can(u.roles, ["Team Supervisor"]) && Boolean(groupSupervisor) && groupSupervisor === u.id);
+  if (!reads) delete s.national_id;
   return s;
 }
 
@@ -842,9 +851,10 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
     row.value = scrubAuditText(row.value);
   }
   for (const s of students) {
-    // A student's national ID is their first password: only an administrator
-    // sees it. Everyone else learns only whether one is on record.
-    hideNationalId(u, s);
+    // A student's national ID is their first password: only administrators,
+    // Project Operations and the group's supervisor see it. Everyone else
+    // learns only whether one is on record.
+    hideNationalId(u, s, groupMap.get(s.group_id)?.supervisor);
     // A student seen through a client account the coordinator holds may be in
     // a group they do not run; the student's row carries that group's policy.
     const group = groupMap.get(s.group_id) || s;
