@@ -134,6 +134,7 @@ import {
   dataTransferRoles,
 } from "@/lib/domain/rules";
 import { readSheet, toCSV, toWorkbook, toXLSX } from "@/lib/spreadsheet";
+import { useLiveReload } from "@/lib/use-live-reload";
 import { guessKeyColumn, guessMapping, normalizePhone } from "@/lib/domain/sheet-mapping";
 import { whatsappInvite } from "@/lib/domain/whatsapp";
 import { sessionEnded } from "@/lib/domain/session-time";
@@ -661,6 +662,11 @@ export default function Operations({ module: initialModule }: { module: string }
     refresh();
     setSaved(JSON.parse(localStorage.getItem("depi-saved-filters") || "[]"));
   }, []);
+  // A page left open keeps up with everyone's work, not only the user's own:
+  // every tab and the overview reload on return to the page and every five
+  // minutes while it is in view (2 November 2026). The latest refreshSoon is
+  // called each time, so loaded service links and the open student reload too.
+  useLiveReload(refreshSoon);
   useEffect(() => setPage(1), [search, filter, module]);
   const needsServiceLinks = module === "quality" || modal?.action === "account_assign";
   useEffect(() => {
