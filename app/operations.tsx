@@ -1227,7 +1227,6 @@ export default function Operations({ module: initialModule }: { module: string }
               <small>
                 {s.id} <span>·</span> {s.track}
                 {s.provider ? <> <span>·</span> {s.provider}</> : null}
-                {/* Sent only to Project Operations, the group's supervisor and administrators. */}
                 {s.national_id ? <> <span>·</span> {t("National ID")} <bdi dir="ltr">{s.national_id}</bdi></> : null}
                 {s.round_1 && s.round_1 !== "Current Round" ? (
                   <> <span className="badge muted">{t(s.round_1)}</span></>
@@ -5652,7 +5651,6 @@ See you there!`,
                     {selectedStudent.id} · {selectedStudent.group_id} ·{" "}
                     {selectedStudent.track}
                   </p>
-                  {/* Only the people allowed to read it receive it (lib/server.ts hideNationalId). */}
                   {selectedStudent.national_id && (
                     <p className="contact-line">
                       <span>{t("National ID")}: <bdi dir="ltr">{selectedStudent.national_id}</bdi></span>

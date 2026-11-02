@@ -4676,7 +4676,7 @@ test("coordinators follow each order on a student's client account, and the lead
   await dbExec("UPDATE accounts SET student_id=NULL WHERE id='ACC-ORDER-1'");
 });
 
-test("a student's national ID reaches only administrators, Project Operations and the group's supervisor", async () => {
+test("a student's national ID reaches every member of staff who sees the student", async () => {
   await dbExec("DELETE FROM rate_limits");
   current = { id: "owner", email: "owner@example.com" };
   const row = await dbRow(
@@ -4697,8 +4697,8 @@ test("a student's national ID reaches only administrators, Project Operations an
     assert.equal(sup?.national_id, "29901019999999", "the group's supervisor");
     const coord = await seen({ id: row.coordinator, email: row.coordinator_email });
     assert.ok(coord, "the coordinator sees the student");
-    assert.equal(coord.national_id, undefined, "but not their national ID");
-    assert.equal(coord.has_national_id, true, "only that one is recorded");
+    assert.equal(coord.national_id, "29901019999999", "and their national ID (2 November 2026)");
+    assert.equal(coord.has_national_id, true);
   } finally {
     current = { id: "owner", email: "owner@example.com" };
     await dbExec("UPDATE students SET national_id=? WHERE id=?", before ?? null, row.id);
