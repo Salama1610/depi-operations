@@ -2929,4 +2929,7 @@ export const ar: Record<string, string> = {
   "A new comment, kept with the earlier ones": "تعليق جديد، يتحفظ مع التعليقات اللي قبله",
   "Write the comment first.": "اكتب التعليق الأول.",
   "Only the reviewer it was given to, or the Quality Lead, can comment on it.": "يعلق عليه المراجع المكلف به أو قائد الجودة فقط.",
+  // The workspace loads lists when a page needs them (2 Nov 2026)
+  "Loading the service links…": "جارٍ تحميل روابط الخدمات…",
+  "Student service-link verification": "التحقق من روابط خدمات الطلاب",
 };

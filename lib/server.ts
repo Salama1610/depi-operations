@@ -434,7 +434,106 @@ export function keepsAccounts(u: any) {
   );
 }
 
-export async function loadData(u: any) {
+/**
+ * Service links: the quality team, and everyone who follows the services of
+ * their own groups (coordinators, supervisors, Coach Operations, leaders).
+ * Coaches too (17 October 2026): everyone assigned to a student reads the
+ * quality team's comments on their services, read-only.
+ */
+function seesServiceLinks(u: any) {
+  return can(u.roles, [
+    "Coach",
+    "Quality Member",
+    "Quality Lead",
+    "Project Operations",
+    "Operations Systems / Admin",
+    "Operations Coordinator",
+    "Team Supervisor",
+    "Coach Operations",
+    "Higher Board",
+  ]);
+}
+
+/** The service links and their review history a person sees, all of them or one student's. */
+function serviceLinkQueries(u: any, student?: string) {
+  const q = scopeSql(u);
+  const one = student ? " AND s.id=?" : "";
+  const args = student ? [...q.args, student] : q.args;
+  return {
+    links: () =>
+      all(
+        `SELECT l.*,s.name student_name,s.email student_email,s.group_id,g.track,g.coordinator,g.supervisor,
+                ss.status submission_status,ss.submitted_at submission_submitted_at,
+                ss.qc_completed_at,u.name reviewer_name,
+                (SELECT count(*) FROM service_link_reviews r WHERE r.service_link_id=l.id) correction_count
+         FROM service_links l
+         JOIN students s ON s.id=l.student_id
+         JOIN groups g ON g.id=s.group_id
+         LEFT JOIN service_submissions ss ON ss.student_id=l.student_id
+         LEFT JOIN users u ON u.id=l.qc_actor
+         WHERE ${q.sql}${one}
+         ORDER BY CASE WHEN l.qc_status='Needs Correction' THEN 0 WHEN l.qc_status='Pending' THEN 1 ELSE 2 END,l.updated_at ASC`,
+        ...args,
+      ),
+    reviews: () =>
+      all(
+        `SELECT r.*,l.student_id,l.slot,u.name reviewer_name
+         FROM service_link_reviews r
+         JOIN service_links l ON l.id=r.service_link_id
+         JOIN students s ON s.id=l.student_id
+         JOIN groups g ON g.id=s.group_id
+         JOIN users u ON u.id=r.reviewed_by
+         WHERE ${q.sql}${one}
+         ORDER BY r.reviewed_at DESC LIMIT 2000`,
+        ...args,
+      ),
+    // Who reviews them, for the colleagues a frontline person may see named.
+    reviewers: () =>
+      all(
+        `SELECT l.qc_actor id FROM service_links l JOIN students s ON s.id=l.student_id JOIN groups g ON g.id=s.group_id WHERE ${q.sql} AND l.qc_actor IS NOT NULL
+         UNION SELECT r.reviewed_by id FROM service_link_reviews r JOIN service_links l ON l.id=r.service_link_id JOIN students s ON s.id=l.student_id JOIN groups g ON g.id=s.group_id WHERE ${q.sql}`,
+        ...q.args,
+        ...q.args,
+      ),
+  };
+}
+
+/** The service links and their review history, for the pages that list them (loaded when opened). */
+export async function serviceLinkLists(u: any) {
+  if (!seesServiceLinks(u)) return { serviceLinks: [], serviceLinkReviews: [] };
+  const svc = serviceLinkQueries(u);
+  const [serviceLinks, serviceLinkReviews] = await Promise.all([svc.links(), svc.reviews()]);
+  return { serviceLinks, serviceLinkReviews };
+}
+
+/**
+ * One student's contacts and service links with their reviews, for the
+ * student's sheet, in the same scope as the workspace: nothing for a student
+ * the person cannot see.
+ */
+export async function studentRecords(u: any, studentId: string) {
+  const q = scopeSql(u);
+  const svc = seesServiceLinks(u) ? serviceLinkQueries(u, studentId) : null;
+  const [contacts, serviceLinks, serviceLinkReviews] = await Promise.all([
+    all(
+      `SELECT t.* FROM contacts t JOIN students s ON s.id=t.student_id JOIN groups g ON g.id=s.group_id WHERE ${q.sql} AND s.id=? ORDER BY t.occurred_at DESC`,
+      ...q.args,
+      studentId,
+    ),
+    svc ? svc.links() : Promise.resolve([] as any[]),
+    svc ? svc.reviews() : Promise.resolve([] as any[]),
+  ]);
+  return { student_id: studentId, contacts, serviceLinks, serviceLinkReviews };
+}
+
+/**
+ * Everything the workspace shows. `lite` leaves out the lists only some pages
+ * use, which the browser loads when they open: every contact (the student
+ * sheet reads one student's), and the service links with their reviews (the
+ * Quality page and the sheet). For Project Operations that was 7.9 MB of the
+ * 17.6 (2 Nov 2026). Contacts are still read here, for each student's risk.
+ */
+export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}) {
   const q = scopeSql(u);
   // The same rule for queries that carry no students of their own.
   const qg = scopeSql(u, "g", null);
@@ -448,21 +547,8 @@ export async function loadData(u: any) {
       ...q.args,
     );
   const none = Promise.resolve([] as any[]);
-  // Service links: the quality team, and everyone who follows the services of
-  // their own groups (coordinators, supervisors, Coach Operations, leaders).
-  // Coaches too (17 October 2026): everyone assigned to a student reads the
-  // quality team's comments on their services, read-only.
-  const qualityScope = can(u.roles, [
-    "Coach",
-    "Quality Member",
-    "Quality Lead",
-    "Project Operations",
-    "Operations Systems / Admin",
-    "Operations Coordinator",
-    "Team Supervisor",
-    "Coach Operations",
-    "Higher Board",
-  ]);
+  const qualityScope = seesServiceLinks(u);
+  const svc = serviceLinkQueries(u);
   const coverageScope = can(u.roles, [
     "Coach Operations",
     "Quality Member",
@@ -515,6 +601,7 @@ export async function loadData(u: any) {
     sessionFeedback,
     joinLogins,
     progress,
+    linkReviewers,
   ] = await Promise.all([
     all(
       `SELECT g.*,c.name coordinator_name,s.name supervisor_name,s.title supervisor_title,s.team supervisor_team,h.name coach_name,m.name account_manager_name FROM groups g JOIN users c ON c.id=g.coordinator JOIN users s ON s.id=g.supervisor JOIN users h ON h.id=g.coach LEFT JOIN users m ON m.id=g.account_manager WHERE ${qg.sql}`,
@@ -552,22 +639,7 @@ export async function loadData(u: any) {
       `SELECT x.* FROM gig_fx_applications x JOIN gigs z ON z.id=x.gig_id JOIN students s ON s.id=z.student_id JOIN groups g ON g.id=s.group_id WHERE ${q.sql}`,
       ...q.args,
     ),
-    qualityScope
-      ? all(
-          `SELECT l.*,s.name student_name,s.email student_email,s.group_id,g.track,g.coordinator,g.supervisor,
-                  ss.status submission_status,ss.submitted_at submission_submitted_at,
-                  ss.qc_completed_at,u.name reviewer_name,
-                  (SELECT count(*) FROM service_link_reviews r WHERE r.service_link_id=l.id) correction_count
-           FROM service_links l
-           JOIN students s ON s.id=l.student_id
-           JOIN groups g ON g.id=s.group_id
-           LEFT JOIN service_submissions ss ON ss.student_id=l.student_id
-           LEFT JOIN users u ON u.id=l.qc_actor
-           WHERE ${q.sql}
-           ORDER BY CASE WHEN l.qc_status='Needs Correction' THEN 0 WHEN l.qc_status='Pending' THEN 1 ELSE 2 END,l.updated_at ASC`,
-          ...q.args,
-        )
-      : none,
+    qualityScope && !lite ? svc.links() : none,
     // Every scoped student's service-link position, including those who have
     // submitted nothing, so coordinators can chase non-submitters. Only the
     // counts travel: name, group and coordinator are joined in the browser
@@ -601,19 +673,7 @@ export async function loadData(u: any) {
           ...q.args,
         )
       : none,
-    qualityScope
-      ? all(
-          `SELECT r.*,l.student_id,l.slot,u.name reviewer_name
-           FROM service_link_reviews r
-           JOIN service_links l ON l.id=r.service_link_id
-           JOIN students s ON s.id=l.student_id
-           JOIN groups g ON g.id=s.group_id
-           JOIN users u ON u.id=r.reviewed_by
-           WHERE ${q.sql}
-           ORDER BY r.reviewed_at DESC LIMIT 2000`,
-          ...q.args,
-        )
-      : none,
+    qualityScope && !lite ? svc.reviews() : none,
     broad
       ? all(`SELECT * FROM audit_events WHERE ${sameSide(u, "actor")} ORDER BY created_at DESC LIMIT 200`)
       : all("SELECT * FROM audit_events WHERE actor=? ORDER BY created_at DESC LIMIT 100", u.id),
@@ -712,6 +772,7 @@ export async function loadData(u: any) {
        LEFT JOIN users w ON w.id=p.updated_by WHERE ${q.sql}`,
       ...q.args,
     ),
+    qualityScope && lite ? svc.reviewers() : none,
   ]);
   loadTimings.db = Date.now() - loadStarted;
   const initialized: any = initializedRows[0];
@@ -893,6 +954,7 @@ export async function loadData(u: any) {
     for (const e of evidence) add(e.qc_actor, e.recorder);
     for (const l of serviceLinks) add(l.qc_actor);
     for (const r of serviceLinkReviews) add(r.reviewed_by);
+    for (const r of linkReviewers) add(r.id);
     for (const s of sessions) add(s.coach_id);
     for (const c of sessionChecks) add(c.done_by);
     const reviewer = can(u.roles, ["Quality Member"]);
@@ -910,7 +972,11 @@ export async function loadData(u: any) {
     groups,
     tracks,
     tasks,
-    contacts,
+    // Left out of a lite workspace (undefined is not sent); every other caller has them.
+    lite,
+    contacts: (lite ? undefined : contacts) as any[],
+    serviceLinks: (lite ? undefined : serviceLinks) as any[],
+    serviceLinkReviews: (lite ? undefined : serviceLinkReviews) as any[],
     gigs,
     evidence,
     cases,
@@ -935,8 +1001,6 @@ export async function loadData(u: any) {
     creditLedger,
     evidencePackages,
     evidencePackageItems,
-    serviceLinks,
-    serviceLinkReviews,
     serviceSubmissionStatus,
     accounts,
     accountOrders: await accountOrdersFor(u),

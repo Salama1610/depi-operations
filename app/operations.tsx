@@ -619,13 +619,38 @@ export default function Operations({ module: initialModule }: { module: string }
   // page ends on the latest data without loading it once per click.
   const [reloadQueue] = useState(coalesced);
   const refreshSoon = () => void reloadQueue(refresh);
+  // The workspace opens without every contact and without the service links,
+  // which only some pages show (see GET /api/operations): the Quality page
+  // and the account form load the service links when they open, and a
+  // student's sheet loads that student's own. Lists already loaded are read
+  // again with each refresh, so they never fall behind the rest.
+  const [serviceParts, setServiceParts] = useState<Row | null>(null);
+  const [studentParts, setStudentParts] = useState<Row | null>(null);
+  async function loadServiceLinks() {
+    try {
+      const v = await (await fetch("/api/operations?part=service-links")).json();
+      if (!v.error) setServiceParts(v);
+    } catch {
+      // The page keeps showing that the links are loading; the next refresh tries again.
+    }
+  }
+  async function loadStudentParts(id: string) {
+    try {
+      const v = await (await fetch("/api/operations?student=" + encodeURIComponent(id))).json();
+      if (!v.error) setStudentParts(v);
+    } catch {
+      // As above.
+    }
+  }
   async function refresh() {
     try {
       setError("");
-      const r = await fetch("/api/operations");
+      const r = await fetch("/api/operations?lite=1");
       const d = await r.json();
       if (d.error) throw Error(d.error);
       setData(d);
+      if (serviceParts) void loadServiceLinks();
+      if (selected?.id) void loadStudentParts(selected.id);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -637,6 +662,15 @@ export default function Operations({ module: initialModule }: { module: string }
     setSaved(JSON.parse(localStorage.getItem("depi-saved-filters") || "[]"));
   }, []);
   useEffect(() => setPage(1), [search, filter, module]);
+  const needsServiceLinks = module === "quality" || modal?.action === "account_assign";
+  useEffect(() => {
+    if (needsServiceLinks && data?.lite && !serviceParts) void loadServiceLinks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needsServiceLinks, data?.lite, serviceParts]);
+  useEffect(() => {
+    if (selected?.id && data?.lite) void loadStudentParts(selected.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id, data?.lite]);
   const d = data || {};
   const staff = d.staff || [];
   const user = d.user || { roles: [], name: "Staff member" };
@@ -648,10 +682,18 @@ export default function Operations({ module: initialModule }: { module: string }
   const sessions: Row[] = d.sessions || [];
   const attendance: Row[] = d.attendance || [];
   const groupCoaches: Row[] = d.groupCoaches || [];
-  const serviceLinks: Row[] = d.serviceLinks || [];
+  const serviceLinks: Row[] = serviceParts?.serviceLinks || d.serviceLinks || [];
+  // Whether the service links are in yet; until then the Quality page says it is loading them, not that there are none.
+  const serviceListsReady = !d.lite || Boolean(serviceParts);
   // Orders placed through client accounts (lib/server.ts accountOrdersFor).
   const accountOrders: Row[] = d.accountOrders || [];
-  const serviceLinkReviews: Row[] = d.serviceLinkReviews || [];
+  const serviceLinkReviews: Row[] = serviceParts?.serviceLinkReviews || d.serviceLinkReviews || [];
+  // The open sheet's student: their contacts and service links, once loaded.
+  const sheetParts = selected && studentParts?.student_id === selected.id ? studentParts : null;
+  const sheetReady = !d.lite || Boolean(sheetParts);
+  const sheetContacts: Row[] = sheetParts?.contacts || d.contacts || [];
+  const sheetLinks: Row[] = sheetParts?.serviceLinks || serviceLinks;
+  const sheetLinkReviews: Row[] = sheetParts?.serviceLinkReviews || serviceLinkReviews;
   // The server sends only per-student counts; identity fields come from the
   // student list already in memory, so the same facts are not shipped twice.
   const studentsById = new Map<string, Row>((d.students || []).map((s: Row) => [s.id, s]));
@@ -4535,7 +4577,8 @@ See you there!`,
       <>
         {module === "quality" && (
           <>
-            {canSeeServiceQueue && (
+            {canSeeServiceQueue && !serviceListsReady && panel(t("Student service-link verification"), <p className="footnote">{t("Loading the service links…")}</p>)}
+            {canSeeServiceQueue && serviceListsReady && (
             <>
             <div className="mini-stats service-qc-stats">
               <button type="button" className="mini-stat-btn" aria-pressed={serviceFilters.state === "Pending"} title={t("Show only these links")} onClick={() => setService({ ...serviceFilters, state: "Pending" })}><strong>{serviceLinks.filter((r) => r.qc_status === "Pending").length}</strong>{t("Awaiting review")}</button>
@@ -5844,9 +5887,11 @@ See you there!`,
                           (t) => t.student_id === selectedStudent.id,
                         ),
                       )
+                    ) : tab === "contacts" && !sheetReady ? (
+                      <p className="footnote">{t("Loading…")}</p>
                     ) : tab === "contacts" ? (
                       <div className="history">
-                        {(d.contacts || []).filter(
+                        {sheetContacts.filter(
                           (c: Row) => c.student_id === selectedStudent.id,
                         ).length === 0 ? (
                           <Empty
@@ -5854,7 +5899,7 @@ See you there!`,
                             text={t("Log a contact with a comment and a next action.")}
                           />
                         ) : (
-                          (d.contacts || [])
+                          sheetContacts
                             .filter(
                               (c: Row) => c.student_id === selectedStudent.id,
                             )
@@ -5882,18 +5927,20 @@ See you there!`,
                             ))
                         )}
                       </div>
+                    ) : tab === "services" && !sheetReady ? (
+                      <p className="footnote">{t("Loading…")}</p>
                     ) : tab === "services" ? (
                       <div className="history">
-                        {serviceLinks.filter((link) => link.student_id === selectedStudent.id).length === 0 ? (
+                        {sheetLinks.filter((link) => link.student_id === selectedStudent.id).length === 0 ? (
                           <Empty title={t("No service links submitted")} text={t("The student has not submitted service links yet.")} />
-                        ) : serviceLinks.filter((link) => link.student_id === selectedStudent.id).map((link) => (
+                        ) : sheetLinks.filter((link) => link.student_id === selectedStudent.id).map((link) => (
                           <article key={link.id}>
                             <div className="detail-actions"><Badge value={serviceLabel(link.platform)} /><Badge value={qcState(link.qc_status)} /><Badge value={link.auto_status} /></div>
                             <h3><a className="text-link" href={link.url} target="_blank" rel="noreferrer">{serviceLabel(link.platform)} <ExternalLink size={14} /></a></h3>
                             <small className="service-link-url" dir="ltr">{link.url}</small>
                             <p>{(() => { try { return checkText(JSON.parse(link.auto_result || "{}").message); } catch { return t("Automatic details unavailable."); } })()}</p>
                             <small>{t("Revision")}{" "}{link.revision} {t("· submitted")}{" "}{moment(link.submitted_at)}{link.qc_at ? t(" · reviewed {v0} by {v1}", { v0: moment(link.qc_at), v1: link.reviewer_name || owner(link.qc_actor) }) : ""}</small>
-                            {serviceLinkReviews.filter((review) => review.service_link_id === link.id).map((review) => (
+                            {sheetLinkReviews.filter((review) => review.service_link_id === link.id).map((review) => (
                               <div className="info-box" key={review.id}><Badge value={review.decision} /><span>{review.comment}</span><small>{moment(review.reviewed_at)} · {review.reviewer_name}</small></div>
                             ))}
                           </article>
@@ -7459,6 +7506,7 @@ See you there!`,
                 // Service Team students; the services offered are the chosen student's approved ones.
                 const pool = students.filter((s) => groups.find((g) => g.id === s.group_id)?.supervisor_team === "Service Team" && s.lifecycle === "Active");
                 const theirLinks = serviceLinks.filter((l) => l.student_id === form.key_student && l.qc_status === "Locked");
+                if (!serviceListsReady) return <p className="footnote">{t("Loading the service links…")}</p>;
                 return (
                   <>
                     <div className="account-summary">

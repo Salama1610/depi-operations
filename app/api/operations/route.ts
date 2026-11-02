@@ -2,6 +2,8 @@ import { notify, policyChecks } from "@/lib/automation";
 import { distributeEvenly, spread } from "@/lib/domain/qc-assignment";
 import {
   loadTimings,
+  serviceLinkLists,
+  studentRecords,
   actor,
   identity,
   stmt,
@@ -368,8 +370,18 @@ function slimForBrowser(data: any) {
   }
 }
 
-export async function GET() {
+/**
+ * The workspace, in one of four shapes:
+ * - with no parameter, everything (the shape server-side callers and tests use);
+ * - ?lite=1, what the browser opens with: without every contact and without
+ *   the service links and their reviews, which the pages that show them load;
+ * - ?part=service-links, those lists, for the Quality page and the account form;
+ * - ?student=<id>, one student's contacts, service links and reviews, for the
+ *   student's sheet, in the same scope as the rest.
+ */
+export async function GET(req?: Request) {
   try {
+    const params = req ? new URL(req.url).searchParams : new URLSearchParams();
     const timings: Record<string, number> = {};
     let mark = Date.now();
     const lap = (name: string) => {
@@ -397,7 +409,20 @@ export async function GET() {
     }
     void i;
     lap("actor");
-    const data: any = await loadData(u);
+    const student = params.get("student");
+    if (student) {
+      const records: any = await studentRecords(u, student);
+      slimForBrowser(records);
+      lap("load");
+      return jsonResponse(records, timings);
+    }
+    if (params.get("part") === "service-links") {
+      const lists: any = await serviceLinkLists(u);
+      slimForBrowser(lists);
+      lap("load");
+      return jsonResponse(lists, timings);
+    }
+    const data: any = await loadData(u, { lite: params.get("lite") === "1" });
     lap("load");
     timings.db = loadTimings.db;
     timings.enrich = loadTimings.enrich;

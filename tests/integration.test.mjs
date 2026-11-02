@@ -4804,6 +4804,35 @@ test("a portal row is matched to our student by national ID first, and the ID is
   await dbExec("UPDATE students SET national_id=? WHERE id=?", picked.national_id, picked.id);
 });
 
+test("the workspace opens light, and contacts and service links load where they are shown, in the same scope", async () => {
+  const get = async (query = "") => (await api.GET(new Request("https://test.local/api/operations" + query))).json();
+  current = { id: "owner", email: "owner@example.com" };
+  const full = await get();
+  assert.ok(Array.isArray(full.contacts) && Array.isArray(full.serviceLinks) && Array.isArray(full.serviceLinkReviews), "the full workspace is unchanged");
+  const lite = await get("?lite=1");
+  assert.equal(lite.error, undefined, lite.error);
+  assert.equal(lite.lite, true);
+  for (const left of ["contacts", "serviceLinks", "serviceLinkReviews"]) assert.ok(!(left in lite), left + " waits for the page that shows it");
+  assert.equal(lite.students.length, full.students.length);
+  assert.deepEqual(lite.students.map((x) => x.risk.status), full.students.map((x) => x.risk.status), "each student's risk still counts their contacts");
+  const lists = await get("?part=service-links");
+  assert.equal(lists.serviceLinks.length, full.serviceLinks.length);
+  assert.equal(lists.serviceLinkReviews.length, full.serviceLinkReviews.length);
+  const someone = full.contacts[0]?.student_id || full.serviceLinks[0]?.student_id;
+  assert.ok(someone, "a student with a contact or a service link");
+  const mine = await get("?student=" + encodeURIComponent(someone));
+  assert.deepEqual(mine.contacts.map((c) => c.id).sort(), full.contacts.filter((c) => c.student_id === someone).map((c) => c.id).sort());
+  assert.deepEqual(mine.serviceLinks.map((l) => l.id).sort(), full.serviceLinks.filter((l) => l.student_id === someone).map((l) => l.id).sort());
+  // A coordinator asking for a student outside their groups gets nothing.
+  current = { id: "coordinator-login", email: "staff-sara@example.invalid" };
+  const theirs = new Set((await get("?lite=1")).students.map((x) => x.id));
+  const outside = full.students.find((x) => !theirs.has(x.id) && (full.contacts.some((c) => c.student_id === x.id) || full.serviceLinks.some((l) => l.student_id === x.id)));
+  assert.ok(outside, "a student the coordinator does not see");
+  const refused = await get("?student=" + encodeURIComponent(outside.id));
+  assert.deepEqual([refused.contacts.length, refused.serviceLinks.length, refused.serviceLinkReviews.length], [0, 0, 0]);
+  current = { id: "owner", email: "owner@example.com" };
+});
+
 test("a coach's Gigs tab lists the portal gigs our QC decided, with links and the student's portal record", async () => {
   await dbExec("DELETE FROM rate_limits");
   current = { id: "owner", email: "owner@example.com" };
