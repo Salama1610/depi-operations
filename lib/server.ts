@@ -507,6 +507,28 @@ export async function serviceLinkLists(u: any) {
 }
 
 /**
+ * What Weekly progress counts, in the same scope and only the fields it
+ * reads: each contact's student and time, and each service link's student,
+ * submission and approval dates and state (about a tenth of the full rows).
+ */
+export async function weeklyLists(u: any) {
+  const q = scopeSql(u);
+  const [contacts, serviceLinks] = await Promise.all([
+    all(
+      `SELECT t.student_id,t.occurred_at FROM contacts t JOIN students s ON s.id=t.student_id JOIN groups g ON g.id=s.group_id WHERE ${q.sql}`,
+      ...q.args,
+    ),
+    seesServiceLinks(u)
+      ? all(
+          `SELECT l.student_id,l.submitted_at,l.qc_status,l.qc_at FROM service_links l JOIN students s ON s.id=l.student_id JOIN groups g ON g.id=s.group_id WHERE ${q.sql}`,
+          ...q.args,
+        )
+      : Promise.resolve([] as any[]),
+  ]);
+  return { contacts, serviceLinks };
+}
+
+/**
  * One student's contacts and service links with their reviews, for the
  * student's sheet, in the same scope as the workspace: nothing for a student
  * the person cannot see.

@@ -4815,6 +4815,12 @@ test("the workspace opens light, and contacts and service links load where they 
   for (const left of ["contacts", "serviceLinks", "serviceLinkReviews"]) assert.ok(!(left in lite), left + " waits for the page that shows it");
   assert.equal(lite.students.length, full.students.length);
   assert.deepEqual(lite.students.map((x) => x.risk.status), full.students.map((x) => x.risk.status), "each student's risk still counts their contacts");
+  // Weekly progress gets only the fields it counts, for every contact and link.
+  const weekly = await get("?part=weekly");
+  assert.equal(weekly.contacts.length, full.contacts.length);
+  assert.deepEqual(Object.keys(weekly.contacts[0] || { student_id: 1, occurred_at: 1 }).sort(), ["occurred_at", "student_id"]);
+  assert.equal(weekly.serviceLinks.length, full.serviceLinks.length);
+  assert.deepEqual(Object.keys(weekly.serviceLinks[0] || { student_id: 1, submitted_at: 1, qc_status: 1, qc_at: 1 }).sort(), ["qc_at", "qc_status", "student_id", "submitted_at"]);
   const lists = await get("?part=service-links");
   assert.equal(lists.serviceLinks.length, full.serviceLinks.length);
   assert.equal(lists.serviceLinkReviews.length, full.serviceLinkReviews.length);

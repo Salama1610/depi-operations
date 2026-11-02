@@ -627,6 +627,15 @@ export default function Operations({ module: initialModule }: { module: string }
   // again with each refresh, so they never fall behind the rest.
   const [serviceParts, setServiceParts] = useState<Row | null>(null);
   const [studentParts, setStudentParts] = useState<Row | null>(null);
+  const [weeklyParts, setWeeklyParts] = useState<Row | null>(null);
+  async function loadWeekly() {
+    try {
+      const v = await (await fetch("/api/operations?part=weekly")).json();
+      if (!v.error) setWeeklyParts(v);
+    } catch {
+      // Weekly progress keeps saying it is loading; the next refresh tries again.
+    }
+  }
   async function loadServiceLinks() {
     try {
       const v = await (await fetch("/api/operations?part=service-links")).json();
@@ -651,6 +660,7 @@ export default function Operations({ module: initialModule }: { module: string }
       if (d.error) throw Error(d.error);
       setData(d);
       if (serviceParts) void loadServiceLinks();
+      if (weeklyParts) void loadWeekly();
       if (selected?.id) void loadStudentParts(selected.id);
     } catch (e: any) {
       setError(e.message);
@@ -671,11 +681,12 @@ export default function Operations({ module: initialModule }: { module: string }
   const needsServiceLinks = module === "quality" || modal?.action === "account_assign";
   useEffect(() => {
     if (needsServiceLinks && data?.lite && !serviceParts) void loadServiceLinks();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [needsServiceLinks, data?.lite, serviceParts]);
   useEffect(() => {
+    if (module === "weekly" && data?.lite && !weeklyParts) void loadWeekly();
+  }, [module, data?.lite, weeklyParts]);
+  useEffect(() => {
     if (selected?.id && data?.lite) void loadStudentParts(selected.id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected?.id, data?.lite]);
   const d = data || {};
   const staff = d.staff || [];
@@ -4838,12 +4849,17 @@ See you there!`,
       ),
     );
   } else if (module === "weekly") {
-    content = (
-      <WeeklyProgress
-        data={d}
-        onStudent={(id) => setSelected(students.find((s) => s.id === id) || null)}
-      />
-    );
+    // Weekly progress counts contacts and service links, which the light
+    // workspace leaves out: it gets their few fields it reads, once loaded.
+    content =
+      d.lite && !weeklyParts ? (
+        panel(t("Weekly progress"), <p className="footnote">{t("Loading…")}</p>)
+      ) : (
+        <WeeklyProgress
+          data={d.lite ? { ...d, ...weeklyParts } : d}
+          onStudent={(id) => setSelected(students.find((s) => s.id === id) || null)}
+        />
+      );
   } else if (module === "reports") {
     content = (
       <>

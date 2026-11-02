@@ -4,6 +4,7 @@ import {
   loadTimings,
   serviceLinkLists,
   studentRecords,
+  weeklyLists,
   actor,
   identity,
   stmt,
@@ -371,11 +372,12 @@ function slimForBrowser(data: any) {
 }
 
 /**
- * The workspace, in one of four shapes:
+ * The workspace, in one of five shapes:
  * - with no parameter, everything (the shape server-side callers and tests use);
  * - ?lite=1, what the browser opens with: without every contact and without
  *   the service links and their reviews, which the pages that show them load;
  * - ?part=service-links, those lists, for the Quality page and the account form;
+ * - ?part=weekly, the few fields of them Weekly progress counts;
  * - ?student=<id>, one student's contacts, service links and reviews, for the
  *   student's sheet, in the same scope as the rest.
  */
@@ -415,6 +417,11 @@ export async function GET(req?: Request) {
       slimForBrowser(records);
       lap("load");
       return jsonResponse(records, timings);
+    }
+    if (params.get("part") === "weekly") {
+      const lists = await weeklyLists(u);
+      lap("load");
+      return jsonResponse(lists, timings);
     }
     if (params.get("part") === "service-links") {
       const lists: any = await serviceLinkLists(u);
