@@ -745,8 +745,9 @@ export default function Operations({ module: initialModule }: { module: string }
           can(user.roles, ["Operations Systems / Admin"]) && !demoAccount
       : m === "administration"
         ? can(user.roles, ["Operations Systems / Admin"])
-        : m === "gigs" && onlyCoach
-          ? false
+        : m === "gigs"
+          ? // The team does not use the Services page (Taha, 2 November 2026).
+            false
         : m === "portal"
           ? // The portal sheets hold real students, so demo sign-ins do not open them.
             !demoAccount && can(user.roles, [
@@ -3432,6 +3433,43 @@ See you there!`,
       ) : (
         "—"
       );
+    // What the coordinator paid for each service and the marketplace they
+    // bought it on (Taha, 2 November 2026): saved on the service's order when
+    // the field is left.
+    const costCell = (rows: Row[], key: "amount" | "bought_on") =>
+      rows.length ? (
+        <span className="svc-cell">
+          {rows.map((r) => {
+            const value = r.latest?.[key] ?? "";
+            const label = key === "amount" ? t("Price paid for service {v0}", { v0: r.service_slot || 1 }) : t("Where service {v0} was bought", { v0: r.service_slot || 1 });
+            return setsServiceStatus(r) ? (
+              <label key={r.id + ":" + value} className="svc-cost-field">
+                {rows.length > 1 && <small className="svc-platform">{t("Service {v0}", { v0: r.service_slot || 1 })}</small>}
+                <input
+                  type={key === "amount" ? "number" : "text"}
+                  min={key === "amount" ? 0 : undefined}
+                  step={key === "amount" ? "0.01" : undefined}
+                  list={key === "bought_on" ? "svc-bought-on" : undefined}
+                  dir={key === "amount" ? "ltr" : undefined}
+                  defaultValue={String(value)}
+                  aria-label={label}
+                  placeholder={key === "amount" ? "0" : t("Marketplace")}
+                  disabled={busy}
+                  onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+                  onBlur={(e) => {
+                    const next = e.target.value.trim();
+                    if (next !== String(value)) quick("account_order_cost", { account_id: r.id, [key]: next });
+                  }}
+                />
+              </label>
+            ) : (
+              <span key={r.id}>{value === "" ? "—" : String(value)}</span>
+            );
+          })}
+        </span>
+      ) : (
+        "—"
+      );
     const wordOn = (r: Row) => r.coordinator_id === user.id || r.coordinator_2_id === user.id || keepsAccounts;
     // Status changes, unblocking included, belong to the people who keep the accounts.
     const managesAccounts = keepsAccounts;
@@ -3914,6 +3952,8 @@ See you there!`,
                       "Service 1 Status": s.rows[0] ? orderSheetWord(s.rows[0].state) : "",
                       "Service 2 Platform": s.rows[1]?.service_platform || s.rows[1]?.platform || "",
                       "Service 2 Status": s.rows[1] ? orderSheetWord(s.rows[1].state) : "",
+                      "Price Paid": s.rows.map((r: Row) => r.latest?.amount ?? "").filter((v: any) => v !== "").join(" | "),
+                      "Bought On": s.rows.map((r: Row) => r.latest?.bought_on || "").filter(Boolean).join(" | "),
                     }))
                   }
                 >
@@ -3946,8 +3986,8 @@ See you there!`,
                     <table className="svc-sheet">
                       <thead>
                         <tr>
-                          <th>{t("Coordinator")}</th>
-                          <th>{t("Student")}</th>
+                          <th className="svc-fix svc-fix-1">{t("Coordinator")}</th>
+                          <th className="svc-fix svc-fix-2">{t("Student")}</th>
                           <th>{t("Phone")}</th>
                           <th>{t("Email")}</th>
                           <th>{t("Group code")}</th>
@@ -3960,13 +4000,15 @@ See you there!`,
                           <th className="svc-nafezly">{t("Password")}</th>
                           <th className="svc-state">{t("Service 1")}</th>
                           <th className="svc-state">{t("Service 2")}</th>
+                          <th className="svc-cost">{t("Price paid")}</th>
+                          <th className="svc-cost">{t("Bought on")}</th>
                         </tr>
                       </thead>
                       <tbody>
                         {studentLines.map((s) => (
                           <tr key={s.id}>
-                            <td>{s.coordinator || "—"}</td>
-                            <td>
+                            <td className="svc-fix svc-fix-1">{s.coordinator || "—"}</td>
+                            <td className="svc-fix svc-fix-2">
                               <button type="button" className="text-link" onClick={() => setSelected(students.find((x) => x.id === s.id) || null)}>
                                 <strong>{s.name}</strong>
                               </button>
@@ -3984,10 +4026,15 @@ See you there!`,
                             <td>{passwordsCell(s.nafezly)}</td>
                             <td>{serviceStateCell(s.rows[0])}</td>
                             <td>{serviceStateCell(s.rows[1])}</td>
+                            <td>{costCell(s.rows, "amount")}</td>
+                            <td>{costCell(s.rows, "bought_on")}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
+                    <datalist id="svc-bought-on">
+                      {["Kafiil", "Nafezly", "Khamsat", "Mostaql", "Fiverr", "Upwork"].map((v) => <option key={v} value={v} />)}
+                    </datalist>
                   </div>
                 ) : (
                   <Empty title={serviceRows.length ? t("No service matches these filters") : t("No service has a client account yet.")} />
@@ -4589,7 +4636,7 @@ See you there!`,
               paginate(serviceQueue, (pageRows) => generic(
                 pageRows,
                 [
-                  { key: "student_name", label: t("Student"), render: (r) => { const own = serviceLinks.filter((l) => l.student_id === r.student_id); const decided = own.filter((l) => l.qc_status !== "Pending").length; return <span><strong>{r.student_name}</strong><small className="table-subline">{r.student_id} · <bdi>{r.group_id}</bdi> · {decided}/{own.length} {t("reviewed")}</small></span>; } },
+                  { key: "student_name", label: t("Student"), render: (r) => { const own = serviceLinks.filter((l) => l.student_id === r.student_id); const decided = own.filter((l) => l.qc_status !== "Pending").length; const pupil = students.find((x) => x.id === r.student_id); return <span>{pupil ? <button type="button" className="text-link" title={t("Open the student's details")} onClick={() => setSelected(pupil)}><strong>{r.student_name}</strong></button> : <strong>{r.student_name}</strong>}<small className="table-subline">{r.student_id} · <bdi>{r.group_id}</bdi> · {decided}/{own.length} {t("reviewed")}</small></span>; } },
                   { key: "slot", label: t("Service"), render: (r) => (
                       <a className="text-link service-open" href={r.url} target="_blank" rel="noreferrer" title={t("Open the student's service")}>
                         <strong className="service-open-name">{serviceLabel(r.platform)} <ExternalLink size={14} /></strong>
@@ -5603,7 +5650,7 @@ See you there!`,
                 )}
               </div>
               {!onlyCoach && <p className="action-help">
-                <strong>{t("Log contact")}</strong>: {t("a conversation that already happened, with a short comment. Once a week per student.")}{" "}
+                <strong>{t("Log contact")}</strong>: {t("a conversation that already happened, and its status. Once a week per student.")}{" "}
                 <strong>{t("Next action")}</strong>: {t("the follow-up step you commit to do next, with a due date.")}
               </p>}
               <Tabs defaultValue="overview">
@@ -5768,7 +5815,7 @@ See you there!`,
                         ).length === 0 ? (
                           <Empty
                             title={t("No contacts recorded")}
-                            text={t("Log a contact with a comment and a next action.")}
+                            text={t("Log a contact with its status and a next action.")}
                           />
                         ) : (
                           (d.contacts || [])
@@ -6203,7 +6250,7 @@ See you there!`,
                         "Form",
                         "Other",
                       ])}
-                      {choice("outcome", t("Outcome"), [
+                      {choice("outcome", t("Status"), [
                         "Responded",
                         "No Response",
                         "Follow-Up Required",
@@ -6216,7 +6263,6 @@ See you there!`,
                         "datetime-local",
                       )}
                     </div>
-                    {field("notes", t("Comment: what you talked about"))}
                     {field("next_action", t("Next action"))}
                     {ownerLine()}
                     {field("due", t("Action due date"), "datetime-local")}
@@ -6400,10 +6446,9 @@ See you there!`,
                     </label>
                     <div className="form-grid">
                       {choice("channel", t("Channel"), ["WhatsApp", "Phone", "Email", "Teams", "In person"])}
-                      {choice("outcome", t("Outcome"), ["Responded", "No response", "Wrong number", "Unreachable"])}
+                      {choice("outcome", t("Status"), ["Responded", "No response", "Wrong number", "Unreachable"])}
                     </div>
                     {field("occurred_at", t("Sent at"), "datetime-local")}
-                    {field("notes", t("Comment: what the message was about"))}
                   </>
                 );
               }

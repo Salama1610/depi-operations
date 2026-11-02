@@ -861,7 +861,8 @@
     "updated_at": "timestamptz",
     "done_at": "timestamptz",
     "proof_at": "timestamptz",
-    "cancelled_at": "timestamptz"
+    "cancelled_at": "timestamptz",
+    "bought_on": "text"
   },
   "portal_links": {
     "portal_id": "text",

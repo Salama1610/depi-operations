@@ -278,8 +278,7 @@ test("full seeded backend workflow and permission gates", async () => {
     notes: "Talked about the first gig",
     request_id: "contact-once",
   };
-  // A comment is required; the screenshot is not (10 Oct 2026).
-  assert.match((await post("contact", { ...c, notes: "", request_id: "contact-no-comment" })).error, /comment/);
+  // Neither a comment (2 Nov 2026) nor a screenshot (10 Oct 2026) is required.
   const noShot = { ...c, proof_id: "", request_id: "contact-no-screenshot" };
   await check("contact", noShot);
   assert.equal((await dbRow("SELECT proof_id FROM contacts WHERE notes=? AND proof_id IS NULL LIMIT 1", "Talked about the first gig")).proof_id, null);
@@ -3265,7 +3264,6 @@ test("one screenshot of a group message logs a contact for every active student 
   current = { id: group.coordinator, email: group.email };
   const other = await dbRow("SELECT id FROM groups WHERE coordinator<>? AND status='Active' LIMIT 1", group.coordinator);
   assert.match((await post("group_contact", { group_id: other.id, proof_id: "GROUP-SHOT-1", channel: "WhatsApp", outcome: "Responded", occurred_at: at, notes: "Weekly reminder" })).error, /only your own groups/);
-  assert.match((await post("group_contact", { group_id: group.id, channel: "WhatsApp", outcome: "Responded", occurred_at: at })).error, /comment/);
   await check("group_contact", { group_id: group.id, proof_id: "GROUP-SHOT-1", channel: "WhatsApp", outcome: "Responded", occurred_at: at, notes: "Weekly reminder" });
   const logged = await dbRows("SELECT c.student_id FROM contacts c JOIN attachments a ON a.id=c.proof_id WHERE a.hash='group-shot-hash' AND c.occurred_at=?", at);
   assert.equal(logged.length, members.length, "every active student has the contact, each with the same screenshot");
@@ -4634,6 +4632,35 @@ test("a coordinator marks a service Buy first, then follows it on", async () => 
   assert.equal((await dbRow("SELECT count(*) n FROM account_orders WHERE account_id='ACC-BUY-1'")).n, 1);
   current = { id: "owner", email: "owner@example.com" };
   await dbExec("UPDATE accounts SET student_id=NULL,status='Retired' WHERE id='ACC-BUY-1'");
+});
+
+test("a coordinator writes what a service cost and where it was bought, on its order", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const pupil = await dbRow(
+    `SELECT s.id,g.coordinator,u.email FROM students s JOIN groups g ON g.id=s.group_id JOIN users u ON u.id=g.coordinator
+     WHERE s.lifecycle='Active' AND g.id NOT LIKE 'DEMO-%' AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.student_id=s.id) ORDER BY s.id LIMIT 1`,
+  );
+  await check("account", { id: "ACC-COST-1", label: "cost-one@example.org", platform: "Kafeel", credits: 10 });
+  await dbExec("UPDATE accounts SET student_id=?,coordinator_id=?,linked_at=? WHERE id='ACC-COST-1'", pupil.id, pupil.coordinator, new Date().toISOString());
+  current = { id: pupil.coordinator, email: pupil.email };
+  const order = () => dbRow("SELECT status,amount,bought_on FROM account_orders WHERE account_id='ACC-COST-1'");
+  // With no order yet, writing the price starts one at Buy.
+  await check("account_order_cost", { account_id: "ACC-COST-1", amount: "25" });
+  let o = await order();
+  assert.equal(o.status, "Buy");
+  assert.equal(Number(o.amount), 25);
+  await check("account_order_cost", { account_id: "ACC-COST-1", bought_on: "Kafiil" });
+  o = await order();
+  assert.equal(o.bought_on, "Kafiil");
+  assert.equal(Number(o.amount), 25, "the price is kept when only the marketplace changes");
+  assert.equal((await dbRow("SELECT count(*) n FROM account_orders WHERE account_id='ACC-COST-1'")).n, 1);
+  assert.match((await post("account_order_cost", { account_id: "ACC-COST-1", amount: "-3" })).error, /price as a number/);
+  await check("account_order_cost", { account_id: "ACC-COST-1", amount: "" });
+  assert.equal((await order()).amount, null, "an emptied price is cleared");
+  current = { id: "owner", email: "owner@example.com" };
+  await dbExec("DELETE FROM account_orders WHERE account_id='ACC-COST-1'");
+  await dbExec("UPDATE accounts SET student_id=NULL,status='Retired' WHERE id='ACC-COST-1'");
 });
 
 test("a portal row is matched to our student by national ID first, and the ID is not kept with the sheet", async () => {

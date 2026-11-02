@@ -487,7 +487,8 @@ export async function POST(req: Request) {
             x.next_action,
             x.owner,
             x.due,
-            String(x.notes).trim(),
+            // A contact is a status since 2 November 2026; a comment is optional.
+            String(x.notes || "").trim() || null,
             u.id,
             t,
           ),
@@ -526,7 +527,6 @@ export async function POST(req: Request) {
         // own tasks stay their list.
         permit(u, ops);
         ensure(x.group_id && x.channel && x.outcome && x.occurred_at, "Group, channel, outcome and time are required.");
-        ensure(String(x.notes || "").trim().length >= 3, "Write a short comment on the message.");
         const group: any = await stmt("SELECT * FROM groups WHERE id=?", x.group_id).first();
         ensure(group, "Group not found.");
         if (!can(u.roles, ["Project Operations", ...admin]))
@@ -588,7 +588,7 @@ export async function POST(req: Request) {
               x.next_action?.trim() || "Group message",
               u.id,
               due,
-              (x.notes || "") + " (group message)",
+              String(x.notes || "").trim() ? String(x.notes).trim() + " (group message)" : "Group message",
               u.id,
               t,
             ),
@@ -3183,6 +3183,49 @@ export async function POST(req: Request) {
             to, proofId, note || null, t, to, t, to, t, to, t, to, id,
           ),
         );
+        break;
+      }
+      case "account_order_cost": {
+        // What the coordinator paid for a service bought through its client
+        // account, and the marketplace it was bought on (Taha, 2 November
+        // 2026). Kept on the service's current order; writing either starts
+        // the order at Buy when there is none yet.
+        const a: any = await stmt("SELECT * FROM accounts WHERE id=?", String(x.account_id || "")).first();
+        ensure(a, "Account not found.");
+        ensure(
+          can(u.roles, ["Project Operations", "Operations Systems / Admin"]) || keepsAccounts(u) || a.coordinator_id === u.id || a.coordinator_2_id === u.id,
+          "Only this account's coordinator, its keepers or the leaders update its orders.",
+        );
+        ensure(a.student_id, "Link the account to a student before recording an order.");
+        const sets: string[] = [];
+        const values: any[] = [];
+        if ("amount" in x) {
+          const raw = String(x.amount ?? "").trim();
+          const amount = raw === "" ? null : Number(raw);
+          ensure(amount === null || (Number.isFinite(amount) && amount >= 0), "Enter the price as a number, or leave it empty.");
+          sets.push("amount=?");
+          values.push(amount);
+        }
+        if ("bought_on" in x) {
+          const where = String(x.bought_on ?? "").trim();
+          ensure(where.length <= 60, "Keep the marketplace under 60 characters.");
+          sets.push("bought_on=?");
+          values.push(where || null);
+        }
+        ensure(sets.length, "Enter the price or the marketplace.");
+        const current: any = await stmt("SELECT * FROM account_orders WHERE account_id=? ORDER BY created_at DESC LIMIT 1", a.id).first();
+        if (current) {
+          auditPrevious = { amount: current.amount, bought_on: current.bought_on };
+          jobs.push(stmt(`UPDATE account_orders SET ${sets.join(",")},updated_at=? WHERE id=?`, ...values, t, current.id));
+        } else {
+          jobs.push(
+            stmt(
+              "INSERT INTO account_orders(id,account_id,student_id,service_link_id,coordinator,status,created_at,updated_at) VALUES(?,?,?,?,?,'Buy',?,?)",
+              id, a.id, a.student_id, a.service_link_id || null, u.id, t, t,
+            ),
+            stmt(`UPDATE account_orders SET ${sets.join(",")} WHERE id=?`, ...values, id),
+          );
+        }
         break;
       }
       case "account_assign": {

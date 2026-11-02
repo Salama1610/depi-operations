@@ -93,7 +93,6 @@ export function validateContact(x: any) {
       typeof x[k] === "string" && x[k].trim(),
       `Contact is incomplete: ${k.replaceAll("_", " ")} is required.`,
     );
-  ensure(String(x.notes || "").trim().length >= 3, "Write a short comment on the contact.");
   ensure(
     [
       "Responded",

@@ -1245,6 +1245,8 @@ export const accountOrders = sqliteTable(
     coordinator: text("coordinator").notNull().references(() => users.id),
     orderRef: text("order_ref"),
     amount: real("amount"),
+    // Where the coordinator bought the service (2 Nov 2026).
+    boughtOn: text("bought_on"),
     note: text("note"),
     status: text("status").notNull().default("In Progress"),
     proofId: text("proof_id").references(() => attachments.id),
