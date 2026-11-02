@@ -137,7 +137,6 @@ import { readSheet, toCSV, toWorkbook, toXLSX } from "@/lib/spreadsheet";
 import { guessKeyColumn, guessMapping, normalizePhone } from "@/lib/domain/sheet-mapping";
 import { whatsappInvite } from "@/lib/domain/whatsapp";
 import { sessionEnded } from "@/lib/domain/session-time";
-import { reportWorkspaceLoad } from "./speed-check";
 
 /** Runs a job now, or once more after the run in progress: many asks while one runs become a single further run. */
 function coalesced() {
@@ -623,14 +622,10 @@ export default function Operations({ module: initialModule }: { module: string }
   async function refresh() {
     try {
       setError("");
-      const started = performance.now();
       const r = await fetch("/api/operations");
-      const text = await r.text();
-      const d = JSON.parse(text);
+      const d = await r.json();
       if (d.error) throw Error(d.error);
       setData(d);
-      // The Speed check: how long this load took, for the administrators.
-      if (!d.setup) reportWorkspaceLoad(r, started, text.length);
     } catch (e: any) {
       setError(e.message);
     } finally {
