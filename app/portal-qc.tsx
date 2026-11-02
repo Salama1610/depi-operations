@@ -1,12 +1,14 @@
 "use client";
 
 // Our quality team's check of the gigs students upload to the ministry portal
-// (see app/api/portal-qc). The gigs still waiting for the coach are handed out
-// automatically, a student's gigs together; a Quality Member opens each one,
-// checks it by the team's SOP and approves or rejects it with a comment. The
-// coach reads the verdict in Student progress and approves on the portal; the
-// coordinator sees it in the gigs portal view. The Quality Lead sees everyone's
-// queue, moves a student to another member, or shares the pending ones out.
+// (see app/api/portal-qc). Each portal student (their GUID in the sheets) has
+// one Quality Member, who gets every gig of theirs still waiting for the
+// coach; a review stays with its proof link across uploads of the gigs sheet.
+// The member opens each gig, checks it by the team's SOP and approves or
+// rejects it with a comment. The coach reads the verdict in Student progress
+// and approves on the portal; the coordinator sees it in the gigs portal view.
+// The Quality Lead sees everyone's queue, moves a student to another member,
+// or shares the students waiting out again.
 
 import { useEffect, useMemo, useState } from "react";
 import { Check, ExternalLink, RefreshCw, RotateCcw, Shuffle, X } from "lucide-react";
@@ -255,10 +257,10 @@ export function PortalQc() {
               className="small-btn"
               disabled={busy || !count("Pending")}
               onClick={() => {
-                if (window.confirm(t("Share every pending gig out again evenly, keeping each student's gigs together?"))) send({ action: "redistribute" });
+                if (window.confirm(t("Share the students waiting for review out again evenly? Each student moves with all their gigs."))) send({ action: "redistribute" });
               }}
             >
-              <Shuffle size={14} /> {t("Share pending gigs out again")}
+              <Shuffle size={14} /> {t("Share students out again")}
             </button>
           )}
           <button type="button" className="small-btn" onClick={load} disabled={loading}>
@@ -278,7 +280,7 @@ export function PortalQc() {
       {data.lead && (data.reviewers || []).length > 0 && (
         <div className="pqc-load">
           {(data.reviewers || []).map((p: Row) => (
-            <span key={p.id} className="cue is-info">{p.name}: <bdi dir="ltr">{p.pending}</bdi></span>
+            <span key={p.id} className="cue is-info">{t("{v0}: {v1} students waiting", { v0: p.name, v1: p.pending })}</span>
           ))}
         </div>
       )}
@@ -323,12 +325,15 @@ export function PortalQc() {
                     <small className="table-subline">
                       <bdi>{[first.group_id, first.track, first.provider].filter(Boolean).join(" · ") || t("Not linked")}</bdi>
                     </small>
+                    <small className="table-subline pqc-guid">
+                      {t("Portal student ID")}: <bdi dir="ltr">{portalId}</bdi>
+                    </small>
                   </div>
                   {data.lead ? (
                     <SearchableSelect
                       label={t("Reviewer")}
                       value={first.reviewer}
-                      onChange={(v) => v && v !== first.reviewer && send({ action: "reassign", portal_gig_id: first.portal_gig_id, reviewer: v })}
+                      onChange={(v) => v && v !== first.reviewer && send({ action: "reassign", portal_student_id: portalId, reviewer: v })}
                       options={[
                         ...(data.reviewers || []).map((p: Row) => ({ value: p.id, label: p.name })),
                         ...((data.reviewers || []).some((p: Row) => p.id === first.reviewer) ? [] : [{ value: first.reviewer, label: first.reviewer_name || first.reviewer }]),

@@ -2568,8 +2568,6 @@ export const ar: Record<string, string> = {
   // Portal gigs QC (16 Oct 2026)
   "Portal gigs QC": "مراجعة جودة جيجز البوابة",
   "Gigs uploaded on the ministry portal that the coach has not decided on yet. Check each one by the team's SOP; the coach and the coordinator see your verdict and the coach acts on the portal.": "الجيجز المرفوعة على بوابة الوزارة ولم يقرر فيها الكوتش بعد. راجع كل جيج حسب إجراءات الفريق؛ الكوتش والمنسق يشوفوا قرارك والكوتش ينفذه على البوابة.",
-  "Share every pending gig out again evenly, keeping each student's gigs together?": "إعادة توزيع كل الجيجز المعلقة بالتساوي مع إبقاء جيجز كل طالب مع نفس المراجع؟",
-  "Share pending gigs out again": "إعادة توزيع الجيجز المعلقة",
   "No gigs sheet has been uploaded yet. It is uploaded from the Gigs portal view.": "لم يتم رفع شيت الجيجز بعد. يتم رفعه من صفحة عرض بوابة الجيجز.",
   "Add an active Quality Member before assigning reviews.": "أضف عضو جودة نشط قبل توزيع المراجعات.",
   "Search student, gig, group or link": "ابحث بالطالب أو الجيج أو المجموعة أو الرابط",
@@ -2917,4 +2915,9 @@ export const ar: Record<string, string> = {
   "The gigs our quality team has checked. Open the gig and its proof, find the student on the ministry portal by their portal ID, then approve or reject the gig there as the verdict says. A gig stops waiting once the next portal sheet shows your decision.": "الخدمات التي راجعها فريق الجودة. افتح الخدمة وإثباتها، وابحث عن الطالب على بوابة الوزارة برقمه على البوابة، ثم اعتمد الخدمة أو ارفضها هناك كما يقول القرار. تتوقف الخدمة عن الانتظار عندما يظهر قرارك في شيت البوابة التالي.",
   "Waiting for you on the portal": "تنتظرك على البوابة",
   "{v0} gigs checked by our quality team are waiting for you on the portal": "{v0} خدمة راجعها فريق الجودة تنتظرك على البوابة",
+  // Portal gigs QC per student, kept by proof link (2 Nov 2026)
+  "Share the students waiting for review out again evenly? Each student moves with all their gigs.": "إعادة توزيع الطلاب المنتظرين للمراجعة بالتساوي؟ كل طالب ينتقل بكل الجيجز بتاعته.",
+  "Share students out again": "إعادة توزيع الطلاب",
+  "{v0}: {v1} students waiting": "{v0}: {v1} طالب في الانتظار",
+  "This student is not in the quality queue.": "هذا الطالب ليس في قائمة مراجعة الجودة.",
 };

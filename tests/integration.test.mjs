@@ -4034,13 +4034,16 @@ test("portal gigs waiting for the coach go to the quality team, whose verdict th
     { portal_id: "PQ-2", email: "portal-only-qc@example.org", full_name: "Portal only" },
   ]);
   const gigMapping = { ID: "portal_gig_id", "Student ID": "portal_student_id", Title: "title", URL: "url", Status: "status", "Provider Status": "provider_status", Proof: "proof_url" };
-  const gigRows = [
-    // Two gigs with one proof: each card points at the other.
-    { portal_gig_id: "QG-1", portal_student_id: "PQ-1", title: "Logo", url: "https://example.org/1", status: "Pending", provider_status: "Pending", proof_url: "https://proof.example.org/same" },
-    { portal_gig_id: "QG-2", portal_student_id: "PQ-1", title: "Banner", url: "https://example.org/2", status: "Pending", provider_status: "Pending", proof_url: "https://proof.example.org/same" },
-    { portal_gig_id: "QG-3", portal_student_id: "PQ-1", title: "Already decided", status: "Approved", provider_status: "Approved" },
-    { portal_gig_id: "QG-4", portal_student_id: "PQ-2", title: "Deck", status: "Pending", provider_status: "" },
-  ];
+  const gig = {
+    1: { portal_gig_id: "QG-1", portal_student_id: "PQ-1", title: "Logo", url: "https://example.org/1", status: "Pending", provider_status: "Pending", proof_url: "https://proof.example.org/one" },
+    2: { portal_gig_id: "QG-2", portal_student_id: "PQ-1", title: "Banner", url: "https://example.org/2", status: "Pending", provider_status: "Pending", proof_url: "https://proof.example.org/two" },
+    3: { portal_gig_id: "QG-3", portal_student_id: "PQ-1", title: "Already decided", status: "Approved", provider_status: "Approved", proof_url: "https://proof.example.org/three" },
+    // No proof link: the review falls back to the gig's ID.
+    4: { portal_gig_id: "QG-4", portal_student_id: "PQ-2", title: "Deck", status: "Pending", provider_status: "" },
+    // The proof of QG-1 sent again for another gig: one proof, one review, flagged on its card.
+    5: { portal_gig_id: "QG-50", portal_student_id: "PQ-1", title: "Logo again", url: "https://example.org/5", status: "Pending", provider_status: "Pending", proof_url: "https://proof.example.org/ONE " },
+  };
+  const gigRows = [gig[1], gig[2], gig[3], gig[4], gig[5]];
   await upload("gigs", gigMapping, gigRows);
 
   // The lead's look hands out only what waits for the coach, a student's gigs to one member.
@@ -4048,12 +4051,15 @@ test("portal gigs waiting for the coach go to the quality team, whose verdict th
   const lead = await get();
   assert.equal(lead.error, undefined, lead.error);
   assert.ok(lead.lead);
-  assert.deepEqual(lead.reviews.map((r) => r.portal_gig_id).sort(), ["QG-1", "QG-2", "QG-4"], "the coach's decided gig is not queued");
-  assert.deepEqual(lead.reviews.find((r) => r.portal_gig_id === "QG-1").same_proof, ["QG-2"], "a proof used on another gig is flagged");
+  assert.deepEqual(lead.reviews.map((r) => r.portal_gig_id).sort(), ["QG-1", "QG-2", "QG-4"], "the coach's decided gig is not queued, and one proof is one review");
+  assert.deepEqual(lead.reviews.find((r) => r.portal_gig_id === "QG-1").same_proof, ["QG-50"], "a proof used on another gig is flagged");
   assert.deepEqual(lead.reviews.find((r) => r.portal_gig_id === "QG-4").same_proof, []);
   const rows = await dbRows("SELECT * FROM portal_gig_reviews ORDER BY portal_gig_id");
+  assert.deepEqual(rows.map((r) => r.proof_key), ["https://proof.example.org/one", "https://proof.example.org/two", "gig:QG-4"]);
   assert.equal(rows[0].reviewer, rows[1].reviewer, "one student's gigs stay together");
   assert.equal(rows[0].student_id, ours.id);
+  // The load is counted in students: PQ-1's two gigs are one student waiting.
+  assert.equal(lead.reviewers.reduce((n, p) => n + Number(p.pending), 0), 2);
   for (const r of rows) {
     const roles = JSON.parse((await dbRow("SELECT roles FROM users WHERE id=?", r.reviewer)).roles);
     assert.ok(roles.includes("Quality Member") && !roles.includes("Quality Lead"), "only Quality Members, not the lead");
@@ -4073,19 +4079,26 @@ test("portal gigs waiting for the coach go to the quality team, whose verdict th
   assert.equal((await send({ action: "decide", portal_gig_id: "QG-2", status: "Approved", proof_checked: true })).ok, true);
   assert.match((await send({ action: "redistribute" })).error, /Quality Lead/);
 
-  // A new upload of the same sheet keeps the verdicts with their gigs.
+  // A new upload finds each review by its proof link, even when the row's ID
+  // changed, and a later gig of the student goes to the same member though
+  // nothing of theirs is waiting any more.
   current = { id: "owner", email: "owner@example.com" };
-  await upload("gigs", gigMapping, gigRows);
+  const renamed = { ...gig[1], portal_gig_id: "QG-11" };
+  const later = { portal_gig_id: "QG-6", portal_student_id: "PQ-1", title: "Flyer", url: "https://example.org/6", status: "Pending", provider_status: "Pending", proof_url: "https://proof.example.org/six" };
+  await upload("gigs", gigMapping, [renamed, gig[2], gig[3], gig[4], gig[5], later]);
   current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
-  assert.equal((await get()).reviews.length, 3);
-  assert.equal((await dbRow("SELECT status FROM portal_gig_reviews WHERE portal_gig_id='QG-1'")).status, "Rejected");
+  assert.deepEqual((await get()).reviews.map((r) => r.portal_gig_id).sort(), ["QG-11", "QG-2", "QG-4", "QG-6"]);
+  const kept = await dbRow("SELECT * FROM portal_gig_reviews WHERE proof_key='https://proof.example.org/one'");
+  assert.deepEqual([kept.portal_gig_id, kept.status, kept.reviewer], ["QG-11", "Rejected", owner], "the verdict and the member stay with the proof");
+  assert.equal((await dbRow("SELECT reviewer FROM portal_gig_reviews WHERE portal_gig_id='QG-6'")).reviewer, owner, "the student keeps their member");
 
   // The coordinator and the coach read the verdict.
   const coordinator = await dbRow("SELECT id,email FROM users WHERE id=?", ours.coordinator);
   current = { id: coordinator.id, email: coordinator.email };
   const theirs = (await portal.GET(new Request("https://test.local/api/portal?student=PQ-1")).then((r) => r.json())).gigs;
-  assert.equal(theirs.find((g) => g.portal_gig_id === "QG-1").qc_status, "Rejected");
-  assert.equal(theirs.find((g) => g.portal_gig_id === "QG-1").qc_comment, "The link shows another seller.");
+  assert.equal(theirs.find((g) => g.portal_gig_id === "QG-11").qc_status, "Rejected");
+  assert.equal(theirs.find((g) => g.portal_gig_id === "QG-11").qc_comment, "The link shows another seller.");
+  assert.equal(theirs.find((g) => g.portal_gig_id === "QG-50").qc_status, "Rejected", "the verdict is on the proof, wherever it is used");
   assert.match((await get()).error, /role/, "the queue itself is the quality team's");
   const coach = await dbRow("SELECT id,email FROM users WHERE id=?", ours.coach);
   current = { id: coach.id, email: coach.email };
@@ -4094,13 +4107,26 @@ test("portal gigs waiting for the coach go to the quality team, whose verdict th
   const pupil = progress.students.find((s) => s.id === ours.id);
   assert.equal(pupil.portal.gigs.find((g) => g.id === "QG-2").qc_status, "Approved");
 
-  // The lead moves the whole student, then shares the pending ones out again.
+  // A gig whose proof was replaced is checked again, by the same member.
+  current = { id: "owner", email: "owner@example.com" };
+  await upload("gigs", gigMapping, [renamed, { ...gig[2], proof_url: "https://proof.example.org/two-new" }, gig[3], gig[4], gig[5], later]);
   current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
-  assert.equal((await send({ action: "decide", portal_gig_id: "QG-2", status: "Pending" })).ok, true);
-  assert.equal((await send({ action: "reassign", portal_gig_id: "QG-2", reviewer: other })).ok, true);
-  assert.equal((await dbRow("SELECT reviewer FROM portal_gig_reviews WHERE portal_gig_id='QG-2'")).reviewer, other);
+  assert.equal((await get()).error, undefined);
+  const again = await dbRow("SELECT * FROM portal_gig_reviews WHERE portal_gig_id='QG-2'");
+  assert.deepEqual([again.proof_key, again.status, again.reviewer, again.comment], ["https://proof.example.org/two-new", "Pending", owner, null]);
+
+  // The lead moves the whole student, decided gigs too.
+  const membersOf = async (student) => (await dbRows("SELECT DISTINCT reviewer FROM portal_gig_reviews WHERE portal_student_id=?", student)).map((r) => r.reviewer);
+  assert.equal((await send({ action: "reassign", portal_student_id: "PQ-1", reviewer: other })).moved, 3);
+  assert.deepEqual(await membersOf("PQ-1"), [other]);
   assert.equal((await send({ action: "reassign", portal_gig_id: "QG-2", reviewer: "staff-quality-lead" })).error, "Choose an active Quality Member.");
-  assert.equal((await send({ action: "redistribute" })).ok, true);
+  // A student split between two members is put back with the one holding their waiting gigs.
+  await dbExec("UPDATE portal_gig_reviews SET reviewer=? WHERE portal_gig_id='QG-11'", owner);
+  await get();
+  assert.deepEqual(await membersOf("PQ-1"), [other]);
+  // Sharing out again moves students, each with all their gigs.
+  assert.equal((await send({ action: "redistribute" })).moved, 2);
+  for (const student of ["PQ-1", "PQ-2"]) assert.equal((await membersOf(student)).length, 1);
 
   current = { id: "owner", email: "owner@example.com" };
   await dbExec("DELETE FROM portal_gig_reviews");

@@ -818,7 +818,8 @@
     "status": "text",
     "comment": "text",
     "reviewed_by": "text",
-    "reviewed_at": "timestamptz"
+    "reviewed_at": "timestamptz",
+    "proof_key": "text"
   },
   "task_progress": {
     "task_id": "text",

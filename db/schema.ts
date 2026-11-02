@@ -1366,7 +1366,9 @@ export const portalGigs = sqliteTable(
   (t) => [index("portal_gigs_batch_idx").on(t.batchId, t.portalStudentId)],
 );
 // Our Quality Member's verdict on each ministry-portal gig before the coach
-// approves it there; keyed by the portal's own gig id so it survives uploads.
+// approves it there. Found again in each new upload of the gigs sheet by the
+// gig's proof link (proof_key), the one cell that never repeats; portal_gig_id
+// is the row of the latest sheet that carries that proof.
 export const portalGigReviews = sqliteTable(
   "portal_gig_reviews",
   {
@@ -1385,8 +1387,13 @@ export const portalGigReviews = sqliteTable(
     comment: text("comment"),
     reviewedBy: text("reviewed_by").references(() => users.id),
     reviewedAt: text("reviewed_at"),
+    proofKey: text("proof_key"),
   },
-  (t) => [index("portal_gig_reviews_reviewer_idx").on(t.reviewer, t.status), index("portal_gig_reviews_student_idx").on(t.portalStudentId)],
+  (t) => [
+    index("portal_gig_reviews_reviewer_idx").on(t.reviewer, t.status),
+    index("portal_gig_reviews_student_idx").on(t.portalStudentId),
+    uniqueIndex("portal_gig_reviews_proof_key").on(t.proofKey),
+  ],
 );
 // Where a coordinator stands on an open task, such as having contacted the
 // student about a service link the quality team sent back.

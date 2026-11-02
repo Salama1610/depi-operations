@@ -1425,6 +1425,7 @@ td .searchable-select,td .pick-inline{max-width:240px;min-width:0}
 .pqc-load{display:flex;flex-wrap:wrap;gap:6px}
 .pqc-student{display:flex;flex-direction:column;gap:10px;min-width:0}
 .pqc-student>header{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;flex-wrap:wrap}
+.pqc-guid bdi{font-family:ui-monospace,Consolas,monospace;user-select:all}
 .pqc-student>header>div:first-child{min-width:0}
 .pqc-student>header>*:last-child{max-width:260px;flex:0 1 220px}
 .pqc-gigs{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}

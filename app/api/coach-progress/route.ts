@@ -1,6 +1,7 @@
 import { actor, all, permit, rateLimit } from "@/lib/server";
 import { graduation, policy } from "@/lib/domain/rules";
 import { sameSide } from "@/lib/demo";
+import { proofKeySql } from "@/lib/domain/portal-review";
 
 export const dynamic = "force-dynamic";
 
@@ -77,7 +78,7 @@ export async function GET() {
           all(
             `SELECT z.portal_gig_id,z.portal_student_id,z.title,z.url,z.price,z.created_on,z.status,z.provider_status,z.auditor_status,
                     r.status qc_status,r.comment qc_comment,r.reviewed_at qc_reviewed_at
-             FROM portal_gigs z LEFT JOIN portal_gig_reviews r ON r.portal_gig_id=z.portal_gig_id
+             FROM portal_gigs z LEFT JOIN portal_gig_reviews r ON r.proof_key=${proofKeySql("z")}
              WHERE z.batch_id=? AND z.portal_student_id IN (${marks(slice)}) ORDER BY z.created_on`,
             gigsBatch,
             ...slice,

@@ -1,6 +1,7 @@
 import { actor, all, auditStmt, db, now, rateLimit, refuseDemo, scopeSql, stmt, uid } from "@/lib/server";
 import { can, ensure } from "@/lib/domain/rules";
 import { isNationalId, normalizeNationalId } from "@/lib/domain/sheet-mapping";
+import { proofKeySql } from "@/lib/domain/portal-review";
 import {
   linkStudent,
   nameInGroup,
@@ -64,7 +65,7 @@ export async function GET(req: Request) {
         ? await all(
             // With our quality team's verdict, read by the coordinator before the coach decides.
             `SELECT z.*,r.status qc_status,r.comment qc_comment,r.reviewed_at qc_reviewed_at,q.name qc_reviewer
-             FROM portal_gigs z LEFT JOIN portal_gig_reviews r ON r.portal_gig_id=z.portal_gig_id LEFT JOIN users q ON q.id=r.reviewed_by
+             FROM portal_gigs z LEFT JOIN portal_gig_reviews r ON r.proof_key=${proofKeySql("z")} LEFT JOIN users q ON q.id=r.reviewed_by
              WHERE z.batch_id=? AND z.portal_student_id=? ORDER BY z.created_on DESC`,
             gigs.batch_id,
             portalId,
@@ -159,8 +160,8 @@ export async function GET(req: Request) {
                   sum(CASE WHEN status='Rejected' THEN 1 ELSE 0 END) rejected,
                   sum(CASE WHEN auditor_status='Pending' THEN 1 ELSE 0 END) audit_pending,
                   sum(CASE WHEN status='Approved' THEN price ELSE 0 END) approved_value,
-                  sum(CASE WHEN EXISTS (SELECT 1 FROM portal_gig_reviews r WHERE r.portal_gig_id=z.portal_gig_id AND r.status='Approved') THEN 1 ELSE 0 END) qc_approved,
-                  sum(CASE WHEN EXISTS (SELECT 1 FROM portal_gig_reviews r WHERE r.portal_gig_id=z.portal_gig_id AND r.status='Rejected') THEN 1 ELSE 0 END) qc_rejected
+                  sum(CASE WHEN EXISTS (SELECT 1 FROM portal_gig_reviews r WHERE r.proof_key=${proofKeySql("z")} AND r.status='Approved') THEN 1 ELSE 0 END) qc_approved,
+                  sum(CASE WHEN EXISTS (SELECT 1 FROM portal_gig_reviews r WHERE r.proof_key=${proofKeySql("z")} AND r.status='Rejected') THEN 1 ELSE 0 END) qc_rejected
            FROM portal_gigs z WHERE batch_id=? GROUP BY portal_student_id`,
           gigs.batch_id,
         )
