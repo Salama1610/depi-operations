@@ -487,8 +487,7 @@ export async function POST(req: Request) {
             x.next_action,
             x.owner,
             x.due,
-            // A contact is a status since 2 November 2026; a comment is optional.
-            String(x.notes || "").trim() || null,
+            String(x.notes).trim(),
             u.id,
             t,
           ),
@@ -527,6 +526,7 @@ export async function POST(req: Request) {
         // own tasks stay their list.
         permit(u, ops);
         ensure(x.group_id && x.channel && x.outcome && x.occurred_at, "Group, channel, outcome and time are required.");
+        ensure(String(x.notes || "").trim().length >= 3, "Write a short comment on the message.");
         const group: any = await stmt("SELECT * FROM groups WHERE id=?", x.group_id).first();
         ensure(group, "Group not found.");
         if (!can(u.roles, ["Project Operations", ...admin]))
@@ -588,7 +588,7 @@ export async function POST(req: Request) {
               x.next_action?.trim() || "Group message",
               u.id,
               due,
-              String(x.notes || "").trim() ? String(x.notes).trim() + " (group message)" : "Group message",
+              (x.notes || "") + " (group message)",
               u.id,
               t,
             ),

@@ -278,7 +278,8 @@ test("full seeded backend workflow and permission gates", async () => {
     notes: "Talked about the first gig",
     request_id: "contact-once",
   };
-  // Neither a comment (2 Nov 2026) nor a screenshot (10 Oct 2026) is required.
+  // A comment is required; the screenshot is not (10 Oct 2026).
+  assert.match((await post("contact", { ...c, notes: "", request_id: "contact-no-comment" })).error, /comment/);
   const noShot = { ...c, proof_id: "", request_id: "contact-no-screenshot" };
   await check("contact", noShot);
   assert.equal((await dbRow("SELECT proof_id FROM contacts WHERE notes=? AND proof_id IS NULL LIMIT 1", "Talked about the first gig")).proof_id, null);
@@ -3264,6 +3265,7 @@ test("one screenshot of a group message logs a contact for every active student 
   current = { id: group.coordinator, email: group.email };
   const other = await dbRow("SELECT id FROM groups WHERE coordinator<>? AND status='Active' LIMIT 1", group.coordinator);
   assert.match((await post("group_contact", { group_id: other.id, proof_id: "GROUP-SHOT-1", channel: "WhatsApp", outcome: "Responded", occurred_at: at, notes: "Weekly reminder" })).error, /only your own groups/);
+  assert.match((await post("group_contact", { group_id: group.id, channel: "WhatsApp", outcome: "Responded", occurred_at: at })).error, /comment/);
   await check("group_contact", { group_id: group.id, proof_id: "GROUP-SHOT-1", channel: "WhatsApp", outcome: "Responded", occurred_at: at, notes: "Weekly reminder" });
   const logged = await dbRows("SELECT c.student_id FROM contacts c JOIN attachments a ON a.id=c.proof_id WHERE a.hash='group-shot-hash' AND c.occurred_at=?", at);
   assert.equal(logged.length, members.length, "every active student has the contact, each with the same screenshot");

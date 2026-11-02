@@ -751,8 +751,9 @@ export default function Operations({ module: initialModule }: { module: string }
       : m === "administration"
         ? can(user.roles, ["Operations Systems / Admin"])
         : m === "gigs"
-          ? // The team does not use the Services page (Taha, 2 November 2026).
-            false
+          ? // Coaches have no Services page, and Project Operations does not
+            // use it (Taha, 2 November 2026).
+            !onlyCoach && !can(user.roles, ["Project Operations"])
         : m === "portal"
           ? // The portal sheets hold real students, so demo sign-ins do not open them.
             !demoAccount && can(user.roles, [
@@ -5659,7 +5660,7 @@ See you there!`,
                 )}
               </div>
               {!onlyCoach && <p className="action-help">
-                <strong>{t("Log contact")}</strong>: {t("a conversation that already happened, and its status. Once a week per student.")}{" "}
+                <strong>{t("Log contact")}</strong>: {t("a conversation that already happened, with a short comment. Once a week per student.")}{" "}
                 <strong>{t("Next action")}</strong>: {t("the follow-up step you commit to do next, with a due date.")}
               </p>}
               <Tabs defaultValue="overview">
@@ -5824,7 +5825,7 @@ See you there!`,
                         ).length === 0 ? (
                           <Empty
                             title={t("No contacts recorded")}
-                            text={t("Log a contact with its status and a next action.")}
+                            text={t("Log a contact with a comment and a next action.")}
                           />
                         ) : (
                           (d.contacts || [])
@@ -5837,7 +5838,8 @@ See you there!`,
                                 <h3>
                                   {c.channel} · {fmt(c.occurred_at)}
                                 </h3>
-                                {c.notes && <p className="wrap-text">{c.notes}</p>}
+                                {/* Project Operations follows contacts by their status only (Taha, 2 November 2026). */}
+                                {c.notes && !can(user.roles, ["Project Operations"]) && <p className="wrap-text">{c.notes}</p>}
                                 <p>{c.next_action}</p>
                                 <small>{t("Recorded by")}{" "}{owner(c.recorder)}</small>
                                 {/* A screenshot is optional since 10 October: the link only when one was uploaded. */}
@@ -6259,7 +6261,7 @@ See you there!`,
                         "Form",
                         "Other",
                       ])}
-                      {choice("outcome", t("Status"), [
+                      {choice("outcome", t("Outcome"), [
                         "Responded",
                         "No Response",
                         "Follow-Up Required",
@@ -6272,6 +6274,7 @@ See you there!`,
                         "datetime-local",
                       )}
                     </div>
+                    {field("notes", t("Comment: what you talked about"))}
                     {field("next_action", t("Next action"))}
                     {ownerLine()}
                     {field("due", t("Action due date"), "datetime-local")}
@@ -6455,9 +6458,10 @@ See you there!`,
                     </label>
                     <div className="form-grid">
                       {choice("channel", t("Channel"), ["WhatsApp", "Phone", "Email", "Teams", "In person"])}
-                      {choice("outcome", t("Status"), ["Responded", "No response", "Wrong number", "Unreachable"])}
+                      {choice("outcome", t("Outcome"), ["Responded", "No response", "Wrong number", "Unreachable"])}
                     </div>
                     {field("occurred_at", t("Sent at"), "datetime-local")}
+                    {field("notes", t("Comment: what the message was about"))}
                   </>
                 );
               }

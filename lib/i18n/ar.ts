@@ -2890,9 +2890,7 @@ export const ar: Record<string, string> = {
   "Nothing waiting for you: every gig our quality team checked has your decision on the portal.": "لا شيء ينتظرك: كل خدمة راجعها فريق الجودة لها قرارك على البوابة.",
   "Reject it on the portal": "ارفضه على البوابة",
   "Rejected by QC · {v0}": "رفضها فريق الجودة · {v0}",
-  // Service status price and marketplace, contact as a status, student link in service review (2 Nov 2026)
-  "a conversation that already happened, and its status. Once a week per student.": "محادثة تمت بالفعل وحالتها. مرة واحدة أسبوعيًا لكل طالب.",
-  "Log a contact with its status and a next action.": "سجّل تواصلًا بحالته وبالإجراء التالي.",
+  // Service status price and marketplace, student link in service review (2 Nov 2026)
   "Price paid": "سعر الشراء",
   "Bought on": "منصة الشراء",
   "Price paid for service {v0}": "سعر شراء الخدمة {v0}",
