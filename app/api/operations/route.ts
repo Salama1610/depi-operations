@@ -545,7 +545,7 @@ export async function POST(req: Request) {
             x.next_action,
             x.owner,
             x.due,
-            String(x.notes).trim(),
+            String(x.notes || "").trim() || null,
             u.id,
             t,
           ),

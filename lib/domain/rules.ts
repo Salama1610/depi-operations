@@ -93,7 +93,8 @@ export function validateContact(x: any) {
       typeof x[k] === "string" && x[k].trim(),
       `Contact is incomplete: ${k.replaceAll("_", " ")} is required.`,
     );
-  ensure(String(x.notes || "").trim().length >= 3, "Write a short comment on the contact.");
+  // The comment is optional (2 Nov 2026): the outcome and the next action say what happened.
+  ensure(String(x.notes || "").length <= 2000, "Keep the comment under 2,000 characters.");
   ensure(
     [
       "Responded",

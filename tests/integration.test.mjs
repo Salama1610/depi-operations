@@ -278,8 +278,9 @@ test("full seeded backend workflow and permission gates", async () => {
     notes: "Talked about the first gig",
     request_id: "contact-once",
   };
-  // A comment is required; the screenshot is not (10 Oct 2026).
-  assert.match((await post("contact", { ...c, notes: "", request_id: "contact-no-comment" })).error, /comment/);
+  // Neither the comment (2 Nov 2026) nor the screenshot (10 Oct 2026) is required.
+  await check("contact", { ...c, notes: "", proof_id: "", request_id: "contact-no-comment" });
+  assert.equal((await dbRow("SELECT count(*) n FROM contacts WHERE student_id='S10001' AND notes IS NULL")).n, 1, "no comment is stored as none");
   const noShot = { ...c, proof_id: "", request_id: "contact-no-screenshot" };
   await check("contact", noShot);
   assert.equal((await dbRow("SELECT proof_id FROM contacts WHERE notes=? AND proof_id IS NULL LIMIT 1", "Talked about the first gig")).proof_id, null);
@@ -287,8 +288,8 @@ test("full seeded backend workflow and permission gates", async () => {
   await check("contact", c);
   assert.equal(
     (await dbRow("SELECT count(*) n FROM contacts WHERE student_id='S10001'")).n,
-    2,
-    "the contact without a screenshot, then the one with it, recorded once despite the retry",
+    3,
+    "the contact without a comment, the one without a screenshot, then the one with it, recorded once despite the retry",
   );
   assert.equal(
     (await dbRow("SELECT activity_type FROM attachment_context WHERE attachment_id='PROOF-1'")).activity_type,

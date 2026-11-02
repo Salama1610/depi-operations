@@ -2932,4 +2932,7 @@ export const ar: Record<string, string> = {
   // The workspace loads lists when a page needs them (2 Nov 2026)
   "Loading the service links…": "جارٍ تحميل روابط الخدمات…",
   "Student service-link verification": "التحقق من روابط خدمات الطلاب",
+  // Log contact: the comment is optional (2 Nov 2026)
+  "Comment (optional): what you talked about": "تعليق (اختياري): عمّ تحدثتم",
+  "Log a contact with its outcome and the next action.": "سجّل تواصلًا بنتيجته والخطوة التالية.",
 };

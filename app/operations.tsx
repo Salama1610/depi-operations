@@ -5930,7 +5930,7 @@ See you there!`,
                         ).length === 0 ? (
                           <Empty
                             title={t("No contacts recorded")}
-                            text={t("Log a contact with a comment and a next action.")}
+                            text={t("Log a contact with its outcome and the next action.")}
                           />
                         ) : (
                           sheetContacts
@@ -6381,7 +6381,7 @@ See you there!`,
                         "datetime-local",
                       )}
                     </div>
-                    {field("notes", t("Comment: what you talked about"))}
+                    {field("notes", t("Comment (optional): what you talked about"), "text", false)}
                     {field("next_action", t("Next action"))}
                     {ownerLine()}
                     {field("due", t("Action due date"), "datetime-local")}
