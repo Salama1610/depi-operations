@@ -571,6 +571,7 @@ export default function Operations({ module: initialModule }: { module: string }
     [feedbackFor, setFeedbackFor] = useState<string | null>(null),
     [sessionTab, setSessionTab] = useState("schedule"),
     [svcFilters, setSvcFilters] = useState<Row>({ q: "", status: "All", coordinator: "All", supervisor: "All", group: "All", platform: "All" }),
+    [boughtFilters, setBoughtFilters] = useState<Row>({ q: "", status: "All", coordinator: "All", where: "All" }),
     [accountFilters, setAccountFilters] = useState<Row>({ platform: "All", status: "All", request: "Open", ledger: "All", coordinator: "All", owner: "All", linked: "All", word: "All", sort: "platform" }),
     [insightFilters, setInsightFilters] = useState<Row>({
       group: "All", coach: "All", from: "", to: "", absentOnly: false,
@@ -3585,6 +3586,19 @@ See you there!`,
       );
     });
     const stateWord = (state: string) => (state === "No order yet" ? t("No order yet") : orderWord(state));
+    // Bought services: every order done or with its proof uploaded, newest first.
+    const boughtAll = accountOrders
+      .filter((o) => o.status === "Done" || o.status === "Proof Uploaded")
+      .sort((x, y) => String(y.proof_at || y.done_at || y.updated_at).localeCompare(String(x.proof_at || x.done_at || x.updated_at)));
+    const boughtRows = boughtAll.filter((o) => {
+      const q = String(boughtFilters.q || "").trim().toLowerCase();
+      return (
+        (!q || [o.student_name, o.student_id, o.account_label, o.service_url, o.bought_on].some((v) => String(v || "").toLowerCase().includes(q))) &&
+        (boughtFilters.status === "All" || o.status === boughtFilters.status) &&
+        (boughtFilters.coordinator === "All" || o.coordinator === boughtFilters.coordinator) &&
+        (boughtFilters.where === "All" || o.bought_on === boughtFilters.where)
+      );
+    });
     const downloadSheet = (rows: Row[], file: string, shape: (r: Row) => Row) => {
       const data = toWorkbook([{ name: "Service status", rows: rows.map(shape) }]);
       const link = document.createElement("a");
@@ -3823,12 +3837,138 @@ See you there!`,
                 {t("Service status")}{" "}<span className="count">{serviceRows.length}</span>
               </TabsTrigger>
             )}
+            {followsServices && (
+              <TabsTrigger value="bought">
+                {t("Bought services")}{" "}<span className="count">{boughtRows.length}</span>
+              </TabsTrigger>
+            )}
             {(keepsAccounts || can(user.roles, ["Project Operations"])) && (
               <TabsTrigger value="credit">
                 {t("Credit tracker")}{" "}<span className="count">{(d.creditLedger || []).length}</span>
               </TabsTrigger>
             )}
           </TabsList>
+          {followsServices && (
+            <TabsContent value="bought">
+              {/* The record of services bought through the client accounts: every
+                  order done or with its proof uploaded, what it cost and where
+                  it was bought (3 November 2026). */}
+              <div className="filter-row">
+                <label className="search-box">
+                  <Search size={15} />
+                  <input value={boughtFilters.q} placeholder={t("Student, ID, account or link")} onChange={(e) => setBoughtFilters({ ...boughtFilters, q: e.target.value })} />
+                </label>
+                <Pick
+                  label={t("Order state")}
+                  value={boughtFilters.status}
+                  onChange={(status) => setBoughtFilters({ ...boughtFilters, status })}
+                  options={[
+                    { value: "All", label: t("Every state") },
+                    { value: "Proof Uploaded", label: t("POH uploaded") },
+                    { value: "Done", label: t("Done, POH still to upload") },
+                  ]}
+                />
+                <Pick
+                  label={t("Coordinator")}
+                  value={boughtFilters.coordinator}
+                  onChange={(coordinator) => setBoughtFilters({ ...boughtFilters, coordinator })}
+                  options={[
+                    { value: "All", label: t("Every coordinator") },
+                    ...[...new Set(boughtAll.map((o) => o.coordinator).filter(Boolean))]
+                      .map((id) => ({ value: String(id), label: owner(String(id)) }))
+                      .sort((a, b) => a.label.localeCompare(b.label)),
+                  ]}
+                />
+                <Pick
+                  label={t("Bought on")}
+                  value={boughtFilters.where}
+                  onChange={(where) => setBoughtFilters({ ...boughtFilters, where })}
+                  options={[{ value: "All", label: t("All") }, ...[...new Set(boughtAll.map((o) => o.bought_on).filter(Boolean))].sort().map((v) => ({ value: String(v), label: String(v) }))]}
+                />
+                <button
+                  type="button"
+                  className="small-btn"
+                  disabled={!boughtRows.length}
+                  onClick={() =>
+                    downloadSheet(boughtRows, "bought-services", (o: Row) => ({
+                      "Bought at": o.proof_at || o.done_at || o.updated_at,
+                      Student: o.student_name || name(o.student_id),
+                      "Student ID": o.student_id,
+                      Group: o.group_id,
+                      Coordinator: owner(o.coordinator),
+                      Account: o.account_label,
+                      "Account platform": o.account_platform,
+                      Service: o.service_url || "",
+                      "Bought on": o.bought_on || "",
+                      Price: o.amount ?? "",
+                      Status: orderSheetWord(o.status),
+                    }))
+                  }
+                >
+                  <Download size={14} /> {t("Download as Excel")}
+                </button>
+              </div>
+              <div className="mini-stats">
+                <span><strong>{boughtRows.length}</strong>{t("Services bought")}</span>
+                <span><strong>{boughtRows.filter((o) => o.status === "Proof Uploaded").length}</strong>{t("POH uploaded")}</span>
+                <span><strong>{money(boughtRows.reduce((n, o) => n + Number(o.amount || 0), 0))}</strong>{t("Paid in all")}</span>
+                <span><strong>{boughtRows.filter((o) => o.amount === null || o.amount === undefined || o.amount === "").length}</strong>{t("Without a price yet")}</span>
+              </div>
+              {panel(
+                t("Services bought through client accounts · {v0}", { v0: boughtRows.length }),
+                boughtRows.length
+                  ? paginate(boughtRows, (pageRows) =>
+                      generic(pageRows, [
+                        { key: "at", label: t("Bought"), render: (o) => fmt(o.proof_at || o.done_at || o.updated_at) },
+                        {
+                          key: "student",
+                          label: t("Student"),
+                          render: (o) => {
+                            const pupil = students.find((x) => x.id === o.student_id);
+                            return (
+                              <span>
+                                {pupil ? <button type="button" className="text-link" onClick={() => setSelected(pupil)}><strong>{o.student_name || pupil.name}</strong></button> : <strong>{o.student_name || o.student_id}</strong>}
+                                <small className="table-subline"><bdi>{o.student_id}</bdi> · <bdi>{o.group_id}</bdi></small>
+                              </span>
+                            );
+                          },
+                        },
+                        { key: "coordinator", label: t("Coordinator"), render: (o) => owner(o.coordinator) },
+                        { key: "account", label: t("Account"), render: (o) => <span><bdi dir="ltr">{o.account_label}</bdi><small className="table-subline">{o.account_platform}</small></span> },
+                        {
+                          key: "service",
+                          label: t("Service"),
+                          render: (o) =>
+                            o.service_url ? (
+                              <a className="text-link" href={o.service_url} target="_blank" rel="noreferrer">
+                                {t("Service {v0}", { v0: o.service_slot || 1 })} <ExternalLink size={11} />
+                              </a>
+                            ) : (
+                              "—"
+                            ),
+                        },
+                        { key: "bought_on", label: t("Bought on"), render: (o) => o.bought_on || "—" },
+                        { key: "amount", label: t("Price paid"), render: (o) => (o.amount === null || o.amount === undefined || o.amount === "" ? "—" : money(o.amount)) },
+                        {
+                          key: "status",
+                          label: t("Order state"),
+                          render: (o) => (
+                            <span>
+                              <Cue tone={stateTone(o.status)}>{orderWord(o.status)}</Cue>
+                              {o.proof_id && (
+                                <a className="table-subline text-link" href={"/api/files?id=" + o.proof_id} target="_blank" rel="noreferrer">
+                                  {t("Open the proof")} <ExternalLink size={11} />
+                                </a>
+                              )}
+                            </span>
+                          ),
+                        },
+                      ]),
+                    )
+                  : <Empty title={boughtAll.length ? t("No service matches these filters") : t("No service has been bought through a client account yet.")} />,
+              )}
+            </TabsContent>
+          )}
           <TabsContent value="credit">
             <div className="mini-stats">
               <span><strong>{money(toppedUp.reduce((n: number, e: Row) => n + Number(e.delta), 0))}</strong>{t("Topped up this month")}</span>

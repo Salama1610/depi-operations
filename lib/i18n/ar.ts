@@ -3003,4 +3003,11 @@ export const ar: Record<string, string> = {
   "Download the students sheet ({v0} rows)": "تنزيل شيت الطلاب ({v0} صف)",
   // Attendance on the Overview (3 Nov 2026)
   "{v0} not marked": "{v0} لم يُسجَّل حضورهم",
+  // Bought services record on the Accounts tab (3 Nov 2026)
+  "Bought services": "الخدمات المشتراة",
+  "Services bought": "خدمات تم شراؤها",
+  "Paid in all": "إجمالي المدفوع",
+  "Without a price yet": "بدون سعر حتى الآن",
+  "Services bought through client accounts · {v0}": "الخدمات المشتراة من حسابات العملاء · {v0}",
+  "No service has been bought through a client account yet.": "لم تُشترَ أي خدمة من حسابات العملاء بعد.",
 };
