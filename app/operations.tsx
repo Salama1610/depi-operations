@@ -1574,7 +1574,9 @@ export default function Operations({ module: initialModule }: { module: string }
     can(user.roles, ["Operations Coordinator"]) && sessionGroupOf(r)?.coordinator === user.id;
   // What a credit change was, from its sign and how it was recorded.
   const creditKind = (e: Row) =>
-    /^Top-up/.test(e.reason || "")
+    /^Refund/.test(e.reason || "")
+      ? "Refund"
+      : /^Top-up/.test(e.reason || "")
       ? "Top-up"
       : /^Opening/.test(e.reason || "")
         ? "Opening balance"
@@ -1828,14 +1830,24 @@ See you there!`,
       (s) => mine(s) && s.status === "Scheduled" && !s.coach_confirmed_at && !s.coach_unavailable && Date.parse(s.starts_at) > Date.now() && Date.parse(s.starts_at) - Date.now() <= 27 * 3600000,
     );
     // Attendance of a set of held sessions: students marked present ÷ students on their registers.
+    // Present out of the students marked, as on the Dashboard, the Sessions
+    // page and Weekly progress; students not marked yet are shown beside it
+    // instead of counting as absent (3 November 2026).
     const attendanceOf = (list: Row[]) => {
       let present = 0;
-      let expected = 0;
+      let marked = 0;
       for (const s of list) {
-        expected += rosterOf(s).length;
-        present += attendance.filter((a) => a.session_id === s.id && a.status !== "Absent").length;
+        const marks = attendance.filter((a) => a.session_id === s.id);
+        marked += marks.length;
+        present += marks.filter((a) => a.status === "Present").length;
       }
-      return expected ? Math.round((100 * present) / expected) : null;
+      return marked ? Math.round((100 * present) / marked) : null;
+    };
+    const unmarkedOf = (list: Row[]) =>
+      list.reduce((n, s) => n + Math.max(0, rosterOf(s).length - attendance.filter((a) => a.session_id === s.id).length), 0);
+    const withUnmarked = (list: Row[], detail: string) => {
+      const n = unmarkedOf(list);
+      return n ? `${detail} · ${t("{v0} not marked", { v0: n })}` : detail;
     };
     const feedbackIn = (list: Row[]) => list.flatMap((s) => feedbackOf(s.id));
     const score = (rows: Row[]) => {
@@ -2023,7 +2035,7 @@ See you there!`,
           <div className="stats">
             {tile("Sessions this week", week.length, t("{v0} held so far", { v0: held.length }))}
             {tile("Waiting for your confirmation", week.filter((s) => s.status === "Scheduled" && !s.coach_confirmed_at && Date.parse(s.starts_at) > Date.now()).length, t("Confirm at least 27 hours before"))}
-            {tile("Attendance this week", pct(attendanceOf(held)), t("Students present at your sessions"))}
+            {tile("Attendance this week", pct(attendanceOf(held)), withUnmarked(held, t("Students present at your sessions")))}
             {tile("Your students", myStudents.length, t("{v0} graduated", { v0: myStudents.filter((s) => s.portal?.graduated).length }))}
           </div>
           {panel(t("Today"), sessionList(today, "No session today"))}
@@ -2054,7 +2066,7 @@ See you there!`,
           <div className="stats">
             {tile("Sessions today", today.length, t("{v0} checked this morning", { v0: today.filter((s) => checklistOf(s).coach_ops_checked?.done).length }))}
             {tile("Coach not confirmed (27 hours)", soon.length, t("Coach Operations is notified"))}
-            {tile("Attendance this week", pct(attendanceOf(held)), t("{v0} sessions held", { v0: held.length }))}
+            {tile("Attendance this week", pct(attendanceOf(held)), withUnmarked(held, t("{v0} sessions held", { v0: held.length })))}
             {tile("Feedback this week", score(feedbackIn(held)), t("{v0} sessions under 3", { v0: lowFeedback.length }))}
           </div>
           {panel(t("Today's sessions to check"), sessionList(today, "No session today", (s) =>
@@ -2109,7 +2121,7 @@ See you there!`,
           <div className="stats">
             {tile("Your students", f.st.length, t("{v0} groups", { v0: gids.size }))}
             {tile("Contacted this week", share(f.contacted, f.st.length), t("{v0} of {v1} students", { v0: f.contacted, v1: f.st.length }))}
-            {tile("Attendance this week", pct(attendanceOf(f.hd)), t("{v0} sessions held", { v0: f.hd.length }))}
+            {tile("Attendance this week", pct(attendanceOf(f.hd)), withUnmarked(f.hd, t("{v0} sessions held", { v0: f.hd.length })))}
             {readsFeedback ? tile("Feedback this week", score(feedbackIn(f.hd)), t("Average of the three ratings")) : null}
             {tile("Service links submitted", share(f.linksIn, f.sub.length), t("{v0} students with 3 approved", { v0: f.linksDone }))}
             {tile("Gigs approved on the portal", f.portal.approved, t("{v0} with the coach · {v1} with the auditor", { v0: f.portal.coach, v1: f.portal.auditor }))}
@@ -2144,7 +2156,7 @@ See you there!`,
           <div className="stats">
             {tile("Your students", f.st.length, t("{v0} groups", { v0: gids.size }))}
             {tile("Contacted this week", share(f.contacted, f.st.length), t("{v0} of {v1} students", { v0: f.contacted, v1: f.st.length }))}
-            {tile("Attendance this week", pct(attendanceOf(f.hd)), t("{v0} of {v1} sessions held", { v0: f.hd.length, v1: f.wk.length }))}
+            {tile("Attendance this week", pct(attendanceOf(f.hd)), withUnmarked(f.hd, t("{v0} of {v1} sessions held", { v0: f.hd.length, v1: f.wk.length })))}
             {readsFeedback ? tile("Feedback this week", score(feedbackIn(f.hd)), t("Average of the three ratings")) : null}
             {tile("Service links submitted", share(f.linksIn, f.sub.length), t("{v0} students with 3 approved", { v0: f.linksDone }))}
             {tile("Gigs approved on the portal", f.portal.approved, t("{v0} with the coach · {v1} with the auditor", { v0: f.portal.coach, v1: f.portal.auditor }))}
@@ -2204,7 +2216,7 @@ See you there!`,
         <div className="stats">
           {tile("Active students", active.length, t("{v0} groups", { v0: groups.length }))}
           {tile("Contacted this week", share(contacted, active.length), t("{v0} of {v1} students", { v0: contacted, v1: active.length }))}
-          {tile("Attendance this week", pct(attendanceOf(held)), t("{v0} of {v1} sessions held", { v0: held.length, v1: week.length }))}
+          {tile("Attendance this week", pct(attendanceOf(held)), withUnmarked(held, t("{v0} of {v1} sessions held", { v0: held.length, v1: week.length })))}
           {tile("Feedback this week", score(feedbackIn(held)), t("Average of the three ratings"))}
           {tile("Service links submitted", share(linksIn, submissions.length), t("{v0} students with 3 approved", { v0: linksDone }))}
           {tile("Graduated", portalTotals.graduated, t("{v0} gigs approved · {v1} waiting on the portal", { v0: portalTotals.approved, v1: portalTotals.coach + portalTotals.auditor }))}

@@ -3001,4 +3001,6 @@ export const ar: Record<string, string> = {
   "{v0} of them Depi Industry, left out": "منهم {v0} من ديبي إندستري، غير محسوبين",
   "Depi Industry, left out ({v0})": "ديبي إندستري، غير محسوبين ({v0})",
   "Download the students sheet ({v0} rows)": "تنزيل شيت الطلاب ({v0} صف)",
+  // Attendance on the Overview (3 Nov 2026)
+  "{v0} not marked": "{v0} لم يُسجَّل حضورهم",
 };

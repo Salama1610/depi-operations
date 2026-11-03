@@ -113,6 +113,34 @@ const demoActions = new Set([
  * A demo sign-in works on the demo groups, with the demo team, and nowhere
  * else: every record the request names must lead back to a DEMO- group.
  */
+/**
+ * Keeps an account's credit in step with what was paid through it
+ * (3 November 2026). The price written on an order comes off the account's
+ * credit, never more than is left (an account with no credit can still be
+ * used), and goes back when the price is lowered or cleared, or the order is
+ * cancelled. Each movement is a credit-ledger row naming the order, so the
+ * amount still charged to an order is the sum of its rows.
+ */
+async function orderCreditJobs(accountId: string, orderId: string, wanted: number, actorId: string, t: string) {
+  const tag = `[order ${orderId}]`;
+  const account: any = await stmt("SELECT credits FROM accounts WHERE id=?", accountId).first();
+  const row: any = await stmt("SELECT COALESCE(sum(delta),0) n FROM account_credit_ledger WHERE account_id=? AND reason LIKE ?", accountId, "%" + tag).first();
+  const cents = (v: number) => Math.round(v * 100) / 100;
+  const charged = cents(-Number(row?.n || 0));
+  const credits = Number(account?.credits || 0);
+  const target = cents(Math.min(Math.max(0, Number(wanted) || 0), credits + charged));
+  const change = cents(target - charged);
+  if (!change) return [];
+  const balance = cents(credits - change);
+  return [
+    stmt("UPDATE accounts SET credits=? WHERE id=?", balance, accountId),
+    stmt(
+      "INSERT INTO account_credit_ledger(id,account_id,delta,balance_after,reason,actor,created_at) VALUES(?,?,?,?,?,?,?)",
+      uid("CR"), accountId, -change, balance, (change > 0 ? "Service bought " : "Refund: price lowered or order cancelled ") + tag, actorId, t,
+    ),
+  ];
+}
+
 async function demoGuard(x: any) {
   const elsewhere = "This is not available in the demo. Demo accounts work on the demo groups only.";
   ensure(demoActions.has(x.action), elsewhere);
@@ -3135,6 +3163,8 @@ export async function POST(req: Request) {
         ensure(reason.length >= 3, "Say why the account is being released.");
         auditPrevious = { student_id: a.student_id, service_link_id: a.service_link_id, linked_at: a.linked_at, linked_by: a.linked_by, coordinator_id: a.coordinator_id };
         auditValue = { account_id: id, student_id: null, service_link_id: null };
+        for (const open of await all("SELECT id FROM account_orders WHERE account_id=? AND student_id=? AND status NOT IN ('Proof Uploaded','Cancelled')", id, a.student_id || ""))
+          jobs.push(...(await orderCreditJobs(id, String((open as any).id), 0, u.id, t)));
         jobs.push(
           stmt("UPDATE accounts SET student_id=NULL,service_link_id=NULL,linked_at=NULL,linked_by=NULL WHERE id=?", id),
           // An order belongs to the student it was placed for: one still open
@@ -3198,6 +3228,7 @@ export async function POST(req: Request) {
             ensure(current.status !== to, "The service is already at that status.");
             const at = stamps(current);
             auditPrevious = current;
+            jobs.push(...(await orderCreditJobs(a.id, current.id, to === "Cancelled" ? 0 : Number(current.amount || 0), u.id, t)));
             jobs.push(
               stmt(
                 "UPDATE account_orders SET status=?,proof_id=?,note=COALESCE(?,note),updated_at=?,done_at=?,proof_at=?,cancelled_at=? WHERE id=?",
@@ -3248,6 +3279,7 @@ export async function POST(req: Request) {
           proofId = String(x.proof_id);
         }
         auditPrevious = order;
+        jobs.push(...(await orderCreditJobs(order.account_id, order.id, to === "Cancelled" ? 0 : Number(order.amount || 0), u.id, t)));
         jobs.push(
           stmt(
             `UPDATE account_orders SET status=?,proof_id=?,note=COALESCE(?,note),updated_at=?,
@@ -3289,6 +3321,12 @@ export async function POST(req: Request) {
         }
         ensure(sets.length, "Enter the price or the marketplace.");
         const current: any = await stmt("SELECT * FROM account_orders WHERE account_id=? AND student_id=? ORDER BY created_at DESC LIMIT 1", a.id, a.student_id).first();
+        // The price comes off the account's credit (a cancelled order's does not).
+        if ("amount" in x) {
+          const raw = String(x.amount ?? "").trim();
+          const price = raw === "" ? 0 : Number(raw);
+          jobs.push(...(await orderCreditJobs(a.id, current?.id || id, current?.status === "Cancelled" ? 0 : price, u.id, t)));
+        }
         if (current) {
           auditPrevious = { amount: current.amount, bought_on: current.bought_on };
           jobs.push(stmt(`UPDATE account_orders SET ${sets.join(",")},updated_at=? WHERE id=?`, ...values, t, current.id));
@@ -3344,6 +3382,9 @@ export async function POST(req: Request) {
         auditValue = { account_id: id, student_id: studentId, service_link_id: serviceId, coordinator_id: coordinatorId };
         const sameStudent = studentId && studentId === a.student_id;
         // Moved to another student: the previous student's unfinished order closes.
+        if (a.student_id && !sameStudent)
+          for (const open of await all("SELECT id FROM account_orders WHERE account_id=? AND student_id=? AND status NOT IN ('Proof Uploaded','Cancelled')", id, a.student_id))
+            jobs.push(...(await orderCreditJobs(id, String((open as any).id), 0, u.id, t)));
         if (a.student_id && !sameStudent)
           jobs.push(stmt(
             "UPDATE account_orders SET status='Cancelled',note=COALESCE(note||' · ','')||?,cancelled_at=?,updated_at=? WHERE account_id=? AND student_id=? AND status NOT IN ('Proof Uploaded','Cancelled')",

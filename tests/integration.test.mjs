@@ -4815,8 +4815,20 @@ test("a coordinator writes what a service cost and where it was bought, on its o
   assert.equal(Number(o.amount), 25, "the price is kept when only the marketplace changes");
   assert.equal((await dbRow("SELECT count(*) n FROM account_orders WHERE account_id='ACC-COST-1'")).n, 1);
   assert.match((await post("account_order_cost", { account_id: "ACC-COST-1", amount: "-3" })).error, /price as a number/);
+  // The price came off the account's credit, never below zero (3 Nov 2026).
+  const credits = async () => Number((await dbRow("SELECT credits FROM accounts WHERE id='ACC-COST-1'")).credits);
+  assert.equal(await credits(), 0, "25 asked of 10 left: the 10 is used");
+  await check("account_order_cost", { account_id: "ACC-COST-1", amount: "4" });
+  assert.equal(await credits(), 6, "a lower price gives the difference back");
+  const ledger = await dbRows("SELECT delta,reason FROM account_credit_ledger WHERE account_id='ACC-COST-1' AND reason LIKE '%[order %' ORDER BY created_at");
+  assert.deepEqual(ledger.map((e) => Number(e.delta)), [-10, 6]);
   await check("account_order_cost", { account_id: "ACC-COST-1", amount: "" });
   assert.equal((await order()).amount, null, "an emptied price is cleared");
+  assert.equal(await credits(), 10, "and its credit is back");
+  await check("account_order_cost", { account_id: "ACC-COST-1", amount: "3" });
+  assert.equal(await credits(), 7);
+  await check("account_service_status", { account_id: "ACC-COST-1", status: "Cancelled", note: "Seller refused" });
+  assert.equal(await credits(), 10, "a cancelled order's price goes back");
   current = { id: "owner", email: "owner@example.com" };
   await dbExec("DELETE FROM account_orders WHERE account_id='ACC-COST-1'");
   await dbExec("UPDATE accounts SET student_id=NULL,status='Retired' WHERE id='ACC-COST-1'");
