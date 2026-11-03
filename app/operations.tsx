@@ -138,6 +138,7 @@ import { useLiveReload } from "@/lib/use-live-reload";
 import { guessKeyColumn, guessMapping, normalizePhone } from "@/lib/domain/sheet-mapping";
 import { whatsappInvite } from "@/lib/domain/whatsapp";
 import { sessionEnded } from "@/lib/domain/session-time";
+import { sumPortalFigures } from "@/lib/domain/portal-figures";
 
 /** Runs a job now, or once more after the run in progress: many asks while one runs become a single further run. */
 function coalesced() {
@@ -725,6 +726,11 @@ export default function Operations({ module: initialModule }: { module: string }
   const critical = students.filter((s) => s.risk.status === "Critical");
   const atRisk = students.filter((s) => s.risk.status === "At Risk");
   const graduates = students.filter((s) => s.graduation.includes("Graduate"));
+  // Graduation and gigs on the Overview come from the portal's latest sheets
+  // (lib/domain/portal-figures), so they change with each upload; the
+  // graduation ledger above stays for reports and payouts.
+  const portalGraduates = students.filter((s) => s.lifecycle === "Active" && s.portal?.graduated);
+  const portalTotals = sumPortalFigures(students.filter((s) => s.lifecycle === "Active").map((s) => s.portal));
   const accepted = evidence.filter((e) => e.status === "Accepted");
   const reviews = evidence.filter((e) =>
     ["Coordinator L1", "Quality Review", "L3 Review"].includes(
@@ -806,7 +812,7 @@ export default function Operations({ module: initialModule }: { module: string }
       (Array.isArray(user.scopes) && (user.scopes.includes("account-owner") || user.scopes.includes("revoke-students"))));
   const shownNav = nav.filter(([m]) =>
     qualityOnly
-      ? m === "quality" || m === "feedback-review" || m === "attendance-check" || (m === "quality-reports" && !demoAccount) || ((m === "portal" || m === "portal-qc") && !demoAccount)
+      ? m === "home" || m === "quality" || m === "feedback-review" || m === "attendance-check" || (m === "quality-reports" && !demoAccount) || ((m === "portal" || m === "portal-qc") && !demoAccount)
       : m === "feedback-review"
         ? // Students' session feedback, given out to the quality team to review;
           // a coach reads their own sessions' feedback there, read-only.
@@ -1782,7 +1788,12 @@ See you there!`,
   // Operations, Coach Operations, the supervisors and the coaches each see what
   // they review every day and every week. Coordinators keep the Overview,
   // which is their daily work list. Weeks run Friday to Thursday in Cairo.
-  const dashboardRole: "project" | "coachOps" | "supervisor" | "coach" | null =
+  type DashboardRole = "project" | "coachOps" | "supervisor" | "coach" | "coordinator" | "quality";
+  // Each member's Overview counts the groups they are assigned to in that
+  // role: a supervisor's the groups they supervise, a coordinator's the groups
+  // they coordinate, a coach's the groups they coach. The programme-wide roles
+  // see the whole programme; the quality team sees the students given to them.
+  const dashboardRole: DashboardRole | null =
     can(user.roles, ["Project Operations", "Operations Systems / Admin", "Higher Board"])
       ? "project"
       : can(user.roles, ["Coach Operations"])
@@ -1791,8 +1802,12 @@ See you there!`,
           ? "supervisor"
           : can(user.roles, ["Coach"]) && !can(user.roles, ["Operations Coordinator"])
             ? "coach"
-            : null;
-  function roleDashboard(role: "project" | "coachOps" | "supervisor" | "coach") {
+            : can(user.roles, ["Operations Coordinator"])
+              ? "coordinator"
+              : can(user.roles, ["Quality Member", "Quality Lead"])
+                ? "quality"
+                : null;
+  function roleDashboard(role: DashboardRole) {
     const todayDay = programDay();
     const shift = (day: string, n: number) => {
       const x = new Date(day + "T12:00:00Z");
@@ -1836,6 +1851,52 @@ See you there!`,
     const linksDone = submissions.filter((r) => Number(r.links_done) >= 3 && !Number(r.links_pending)).length;
     const openCases = (d.cases || []).filter((c: Row) => !["Closed", "Resolved"].includes(c.status));
     const urgentCases = openCases.filter((c: Row) => /S1|S2/.test(String(c.severity)));
+    // The figures of a set of groups: this week's sessions, the active
+    // students, their contact, services and portal figures.
+    const figuresOf = (gids: Set<string>) => {
+      const st = active.filter((s) => gids.has(s.group_id));
+      const sub = submissions.filter((r) => gids.has(r.group_id));
+      return {
+        st,
+        wk: week.filter((s) => gids.has(s.group_id)),
+        hd: held.filter((s) => gids.has(s.group_id)),
+        sub,
+        contacted: st.filter((s) => !s.contact_due).length,
+        linksIn: sub.filter((r) => Number(r.links_submitted) > 0).length,
+        linksDone: sub.filter((r) => Number(r.links_done) >= 3 && !Number(r.links_pending)).length,
+        portal: sumPortalFigures(st.map((s) => s.portal)),
+      };
+    };
+    // One row per group, for a coordinator's own groups.
+    const perGroup = (ids: string[]) =>
+      generic(
+        ids
+          .map((id) => {
+            const f = figuresOf(new Set([id]));
+            return {
+              id,
+              group: id,
+              students: f.st.length,
+              contacted: share(f.contacted, f.st.length),
+              sessions: `${f.hd.length}/${f.wk.length}`,
+              attendance: pct(attendanceOf(f.hd)),
+              links: share(f.linksIn, f.sub.length),
+              gigs: f.portal.approved,
+              graduated: f.portal.graduated,
+            };
+          })
+          .sort((a, b) => a.group.localeCompare(b.group)),
+        [
+          { key: "group", label: "Group", render: (r) => <strong><bdi>{r.group}</bdi></strong> },
+          { key: "students", label: "Students" },
+          { key: "contacted", label: "Contacted this week" },
+          { key: "sessions", label: "Sessions held this week" },
+          { key: "attendance", label: "Attendance this week" },
+          { key: "links", label: "Service links submitted" },
+          { key: "gigs", label: "Gigs approved on the portal" },
+          { key: "graduated", label: "Graduated" },
+        ],
+      );
     const time = (iso: string) =>
       new Date(iso).toLocaleTimeString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { hour: "numeric", hour12: true, minute: "2-digit", timeZone: "Africa/Cairo" });
     const weekLabel = `${formatDay(weekFrom + "T12:00:00Z", locale)} – ${formatDay(shift(weekTo, -1) + "T12:00:00Z", locale)}`;
@@ -1912,10 +1973,13 @@ See you there!`,
             const st = active.filter((s) => gs.has(s.group_id));
             const ws = held.filter((s) => gs.has(s.group_id));
             const sub = submissions.filter((r) => gs.has(r.group_id));
+            const portal = sumPortalFigures(st.map((s) => s.portal));
             return {
               id,
               name: owner(id),
               students: st.length,
+              gigs: portal.approved,
+              graduated: portal.graduated,
               contacted: share(st.filter((s) => !s.contact_due).length, st.length),
               sessions: `${ws.length}/${week.filter((s) => gs.has(s.group_id)).length}`,
               attendance: pct(attendanceOf(ws)),
@@ -1933,6 +1997,8 @@ See you there!`,
           { key: "attendance", label: "Attendance this week" },
           ...(readsFeedback ? [{ key: "feedback", label: "Feedback this week" }] : []),
           { key: "links", label: "Service links submitted" },
+          { key: "gigs", label: "Gigs approved on the portal" },
+          { key: "graduated", label: "Graduated" },
           ...(withContact ? [{ key: "overdue", label: "Overdue actions" }] : []),
         ],
       );
@@ -1940,7 +2006,7 @@ See you there!`,
       <div className="page-heading">
         <div>
           <div className="eyebrow">{t("YOUR DASHBOARD")}</div>
-          <h1>{t(role === "project" ? "Programme today and this week" : role === "coachOps" ? "Coaching today and this week" : role === "supervisor" ? "Your team today and this week" : "Your sessions and students")}</h1>
+          <h1>{t(role === "project" ? "Programme today and this week" : role === "coachOps" ? "Coaching today and this week" : role === "supervisor" ? "Your team today and this week" : role === "coordinator" ? "Your groups today and this week" : role === "quality" ? "Your review work" : "Your sessions and students")}</h1>
           <p>{t("This week: {v0}", { v0: weekLabel })}</p>
         </div>
       </div>
@@ -1957,7 +2023,7 @@ See you there!`,
             {tile("Sessions this week", week.length, t("{v0} held so far", { v0: held.length }))}
             {tile("Waiting for your confirmation", week.filter((s) => s.status === "Scheduled" && !s.coach_confirmed_at && Date.parse(s.starts_at) > Date.now()).length, t("Confirm at least 27 hours before"))}
             {tile("Attendance this week", pct(attendanceOf(held)), t("Students present at your sessions"))}
-            {tile("Your students", myStudents.length, t("{v0} graduated", { v0: myStudents.filter((s) => /Graduat/.test(s.graduation || "")).length }))}
+            {tile("Your students", myStudents.length, t("{v0} graduated", { v0: myStudents.filter((s) => s.portal?.graduated).length }))}
           </div>
           {panel(t("Today"), sessionList(today, "No session today"))}
           {panel(t("This week"), sessionList(week.sort((a, b) => a.starts_at.localeCompare(b.starts_at)), "No session this week", (s) => (
@@ -2032,20 +2098,26 @@ See you there!`,
       );
     }
     if (role === "supervisor") {
-      const coordinators = [...new Set(groups.map((g) => g.coordinator).filter(Boolean))] as string[];
+      const own = groups.filter((g) => g.supervisor === user.id);
+      const gids = new Set((own.length ? own : groups).map((g) => g.id));
+      const f = figuresOf(gids);
+      const coordinators = [...new Set(groups.filter((g) => gids.has(g.id)).map((g) => g.coordinator).filter(Boolean))] as string[];
       return (
         <>
           {heading}
           <div className="stats">
-            {tile("Contacted this week", share(contacted, active.length), t("{v0} of {v1} students", { v0: contacted, v1: active.length }))}
-            {tile("Attendance this week", pct(attendanceOf(held)), t("{v0} sessions held", { v0: held.length }))}
-            {readsFeedback ? tile("Feedback this week", score(feedbackIn(held)), t("Average of the three ratings")) : null}
-            {tile("Service links submitted", share(linksIn, submissions.length), t("{v0} students with 3 approved", { v0: linksDone }))}
+            {tile("Your students", f.st.length, t("{v0} groups", { v0: gids.size }))}
+            {tile("Contacted this week", share(f.contacted, f.st.length), t("{v0} of {v1} students", { v0: f.contacted, v1: f.st.length }))}
+            {tile("Attendance this week", pct(attendanceOf(f.hd)), t("{v0} sessions held", { v0: f.hd.length }))}
+            {readsFeedback ? tile("Feedback this week", score(feedbackIn(f.hd)), t("Average of the three ratings")) : null}
+            {tile("Service links submitted", share(f.linksIn, f.sub.length), t("{v0} students with 3 approved", { v0: f.linksDone }))}
+            {tile("Gigs approved on the portal", f.portal.approved, t("{v0} with the coach · {v1} with the auditor", { v0: f.portal.coach, v1: f.portal.auditor }))}
+            {tile("Graduated", f.portal.graduated, t("{v0}% of your students, from the portal", { v0: f.st.length ? Math.round((100 * f.portal.graduated) / f.st.length) : 0 }))}
           </div>
           {user.team === "Service Team" && ordersRow()}
-          {panel(t("Today's sessions"), sessionList(today, "No session today"))}
-          {soon.length > 0 && panel(t("Coach not confirmed within 27 hours"), sessionList(soon, "Every coach has confirmed"))}
-          {panel(t("Your coordinators this week"), perPerson(coordinators, (id) => new Set(groups.filter((g) => g.coordinator === id).map((g) => g.id)), "Coordinator", true))}
+          {panel(t("Today's sessions"), sessionList(today.filter((s) => gids.has(s.group_id)), "No session today"))}
+          {soon.some((s) => gids.has(s.group_id)) && panel(t("Coach not confirmed within 27 hours"), sessionList(soon.filter((s) => gids.has(s.group_id)), "Every coach has confirmed"))}
+          {panel(t("Your coordinators this week"), perPerson(coordinators, (id) => new Set(groups.filter((g) => g.coordinator === id && gids.has(g.id)).map((g) => g.id)), "Coordinator", true))}
           {openCases.length > 0 &&
             panel(
               t("Open cases in your groups"),
@@ -2056,6 +2128,70 @@ See you there!`,
                 { key: "due", label: "Due", render: (c) => fmt(c.due) },
               ]),
             )}
+        </>
+      );
+    }
+    if (role === "coordinator") {
+      const own = groups.filter((g) => g.coordinator === user.id);
+      const gids = new Set((own.length ? own : groups).map((g) => g.id));
+      const f = figuresOf(gids);
+      const mineOverdue = overdue.filter((x) => x.owner === user.id);
+      const mineToday = dueToday.filter((x) => x.owner === user.id);
+      return (
+        <>
+          {heading}
+          <div className="stats">
+            {tile("Your students", f.st.length, t("{v0} groups", { v0: gids.size }))}
+            {tile("Contacted this week", share(f.contacted, f.st.length), t("{v0} of {v1} students", { v0: f.contacted, v1: f.st.length }))}
+            {tile("Attendance this week", pct(attendanceOf(f.hd)), t("{v0} of {v1} sessions held", { v0: f.hd.length, v1: f.wk.length }))}
+            {readsFeedback ? tile("Feedback this week", score(feedbackIn(f.hd)), t("Average of the three ratings")) : null}
+            {tile("Service links submitted", share(f.linksIn, f.sub.length), t("{v0} students with 3 approved", { v0: f.linksDone }))}
+            {tile("Gigs approved on the portal", f.portal.approved, t("{v0} with the coach · {v1} with the auditor", { v0: f.portal.coach, v1: f.portal.auditor }))}
+            {tile("Graduated", f.portal.graduated, t("{v0}% of your students, from the portal", { v0: f.st.length ? Math.round((100 * f.portal.graduated) / f.st.length) : 0 }))}
+            {tile("Overdue actions", mineOverdue.length, t("{v0} due today", { v0: mineToday.length }))}
+          </div>
+          {panel(t("Today's sessions"), sessionList(today.filter((s) => gids.has(s.group_id)), "No session today"))}
+          {soon.some((s) => gids.has(s.group_id)) && panel(t("Coach not confirmed within 27 hours"), sessionList(soon.filter((s) => gids.has(s.group_id)), "Every coach has confirmed"))}
+          {panel(t("Your groups this week"), perGroup([...gids]))}
+          {(() => {
+            const needing = critical.filter((s) => gids.has(s.group_id));
+            return needing.length > 0 && panel(t("Students needing intervention"), studentRows(needing.slice(0, 6)), <span className="count">{needing.length}</span>);
+          })()}
+          {panel(
+            t("Next actions"),
+            taskRows([...mineOverdue, ...mineToday].slice(0, 5)),
+            <a href="/work" className="text-link">
+              {t("View all")}{" "}<ChevronRight size={16} />
+            </a>,
+          )}
+        </>
+      );
+    }
+    if (role === "quality") {
+      // The students whose services or gigs are this reviewer's to check;
+      // everyone, for the Quality Lead.
+      const total = (key: string) => submissions.reduce((n, r) => n + Number(r[key] || 0), 0);
+      const done = submissions.filter((r) => Number(r.links_done) >= 3 && !Number(r.links_pending)).length;
+      const portal = sumPortalFigures(active.map((s) => s.portal));
+      return (
+        <>
+          {heading}
+          <div className="stats">
+            {tile(isQualityLead ? "Active students" : "Your students", active.length, t("Whose services or gigs are checked by our quality team"))}
+            {tile("Service links waiting for review", total("links_pending"), t("{v0} sent back to the student", { v0: total("links_need_correction") }))}
+            {tile("Students with services complete", done, t("{v0} of {v1} students", { v0: done, v1: submissions.length }))}
+            {tile("Gigs waiting for the coach", portal.coach, t("Our QC: {v0} approved · {v1} rejected", { v0: portal.qc_approved, v1: portal.qc_rejected }))}
+            {tile("Gigs waiting for the auditor", portal.auditor, t("Approved by the coach on the portal"))}
+            {tile("Gigs approved on the portal", portal.approved, t("{v0} rejected", { v0: portal.rejected }))}
+            {tile("Graduated", portal.graduated, t("{v0}% of these students, from the portal", { v0: active.length ? Math.round((100 * portal.graduated) / active.length) : 0 }))}
+          </div>
+          {panel(
+            t("Your queues"),
+            <div className="detail-actions">
+              <button className="small-btn" onClick={() => goTo("quality")}>{t("Open the review queue")}</button>
+              <button className="small-btn" onClick={() => goTo("portal-qc")}>{t("Open Portal gigs QC")}</button>
+            </div>,
+          )}
         </>
       );
     }
@@ -2070,7 +2206,7 @@ See you there!`,
           {tile("Attendance this week", pct(attendanceOf(held)), t("{v0} of {v1} sessions held", { v0: held.length, v1: week.length }))}
           {tile("Feedback this week", score(feedbackIn(held)), t("Average of the three ratings"))}
           {tile("Service links submitted", share(linksIn, submissions.length), t("{v0} students with 3 approved", { v0: linksDone }))}
-          {tile("Graduated", graduates.length, t("{v0} at risk · {v1} critical", { v0: atRisk.length, v1: critical.length }))}
+          {tile("Graduated", portalTotals.graduated, t("{v0} gigs approved · {v1} waiting on the portal", { v0: portalTotals.approved, v1: portalTotals.coach + portalTotals.auditor }))}
           {tile("Coach not confirmed (27 hours)", soon.length, t("Sessions starting soon"))}
           {tile("Urgent open cases", urgentCases.length, t("{v0} open in all", { v0: openCases.length }))}
         </div>
@@ -2117,6 +2253,7 @@ See you there!`,
         detail: t("{v0} assigned groups", { v0: groups.length }),
         icon: Users,
         q: "All",
+        go: "",
       },
       {
         label: t("Contact compliance"),
@@ -2124,20 +2261,23 @@ See you there!`,
         detail: t("{v0} students need contact", { v0: noContact.length }),
         icon: MessageSquare,
         q: "No Contact",
+        go: "",
       },
       {
-        label: t("Services waiting for review"),
-        value: reviews.length,
-        detail: t("{v0} require correction", { v0: rejected.length }),
+        label: t("Gigs waiting on the portal"),
+        value: portalTotals.coach + portalTotals.auditor,
+        detail: t("{v0} with the coach · {v1} with the auditor", { v0: portalTotals.coach, v1: portalTotals.auditor }),
         icon: Files,
-        q: "Evidence Blocker",
+        q: "All",
+        go: "portal",
       },
       {
         label: t("Graduation progress"),
-        value: graduates.length,
-        detail: t("{v0}% achieved · 85% target", { v0: students.length ? Math.round((graduates.length / students.length) * 100) : 0 }),
+        value: portalGraduates.length,
+        detail: t("{v0}% achieved · 85% target", { v0: activeCount ? Math.round((portalGraduates.length / activeCount) * 100) : 0 }),
         icon: GraduationCap,
         q: "All",
+        go: "portal",
       },
     ];
     content = (
@@ -2168,7 +2308,7 @@ See you there!`,
             <button
               className="stat"
               key={s.label}
-              onClick={() => routeQueue(s.q)}
+              onClick={() => (s.go ? goTo(s.go) : routeQueue(s.q))}
             >
               <div>
                 <span>{t(s.label)}</span>
@@ -2270,20 +2410,20 @@ See you there!`,
           <div className="side-column">
             <section className="journey-card">
               <div className="eyebrow">{t("COHORT JOURNEY")}</div>
-              <h2>{t("Progress with proof.")}</h2>
-              <p>{t("Only Quality-accepted services count toward graduation.")}</p>
+              <h2>{t("Progress on the portal.")}</h2>
+              <p>{t("From the portal's latest students and gigs sheets.")}</p>
               <div className="journey-total">
-                <strong>{graduates.length}</strong>
+                <strong>{portalGraduates.length}</strong>
                 <span>
-                  {t("of {v0} students", { v0: students.length })}
+                  {t("of {v0} students", { v0: activeCount })}
                   <br />
                   {t("graduated")}
                 </span>
               </div>
               <Progress
                 value={
-                  students.length
-                    ? (graduates.length / students.length) * 100
+                  activeCount
+                    ? (portalGraduates.length / activeCount) * 100
                     : 0
                 }
               />
@@ -2292,22 +2432,26 @@ See you there!`,
                 <span>{t("Target 85%")}</span>
               </div>
               <div className="journey-stages">
-                {["0/3", "1/3", "2/3", "Graduated"].map((v, i) => (
-                  <div key={v}>
+                {(
+                  [
+                    ["No approved gig yet", (s: Row) => !s.portal?.graduated && !(Number(s.portal?.approved) > 0)],
+                    ["1 approved gig", (s: Row) => !s.portal?.graduated && Number(s.portal?.approved) === 1],
+                    ["2 approved gigs", (s: Row) => !s.portal?.graduated && Number(s.portal?.approved) === 2],
+                    ["3 or more, not graduated yet", (s: Row) => !s.portal?.graduated && Number(s.portal?.approved) >= 3],
+                    ["Graduated", (s: Row) => Boolean(s.portal?.graduated)],
+                  ] as [string, (s: Row) => boolean][]
+                ).map(([label, test], i) => (
+                  <div key={label}>
                     <span>
-                      <i className={"stage-dot dot-" + i} />
-                      {v === "Graduated" ? t("Graduated") : v + " " + t("qualifying services")}
+                      <i className={"stage-dot dot-" + Math.min(i, 3)} />
+                      {t(label)}
                     </span>
-                    <strong>
-                      {v === "Graduated"
-                        ? graduates.length
-                        : students.filter((s) => s.graduation === v).length}
-                    </strong>
+                    <strong>{students.filter((s) => s.lifecycle === "Active" && test(s)).length}</strong>
                   </div>
                 ))}
               </div>
-              <a href="/reports">
-                {t("Explore graduation report")}{" "}<ArrowRight size={16} />
+              <a href="/portal" onClick={(event) => goTo("portal", event)}>
+                {t("Open the Gigs portal view")}{" "}<ArrowRight size={16} />
               </a>
             </section>
             {panel(

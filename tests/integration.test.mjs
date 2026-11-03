@@ -4860,6 +4860,46 @@ test("a portal row is matched to our student by national ID first, and the ID is
   await dbExec("UPDATE students SET national_id=? WHERE id=?", picked.national_id, picked.id);
 });
 
+test("the Overview and the Dashboard take graduation and gigs from the portal sheets, and follow each new upload", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const portal = await route("portal");
+  const dashboard = await route("dashboard");
+  const upload = async (sheet, mapping, rows) => {
+    const post = async (body) =>
+      (await portal.POST(new Request("https://test.local/api/portal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }))).json();
+    const begun = await post({ action: "begin", sheet, mapping, total: rows.length, file_name: sheet + ".xlsx" });
+    assert.ok(begun.batch, JSON.stringify(begun));
+    assert.equal((await post({ action: "chunk", batch: begun.batch, rows })).error, undefined);
+    assert.equal((await post({ action: "commit", batch: begun.batch })).error, undefined);
+  };
+  const pupil = await dbRow(
+    `SELECT s.id,s.email FROM students s JOIN groups g ON g.id=s.group_id
+     WHERE s.email IS NOT NULL AND trim(s.email)<>'' AND s.lifecycle='Active' AND g.status='Active' AND g.id NOT LIKE 'DEMO-%'
+       AND coalesce(g.delivery_model,'Regular')<>'Industry' ORDER BY s.id LIMIT 1`,
+  );
+  const studentsMap = { ID: "portal_id", Email: "email", "Full Name": "full_name", "Final Status": "final_status", "Graduate Type": "graduate_type" };
+  const gigsMap = { ID: "portal_gig_id", "Student ID": "portal_student_id", Title: "title", Proof: "proof_url", Status: "status", "Provider Status": "provider_status", "Auditor Status": "auditor_status" };
+  const gig = (id, status, provider, auditor) => ({ portal_gig_id: id, portal_student_id: "PF-1", title: id, proof_url: "https://proof.example.org/" + id, status, provider_status: provider, auditor_status: auditor });
+  await upload("students", studentsMap, [{ portal_id: "PF-1", email: pupil.email, full_name: "Portal figures", final_status: "Started", graduate_type: "Not Graduated" }]);
+  await upload("gigs", gigsMap, [gig("PF-G1", "Approved", "Approved", "Approved"), gig("PF-G2", "Pending", "Pending", "Pending"), gig("PF-G3", "Pending", "Approved", "Pending")]);
+  const figures = async () => (await (await api.GET()).json()).students.find((x) => x.id === pupil.id).portal;
+  assert.deepEqual(
+    (({ graduated, approved, coach, auditor }) => ({ graduated, approved, coach, auditor }))(await figures()),
+    { graduated: false, approved: 1, coach: 1, auditor: 1 },
+  );
+  // A new upload moves the figures: two more approvals and the portal's graduation.
+  await upload("students", studentsMap, [{ portal_id: "PF-1", email: pupil.email, full_name: "Portal figures", final_status: "Graduated", graduate_type: "3 Gigs" }]);
+  await upload("gigs", gigsMap, [gig("PF-G1", "Approved", "Approved", "Approved"), gig("PF-G2", "Approved", "Approved", "Approved"), gig("PF-G3", "Approved", "Approved", "Approved")]);
+  const after = await figures();
+  assert.deepEqual([after.graduated, after.graduate_type, after.approved, after.coach, after.auditor], [true, "3 Gigs", 3, 0, 0]);
+  // The administrators' Dashboard reads the same figures.
+  const board = await (await dashboard.GET()).json();
+  assert.equal(board.error, undefined, board.error);
+  const mine = board.portal.find((x) => x.student_id === pupil.id);
+  assert.deepEqual([mine.graduated, mine.approved], [true, 3]);
+});
+
 test("the workspace opens light, and contacts and service links load where they are shown, in the same scope", async () => {
   const get = async (query = "") => (await api.GET(new Request("https://test.local/api/operations" + query))).json();
   current = { id: "owner", email: "owner@example.com" };

@@ -4,6 +4,8 @@ import { database } from "./data/database";
 import { objectStore } from "./data/storage";
 import { DEMO_PASSWORD, isDemo, sameSide } from "./demo";
 import { cairoDay, programmeWeekStart } from "./domain/programme-week";
+import { portalFiguresByStudent } from "./domain/portal-figures";
+import { proofKeySql } from "./domain/portal-review";
 import {
   ensure,
   can,
@@ -628,6 +630,8 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
     joinLogins,
     progress,
     linkReviewers,
+    portalStudentRows,
+    portalGigRows,
   ] = await Promise.all([
     all(
       `SELECT g.*,c.name coordinator_name,s.name supervisor_name,s.title supervisor_title,s.team supervisor_team,h.name coach_name,m.name account_manager_name FROM groups g JOIN users c ON c.id=g.coordinator JOIN users s ON s.id=g.supervisor JOIN users h ON h.id=g.coach LEFT JOIN users m ON m.id=g.account_manager WHERE ${qg.sql}`,
@@ -801,6 +805,24 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
       ...q.args,
     ),
     qualityScope && lite ? svc.reviewers() : none,
+    // Graduation and gigs from the portal sheets in use, for each student we
+    // know there (lib/domain/portal-figures): the Overview follows each upload.
+    all(
+      `SELECT p.student_id,p.final_status,p.graduate_type FROM portal_students p
+       JOIN portal_uploads b ON b.batch_id=p.batch_id AND b.sheet='students' AND b.status='Active'
+       JOIN students s ON s.id=p.student_id JOIN groups g ON g.id=s.group_id WHERE ${q.sql}`,
+      ...q.args,
+    ),
+    all(
+      `SELECT p.student_id,z.status,z.provider_status,z.auditor_status,r.status qc FROM portal_gigs z
+       JOIN portal_uploads gb ON gb.batch_id=z.batch_id AND gb.sheet='gigs' AND gb.status='Active'
+       JOIN portal_students p ON p.portal_id=z.portal_student_id
+       JOIN portal_uploads sb ON sb.batch_id=p.batch_id AND sb.sheet='students' AND sb.status='Active'
+       JOIN students s ON s.id=p.student_id JOIN groups g ON g.id=s.group_id
+       LEFT JOIN portal_gig_reviews r ON r.proof_key=${proofKeySql("z")}
+       WHERE ${q.sql}`,
+      ...q.args,
+    ),
   ]);
   loadTimings.db = Date.now() - loadStarted;
   const initialized: any = initializedRows[0];
@@ -838,6 +860,7 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
     "student_id",
   );
   const studentsByGroup = bucket(students, "group_id");
+  const portalFigures = portalFiguresByStudent(portalStudentRows, portalGigRows);
   // The programme week (Friday to Thursday, Cairo) that is running now.
   const thisWeek = programmeWeekStart(cairoDay(new Date().toISOString()));
   // History written before the cleaning existed is cleaned on the way out.
@@ -904,6 +927,7 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
       policyMap[group.policy_id],
     );
     s.next_task = openTasksByStudent.get(s.id)?.[0] || null;
+    s.portal = portalFigures.get(s.id) || null;
   }
   for (const g of groups) {
     const ss = studentsByGroup.get(g.id) || [],

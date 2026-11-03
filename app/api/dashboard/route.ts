@@ -1,4 +1,6 @@
 import { actor, all, permit, rateLimit, refuseDemo } from "@/lib/server";
+import { portalFiguresByStudent } from "@/lib/domain/portal-figures";
+import { proofKeySql } from "@/lib/domain/portal-review";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +41,8 @@ export async function GET() {
       requests,
       audit,
       support,
+      portalStudents,
+      portalGigs,
     ] = await Promise.all([
       all(`SELECT id,name,roles,team,title,active FROM users WHERE ${real("id")} AND id NOT LIKE 'system-%'`),
       all(`SELECT g.id,g.track,g.provider,g.pathway,g.coordinator,g.supervisor,g.coach,g.status,g.start_date FROM groups g WHERE ${shownGroup}`),
@@ -65,6 +69,21 @@ export async function GET() {
       all(`SELECT r.student_id,r.platform,r.value,r.status,r.recorder,r.created_at FROM account_requests r ${viaStudent("r")}`),
       all(`SELECT actor,action,entity_id,created_at FROM audit_events WHERE ${real("actor")} ORDER BY created_at DESC LIMIT 20000`),
       all("SELECT reporter,category,severity,status,created_at FROM support_reports").catch(() => []),
+      // Graduation and gigs from the portal sheets in use (lib/domain/portal-figures).
+      all(
+        `SELECT p.student_id,p.final_status,p.graduate_type FROM portal_students p
+         JOIN portal_uploads b ON b.batch_id=p.batch_id AND b.sheet='students' AND b.status='Active'
+         JOIN students s ON s.id=p.student_id JOIN groups g ON g.id=s.group_id WHERE ${shownGroup}`,
+      ),
+      all(
+        `SELECT p.student_id,z.status,z.provider_status,z.auditor_status,r.status qc FROM portal_gigs z
+         JOIN portal_uploads gb ON gb.batch_id=z.batch_id AND gb.sheet='gigs' AND gb.status='Active'
+         JOIN portal_students p ON p.portal_id=z.portal_student_id
+         JOIN portal_uploads sb ON sb.batch_id=p.batch_id AND sb.sheet='students' AND sb.status='Active'
+         JOIN students s ON s.id=p.student_id JOIN groups g ON g.id=s.group_id
+         LEFT JOIN portal_gig_reviews r ON r.proof_key=${proofKeySql("z")}
+         WHERE ${shownGroup}`,
+      ),
     ]);
     const parse = (v: any) => {
       try {
@@ -96,6 +115,8 @@ export async function GET() {
         requests,
         audit,
         support,
+        // Each linked student's portal figures, for the per-member table and the graduation tiles.
+        portal: [...portalFiguresByStudent(portalStudents, portalGigs)].map(([student_id, f]) => ({ student_id, ...f })),
       },
       { headers: { "Cache-Control": "no-store" } },
     );

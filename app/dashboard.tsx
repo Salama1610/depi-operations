@@ -12,6 +12,7 @@ import { Download, RefreshCw, X } from "lucide-react";
 import { useLocale, useT } from "@/lib/i18n/context";
 import { useLiveReload } from "@/lib/use-live-reload";
 import { servicesComplete } from "@/lib/domain/service-links";
+import { sumPortalFigures } from "@/lib/domain/portal-figures";
 import { sessionEnded } from "@/lib/domain/session-time";
 import { SearchableSelect } from "@/components/searchable-select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -242,6 +243,37 @@ export function Dashboard() {
   for (const l of links) if (activeIds.has(l.student_id)) linksOf.set(l.student_id, [...(linksOf.get(l.student_id) || []), l]);
   const completeStudents = [...linksOf.values()].filter((mine) => servicesComplete(mine)).length;
   const submittedStudents = linksOf.size;
+  // Graduation and gigs from the portal sheets in use (lib/domain/portal-figures),
+  // for the active students in view: they change with each upload.
+  const portalOf = new Map<string, Row>((data?.portal || []).map((p: Row) => [p.student_id, p]));
+  const portalNow = sumPortalFigures(active.map((s) => portalOf.get(s.id) as any));
+  // Each member over the groups they are assigned to (as coordinator,
+  // supervisor or coach) and those groups' active students: what they track.
+  const members = staff
+    .filter((p) => p.active !== false && p.active !== 0)
+    .map((p) => {
+      const theirs = groups.filter((g) => g.coordinator === p.id || g.supervisor === p.id || g.coach === p.id);
+      const gids = new Set(theirs.map((g) => g.id));
+      const st = active.filter((s) => gids.has(s.group_id));
+      const ids = new Set(st.map((s) => s.id));
+      const marks = attendance.filter((a) => ids.has(a.student_id));
+      const portal = sumPortalFigures(st.map((s) => portalOf.get(s.id) as any));
+      return {
+        id: p.id,
+        name: p.name,
+        role: roleOf(p),
+        groups: theirs.length,
+        students: st.length,
+        contacted: st.filter((s) => contactedIds.has(s.id)).length,
+        present: marks.filter((a) => a.status === "Present").length,
+        marks: marks.length,
+        services: st.filter((s) => servicesComplete(linksOf.get(s.id) || [])).length,
+        gigs: portal.approved,
+        graduated: portal.graduated,
+      };
+    })
+    .filter((m) => m.groups > 0)
+    .sort((a, b) => b.students - a.students || String(a.name).localeCompare(String(b.name)));
   // The same rule as the feedback screens: a session's score is the average of
   // all its ratings; below 3 it is a red flag, open until someone handles it.
   const avgFeedback = scoreOf(feedback as any);
@@ -491,6 +523,8 @@ export function Dashboard() {
             <Kpi label={t("Open cases")} value={num(openCases.length)} />
             <Kpi label={t("Service links approved")} value={num(linkCounts.approved)} sub={t("{v0} waiting · {v1} rejected", { v0: num(linkCounts.pending), v1: num(linkCounts.rejected) })} />
             <Kpi label={t("Students with 3 approved links")} value={num(completeStudents)} sub={t("{v0} have submitted", { v0: num(submittedStudents) })} />
+            <Kpi label={t("Graduated")} value={num(portalNow.graduated)} sub={t("{v0} of active students, from the portal", { v0: rate(portalNow.graduated, active.length) })} />
+            <Kpi label={t("Gigs approved on the portal")} value={num(portalNow.approved)} sub={t("{v0} with the coach · {v1} with the auditor", { v0: num(portalNow.coach), v1: num(portalNow.auditor) })} />
             <Kpi label={t("Paid services")} value={num(gigs.length)} sub={t("{v0} proofs in review", { v0: num(evidence.filter((e) => !["Accepted", "Rejected", "Closed L3"].includes(e.status)).length) })} />
             <Kpi label={t("Average session rating")} value={avgFeedback === null ? "—" : num(avgFeedback, 1) + " / 5"} sub={t("{v0} responses", { v0: num(feedback.length) })} tone={avgFeedback === null ? undefined : avgFeedback >= 4 ? "good" : avgFeedback >= 3 ? "warn" : "bad"} />
             <Kpi label={t("Open red flags")} value={num(openFlags.length)} tone={openFlags.length ? "bad" : "good"} />
@@ -547,6 +581,34 @@ export function Dashboard() {
             </Card>
             <Card title={t("Overdue actions by owner")}>
               <Ranking rows={top(overdueByOwner, "value", 10)} valueLabel={t("Overdue actions")} onPick={pickPerson} tone={STATUS.bad} />
+            </Card>
+            <Card title={t("Each member's assigned students · {v0} people", { v0: num(members.length) })} wide action={exportButton("members", members.map((m: Row) => ({ ...m, role: t(m.role) })))}>
+              <div className="dash-table-wrap">
+                <table className="dash-table">
+                  <thead>
+                    <tr>
+                      <th>{t("Name")}</th><th>{t("Role")}</th><th>{t("Groups")}</th><th>{t("Active students")}</th><th>{t("Contacted in the period")}</th>
+                      <th>{t("Attendance rate")}</th><th>{t("Students with 3 approved links")}</th><th>{t("Gigs approved on the portal")}</th><th>{t("Graduated")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {members.slice(0, 300).map((m: Row) => (
+                      <tr key={m.id} className={f.person === m.id ? "is-picked" : ""} onClick={() => pickPerson(m.id)}>
+                        <td><strong>{m.name}</strong></td>
+                        <td>{t(m.role)}</td>
+                        <td>{num(m.groups)}</td>
+                        <td>{num(m.students)}</td>
+                        <td>{rate(m.contacted, m.students)}</td>
+                        <td>{rate(m.present, m.marks)}</td>
+                        <td className={m.services ? "" : "is-zero"}>{num(m.services)}</td>
+                        <td className={m.gigs ? "" : "is-zero"}>{num(m.gigs)}</td>
+                        <td className={m.graduated ? "" : "is-zero"}>{num(m.graduated)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {!members.length && <p className="dash-empty">{t("Nothing in this period.")}</p>}
+              </div>
             </Card>
             <Card title={t("What everyone did · {v0} people", { v0: num(people.length) })} wide action={exportButton("people", people.map((p: Row) => ({ ...p, role: t(p.role), team: t(p.team) })))}>
               <div className="dash-table-wrap">
