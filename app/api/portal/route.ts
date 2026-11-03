@@ -28,6 +28,13 @@ const chunkLimit = 1000;
 const mappingName = "DEPI portal export";
 
 const uploads = (u: any) => can(u.roles, ["Operations Systems / Admin", ...portalUploadRoles]);
+// The quality team checks the gigs, not when each sheet came in: when a sheet
+// was uploaded, by whom and under what file name stay with the other roles
+// (3 November 2026).
+const seesUploads = (u: any) =>
+  !can(u.roles, ["Quality Member", "Quality Lead"]) ||
+  can(u.roles, ["Operations Systems / Admin", "Project Operations", "Coach Operations", "Higher Board", "Team Supervisor"]);
+const withoutUploadDetails = (row: any) => (row ? { ...row, committed_at: undefined, created_at: undefined, uploaded_by: undefined, file_name: undefined } : row);
 // Linking a portal student to ours by hand, through a national ID.
 const linksByHand = (u: any) => can(u.roles, ["Project Operations", "Operations Systems / Admin"]);
 
@@ -214,8 +221,8 @@ export async function GET(req: Request) {
       canLink: linksByHand(u),
       fields: portalFields,
       mappings,
-      active: { students, gigs },
-      history,
+      active: seesUploads(u) ? { students, gigs } : { students: withoutUploadDetails(students), gigs: withoutUploadDetails(gigs) },
+      history: seesUploads(u) ? history : [],
       students: scope === null ? studentRows : studentRows.filter((r: any) => r.student_id && scope.has(r.student_id)),
       notInSheet,
       ourActive: ourActive.length,

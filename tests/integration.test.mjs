@@ -4747,6 +4747,35 @@ test("the portal's Coaches sheet decides which coach gets a group's QC-checked g
   await dbExec("DELETE FROM portal_coaches");
 });
 
+test("the quality team is not shown when the portal sheets were uploaded", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const portal = await route("portal");
+  const view = async () => (await portal.GET(new Request("https://test.local/api/portal"))).json();
+  const at = new Date().toISOString();
+  await dbExec(
+    "INSERT INTO portal_uploads(id,sheet,batch_id,status,file_name,rows_total,rows_linked,mapping,uploaded_by,created_at,committed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+    "PUP-DATES-1", "gigs", "BATCH-DATES-1", "Active", "gigs-dates.xlsx", 0, 0, "{}", "owner", at, at,
+  );
+  try {
+    const mine = await view();
+    assert.ok(mine.active?.gigs?.committed_at, JSON.stringify(mine).slice(0, 300));
+    assert.ok(mine.history.length);
+    const qc = await dbRow("SELECT id,email FROM users WHERE active=1 AND roles LIKE '%Quality Member%' AND roles NOT LIKE '%Admin%' AND roles NOT LIKE '%Project Operations%' AND id NOT LIKE 'DEMO-%' AND email NOT LIKE 'demo.%' ORDER BY id LIMIT 1");
+    assert.ok(qc, "a quality member");
+    current = { id: qc.id, email: qc.email };
+    const theirs = await view();
+    assert.ok(theirs.active?.gigs, JSON.stringify(theirs).slice(0, 300));
+    assert.equal(theirs.active.gigs.committed_at, undefined);
+    assert.equal(theirs.active.gigs.uploaded_by, undefined);
+    assert.equal(theirs.active.gigs.file_name, undefined);
+    assert.deepEqual(theirs.history, []);
+  } finally {
+    current = { id: "owner", email: "owner@example.com" };
+    await dbExec("DELETE FROM portal_uploads WHERE id='PUP-DATES-1'");
+  }
+});
+
 test("each service row's status picker sets where its order stands, in one step", async () => {
   await dbExec("DELETE FROM rate_limits");
   current = { id: "owner", email: "owner@example.com" };

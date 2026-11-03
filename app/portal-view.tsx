@@ -315,7 +315,9 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
                   <strong>{sheet === "students" ? t("Students sheet") : t("Gigs sheet")}</strong>
                   <small>
                     {active
-                      ? t("{v0} rows · uploaded {v1} by {v2}", { v0: active.rows_total, v1: when(active.committed_at), v2: staffName(active.uploaded_by) })
+                      ? active.committed_at
+                        ? t("{v0} rows · uploaded {v1} by {v2}", { v0: active.rows_total, v1: when(active.committed_at), v2: staffName(active.uploaded_by) })
+                        : t("{v0} rows", { v0: active.rows_total })
                       : t("Not uploaded yet")}
                   </small>
                 </div>
