@@ -1312,6 +1312,23 @@ export const portalLinks = sqliteTable(
   },
   (t) => [index("portal_links_email_idx").on(t.email)],
 );
+// The ministry portal's coach for each group, from its Coaches sheet (3 Nov 2026).
+export const portalCoaches = sqliteTable(
+  "portal_coaches",
+  {
+    groupId: text("group_id")
+      .primaryKey()
+      .references(() => groups.id),
+    coachName: text("coach_name"),
+    coachEmail: text("coach_email"),
+    coachUserId: text("coach_user_id").references(() => users.id),
+    uploadedBy: text("uploaded_by")
+      .notNull()
+      .references(() => users.id),
+    uploadedAt: text("uploaded_at").notNull(),
+  },
+  (t) => [index("portal_coaches_user_idx").on(t.coachUserId)],
+);
 export const portalStudents = sqliteTable(
   "portal_students",
   {

@@ -4706,6 +4706,41 @@ test("a student's national ID reaches every member of staff who sees the student
   }
 });
 
+test("the portal's Coaches sheet decides which coach gets a group's QC-checked gigs", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const api = await route("portal-coaches");
+  const send = async (body) => (await api.POST(new Request("https://test.local/api/portal-coaches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }))).json();
+  const { portalCoachSql } = await import("../lib/portal-coaches.ts");
+  const coachOf = async (id) => (await dbRow(`SELECT ${portalCoachSql("g")} coach FROM groups g WHERE g.id=?`, id)).coach;
+  const [one, two] = await dbRows("SELECT g.id,g.coach FROM groups g WHERE g.status='Active' AND g.id NOT LIKE 'DEMO-%' AND COALESCE(g.delivery_model,'Regular')<>'Industry' ORDER BY g.id LIMIT 2");
+  const other = await dbRow("SELECT id,email FROM users WHERE active=1 AND roles LIKE '%\"Coach\"%' AND id<>? ORDER BY id LIMIT 1", one.coach);
+  assert.ok(other, "a second coach");
+  assert.equal(await coachOf(one.id), one.coach, "before any sheet, the group's own coach");
+  const sheet = [
+    { "Group Code": one.id.toLowerCase(), Coach: "Portal Coach", "Coach Email": other.email.toUpperCase() },
+    { "Group Code": two.id, Coach: "Nobody Here", "Coach Email": "nobody-here@example.invalid" },
+    { "Group Code": "NOT-OURS-1", Coach: "X", "Coach Email": "x@example.invalid" },
+  ];
+  const preview = await send({ rows: sheet });
+  assert.equal(preview.applied, false);
+  assert.equal(preview.summary.groups, 2);
+  assert.deepEqual(preview.summary.unknown_groups, ["NOT-OURS-1"]);
+  assert.equal(preview.summary.without_account.length, 1);
+  assert.equal(await coachOf(one.id), one.coach, "a preview changes nothing");
+  const applied = await send({ rows: sheet, apply: true });
+  assert.equal(applied.applied, true, JSON.stringify(applied));
+  assert.equal(await coachOf(one.id), other.id, "the portal's coach takes the group's gigs");
+  assert.equal(await coachOf(two.id), two.coach, "a portal coach without an account leaves the group with its coach");
+  // A new upload replaces the whole list.
+  await send({ rows: [sheet[1]], apply: true });
+  assert.equal(await coachOf(one.id), one.coach);
+  current = { id: other.id, email: other.email };
+  assert.match((await send({ rows: sheet })).error, /role/i, "a coach does not upload it");
+  current = { id: "owner", email: "owner@example.com" };
+  await dbExec("DELETE FROM portal_coaches");
+});
+
 test("each service row's status picker sets where its order stands, in one step", async () => {
   await dbExec("DELETE FROM rate_limits");
   current = { id: "owner", email: "owner@example.com" };

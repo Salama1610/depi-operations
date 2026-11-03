@@ -26,6 +26,7 @@ import { FeedbackAlertCard, FeedbackScore, FeedbackView } from "./feedback-view"
 import { CoachProgress } from "./coach-progress";
 import { CoachGigs, CoachGigsNotice } from "./coach-gigs";
 import { AccountsSheetUpload } from "./accounts-sheet";
+import { PortalCoaches } from "./portal-coaches";
 import { Opportunities } from "./opportunities";
 import { scoreOf } from "@/lib/domain/feedback";
 import { coachPayout, coachRates } from "@/lib/domain/payouts";
@@ -3454,9 +3455,13 @@ See you there!`,
     );
   } else if (module === "coaches") {
     content = (
-      <Suspense fallback={<div className="dash-loading">{t("Loading the coaches…")}</div>}>
-        <CoachAvailability />
-      </Suspense>
+      <>
+        {/* Each group's coach on the ministry portal, who carries out its QC-checked gigs (3 November 2026). */}
+        {!demoAccount && can(user.roles, ["Operations Systems / Admin", "Coach Operations"]) && <PortalCoaches />}
+        <Suspense fallback={<div className="dash-loading">{t("Loading the coaches…")}</div>}>
+          <CoachAvailability />
+        </Suspense>
+      </>
     );
   } else if (module === "dashboard") {
     content = (

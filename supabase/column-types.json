@@ -875,6 +875,14 @@
     "cancelled_at": "timestamptz",
     "bought_on": "text"
   },
+  "portal_coaches": {
+    "group_id": "text",
+    "coach_name": "text",
+    "coach_email": "text",
+    "coach_user_id": "text",
+    "uploaded_by": "text",
+    "uploaded_at": "timestamptz"
+  },
   "portal_links": {
     "portal_id": "text",
     "email": "text",

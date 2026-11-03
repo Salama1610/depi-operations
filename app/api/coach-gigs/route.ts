@@ -2,6 +2,7 @@ import { actor, all, permit, rateLimit } from "@/lib/server";
 import { sameSide } from "@/lib/demo";
 import { proofKey, proofKeySql } from "@/lib/domain/portal-review";
 import { reviewNotes } from "@/lib/portal-review-notes";
+import { portalCoachSql } from "@/lib/portal-coaches";
 
 export const dynamic = "force-dynamic";
 
@@ -30,12 +31,13 @@ export async function GET() {
     const u = await actor();
     permit(u, ["Coach"]);
     await rateLimit("coach-gigs:" + u.id, 60, 60);
-    // The same students as the coach's Students tab.
+    // The students of the groups this coach carries out on the portal: the
+    // portal's own coach for the group, from its Coaches sheet, or the group's
+    // coach here when the sheet names nobody with an account (3 November 2026).
     const students = await all(
       `SELECT s.id,s.name,s.group_id FROM students s JOIN groups g ON g.id=s.group_id
        WHERE s.lifecycle='Active' AND COALESCE(g.delivery_model,'Regular')<>'Industry' AND ${sameSide(u, "g.id")}
-         AND (g.coach=? OR EXISTS (SELECT 1 FROM group_coaches gc WHERE gc.group_id=g.id AND gc.user_id=? AND gc.status='Active' AND gc.coach_type IN ('Outcome Coach','Support Coach')))`,
-      u.id,
+         AND ${portalCoachSql("g")}=?`,
       u.id,
     );
     const byId = new Map(students.map((s: any) => [String(s.id), s]));
