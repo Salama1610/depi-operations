@@ -2982,4 +2982,18 @@ export const ar: Record<string, string> = {
   "The sheet has too many rows.": "الملف به صفوف أكثر من اللازم.",
   "No row has a Group Code. Upload the portal's Coaches sheet as it was downloaded.": "لا يوجد صف به كود مجموعة. ارفع ملف الكوتشات كما نُزّل من البوابة.",
   "None of the sheet's groups is one of ours.": "لا توجد في الملف أي مجموعة من مجموعاتنا.",
+  // Portal sheets: who is not on the portal yet; coaches' waiting gigs in QC (3 Nov 2026)
+  "Our active students": "طلابنا النشطون",
+  "Show who is not on the portal yet": "اعرض من لم يسجل على البوابة بعد",
+  "On the portal": "على البوابة",
+  "Show this group's students": "اعرض طلاب هذه المجموعة",
+  "The portal's students sheet lists the students registered on the ministry portal, and it grows with each export. Our active students below are not in it yet: ask them to register on the portal, or check whether the portal has them under another email and phone. Depi Industry is left out.": "شيت طلاب البوابة فيه الطلاب المسجلين على بوابة الوزارة، وبيزيد مع كل تصدير. طلابنا النشطين اللي تحت مش موجودين فيه لسه: اطلب منهم يسجلوا على البوابة، أو اتأكد إن البوابة مش مسجلاهم بإيميل وتليفون تانيين. مجموعات ديبي إندستري مش محسوبة.",
+  "Waiting for the coach on the portal · {v0} gigs": "تنتظر الكوتش على البوابة · {v0} عمل",
+  "Gigs in the latest sheet that the coach has not decided on yet, by coach: those our quality team has checked are waiting only for the coach.": "الأعمال في آخر شيت اللي الكوتش لسه ما قررش فيها، لكل كوتش: اللي راجعها فريق الجودة مستنية الكوتش بس.",
+  "Checked by our QC: approved": "راجعتها جودتنا: مقبولة",
+  "Checked by our QC: rejected": "راجعتها جودتنا: مرفوضة",
+  "Not checked yet": "لم تتم مراجعتها بعد",
+  "Waiting in all": "الإجمالي في الانتظار",
+  "Oldest since": "الأقدم منذ",
+  "Not linked to our records": "غير مرتبط بسجلاتنا",
 };

@@ -4,14 +4,13 @@ import { database } from "./data/database";
 import { objectStore } from "./data/storage";
 import { DEMO_PASSWORD, isDemo, sameSide } from "./demo";
 import { cairoDay, programmeWeekStart } from "./domain/programme-week";
-import { portalFiguresByStudent } from "./domain/portal-figures";
+import { portalFiguresByStudent, portalGraduation } from "./domain/portal-figures";
 import { proofKeySql } from "./domain/portal-review";
 import {
   ensure,
   can,
   roles,
   policy,
-  graduation,
   risk,
   expectedMilestone,
 } from "./domain/rules";
@@ -835,8 +834,6 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
   );
   for (const e of evidence) e.applied_policy = policyMap[e.policy_id];
   const groupMap = new Map(groups.map((g) => [g.id, g]));
-  const gigMap = new Map(gigs.map((g) => [g.id, g]));
-  const fxMap = new Map(fxApplications.map((x) => [x.gig_id, x]));
   const bucket = (rows: any[], key: string) => {
     const out = new Map<string, any[]>();
     for (const row of rows) {
@@ -899,19 +896,10 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
         )
       : null;
     const studentEvidence = evidenceByStudent.get(s.id) || [];
-    s.graduation = graduation(
-      studentEvidence.map((e) => {
-        const gig = gigMap.get(e.gig_id);
-        return {
-          ...e,
-          gig_status: gig?.status,
-          value: gig?.value,
-          currency: gig?.currency,
-          usd_value: fxMap.get(e.gig_id)?.usd_value,
-        };
-      }),
-      policyMap[group.policy_id],
-    );
+    // Graduation is the portal's (3 Nov 2026): its Final Status, or the gigs it
+    // approved, from the sheets in use. The graduation ledger keeps our own.
+    s.portal = portalFigures.get(s.id) || null;
+    s.graduation = portalGraduation(s.portal);
     const failed = (contactsByStudent.get(s.id) || []).filter(
       (c) =>
         c.outcome === "No Response" &&
@@ -927,7 +915,6 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
       policyMap[group.policy_id],
     );
     s.next_task = openTasksByStudent.get(s.id)?.[0] || null;
-    s.portal = portalFigures.get(s.id) || null;
   }
   for (const g of groups) {
     const ss = studentsByGroup.get(g.id) || [],

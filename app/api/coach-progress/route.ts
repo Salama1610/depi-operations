@@ -1,5 +1,6 @@
 import { actor, all, permit, rateLimit } from "@/lib/server";
-import { graduation, policy } from "@/lib/domain/rules";
+import { policy } from "@/lib/domain/rules";
+import { portalGigStage, portalGraduation } from "@/lib/domain/portal-figures";
 import { sameSide } from "@/lib/demo";
 import { proofKey, proofKeySql } from "@/lib/domain/portal-review";
 import { reviewNotes } from "@/lib/portal-review-notes";
@@ -104,9 +105,12 @@ export async function GET() {
             review_status: g.review_status || null,
           };
         });
-      // The same rule as the graduation ledger: accepted, paid, and worth at least the minimum.
-      const counted = theirs.filter((g) => g.review_status === "Accepted" && g.gig_status === "Paid" && g.usd >= policy.minGig);
       const portal = portalOf.get(s.id);
+      // Graduation is the portal's (3 Nov 2026): its Final Status, or the gigs
+      // it approved, the same rule as every other screen (lib/domain/portal-figures).
+      const approvedOnPortal = portal
+        ? portalGigs.filter((p: any) => String(p.portal_student_id) === String(portal.portal_id) && portalGigStage(p) === "approved")
+        : [];
       return {
         id: s.id,
         name: s.name,
@@ -115,9 +119,9 @@ export async function GET() {
         attendance: attendance
           .filter((a: any) => a.student_id === s.id)
           .map((a: any) => ({ at: a.starts_at, week: a.week, present: a.status !== "Absent" })),
-        graduation: graduation(theirs.map((g) => ({ status: g.review_status, gig_status: g.gig_status, currency: "USD", value: g.usd }))),
-        counted: counted.length,
-        total_usd: Math.round(counted.reduce((sum, g) => sum + g.usd, 0) * 100) / 100,
+        graduation: portalGraduation({ graduated: /^graduated$/i.test(String(portal?.final_status || "").trim()), approved: approvedOnPortal.length }),
+        counted: approvedOnPortal.length,
+        total_usd: Math.round(approvedOnPortal.reduce((sum: number, g: any) => sum + (Number(g.price) || 0), 0) * 100) / 100,
         // The gig's own status follows the client-account workflow, so it stays
         // on the server: the coach sees where the gig is in our review only.
         gigs: theirs.map(({ gig_status: _workflow, ...shown }) => shown),

@@ -167,6 +167,7 @@ function GigCheck({ g, canDecide, busy, send }: { g: Row; canDecide: boolean; bu
 
 export function PortalQc() {
   const t = useT();
+  const tag = useLocale() === "ar" ? "ar-EG-u-nu-latn" : "en-GB";
   const [data, setData] = useState<Row | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -347,6 +348,42 @@ export function PortalQc() {
             <span key={p.id} className="cue is-info">{t("{v0}: {v1} students waiting", { v0: p.name, v1: p.pending })}</span>
           ))}
         </div>
+      )}
+      {data.lead && (data.coaches || []).length > 0 && (
+        <details className="panel pqc-coaches" open>
+          <summary>
+            {t("Waiting for the coach on the portal · {v0} gigs", { v0: (data.coaches as Row[]).reduce((n, c) => n + c.waiting, 0) })}
+          </summary>
+          <small className="footnote">
+            {t("Gigs in the latest sheet that the coach has not decided on yet, by coach: those our quality team has checked are waiting only for the coach.")}
+          </small>
+          <div className="pqc-table">
+            <table className="dash-table">
+              <thead>
+                <tr>
+                  <th>{t("Coach")}</th>
+                  <th>{t("Checked by our QC: approved")}</th>
+                  <th>{t("Checked by our QC: rejected")}</th>
+                  <th>{t("Not checked yet")}</th>
+                  <th>{t("Waiting in all")}</th>
+                  <th>{t("Oldest since")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data.coaches as Row[]).map((c) => (
+                  <tr key={c.coach_id || "none"}>
+                    <td>{c.coach_name || (c.coach_id ? c.coach_id : t("Not linked to our records"))}</td>
+                    <td><bdi dir="ltr">{c.qc_approved}</bdi></td>
+                    <td><bdi dir="ltr">{c.qc_rejected}</bdi></td>
+                    <td><bdi dir="ltr">{c.not_checked}</bdi></td>
+                    <td><strong><bdi dir="ltr">{c.waiting}</bdi></strong></td>
+                    <td>{c.oldest ? new Date(c.oldest).toLocaleDateString(tag, { day: "numeric", month: "short" }) : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
       )}
 
       <div className="fr-filters">

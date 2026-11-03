@@ -152,7 +152,9 @@ export async function GET(req: Request) {
            LEFT JOIN users lu ON lu.id=pl.linked_by
            LEFT JOIN groups g ON g.id=s.group_id
            LEFT JOIN users c ON c.id=g.coordinator
-           WHERE p.batch_id=?`,
+           WHERE p.batch_id=?
+             -- Depi Industry was dropped from Round 5: its rows stay out, as its groups do.
+             AND NOT EXISTS (SELECT 1 FROM groups ig WHERE ig.id=p.round_code AND COALESCE(ig.delivery_model,'Regular')='Industry')`,
           students.batch_id,
         )
       : [];
@@ -170,20 +172,32 @@ export async function GET(req: Request) {
           gigs.batch_id,
         )
       : [];
-    // Our active students that no row of the students sheet links to: in our
-    // records, missing from the portal (or there under another email and phone).
-    const notInSheet = students
+    // Our active students, and whether the students sheet has them. The sheet
+    // lists the students registered on the ministry portal, and it grows with
+    // each export (105 on 11 Oct, 1,968 on 3 Nov 2026); our students it does
+    // not have are not registered there yet, or are there under another email
+    // and phone. Counted by group, so each coordinator sees who to chase.
+    const ourActive: any[] = students
       ? (
           await all(
-            `SELECT s.id,s.name,s.email,s.phone,s.group_id,g.track,g.provider,c.name coordinator_name
+            `SELECT s.id,s.name,s.email,s.phone,s.group_id,g.track,g.provider,c.name coordinator_name,
+                    CASE WHEN EXISTS (SELECT 1 FROM portal_students p WHERE p.batch_id=? AND p.student_id=s.id) THEN 1 ELSE 0 END on_portal
              FROM students s JOIN groups g ON g.id=s.group_id LEFT JOIN users c ON c.id=g.coordinator
              WHERE s.lifecycle='Active' AND COALESCE(g.delivery_model,'Regular')<>'Industry' AND g.id NOT LIKE 'DEMO-%'
-               AND NOT EXISTS (SELECT 1 FROM portal_students p WHERE p.batch_id=? AND p.student_id=s.id)
              ORDER BY s.group_id,s.name`,
             students.batch_id,
           )
         ).filter((r: any) => scope === null || scope.has(r.id))
       : [];
+    const notInSheet = ourActive.filter((r) => !Number(r.on_portal)).map(({ on_portal: _onPortal, ...r }) => r);
+    const groupsGap = new Map<string, { group_id: string; coordinator_name: string | null; active: number; on_portal: number }>();
+    for (const r of ourActive) {
+      const g = groupsGap.get(r.group_id) || { group_id: r.group_id, coordinator_name: r.coordinator_name || null, active: 0, on_portal: 0 };
+      g.active++;
+      if (Number(r.on_portal)) g.on_portal++;
+      groupsGap.set(r.group_id, g);
+    }
+    const portalByGroup = [...groupsGap.values()].sort((a, b) => b.active - b.on_portal - (a.active - a.on_portal) || a.group_id.localeCompare(b.group_id));
     // The sheets in use now; each upload before them is a line in the activity history.
     const history = await all("SELECT id,sheet,status,file_name,rows_total,rows_linked,uploaded_by,created_at,committed_at FROM portal_uploads WHERE status='Active' ORDER BY sheet");
     const mappings = Object.fromEntries(
@@ -203,7 +217,10 @@ export async function GET(req: Request) {
       history,
       students: scope === null ? studentRows : studentRows.filter((r: any) => r.student_id && scope.has(r.student_id)),
       notInSheet,
-      gigCounts: scope === null ? gigCounts : gigCounts.filter((g: any) => studentRows.some((r: any) => r.portal_id === g.portal_student_id && r.student_id && scope.has(r.student_id))),
+      ourActive: ourActive.length,
+      portalByGroup,
+      // The gigs of the students listed: in scope, and not of a Depi Industry group.
+      gigCounts: gigCounts.filter((g: any) => studentRows.some((r: any) => r.portal_id === g.portal_student_id && (scope === null || (r.student_id && scope.has(r.student_id))))),
     });
   } catch (e: any) {
     return Response.json({ error: e.message }, { status: 400 });

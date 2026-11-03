@@ -362,6 +362,10 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
       <div className="mini-stats">
         <span><strong>{students.length}</strong>{t("Students in the portal")}</span>
         <span><strong>{students.filter((s) => s.student_id).length}</strong>{t("Linked to our students")}</span>
+        <span><strong>{data?.ourActive ?? "—"}</strong>{t("Our active students")}</span>
+        <button type="button" className="mini-stat-btn" title={t("Show who is not on the portal yet")} onClick={() => { setFilters({ ...filters, link: "Missing" }); setShown(100); }}>
+          <strong>{missing.length}</strong>{t("Not on the portal yet")}
+        </button>
         <span><strong>{students.filter((s) => s.final_status === "Graduated").length}</strong>{t("Graduated")}</span>
         <span><strong>{gigTotals.approved}/{gigTotals.total}</strong>{t("Gigs approved")}</span>
         <span><strong>{gigTotals.pending}</strong>{t("Awaiting the auditor")}</span>
@@ -410,8 +414,34 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
         {filters.link === "Missing" ? (
           <>
             <p className="footnote">
-              {t("Our active students that no row of the uploaded students sheet matches, by email or phone. Either they are not on the portal, or the portal has them under another email and phone.")}
+              {t("The portal's students sheet lists the students registered on the ministry portal, and it grows with each export. Our active students below are not in it yet: ask them to register on the portal, or check whether the portal has them under another email and phone. Depi Industry is left out.")}
             </p>
+            {(data?.portalByGroup || []).length > 0 && (
+              <div className="table-wrap">
+                <table className="portal-table">
+                  <thead>
+                    <tr>
+                      <th>{t("Group")}</th><th>{t("Coordinator")}</th><th>{t("Active students")}</th><th>{t("On the portal")}</th><th>{t("Not on the portal yet")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(data!.portalByGroup as Row[]).filter((g) => g.active > g.on_portal).map((g) => (
+                      <tr key={g.group_id}>
+                        <td>
+                          <button type="button" className="text-link" title={t("Show this group's students")} onClick={() => { setQuery(g.group_id); setShown(100); }}>
+                            <bdi>{g.group_id}</bdi>
+                          </button>
+                        </td>
+                        <td>{g.coordinator_name || "—"}</td>
+                        <td><bdi dir="ltr">{g.active}</bdi></td>
+                        <td><bdi dir="ltr">{g.on_portal}</bdi></td>
+                        <td><strong><bdi dir="ltr">{g.active - g.on_portal}</bdi></strong></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
             <div className="table-wrap">
               <table className="portal-table">
                 <thead>

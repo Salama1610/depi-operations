@@ -2,7 +2,7 @@
 // read graduation and gigs from here, so they follow every upload.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { portalFiguresByStudent, portalGigStage, sumPortalFigures } from "../lib/domain/portal-figures.ts";
+import { portalFiguresByStudent, portalGigStage, portalGraduation, sumPortalFigures } from "../lib/domain/portal-figures.ts";
 
 test("a portal gig is approved or rejected for good, or waits for the coach, then the auditor", () => {
   assert.equal(portalGigStage({ status: "Approved", provider_status: "Approved", auditor_status: "Approved" }), "approved");
@@ -37,6 +37,8 @@ test("each linked student's graduation and gigs, the further record winning when
     [figures.get("S2").gigs, figures.get("S2").coach, figures.get("S2").auditor, figures.get("S2").qc_rejected],
     [2, 1, 1, 1],
   );
+  assert.deepEqual([portalGraduation(figures.get("S1")), portalGraduation(figures.get("S2")), portalGraduation(null)], ["Graduated", "0/3", "0/3"]);
+  assert.equal(portalGraduation({ graduated: false, approved: 5 }), "3/3", "three approved but not yet graduated on the portal");
   const total = sumPortalFigures([figures.get("S1"), figures.get("S2"), null]);
   assert.deepEqual([total.students, total.graduated, total.gigs, total.approved, total.coach, total.auditor, total.qc_approved, total.qc_rejected], [2, 1, 4, 2, 1, 1, 1, 1]);
 });

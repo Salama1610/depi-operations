@@ -4104,6 +4104,12 @@ test("portal gigs waiting for the coach go to the quality team, whose verdict th
   assert.equal((await send({ action: "decide", portal_gig_id: "QG-2", status: "Approved", proof_checked: true })).ok, true);
   assert.match((await send({ action: "redistribute" })).error, /Quality Lead/);
 
+  // The Quality Lead sees each coach's gigs still waiting on the portal, by our QC's verdict.
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  const byCoach = (await get()).coaches;
+  const coachRow = byCoach.find((c) => c.coach_id === ours.coach);
+  assert.deepEqual([coachRow.qc_approved, coachRow.qc_rejected, coachRow.not_checked, coachRow.waiting], [1, 2, 0, 3], "the one proof on two gigs carries its verdict to both");
+  assert.equal(byCoach.find((c) => c.coach_id === null)?.waiting, 1, "a gig of a student we do not know yet");
   // A new upload finds each review by its proof link, even when the row's ID
   // changed, and a later gig of the student goes to the same member though
   // nothing of theirs is waiting any more.
@@ -4909,7 +4915,7 @@ test("the Overview and the Dashboard take graduation and gigs from the portal sh
     assert.equal((await post({ action: "commit", batch: begun.batch })).error, undefined);
   };
   const pupil = await dbRow(
-    `SELECT s.id,s.email FROM students s JOIN groups g ON g.id=s.group_id
+    `SELECT s.id,s.email,s.group_id FROM students s JOIN groups g ON g.id=s.group_id
      WHERE s.email IS NOT NULL AND trim(s.email)<>'' AND s.lifecycle='Active' AND g.status='Active' AND g.id NOT LIKE 'DEMO-%'
        AND coalesce(g.delivery_model,'Regular')<>'Industry' ORDER BY s.id LIMIT 1`,
   );
@@ -4918,7 +4924,9 @@ test("the Overview and the Dashboard take graduation and gigs from the portal sh
   const gig = (id, status, provider, auditor) => ({ portal_gig_id: id, portal_student_id: "PF-1", title: id, proof_url: "https://proof.example.org/" + id, status, provider_status: provider, auditor_status: auditor });
   await upload("students", studentsMap, [{ portal_id: "PF-1", email: pupil.email, full_name: "Portal figures", final_status: "Started", graduate_type: "Not Graduated" }]);
   await upload("gigs", gigsMap, [gig("PF-G1", "Approved", "Approved", "Approved"), gig("PF-G2", "Pending", "Pending", "Pending"), gig("PF-G3", "Pending", "Approved", "Pending")]);
-  const figures = async () => (await (await api.GET()).json()).students.find((x) => x.id === pupil.id).portal;
+  const studentNow = async () => (await (await api.GET()).json()).students.find((x) => x.id === pupil.id);
+  const figures = async () => (await studentNow()).portal;
+  assert.equal((await studentNow()).graduation, "1/3", "graduation is the portal's: one gig approved there");
   assert.deepEqual(
     (({ graduated, approved, coach, auditor }) => ({ graduated, approved, coach, auditor }))(await figures()),
     { graduated: false, approved: 1, coach: 1, auditor: 1 },
@@ -4928,6 +4936,15 @@ test("the Overview and the Dashboard take graduation and gigs from the portal sh
   await upload("gigs", gigsMap, [gig("PF-G1", "Approved", "Approved", "Approved"), gig("PF-G2", "Approved", "Approved", "Approved"), gig("PF-G3", "Approved", "Approved", "Approved")]);
   const after = await figures();
   assert.deepEqual([after.graduated, after.graduate_type, after.approved, after.coach, after.auditor], [true, "3 Gigs", 3, 0, 0]);
+  assert.equal((await studentNow()).graduation, "Graduated", "and the portal's Final Status graduates them");
+  // The Gigs portal view counts our active students against the sheet: who is
+  // on the portal, and who is not yet, group by group.
+  const view = await (await portal.GET(new Request("https://test.local/api/portal"))).json();
+  assert.equal(view.error, undefined, view.error);
+  const onPortal = view.portalByGroup.reduce((n, g) => n + g.on_portal, 0);
+  assert.equal(view.ourActive - onPortal, view.notInSheet.length, "everyone not on the portal is listed");
+  assert.ok(view.portalByGroup.find((g) => g.group_id === pupil.group_id).on_portal >= 1);
+  assert.ok(!view.notInSheet.some((x) => x.id === pupil.id), "the uploaded student is on the portal");
   // The administrators' Dashboard reads the same figures.
   const board = await (await dashboard.GET()).json();
   assert.equal(board.error, undefined, board.error);

@@ -79,6 +79,16 @@ export function portalFiguresByStudent(
   return out;
 }
 
+/**
+ * A student's graduation as every screen shows it (3 Nov 2026: from the
+ * portal sheets, not our own evidence): "Graduated" when the portal's Final
+ * Status says so, otherwise how many gigs the portal approved, out of three.
+ */
+export function portalGraduation(f?: { graduated?: boolean; approved?: number } | null) {
+  if (f?.graduated) return "Graduated";
+  return `${Math.min(Number(f?.approved) || 0, 3)}/3`;
+}
+
 /** The figures of a set of students added up, for a tile or a row of a table. */
 export function sumPortalFigures(list: (PortalFigures | null | undefined)[]) {
   const total = { students: 0, graduated: 0, gigs: 0, approved: 0, rejected: 0, coach: 0, auditor: 0, qc_approved: 0, qc_rejected: 0 };
