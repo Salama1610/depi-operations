@@ -140,21 +140,22 @@ export async function GET(req: Request) {
         }));
       return Response.json({ shared, proofs, repeats });
     }
+    // Every row of the students sheet. A Depi Industry row (dropped from Round 5)
+    // is flagged: counted in the total uploaded, kept out of the cohort shown.
     const studentRows = students
       ? await all(
           `SELECT p.portal_id,p.email,p.full_name,p.phone,p.round_code,p.provider,p.track,p.profile,p.status,p.final_status,
                   p.graduate_type,p.total_gigs,p.approved_gigs,p.rejected_gigs,p.total_revenue,p.student_id,
                   s.name app_name,s.group_id,g.coordinator,c.name coordinator_name,
-                  CASE WHEN pl.student_id=p.student_id THEN 1 ELSE 0 END linked_by_hand,lu.name linked_by_name
+                  CASE WHEN pl.student_id=p.student_id THEN 1 ELSE 0 END linked_by_hand,lu.name linked_by_name,
+                  CASE WHEN EXISTS (SELECT 1 FROM groups ig WHERE ig.id=p.round_code AND COALESCE(ig.delivery_model,'Regular')='Industry') THEN 1 ELSE 0 END industry
            FROM portal_students p
            LEFT JOIN students s ON s.id=p.student_id
            LEFT JOIN portal_links pl ON pl.portal_id=p.portal_id
            LEFT JOIN users lu ON lu.id=pl.linked_by
            LEFT JOIN groups g ON g.id=s.group_id
            LEFT JOIN users c ON c.id=g.coordinator
-           WHERE p.batch_id=?
-             -- Depi Industry was dropped from Round 5: its rows stay out, as its groups do.
-             AND NOT EXISTS (SELECT 1 FROM groups ig WHERE ig.id=p.round_code AND COALESCE(ig.delivery_model,'Regular')='Industry')`,
+           WHERE p.batch_id=?`,
           students.batch_id,
         )
       : [];
@@ -220,7 +221,9 @@ export async function GET(req: Request) {
       ourActive: ourActive.length,
       portalByGroup,
       // The gigs of the students listed: in scope, and not of a Depi Industry group.
-      gigCounts: gigCounts.filter((g: any) => studentRows.some((r: any) => r.portal_id === g.portal_student_id && (scope === null || (r.student_id && scope.has(r.student_id))))),
+      gigCounts: gigCounts.filter((g: any) =>
+        studentRows.some((r: any) => r.portal_id === g.portal_student_id && !Number(r.industry) && (scope === null || (r.student_id && scope.has(r.student_id)))),
+      ),
     });
   } catch (e: any) {
     return Response.json({ error: e.message }, { status: 400 });

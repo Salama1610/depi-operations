@@ -7,11 +7,11 @@
 // away. Coordinators see their own linked students.
 
 import { useEffect, useMemo, useState } from "react";
-import { ExternalLink, FileUp, RefreshCw, Link2 } from "lucide-react";
+import { Download, ExternalLink, FileUp, RefreshCw, Link2 } from "lucide-react";
 import { useLocale, useT } from "@/lib/i18n/context";
 import { SearchableSelect } from "@/components/searchable-select";
 import { QcThread } from "@/components/qc-thread";
-import { readSheet } from "@/lib/spreadsheet";
+import { readSheet, toWorkbook } from "@/lib/spreadsheet";
 import { guessPortalMapping, mappingProblems, nationalIdColumn, type PortalSheet } from "@/lib/domain/portal-sheets";
 
 type Row = Record<string, any>;
@@ -215,14 +215,47 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
   }
 
   const counts = useMemo(() => new Map<string, Row>((data?.gigCounts || []).map((g: Row) => [g.portal_student_id, g])), [data]);
-  const students: Row[] = data?.students || [];
+  // Every row of the uploaded students sheet, and the cohort shown: without
+  // the Depi Industry rows (dropped from Round 5), which have their own filter.
+  const sheetRows: Row[] = data?.students || [];
+  const industryRows = sheetRows.filter((s) => Number(s.industry));
+  const students: Row[] = sheetRows.filter((s) => !Number(s.industry));
   const options = (key: string) => ["All", ...Array.from(new Set(students.map((s) => s[key]).filter(Boolean))).sort()];
-  const rows = students
-    .filter((s) => !query || JSON.stringify([s.full_name, s.email, s.phone, s.round_code, s.app_name]).toLowerCase().includes(query.toLowerCase()))
+  const rows = (filters.link === "Industry" ? industryRows : students)
+    .filter((s) => !query || JSON.stringify([s.full_name, s.email, s.phone, s.round_code, s.app_name, s.portal_id, s.student_id]).toLowerCase().includes(query.toLowerCase()))
     .filter((s) => filters.final === "All" || s.final_status === filters.final)
     .filter((s) => filters.type === "All" || s.graduate_type === filters.type)
     .filter((s) => filters.provider === "All" || s.provider === filters.provider)
-    .filter((s) => filters.link === "All" || filters.link === "Missing" || (filters.link === "Linked" ? !!s.student_id : !s.student_id));
+    .filter((s) => ["All", "Missing", "Industry"].includes(filters.link) || (filters.link === "Linked" ? !!s.student_id : !s.student_id));
+  // The whole uploaded sheet as a workbook: each student's portal ID and our record.
+  function downloadSheet() {
+    const file = toWorkbook([
+      {
+        name: "Students sheet",
+        rows: sheetRows.map((s) => ({
+          "Portal ID": s.portal_id,
+          "Full name": s.full_name,
+          Email: s.email,
+          Phone: s.phone,
+          "Round code": s.round_code,
+          Provider: s.provider,
+          Track: s.track,
+          "Final status": s.final_status,
+          "Graduate type": s.graduate_type,
+          "Approved gigs": s.approved_gigs,
+          "Our student ID": s.student_id || "",
+          "Our student": s.app_name || "",
+          "Our group": s.group_id || "",
+          Coordinator: s.coordinator_name || "",
+          "In our records": s.student_id ? "Linked" : Number(s.industry) ? "Depi Industry (left out)" : "Not linked",
+        })),
+      },
+    ]);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([file as BlobPart], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    a.download = `portal-students-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.click();
+  }
   // Our students that no row of the uploaded students sheet links to.
   const missing: Row[] = (data?.notInSheet || []).filter(
     (s: Row) => !query || JSON.stringify([s.name, s.email, s.phone, s.group_id, s.id]).toLowerCase().includes(query.toLowerCase()),
@@ -360,6 +393,11 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
       {error && <div className="form-error" role="alert">{t(error)}</div>}
 
       <div className="mini-stats">
+        <span>
+          <strong>{sheetRows.length}</strong>
+          {t("Rows in the students sheet")}
+          {industryRows.length > 0 && <small>{t("{v0} of them Depi Industry, left out", { v0: industryRows.length })}</small>}
+        </span>
         <span><strong>{students.length}</strong>{t("Students in the portal")}</span>
         <span><strong>{students.filter((s) => s.student_id).length}</strong>{t("Linked to our students")}</span>
         <span><strong>{data?.ourActive ?? "—"}</strong>{t("Our active students")}</span>
@@ -400,10 +438,16 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
               { value: "Linked", label: t("Linked") },
               { value: "Unlinked", label: t("Not linked") },
               { value: "Missing", label: t("In our records, not in the sheet ({v0})", { v0: missing.length }) },
+              ...(industryRows.length ? [{ value: "Industry", label: t("Depi Industry, left out ({v0})", { v0: industryRows.length }) }] : []),
             ]}
           />
         </label>
         {filtered && <button className="small-btn" onClick={clearFilters}>{t("Clear filters")}</button>}
+        {sheetRows.length > 0 && (
+          <button className="small-btn" onClick={downloadSheet}>
+            <Download size={14} /> {t("Download the students sheet ({v0} rows)", { v0: sheetRows.length })}
+          </button>
+        )}
       </div>
       <div className="panel">
         <h3>
@@ -583,7 +627,14 @@ function PortalRow({
   return (
     <>
       <tr className={open ? "is-open" : ""}>
-        <td><strong>{s.full_name}</strong><small className="table-subline">{s.email || s.phone}</small></td>
+        <td>
+          <strong>{s.full_name}</strong>
+          <small className="table-subline">{s.email || s.phone}</small>
+          <small className="table-subline portal-ids">
+            <bdi dir="ltr">{s.portal_id}</bdi>
+            {s.student_id ? <> · <bdi dir="ltr">{s.student_id}</bdi></> : null}
+          </small>
+        </td>
         <td>{s.round_code}<small className="table-subline">{s.provider}</small></td>
         <td><span className={"badge " + tone(s.final_status)}>{s.final_status ? t(s.final_status) : "—"}</span></td>
         <td>{s.graduate_type || "—"}</td>

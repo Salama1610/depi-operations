@@ -4,6 +4,7 @@ import { can, ensure } from "@/lib/domain/rules";
 import { fingerprint, samePicture, type ProofPrint } from "@/lib/domain/proof-image";
 import { proofKey, proofKeySql, waitsForCoach } from "@/lib/domain/portal-review";
 import { noteStmt, reviewNotes } from "@/lib/portal-review-notes";
+import { portalCoachSql } from "@/lib/portal-coaches";
 
 export const dynamic = "force-dynamic";
 
@@ -235,27 +236,29 @@ export async function GET() {
     const loads = gigsBatch ? await members(u) : pool;
     // For the Quality Lead: how many gigs of the latest sheet still wait for
     // each coach on the portal, those our QC has decided and those it has not
-    // checked yet, and since when the oldest has waited. The group's coach is
-    // ours (groups.coach) until the portal's own coach list is in.
-    const coachOf = "g.coach";
+    // checked yet, and since when the oldest has waited. Each group's coach is
+    // the portal's (lib/portal-coaches), the one Coach Gigs shows them to.
     const coaches =
       leads && gigsBatch
         ? await all(
-            `SELECT ${coachOf} coach_id, c.name coach_name,
-                    sum(CASE WHEN r.status='Approved' THEN 1 ELSE 0 END) qc_approved,
-                    sum(CASE WHEN r.status='Rejected' THEN 1 ELSE 0 END) qc_rejected,
-                    sum(CASE WHEN r.status IS NULL OR r.status='Pending' THEN 1 ELSE 0 END) not_checked,
+            `SELECT x.coach_id, c.name coach_name,
+                    sum(CASE WHEN x.qc='Approved' THEN 1 ELSE 0 END) qc_approved,
+                    sum(CASE WHEN x.qc='Rejected' THEN 1 ELSE 0 END) qc_rejected,
+                    sum(CASE WHEN x.qc IS NULL OR x.qc='Pending' THEN 1 ELSE 0 END) not_checked,
                     count(*) waiting,
-                    min(z.created_on) oldest
-             FROM portal_gigs z
-             LEFT JOIN portal_students p ON p.batch_id=? AND p.portal_id=z.portal_student_id
-             LEFT JOIN students s ON s.id=p.student_id
-             LEFT JOIN groups g ON g.id=s.group_id
-             LEFT JOIN users c ON c.id=${coachOf}
-             LEFT JOIN portal_gig_reviews r ON r.proof_key=${proofKeySql("z")}
-             WHERE z.batch_id=? AND lower(trim(coalesce(z.provider_status,''))) IN ('','pending')
-             GROUP BY ${coachOf}, c.name
-             ORDER BY sum(CASE WHEN r.status IN ('Approved','Rejected') THEN 1 ELSE 0 END) DESC, count(*) DESC`,
+                    min(x.created_on) oldest
+             FROM (
+               SELECT ${portalCoachSql("g")} coach_id, r.status qc, z.created_on
+               FROM portal_gigs z
+               LEFT JOIN portal_students p ON p.batch_id=? AND p.portal_id=z.portal_student_id
+               LEFT JOIN students s ON s.id=p.student_id
+               LEFT JOIN groups g ON g.id=s.group_id
+               LEFT JOIN portal_gig_reviews r ON r.proof_key=${proofKeySql("z")}
+               WHERE z.batch_id=? AND lower(trim(coalesce(z.provider_status,''))) IN ('','pending')
+             ) x
+             LEFT JOIN users c ON c.id=x.coach_id
+             GROUP BY x.coach_id, c.name
+             ORDER BY sum(CASE WHEN x.qc IN ('Approved','Rejected') THEN 1 ELSE 0 END) DESC, count(*) DESC`,
             studentsBatch?.batch_id || "",
             gigsBatch.batch_id,
           )

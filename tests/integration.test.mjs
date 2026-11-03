@@ -4945,6 +4945,9 @@ test("the Overview and the Dashboard take graduation and gigs from the portal sh
   assert.equal(view.ourActive - onPortal, view.notInSheet.length, "everyone not on the portal is listed");
   assert.ok(view.portalByGroup.find((g) => g.group_id === pupil.group_id).on_portal >= 1);
   assert.ok(!view.notInSheet.some((x) => x.id === pupil.id), "the uploaded student is on the portal");
+  // Every row of the uploaded sheet is there, each with its portal ID, flagged when it is Depi Industry.
+  const row = view.students.find((x) => x.portal_id === "PF-1");
+  assert.deepEqual([row.student_id, Number(row.industry)], [pupil.id, 0]);
   // The administrators' Dashboard reads the same figures.
   const board = await (await dashboard.GET()).json();
   assert.equal(board.error, undefined, board.error);

@@ -2996,4 +2996,9 @@ export const ar: Record<string, string> = {
   "Waiting in all": "الإجمالي في الانتظار",
   "Oldest since": "الأقدم منذ",
   "Not linked to our records": "غير مرتبط بسجلاتنا",
+  // The students sheet: its total and each student's portal ID (3 Nov 2026)
+  "Rows in the students sheet": "صفوف شيت الطلاب",
+  "{v0} of them Depi Industry, left out": "منهم {v0} من ديبي إندستري، غير محسوبين",
+  "Depi Industry, left out ({v0})": "ديبي إندستري، غير محسوبين ({v0})",
+  "Download the students sheet ({v0} rows)": "تنزيل شيت الطلاب ({v0} صف)",
 };
