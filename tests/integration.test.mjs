@@ -4625,6 +4625,56 @@ test("the quality team reports a group's problem to Coach or Project Operations,
   assert.ok((await get()).reports.length >= 2, "the administrators read them all");
 });
 
+test("a coordinator writes feedback once a session has ended; its coach and Project Operations read it, others do not", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const group = await dbRow(
+    `SELECT g.id,g.coordinator,g.coach,u.email,c.email coach_email FROM groups g JOIN users u ON u.id=g.coordinator JOIN users c ON c.id=g.coach
+     WHERE g.status='Active' AND g.id NOT LIKE 'DEMO-%' AND coalesce(g.delivery_model,'Regular')<>'Industry' AND g.coach<>g.coordinator
+       AND (SELECT count(DISTINCT week) FROM sessions x WHERE x.group_id=g.id AND x.status<>'Cancelled')<8
+     ORDER BY g.id LIMIT 1`,
+  );
+  const used = new Set((await dbRows("SELECT week FROM sessions WHERE group_id=? AND status<>'Cancelled'", group.id)).map((r) => Number(r.week)));
+  const week = [1, 2, 3, 4, 5, 6, 7, 8].find((w) => !used.has(w));
+  await check("session", { id: "SES-NOTE-1", group_id: group.id, title: "Coaching", starts_at: new Date(Date.now() - 30 * 60000).toISOString(), week, duration_minutes: 180 });
+  const operations = await route("operations");
+  const notes = async () => (await (await operations.GET(new Request("https://test.local/api/operations?part=sessions"))).json()).sessionNotes.filter((n) => n.session_id === "SES-NOTE-1");
+  const asCoordinator = { id: group.coordinator, email: group.email };
+
+  // Not while it is running, and only from the group's coordinator.
+  current = asCoordinator;
+  assert.match((await post("session_note", { id: "SES-NOTE-1", comments: "Too early" })).error, /once the session has ended/);
+  await check("session_done", { id: "SES-NOTE-1" });
+  current = { id: "coordinator-other", email: "staff-quality@example.invalid" };
+  assert.match((await post("session_note", { id: "SES-NOTE-1", comments: "Not my group" })).error, /Only the group's coordinator/);
+
+  // Written, then edited: still one comment, and the session stays done.
+  current = asCoordinator;
+  assert.match((await post("session_note", { id: "SES-NOTE-1", comments: "   " })).error, /Write your feedback first/);
+  await check("session_note", { id: "SES-NOTE-1", comments: "The coach started late" });
+  await check("session_note", { id: "SES-NOTE-1", comments: "The coach started ten minutes late" });
+  assert.match((await post("session_done", { id: "SES-NOTE-1", undo: true })).error, /stays done/);
+  const mine = await notes();
+  assert.equal(mine.length, 1);
+  assert.equal(mine[0].comments, "The coach started ten minutes late");
+  assert.equal(mine[0].coach_id, group.coach);
+  assert.equal(Number((await dbRow("SELECT count(*) n FROM audit_events WHERE value LIKE '%ten minutes late%'")).n), 0, "the words stay out of the audit list");
+
+  // The coach, Project Operations and administrators read it; a quality member does not.
+  current = { id: group.coach, email: group.coach_email };
+  assert.equal((await notes()).length, 1);
+  current = { id: "owner", email: "owner@example.com" };
+  assert.equal((await notes()).length, 1);
+  current = { id: "coordinator-other", email: "staff-quality@example.invalid" };
+  assert.equal((await notes()).length, 0);
+
+  // Clearing it removes it.
+  current = asCoordinator;
+  await check("session_note", { id: "SES-NOTE-1", comments: "" });
+  assert.equal((await notes()).length, 0);
+  current = { id: "owner", email: "owner@example.com" };
+});
+
 test("a coordinator marks a session done so feedback opens early, and Coach Operations records a coordinator as the coach who held one", async () => {
   await dbExec("DELETE FROM rate_limits");
   current = { id: "owner", email: "owner@example.com" };

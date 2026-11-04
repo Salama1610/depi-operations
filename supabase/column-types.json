@@ -678,6 +678,14 @@
     "comments": "text",
     "created_at": "timestamptz"
   },
+  "session_notes": {
+    "id": "text",
+    "session_id": "text",
+    "author": "text",
+    "comments": "text",
+    "created_at": "timestamptz",
+    "updated_at": "timestamptz"
+  },
   "join_accounts": {
     "id": "text",
     "kind": "text",

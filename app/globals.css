@@ -877,6 +877,7 @@ input:focus-visible {
 .feedback-scale button.is-on{background:#315ce8;border-color:#315ce8;color:#fff}
 .feedback-text{display:flex;flex-direction:column;gap:6px;font-size:14px;color:#3b5174;font-weight:600}
 .feedback-text textarea{border:1px solid #d9e2ef;border-radius:8px;padding:10px 12px;font:inherit;font-weight:400;color:#314969}
+.session-note{display:block;min-width:260px;max-width:520px;white-space:pre-wrap;overflow-wrap:anywhere}
 .feedback-comments{display:flex;flex-direction:column;gap:8px;margin-top:12px}
 .feedback-comments .info-box{flex-direction:column;align-items:flex-start;gap:4px}
 

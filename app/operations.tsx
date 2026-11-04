@@ -175,6 +175,7 @@ const sessionActions = new Set([
   "session_check",
   "session_coach",
   "session_done",
+  "session_note",
   "session_attendance",
   "group_whatsapp",
   "group_coach",
@@ -227,6 +228,7 @@ const titles: Row = {
   session_reschedule: "Reschedule session",
   session_cancel: "Cancel session",
   session_unavailable: "I can't attend this session",
+  session_note: "Your feedback on this session",
   account_request: "Request a client account",
   account: "Add client account",
   reserve_account: "Reserve eligible account",
@@ -289,6 +291,8 @@ const actionCopy: Row = {
     "Rescheduling moves the whole group from this session on. It needs a reason, and the coordinator and coach confirm the new times again.",
   session_cancel:
     "Cancelled sessions remain in the operational history and require a reason.",
+  session_note:
+    "The session's coach and Project Operations read this, with your name. Students do not see it.",
   session_unavailable:
     "Project Operations, Coach Operations and the group's supervisor are notified at once so the session can be covered or moved.",
   service_qc_review:
@@ -604,6 +608,7 @@ export default function Operations({ module: initialModule }: { module: string }
     // coordinator copies it and opens the group.
     [groupMessage, setGroupMessage] = useState<Row | null>(null),
     [feedbackFor, setFeedbackFor] = useState<string | null>(null),
+    [sessionNotesPage, setSessionNotesPage] = useState(1),
     [sessionTab, setSessionTab] = useState("schedule"),
     [svcFilters, setSvcFilters] = useState<Row>({ q: "", status: "All", coordinator: "All", supervisor: "All", group: "All", platform: "All" }),
     [boughtFilters, setBoughtFilters] = useState<Row>({ q: "", status: "All", coordinator: "All", where: "All" }),
@@ -2896,6 +2901,10 @@ See you there!`,
       .filter((session) => sessionFilters.day === "All" || sessionDay(session) === sessionFilters.day)
       .filter((session) => sessionFilters.time === "All" || sessionTime(session) === sessionFilters.time)
       .sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+    // What coordinators wrote after their sessions; the server sends only what this person may read.
+    const sessionNotes: Row[] = d.sessionNotes || [];
+    const myNotes = new Map<string, Row>(sessionNotes.filter((n) => n.author === user.id).map((n) => [n.session_id, n]));
+    const readsSessionNotes = sessionNotes.length > 0 || can(user.roles, ["Project Operations", "Operations Systems / Admin", "Coach"]);
     // What happened in the sessions: attendance, feedback and who held them.
     const ended = (x: Row) => x.status !== "Cancelled" && sessionEnded(x as any);
     const inRange = (iso: string) =>
@@ -3043,6 +3052,7 @@ See you there!`,
           <TabsTrigger value="schedule">{t("Schedule")}</TabsTrigger>
           <TabsTrigger value="attendance">{t("Attendance")}</TabsTrigger>
           {readsFeedback && <TabsTrigger value="feedback">{t("Feedback")} <span className="count">{(d.sessionFeedback || []).length}</span></TabsTrigger>}
+          {readsSessionNotes && <TabsTrigger value="notes">{t("Coordinators' feedback")} <span className="count">{sessionNotes.length}</span></TabsTrigger>}
           {paysPeople && <TabsTrigger value="pay">{t("Sessions held")}</TabsTrigger>}
         </TabsList>
         <TabsContent value="schedule">
@@ -3380,6 +3390,11 @@ See you there!`,
                   </button>
                 )
               ))}
+            {r.status !== "Cancelled" && sessionEnded(r as any) && (sessionGroupOf(r)?.coordinator === user.id || r.coordinator_id === user.id || myNotes.has(r.id)) && (
+              <button className="small-btn" onClick={() => open("session_note", { id: r.id, title: r.title, group_id: r.group_id, starts_at: r.starts_at, comments: myNotes.get(r.id)?.comments || "", written: myNotes.has(r.id) })}>
+                <MessageSquareText size={14} /> {myNotes.has(r.id) ? t("Edit your feedback") : t("Write feedback")}
+              </button>
+            )}
             {can(user.roles, ["Coach Operations", "Operations Systems / Admin"]) && r.status !== "Cancelled" && (
               <button className="small-btn" onClick={() => open("session_coach", { ...r, mode: "existing", coach_id: "" })}>
                 {Date.parse(r.starts_at) > Date.now() ? t("Change coach") : t("Who held it")}
@@ -3439,6 +3454,25 @@ See you there!`,
         {readsFeedback && (
           <TabsContent value="feedback">
             <FeedbackView />
+          </TabsContent>
+        )}
+        {readsSessionNotes && (
+          <TabsContent value="notes">
+            {(() => {
+              const shown = sessionNotes.filter(qMatch).filter((n) => inProvider(n.group_id));
+              return panel(
+                t("Coordinators' feedback"),
+                shown.length
+                  ? paginate(shown, (pageRows) => generic(pageRows, [
+                      { key: "starts_at", label: t("Date"), render: (n) => <span>{fmt(n.starts_at)}<small className="table-subline">{t("Week {v0}", { v0: n.week })}</small></span> },
+                      { key: "group_id", label: t("Group") },
+                      { key: "coach_id", label: t("Coach"), render: (n) => owner(n.coach_id) },
+                      { key: "author_name", label: t("Written by") },
+                      { key: "comments", label: t("Comment"), render: (n) => <span className="session-note" dir="auto">{n.comments}</span> },
+                    ]), [sessionNotesPage, setSessionNotesPage])
+                  : <Empty title={t("No coordinator feedback to show")} />,
+              );
+            })()}
           </TabsContent>
         )}
         {paysPeople && (
@@ -5586,7 +5620,7 @@ See you there!`,
     );
   return content;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locale, module, data, error, loading, search, filter, page, statusPage, registersPage, attendancePage, svcPage, selected, busy, notifications, importOpen, importModule, importMode, sheetHeaders, importMapping, importKey, mappingFields, mappingKeys, savedMappings, mappingName, importRows, preview, importId, serviceFilters, submissionFilters, studentServices, moreFilters, saved, checklistFor, accountSecrets, groupMessage, feedbackFor, sessionTab, svcFilters, boughtFilters, accountFilters, insightFilters, sessionFilters, providerFilter, sessionWeek, joinLogin, joinLeft, joinShowPassword, joinEdit, serviceParts, studentParts, weeklyParts]);
+  }, [locale, module, data, error, loading, search, filter, page, statusPage, registersPage, attendancePage, svcPage, sessionNotesPage, selected, busy, notifications, importOpen, importModule, importMode, sheetHeaders, importMapping, importKey, mappingFields, mappingKeys, savedMappings, mappingName, importRows, preview, importId, serviceFilters, submissionFilters, studentServices, moreFilters, saved, checklistFor, accountSecrets, groupMessage, feedbackFor, sessionTab, svcFilters, boughtFilters, accountFilters, insightFilters, sessionFilters, providerFilter, sessionWeek, joinLogin, joinLeft, joinShowPassword, joinEdit, serviceParts, studentParts, weeklyParts]);
   useEffect(() => {
     if (module === "students") {
       const g = sessionStorage.getItem("depi-group-search");
@@ -6920,6 +6954,19 @@ See you there!`,
                       <strong>{modal!.title}</strong> · {modal!.group_id} · {fmt(modal!.starts_at)}
                     </div>
                     {field("reason", t("Why you can't attend"))}
+                  </>
+                );
+              if (a === "session_note")
+                return (
+                  <>
+                    <div className="info-box">
+                      <strong>{modal!.title}</strong> · {modal!.group_id} · {fmt(modal!.starts_at)}
+                    </div>
+                    <label className="field">
+                      {t("Your feedback")}
+                      <textarea rows={6} maxLength={2000} required={!modal!.written} value={form.comments ?? ""} onChange={(e) => setForm({ ...form, comments: e.target.value })} />
+                    </label>
+                    {modal!.written && <p className="footnote">{t("Clear the text and save to remove your feedback.")}</p>}
                   </>
                 );
               if (a === "session_cancel")

@@ -42,6 +42,7 @@ import {
   validatePolicy,
   controlledPlatforms,
 } from "@/lib/domain/rules";
+import { sessionEnded } from "@/lib/domain/session-time";
 import { isNationalId, nationalIdProblem, normalizeNationalId, normalizePhone } from "@/lib/domain/sheet-mapping";
 import { seed } from "@/lib/seed";
 import { appliesTo, beforeSessionKeys, checklistItem, confirmWindowOpen, CONFIRM_WINDOW_HOURS } from "@/lib/domain/session-checklist";
@@ -107,7 +108,7 @@ const demoActions = new Set([
   "gig", "gig_transition", "evidence", "review", "transfer", "account_request", "student",
   "account_coordinator",
   "session", "session_attendance", "session_cancel", "session_check", "session_coach", "session_confirm",
-  "session_reschedule", "session_unavailable", "session_unconfirm", "session_done",
+  "session_reschedule", "session_unavailable", "session_unconfirm", "session_done", "session_note",
 ]);
 
 /**
@@ -1607,6 +1608,10 @@ export async function POST(req: Request) {
             !(await stmt("SELECT id FROM session_feedback WHERE session_id=?", id).first()),
             "Students have already given feedback on this session, so it stays done.",
           );
+          ensure(
+            !(await stmt("SELECT id FROM session_notes WHERE session_id=?", id).first()),
+            "Feedback has been written on this session, so it stays done.",
+          );
           jobs.push(stmt("UPDATE sessions SET ended_at=NULL,ended_by=NULL,updated_at=? WHERE id=?", t, id));
           auditValue = { session_id: id, ended_at: null };
           break;
@@ -1618,6 +1623,38 @@ export async function POST(req: Request) {
         );
         jobs.push(stmt("UPDATE sessions SET ended_at=?,ended_by=?,updated_at=? WHERE id=?", t, u.id, t, id));
         auditValue = { session_id: id, ended_at: t };
+        break;
+      }
+      case "session_note": {
+        // What the coordinator writes about a session once it has ended, for
+        // the session's coach and Project Operations (lib/server.ts reads it
+        // back to them). Their own comment stays theirs to edit or clear, even
+        // after the group moves to another coordinator. The audit keeps its
+        // length, not its words: the audit list reaches more people.
+        const session: any = await stmt("SELECT * FROM sessions WHERE id=?", id).first();
+        ensure(session && session.status !== "Cancelled", "Session not found.");
+        ensure(sessionEnded(session), "Feedback can be written once the session has ended.");
+        const [group, mine]: any[] = await Promise.all([
+          stmt("SELECT coordinator FROM groups WHERE id=?", session.group_id).first(),
+          stmt("SELECT id,comments FROM session_notes WHERE session_id=? AND author=?", id, u.id).first(),
+        ]);
+        ensure(
+          group?.coordinator === u.id || session.coordinator_id === u.id || mine,
+          "Only the group's coordinator writes feedback on this session.",
+        );
+        const comments = String(x.comments || "").trim();
+        ensure(comments.length <= 2000, "Feedback is limited to 2,000 characters.");
+        ensure(comments || mine, "Write your feedback first.");
+        if (mine) auditPrevious = { session_id: id, characters: String(mine.comments).length };
+        auditValue = { session_id: id, characters: comments.length };
+        jobs.push(
+          comments
+            ? stmt(
+                "INSERT INTO session_notes(id,session_id,author,comments,created_at,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(session_id,author) DO UPDATE SET comments=excluded.comments,updated_at=excluded.updated_at",
+                uid("SN"), id, u.id, comments, t, t,
+              )
+            : stmt("DELETE FROM session_notes WHERE session_id=? AND author=?", id, u.id),
+        );
         break;
       }
       case "session_attendance": {

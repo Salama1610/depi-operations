@@ -1144,6 +1144,23 @@ export const sessionFeedback = sqliteTable(
     index("session_feedback_session_idx").on(t.sessionId),
   ],
 );
+// What a coordinator wrote about a session after it ended (4 Nov 2026).
+export const sessionNotes = sqliteTable(
+  "session_notes",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id),
+    author: text("author")
+      .notNull()
+      .references(() => users.id),
+    comments: text("comments").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [uniqueIndex("session_notes_author").on(t.sessionId, t.author)],
+);
 // Job postings Service Team coordinators share with a track. See migration 202610090031.
 export const opportunities = sqliteTable(
   "opportunities",

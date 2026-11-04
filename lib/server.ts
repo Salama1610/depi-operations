@@ -531,6 +531,27 @@ export async function weeklyLists(u: any) {
 }
 
 /**
+ * What coordinators wrote about their sessions after they ended (4 November
+ * 2026), for the session's coach, Project Operations and the administrators.
+ * The group's coordinator and whoever wrote it see it too; nobody else
+ * receives it, so a comment can be frank about a coach.
+ */
+function readSessionNotes(u: any) {
+  const everyone = can(u.roles, ["Project Operations", "Operations Systems / Admin"]);
+  return all(
+    `SELECT n.id,n.session_id,n.author,a.name author_name,n.comments,n.created_at,n.updated_at,t.title,t.week,t.starts_at,t.group_id,COALESCE(t.coach_id,g.coach) coach_id
+     FROM session_notes n JOIN sessions t ON t.id=n.session_id JOIN groups g ON g.id=t.group_id JOIN users a ON a.id=n.author
+     WHERE COALESCE(g.delivery_model,'Regular')<>'Industry' AND ${sameSide(u, "g.id")}${
+       everyone
+         ? ""
+         : " AND (n.author=? OR g.coordinator=? OR t.coordinator_id=? OR COALESCE(t.coach_id,g.coach)=? OR (t.coach_id IS NULL AND EXISTS (SELECT 1 FROM group_coaches gc WHERE gc.group_id=g.id AND gc.user_id=? AND gc.status='Active')))"
+     }
+     ORDER BY t.starts_at DESC`,
+    ...(everyone ? [] : [u.id, u.id, u.id, u.id, u.id]),
+  );
+}
+
+/**
  * What a session or group action changes, in the same scope and shape as the
  * workspace: read right after such an action instead of the whole workspace,
  * so the page shows the result at once (4 November 2026). Groups come without
@@ -539,17 +560,18 @@ export async function weeklyLists(u: any) {
 export async function sessionLists(u: any) {
   const q = scopeSql(u);
   const qg = scopeSql(u, "g", null);
-  const [sessions, attendance, sessionChecks, sessionFeedback, groupCoaches, groupRows] = await Promise.all([
+  const [sessions, attendance, sessionChecks, sessionFeedback, sessionNotes, groupCoaches, groupRows] = await Promise.all([
     all(`SELECT t.* FROM sessions t JOIN groups g ON g.id=t.group_id WHERE ${qg.sql}`, ...qg.args),
     all(`SELECT t.* FROM attendance t JOIN students s ON s.id=t.student_id JOIN groups g ON g.id=s.group_id WHERE ${q.sql}`, ...q.args),
     all(`SELECT c.* FROM session_checks c JOIN sessions t ON t.id=c.session_id JOIN groups g ON g.id=t.group_id WHERE ${qg.sql}`, ...qg.args),
     can(u.roles, ["Coach Operations", "Operations Coordinator", "Team Supervisor", "Project Operations", "Operations Systems / Admin"])
       ? all(`SELECT f.* FROM session_feedback f JOIN sessions t ON t.id=f.session_id JOIN groups g ON g.id=t.group_id WHERE ${qg.sql} AND ${notRevoked(u, "f.student_id")}`, ...qg.args)
       : Promise.resolve([] as any[]),
+    readSessionNotes(u),
     all(`SELECT x.*,u.name coach_name FROM group_coaches x JOIN users u ON u.id=x.user_id JOIN groups g ON g.id=x.group_id WHERE ${qg.sql} ORDER BY x.assigned_at DESC`, ...qg.args),
     all(`SELECT g.*,c.name coordinator_name,s.name supervisor_name,h.name coach_name FROM groups g JOIN users c ON c.id=g.coordinator JOIN users s ON s.id=g.supervisor JOIN users h ON h.id=g.coach WHERE ${qg.sql}`, ...qg.args),
   ]);
-  return { sessions, attendance, sessionChecks, sessionFeedback, groupCoaches, groupRows };
+  return { sessions, attendance, sessionChecks, sessionFeedback, sessionNotes, groupCoaches, groupRows };
 }
 
 /**
@@ -645,6 +667,7 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
     staff,
     sessionChecks,
     sessionFeedback,
+    sessionNotes,
     joinLogins,
     progress,
     linkReviewers,
@@ -814,6 +837,7 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
           ...qg.args,
         )
       : none,
+    readSessionNotes(u),
     // Which session logins are stored: names and dates only, never the login itself.
     isDemo(u)
       ? none
@@ -1056,6 +1080,7 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
     sessions,
     sessionChecks,
     sessionFeedback,
+    sessionNotes,
     joinLogins,
     groupCoaches,
     taskBank,
