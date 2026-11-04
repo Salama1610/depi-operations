@@ -4625,7 +4625,7 @@ test("the quality team reports a group's problem to Coach or Project Operations,
   assert.ok((await get()).reports.length >= 2, "the administrators read them all");
 });
 
-test("a coordinator writes feedback once a session has ended; its coach and Project Operations read it, others do not", async () => {
+test("a coordinator writes feedback once a session has ended; its coach, Coach Operations and Project Operations read it, others do not", async () => {
   await dbExec("DELETE FROM rate_limits");
   current = { id: "owner", email: "owner@example.com" };
   const group = await dbRow(
@@ -4660,8 +4660,10 @@ test("a coordinator writes feedback once a session has ended; its coach and Proj
   assert.equal(mine[0].coach_id, group.coach);
   assert.equal(Number((await dbRow("SELECT count(*) n FROM audit_events WHERE value LIKE '%ten minutes late%'")).n), 0, "the words stay out of the audit list");
 
-  // The coach, Project Operations and administrators read it; a quality member does not.
+  // The coach, Coach Operations, Project Operations and administrators read it; a quality member does not.
   current = { id: group.coach, email: group.coach_email };
+  assert.equal((await notes()).length, 1);
+  current = { id: "coach-ops-login", email: "staff-coach-ops@example.invalid" };
   assert.equal((await notes()).length, 1);
   current = { id: "owner", email: "owner@example.com" };
   assert.equal((await notes()).length, 1);

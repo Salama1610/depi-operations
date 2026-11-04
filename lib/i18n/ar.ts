@@ -3043,7 +3043,7 @@ export const ar: Record<string, string> = {
   "Unable to load the gap.": "تعذّر تحميل الفرق.",
   // Coordinators' feedback on a session (4 Nov 2026)
   "Your feedback on this session": "ملاحظاتك على هذه الجلسة",
-  "The session's coach and Project Operations read this, with your name. Students do not see it.": "يقرأ مدرب الجلسة وفريق عمليات المشروع هذه الملاحظات مع اسمك، ولا يراها الطلاب.",
+  "The session's coach, Coach Operations and Project Operations read this, with your name. Students do not see it.": "يقرأ مدرب الجلسة وعمليات التدريب وعمليات المشروع هذه الملاحظات مع اسمك، ولا يراها الطلاب.",
   "Coordinators' feedback": "ملاحظات المنسقين",
   "Edit your feedback": "تعديل ملاحظاتك",
   "Write feedback": "كتابة ملاحظات",
