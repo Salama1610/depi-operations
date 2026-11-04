@@ -20,6 +20,10 @@ export function portalGigStage(g: { status?: unknown; provider_status?: unknown;
   return decided(g.provider_status) === "approved" ? "auditor" : "coach";
 }
 
+/** Narrows a read to the gigs of the "coach" stage above, as SQL on a portal_gigs alias. */
+export const portalWaitsForCoachSql = (z = "z") =>
+  `lower(trim(coalesce(${z}.status,''))) NOT IN ('approved','rejected') AND lower(trim(coalesce(${z}.provider_status,'')))<>'approved'`;
+
 export type PortalFigures = {
   /** The portal's Final Status is Graduated. */
   graduated: boolean;

@@ -1427,8 +1427,16 @@ td .searchable-select,td .pick-inline{max-width:240px;min-width:0}
 .pqc-student>header{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;flex-wrap:wrap}
 .pqc-guid bdi{font-family:ui-monospace,Consolas,monospace;user-select:all}
 .portal-ids bdi{font-family:ui-monospace,Consolas,monospace;user-select:all}
-.pqc-coaches{padding:12px 16px;display:flex;flex-direction:column;gap:8px}
-.pqc-coaches>summary{cursor:pointer;font-weight:600}
+/* The portal's gigs waiting for the coach against our system (app/portal-gap). */
+.portal-gap{padding:12px 16px;display:flex;flex-direction:column;gap:12px}
+.portal-gap>summary{cursor:pointer;font-weight:600}
+.portal-gap .mini-stats{margin:0;flex-wrap:wrap}
+.portal-gap .mini-stats small{display:block}
+.portal-gap .mini-stats>span{padding:6px 10px;margin:-7px 0;margin-inline-end:12px}
+.portal-gap td small{display:block}
+.portal-gap-tools{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px}
+.portal-gap-tools h3{margin:0;flex:1 1 220px;font-size:15px}
+.portal-gap-tools .field{min-width:200px}
 .pqc-table{overflow-x:auto}
 /* Our quality team's comments on a portal gig, oldest first (components/qc-thread). */
 .qc-thread{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:6px;min-width:0;max-width:420px;white-space:normal}

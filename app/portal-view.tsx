@@ -11,6 +11,7 @@ import { Download, ExternalLink, FileUp, RefreshCw, Link2 } from "lucide-react";
 import { useLocale, useT } from "@/lib/i18n/context";
 import { SearchableSelect } from "@/components/searchable-select";
 import { QcThread } from "@/components/qc-thread";
+import { PortalGap } from "./portal-gap";
 import { readSheet, toWorkbook } from "@/lib/spreadsheet";
 import { guessPortalMapping, mappingProblems, nationalIdColumn, type PortalSheet } from "@/lib/domain/portal-sheets";
 
@@ -305,6 +306,8 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
         {t("The DEPI portal's students and gigs sheets are the cohort's official record. Services coordinators record in this app are internal validation.")}
       </p>
       <PortalDuplicates />
+      {/* A new gigs sheet starts it afresh. */}
+      {data?.seesCoachGap && <PortalGap key={data?.active?.gigs?.batch_id || "none"} />}
       {data?.canUpload && (
         <div className="portal-uploads">
           {(["students", "gigs"] as PortalSheet[]).map((sheet) => {

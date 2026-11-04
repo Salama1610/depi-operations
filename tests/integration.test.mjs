@@ -4106,9 +4106,9 @@ test("portal gigs waiting for the coach go to the quality team, whose verdict th
 
   // The Quality Lead sees each coach's gigs still waiting on the portal, by our QC's verdict.
   current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
-  const byCoach = (await get()).coaches;
+  const byCoach = (await (await (await route("portal-gap")).GET()).json()).coaches;
   const coachRow = byCoach.find((c) => c.coach_id === ours.coach);
-  assert.deepEqual([coachRow.qc_approved, coachRow.qc_rejected, coachRow.not_checked, coachRow.waiting], [1, 2, 0, 3], "the one proof on two gigs carries its verdict to both");
+  assert.deepEqual([coachRow.qc_approved, coachRow.qc_rejected, coachRow.with_qc, coachRow.waiting], [1, 2, 0, 3], "the one proof on two gigs carries its verdict to both");
   assert.equal(byCoach.find((c) => c.coach_id === null)?.waiting, 1, "a gig of a student we do not know yet");
   // A new upload finds each review by its proof link, even when the row's ID
   // changed, and a later gig of the student goes to the same member though
@@ -4196,6 +4196,140 @@ test("portal gigs waiting for the coach go to the quality team, whose verdict th
   await dbExec("UPDATE users SET active=0 WHERE id='staff-quality-2'");
 });
 
+
+test("the Quality Lead and Coach Operations read the gap between the portal's gigs waiting for the coach and our system", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  await dbExec("DELETE FROM portal_gig_review_notes");
+  await dbExec("DELETE FROM portal_gig_reviews");
+  current = { id: "owner", email: "owner@example.com" };
+  const portal = await route("portal");
+  const qc = await route("portal-qc");
+  const gapApi = await route("portal-gap");
+  const coachGigs = await route("coach-gigs");
+  const post = async (body) =>
+    (await portal.POST(new Request("https://test.local/api/portal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }))).json();
+  const upload = async (sheet, mapping, rows) => {
+    current = { id: "owner", email: "owner@example.com" };
+    const begun = await post({ action: "begin", sheet, mapping, total: rows.length, file_name: sheet + ".xlsx" });
+    assert.ok(begun.batch, JSON.stringify(begun));
+    await post({ action: "chunk", batch: begun.batch, rows });
+    const done = await post({ action: "commit", batch: begun.batch });
+    assert.equal(done.error, undefined, done.error);
+  };
+  const decide = async (id, status) => {
+    const row = await dbRow("SELECT reviewer FROM portal_gig_reviews WHERE portal_gig_id=?", id);
+    current = { id: row.reviewer, email: row.reviewer + "@example.invalid" };
+    const r = await (
+      await qc.POST(
+        new Request("https://test.local/api/portal-qc", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "decide", portal_gig_id: id, status, comment: "Checked it", proof_checked: true }) }),
+      )
+    ).json();
+    assert.equal(r.ok, true, JSON.stringify(r));
+  };
+  const lead = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  const openQc = async () => {
+    current = lead;
+    assert.equal((await (await qc.GET()).json()).error, undefined);
+  };
+  const readGap = async () => {
+    current = lead;
+    const v = await (await gapApi.GET()).json();
+    assert.equal(v.error, undefined, v.error);
+    return v;
+  };
+  const place = (gap, id) => {
+    const g = gap.gigs.find((x) => x.id === id);
+    return g && [g.place, g.why];
+  };
+  const pupil = await dbRow(
+    "SELECT s.id,s.email FROM students s JOIN groups g ON g.id=s.group_id WHERE g.coach='staff-coach' AND s.lifecycle='Active' AND s.email IS NOT NULL AND trim(s.email)<>'' AND g.id NOT LIKE 'DEMO-%' AND coalesce(g.delivery_model,'Regular')<>'Industry' ORDER BY s.id LIMIT 1",
+  );
+  assert.ok(pupil, "a student of staff-coach with an email");
+  await dbExec("DELETE FROM portal_coaches");
+  await upload("students", { ID: "portal_id", Email: "email", "Full Name": "full_name" }, [
+    { portal_id: "GAP-P1", email: pupil.email, full_name: "Linked student" },
+    { portal_id: "GAP-P2", email: "portal-only-gap@example.org", full_name: "Portal only" },
+  ]);
+  const mapping = { ID: "portal_gig_id", "Student ID": "portal_student_id", Title: "title", URL: "url", Status: "status", "Provider Status": "provider_status", Proof: "proof_url" };
+  const row = (id, student, status, provider) => ({ portal_gig_id: id, portal_student_id: student, title: id, url: "https://example.org/" + id, status, provider_status: provider, proof_url: "https://proof.example.org/" + id });
+  await upload("gigs", mapping, [
+    row("GAP-1", "GAP-P1", "Pending", "Pending"),
+    row("GAP-2", "GAP-P1", "Pending", "Pending"),
+    row("GAP-3", "GAP-P1", "Edited", "Edited"),
+    row("GAP-4", "GAP-P1", "Rejected", "Pending"),
+    row("GAP-5", "GAP-P1", "Approved", "Approved"),
+    row("GAP-6", "GAP-P1", "Pending", "Approved"),
+    row("GAP-7", "GAP-P2", "Pending", "Pending"),
+    row("GAP-8", "GAP-P1", "Pending", "Pending"),
+  ]);
+
+  // A sheet nobody on the quality team has opened yet: the gap shows the queue has not taken it.
+  const before = await readGap();
+  assert.equal(before.waiting.gigs, 5, "Pending and Edited; the coach's approval and the portal's verdicts are not waiting");
+  assert.deepEqual(place(before, "GAP-1"), ["not_in_queue", "new"]);
+  assert.equal(before.in_our_system.gigs, 0);
+
+  await openQc();
+  await decide("GAP-2", "Approved");
+  await decide("GAP-7", "Rejected");
+  await decide("GAP-8", "Approved");
+  const gap = await readGap();
+  assert.equal(gap.waiting.gigs, 5);
+  assert.equal(gap.in_our_system.gigs, 4, "all but the edited gig, which the queue does not take");
+  assert.deepEqual(place(gap, "GAP-1"), ["with_qc", null]);
+  assert.deepEqual(place(gap, "GAP-2"), ["coach_tab", null]);
+  assert.deepEqual(place(gap, "GAP-3"), ["not_in_queue", "not_pending"]);
+  assert.deepEqual(place(gap, "GAP-7"), ["no_coach", "not_linked"], "checked, but the student is not linked");
+  assert.deepEqual(place(gap, "GAP-4"), ["moved_on", "decided_on_portal"], "the queue took it, but the portal has rejected it");
+  assert.equal(place(gap, "GAP-5"), undefined);
+  assert.equal(place(gap, "GAP-6"), undefined, "the coach has approved it: it waits for the auditor");
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(gap.places).map(([k, v]) => [k, v.gigs])),
+    { not_in_queue: 1, no_coach: 1, with_qc: 1, coach_tab: 2, moved_on: 1 },
+  );
+  const staffCoach = gap.coaches.find((c) => c.coach_id === "staff-coach");
+  assert.deepEqual([staffCoach.waiting, staffCoach.qc_approved, staffCoach.qc_rejected, staffCoach.with_qc, staffCoach.not_in_queue], [4, 2, 0, 1, 1]);
+  assert.ok(!/reviewer|reviewed_by|Checked it/.test(JSON.stringify(gap)), "no reviewer named and no comment sent");
+
+  // What the panel says is in the coach's tab is what the coach sees waiting there.
+  current = { id: "coach-login", email: "staff-coach@example.invalid" };
+  const seen = await (await coachGigs.GET()).json();
+  assert.deepEqual(seen.gigs.filter((g) => g.waiting).map((g) => g.id).sort(), ["GAP-2", "GAP-8"]);
+  // A gig the portal then rejects stops waiting for the coach, though its coach status stays Pending.
+  await upload("gigs", mapping, [
+    row("GAP-1", "GAP-P1", "Pending", "Pending"),
+    row("GAP-2", "GAP-P1", "Pending", "Pending"),
+    row("GAP-3", "GAP-P1", "Edited", "Edited"),
+    row("GAP-8", "GAP-P1", "Rejected", "Pending"),
+  ]);
+  current = { id: "coach-login", email: "staff-coach@example.invalid" };
+  const after = await (await coachGigs.GET()).json();
+  assert.deepEqual(after.gigs.filter((g) => g.waiting).map((g) => g.id), ["GAP-2"]);
+  assert.equal(after.gigs.find((g) => g.id === "GAP-8").waiting, false);
+  await openQc();
+  const later = await readGap();
+  assert.equal(place(later, "GAP-8"), undefined, "decided by our QC and settled on the portal: no longer in the gap");
+  assert.equal(place(later, "GAP-7"), undefined, "decided by our QC and gone from the sheet");
+  assert.deepEqual(place(later, "GAP-4"), ["moved_on", "not_in_sheet"], "still open with our QC, gone from the sheet");
+
+  // Coach Operations reads it too; the rest of the team and the coaches do not.
+  current = { id: "coach-ops-login", email: "staff-coach-ops@example.invalid" };
+  assert.equal((await (await gapApi.GET()).json()).waiting.gigs, later.waiting.gigs);
+  for (const who of [
+    { id: "staff-quality", email: "staff-quality@example.invalid" },
+    { id: "coach-login", email: "staff-coach@example.invalid" },
+    { id: "coordinator", email: "staff-sara@example.invalid" },
+  ]) {
+    current = who;
+    assert.match((await (await gapApi.GET()).json()).error, /does not permit/, who.id);
+  }
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  assert.equal((await (await portal.GET(new Request("https://test.local/api/portal"))).json()).seesCoachGap, true);
+  current = { id: "staff-quality", email: "staff-quality@example.invalid" };
+  assert.equal((await (await portal.GET(new Request("https://test.local/api/portal"))).json()).seesCoachGap, false);
+  await dbExec("DELETE FROM portal_gig_review_notes");
+  await dbExec("DELETE FROM portal_gig_reviews");
+});
 
 test("a service link sent back is the coordinator's task until approved, and each approved service earns a locked client account, two at most", async () => {
   await dbExec("DELETE FROM rate_limits");

@@ -2,6 +2,7 @@ import { actor, all, auditStmt, db, now, rateLimit, refuseDemo, scopeSql, stmt, 
 import { can, ensure } from "@/lib/domain/rules";
 import { isNationalId, normalizeNationalId } from "@/lib/domain/sheet-mapping";
 import { proofKey, proofKeySql } from "@/lib/domain/portal-review";
+import { portalGapRoles } from "@/lib/domain/portal-gap";
 import { reviewNotes } from "@/lib/portal-review-notes";
 import {
   linkStudent,
@@ -219,6 +220,7 @@ export async function GET(req: Request) {
     return Response.json({
       canUpload: uploads(u),
       canLink: linksByHand(u),
+      seesCoachGap: can(u.roles, portalGapRoles),
       fields: portalFields,
       mappings,
       active: seesUploads(u) ? { students, gigs } : { students: withoutUploadDetails(students), gigs: withoutUploadDetails(gigs) },

@@ -1,5 +1,6 @@
 import { actor, all, permit, rateLimit } from "@/lib/server";
 import { sameSide } from "@/lib/demo";
+import { portalGigStage } from "@/lib/domain/portal-figures";
 import { proofKey, proofKeySql } from "@/lib/domain/portal-review";
 import { reviewNotes } from "@/lib/portal-review-notes";
 import { portalCoachSql } from "@/lib/portal-coaches";
@@ -88,8 +89,8 @@ export async function GET() {
         portal_status: g.status || null,
         provider_status: g.provider_status || null,
         auditor_status: g.auditor_status || null,
-        // Still waiting for the coach on the portal: no provider decision yet.
-        waiting: /^(pending)?$/i.test(String(g.provider_status || "").trim()),
+        // Still waiting for the coach on the portal, the rule every count uses.
+        waiting: portalGigStage(g) === "coach",
         qc_status: g.qc_status,
         qc_comment: g.qc_comment || null,
         qc_at: g.qc_reviewed_at || null,

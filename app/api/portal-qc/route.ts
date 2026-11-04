@@ -2,9 +2,8 @@ import { actor, all, auditStmt, db, now, permit, rateLimit, refuseDemo, revokesS
 import { sameSide } from "@/lib/demo";
 import { can, ensure } from "@/lib/domain/rules";
 import { fingerprint, samePicture, type ProofPrint } from "@/lib/domain/proof-image";
-import { proofKey, proofKeySql, waitsForCoach } from "@/lib/domain/portal-review";
+import { proofKey, waitsForCoach } from "@/lib/domain/portal-review";
 import { noteStmt, reviewNotes } from "@/lib/portal-review-notes";
-import { portalCoachSql } from "@/lib/portal-coaches";
 
 export const dynamic = "force-dynamic";
 
@@ -247,36 +246,6 @@ export async function GET() {
       lastSync = { key: syncKey, at: Date.now() };
     }
     const loads = synced ? await members(u) : pool;
-    // For the Quality Lead: how many gigs of the latest sheet still wait for
-    // each coach on the portal, those our QC has decided and those it has not
-    // checked yet, and since when the oldest has waited. Each group's coach is
-    // the portal's (lib/portal-coaches), the one Coach Gigs shows them to.
-    const coaches =
-      leads && gigsBatch
-        ? await all(
-            `SELECT x.coach_id, c.name coach_name,
-                    sum(CASE WHEN x.qc='Approved' THEN 1 ELSE 0 END) qc_approved,
-                    sum(CASE WHEN x.qc='Rejected' THEN 1 ELSE 0 END) qc_rejected,
-                    sum(CASE WHEN x.qc IS NULL OR x.qc='Pending' THEN 1 ELSE 0 END) not_checked,
-                    count(*) waiting,
-                    min(x.created_on) oldest
-             FROM (
-               SELECT ${portalCoachSql("g")} coach_id, r.status qc, z.created_on
-               FROM portal_gigs z
-               LEFT JOIN portal_students p ON p.batch_id=? AND p.portal_id=z.portal_student_id
-               LEFT JOIN students s ON s.id=p.student_id
-               LEFT JOIN groups g ON g.id=s.group_id
-               LEFT JOIN portal_gig_reviews r ON r.proof_key=${proofKeySql("z")}
-               WHERE z.batch_id=? AND lower(trim(coalesce(z.provider_status,''))) IN ('','pending')
-             ) x
-             LEFT JOIN users c ON c.id=x.coach_id
-             GROUP BY x.coach_id, c.name
-             ORDER BY sum(CASE WHEN x.qc IN ('Approved','Rejected') THEN 1 ELSE 0 END) DESC, count(*) DESC`,
-            studentsBatch?.batch_id || "",
-            gigsBatch.batch_id,
-          )
-        : [];
-
     const mine = leads ? "" : " AND r.reviewer=?";
     const hidden = revokesStudents(u) ? "" : " AND COALESCE(s.lifecycle,'')<>'Revoked'";
     const reviews = await all(
@@ -336,15 +305,6 @@ export async function GET() {
       {
         reviews,
         reviewers: leads ? loads.map(({ id, name, pending }) => ({ id, name, pending })) : [],
-        coaches: coaches.map((c: any) => ({
-          coach_id: c.coach_id || null,
-          coach_name: c.coach_name || null,
-          qc_approved: Number(c.qc_approved),
-          qc_rejected: Number(c.qc_rejected),
-          not_checked: Number(c.not_checked),
-          waiting: Number(c.waiting),
-          oldest: c.oldest || null,
-        })),
         lead: leads,
         me: u.id,
         sheet: Boolean(gigsBatch),
