@@ -97,6 +97,7 @@ async function inBatches(statements: any[]) {
  * student whose gigs sit with two members is put back with one.
  */
 async function syncQueue(u: any, pool: Member[], gigsBatch: string, studentsBatch: string) {
+  // Reports whether anything was written, so the caller knows the loads moved.
   const sheet = await all(
     `SELECT z.portal_gig_id,z.portal_student_id,z.student_name,z.title,z.url,z.proof_url,z.provider_status,p.student_id,s.name linked_name,s.lifecycle
      FROM portal_gigs z
@@ -219,7 +220,11 @@ async function syncQueue(u: any, pool: Member[], gigsBatch: string, studentsBatc
   if (followed || regrouped)
     writes.push(auditStmt(u, "Portal gig reviews kept with their proof and student", "portal-gig-reviews", { followed, students_regrouped: regrouped }));
   if (writes.length) await inBatches(writes);
+  return writes.length > 0;
 }
+
+const syncEveryMs = 60000;
+let lastSync = { key: "", at: 0 };
 
 export async function GET() {
   try {
@@ -232,8 +237,16 @@ export async function GET() {
     const pool = await members(u);
 
     // The queue follows the latest sheet: new gigs waiting for the coach are handed out now.
-    if (gigsBatch) await syncQueue(u, pool, gigsBatch.batch_id, studentsBatch?.batch_id || "");
-    const loads = gigsBatch ? await members(u) : pool;
+    // Each decision reloads this page, and the queue only changes with a new
+    // sheet or a change of team, so the sheet is not read again for a minute
+    // while those stay the same. A sync reads the sheet and every review.
+    const syncKey = [gigsBatch?.batch_id, studentsBatch?.batch_id, ...pool.map((p) => p.id)].join("|");
+    let synced = false;
+    if (gigsBatch && (syncKey !== lastSync.key || Date.now() - lastSync.at > syncEveryMs)) {
+      synced = await syncQueue(u, pool, gigsBatch.batch_id, studentsBatch?.batch_id || "");
+      lastSync = { key: syncKey, at: Date.now() };
+    }
+    const loads = synced ? await members(u) : pool;
     // For the Quality Lead: how many gigs of the latest sheet still wait for
     // each coach on the portal, those our QC has decided and those it has not
     // checked yet, and since when the oldest has waited. Each group's coach is

@@ -4180,7 +4180,12 @@ test("portal gigs waiting for the coach go to the quality team, whose verdict th
   // A student split between two members is put back with the one holding their waiting gigs.
   await dbExec("UPDATE portal_gig_reviews SET reviewer=? WHERE portal_gig_id='QG-11'", owner);
   await get();
-  assert.deepEqual(await membersOf("PQ-1"), [other]);
+  assert.deepEqual((await membersOf("PQ-1")).sort(), [other, owner].sort(), "a reload right after the last sync does not read the sheet again");
+  current = { id: "owner", email: "owner@example.com" };
+  await upload("gigs", gigMapping, [renamed, { ...gig[2], proof_url: "https://proof.example.org/two-new" }, gig[3], gig[4], gig[5], later]);
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  await get();
+  assert.deepEqual(await membersOf("PQ-1"), [other], "a new sheet always syncs");
   // Sharing out again moves students, each with all their gigs.
   assert.equal((await send({ action: "redistribute" })).moved, 2);
   for (const student of ["PQ-1", "PQ-2"]) assert.equal((await membersOf(student)).length, 1);
