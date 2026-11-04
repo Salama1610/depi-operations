@@ -569,6 +569,7 @@ export default function Operations({ module: initialModule }: { module: string }
     // The Service links page's second list (each student's status) pages on its own.
     [statusPage, setStatusPage] = useState(1),
     [registersPage, setRegistersPage] = useState(1),
+    [svcPage, setSvcPage] = useState(1),
     [attendancePage, setAttendancePage] = useState(1),
     [selected, setSelected] = useState<Row | null>(null),
     [modal, setModal] = useState<Row | null>(null),
@@ -4448,6 +4449,7 @@ See you there!`,
               {panel(
                 t("Students with a client account · {v0}", { v0: studentLines.length }),
                 studentLines.length ? (
+                  paginate(studentLines as Row[], (pageRows) => (
                   <div className="svc-sheet-wrap">
                     <table className="svc-sheet">
                       <thead>
@@ -4471,7 +4473,7 @@ See you there!`,
                         </tr>
                       </thead>
                       <tbody>
-                        {studentLines.map((s) => (
+                        {pageRows.map((s) => (
                           <tr key={s.id}>
                             <td className="svc-fix svc-fix-1">{s.coordinator || "—"}</td>
                             <td className="svc-fix svc-fix-2">
@@ -4502,6 +4504,7 @@ See you there!`,
                       {["Kafiil", "Nafezly", "Khamsat", "Mostaql", "Fiverr", "Upwork"].map((v) => <option key={v} value={v} />)}
                     </datalist>
                   </div>
+                  ), [svcPage, setSvcPage])
                 ) : (
                   <Empty title={serviceRows.length ? t("No service matches these filters") : t("No service has a client account yet.")} />
                 ),
@@ -5583,7 +5586,7 @@ See you there!`,
     );
   return content;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locale, module, data, error, loading, search, filter, page, statusPage, registersPage, attendancePage, selected, busy, notifications, importOpen, importModule, importMode, sheetHeaders, importMapping, importKey, mappingFields, mappingKeys, savedMappings, mappingName, importRows, preview, importId, serviceFilters, submissionFilters, studentServices, moreFilters, saved, checklistFor, accountSecrets, groupMessage, feedbackFor, sessionTab, svcFilters, boughtFilters, accountFilters, insightFilters, sessionFilters, providerFilter, sessionWeek, joinLogin, joinLeft, joinShowPassword, joinEdit, serviceParts, studentParts, weeklyParts]);
+  }, [locale, module, data, error, loading, search, filter, page, statusPage, registersPage, attendancePage, svcPage, selected, busy, notifications, importOpen, importModule, importMode, sheetHeaders, importMapping, importKey, mappingFields, mappingKeys, savedMappings, mappingName, importRows, preview, importId, serviceFilters, submissionFilters, studentServices, moreFilters, saved, checklistFor, accountSecrets, groupMessage, feedbackFor, sessionTab, svcFilters, boughtFilters, accountFilters, insightFilters, sessionFilters, providerFilter, sessionWeek, joinLogin, joinLeft, joinShowPassword, joinEdit, serviceParts, studentParts, weeklyParts]);
   useEffect(() => {
     if (module === "students") {
       const g = sessionStorage.getItem("depi-group-search");
