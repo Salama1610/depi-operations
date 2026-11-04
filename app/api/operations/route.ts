@@ -890,6 +890,21 @@ export async function POST(req: Request) {
           );
         break;
       }
+      case "student_signin_reset": {
+        // Puts a student's sign-in back to their national ID, their first
+        // password: for a student who changed it and cannot get in
+        // (4 November 2026). Project Operations and administrators only;
+        // audited, and the national ID itself is never written to the history.
+        permit(u, ["Project Operations"]);
+        ensure(s, "Choose the student.");
+        const nationalId = String(s.national_id || "").trim();
+        ensure(/^\d{14}$/.test(nationalId), "Record this student's 14-digit national ID before resetting their sign-in.");
+        const email = String(s.email || "").trim().toLowerCase();
+        ensure(email, "This student has no sign-in email. Add it to their record first.");
+        auditValue = { student_id: sid, email, sign_in: "reset to national ID" };
+        signIn = { email, nationalId, name: s.name, active: true, reset: true };
+        break;
+      }
       case "student_revoke": {
         // Revoking takes a student out of everyone's view but the people who
         // can restore them (lib/server.ts revokesStudents): the lists, the

@@ -4776,6 +4776,32 @@ test("the quality team is not shown when the portal sheets were uploaded", async
   }
 });
 
+test("Project Operations and administrators put a student's sign-in back to their national ID", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const pupil = await dbRow(
+    `SELECT s.id,s.national_id,g.coordinator,c.email coordinator_email FROM students s JOIN groups g ON g.id=s.group_id JOIN users c ON c.id=g.coordinator
+     WHERE s.lifecycle='Active' AND s.email IS NOT NULL AND trim(s.email)<>'' AND s.id NOT LIKE 'DEMO-%' ORDER BY s.id LIMIT 1`,
+  );
+  const before = pupil.national_id;
+  try {
+    current = { id: pupil.coordinator, email: pupil.coordinator_email };
+    assert.match((await post("student_signin_reset", { student_id: pupil.id })).error, /role/, "not a coordinator");
+    current = { id: "owner", email: "owner@example.com" };
+    await dbExec("UPDATE students SET national_id=NULL WHERE id=?", pupil.id);
+    assert.match((await post("student_signin_reset", { student_id: pupil.id })).error, /national ID/);
+    await dbExec("UPDATE students SET national_id='29901017777777' WHERE id=?", pupil.id);
+    const done = await post("student_signin_reset", { student_id: pupil.id, request_id: "signin-reset-1" });
+    assert.ok(done.ok, JSON.stringify(done));
+    const audit = await dbRow("SELECT value FROM audit_events WHERE action='student_signin_reset' AND value LIKE ? ORDER BY created_at DESC LIMIT 1", '%' + pupil.id + '%');
+    assert.ok(audit, "the reset is audited");
+    assert.ok(!String(audit.value).includes("29901017777777"), "without the national ID");
+  } finally {
+    current = { id: "owner", email: "owner@example.com" };
+    await dbExec("UPDATE students SET national_id=? WHERE id=?", before ?? null, pupil.id);
+  }
+});
+
 test("each service row's status picker sets where its order stands, in one step", async () => {
   await dbExec("DELETE FROM rate_limits");
   current = { id: "owner", email: "owner@example.com" };

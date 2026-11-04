@@ -3010,4 +3010,12 @@ export const ar: Record<string, string> = {
   "Without a price yet": "بدون سعر حتى الآن",
   "Services bought through client accounts · {v0}": "الخدمات المشتراة من حسابات العملاء · {v0}",
   "No service has been bought through a client account yet.": "لم تُشترَ أي خدمة من حسابات العملاء بعد.",
+  // Student sign-in reset (4 Nov 2026)
+  "Reset sign-in to national ID": "إعادة الدخول إلى الرقم القومي",
+  "Reset the student's sign-in": "إعادة تعيين دخول الطالب",
+  "{v0} will sign in again with {v1} and their national ID as the password. Their current password stops working. Tell the student once it is done.": "سيدخل {v0} مرة أخرى بـ {v1} وكلمة المرور هي الرقم القومي. كلمة المرور الحالية لن تعمل بعد ذلك. أبلغ الطالب بعد الانتهاء.",
+  "The sign-in could not be reset. Try again in a minute.": "تعذّرت إعادة تعيين الدخول. حاول مرة أخرى بعد دقيقة.",
+  "Record this student's 14-digit national ID before resetting their sign-in.": "سجّل الرقم القومي للطالب (14 رقمًا) قبل إعادة تعيين الدخول.",
+  "This student has no sign-in email. Add it to their record first.": "لا يوجد بريد دخول لهذا الطالب. أضفه إلى سجله أولًا.",
+  "Choose the student.": "اختر الطالب.",
 };

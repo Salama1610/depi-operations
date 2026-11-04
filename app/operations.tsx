@@ -221,6 +221,7 @@ const titles: Row = {
   engagement: "Review engagement status",
   lifecycle: "Update lifecycle status",
   student_revoke: "Revoke or restore a student",
+  student_signin_reset: "Reset the student's sign-in",
   account_order_status: "Update the order",
   account_service_status: "Service status",
   student_services_submit: "Submit service links for this student",
@@ -993,6 +994,9 @@ export default function Operations({ module: initialModule }: { module: string }
     const v = await r.json().catch(() => null);
     if (!v) throw Error("The server did not answer properly. Try again in a minute.");
     if (v.error) throw Error(v.error);
+    // The record is saved before the sign-in is changed; say so if the sign-in part did not work.
+    if (action === "student_signin_reset" && v.sign_in !== "reset" && v.sign_in !== "created")
+      throw Error(v.notice || "The sign-in could not be reset. Try again in a minute.");
     return v;
   }
   async function submit(e: any) {
@@ -6170,6 +6174,17 @@ See you there!`,
                         {t("Submit service links for this student")}
                       </button>
                     )}
+                    {/* A student who changed their password and cannot get in goes back to their national ID (4 November 2026). */}
+                    {can(user.roles, ["Project Operations", "Operations Systems / Admin"]) && !demoAccount && selectedStudent.email && (
+                      <button
+                        className="small-btn"
+                        onClick={() =>
+                          open("student_signin_reset", { student_id: selectedStudent.id, student_name: selectedStudent.name, email: selectedStudent.email })
+                        }
+                      >
+                        {t("Reset sign-in to national ID")}
+                      </button>
+                    )}
                     {revokes && (
                       <button
                         className="small-btn"
@@ -7526,6 +7541,12 @@ See you there!`,
                     {form.status === "Proof Uploaded" && proofField("proof_id", t("Proof"))}
                     {field("note", form.status === "Cancelled" ? t("Why it was cancelled") : t("Note"), "text", form.status === "Cancelled")}
                   </>
+                );
+              if (a === "student_signin_reset")
+                return (
+                  <p className="footnote">
+                    {t("{v0} will sign in again with {v1} and their national ID as the password. Their current password stops working. Tell the student once it is done.", { v0: modal!.student_name, v1: modal!.email })}
+                  </p>
                 );
               if (a === "student_revoke")
                 return (
