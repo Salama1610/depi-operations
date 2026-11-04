@@ -4802,6 +4802,26 @@ test("Project Operations and administrators put a student's sign-in back to thei
   }
 });
 
+test("the quick read after a session action stays within the person's scope", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const read = async () => (await api.GET(new Request("https://test.local/api/operations?part=sessions"))).json();
+  const whole = await (await api.GET(new Request("https://test.local/api/operations?lite=1"))).json();
+  const mine = await read();
+  assert.equal(mine.sessions.length, whole.sessions.length, "the same sessions as the workspace");
+  assert.equal(mine.attendance.length, whole.attendance.length, "the same marks");
+  assert.equal(mine.sessionChecks.length, whole.sessionChecks.length);
+  assert.equal(mine.groupCoaches.length, whole.groupCoaches.length);
+  assert.equal(mine.students, undefined, "only what session and group actions change");
+  const group = await dbRow("SELECT g.id,g.coordinator,c.email FROM groups g JOIN users c ON c.id=g.coordinator WHERE g.id NOT LIKE 'DEMO-%' AND g.status='Active' ORDER BY g.id LIMIT 1");
+  current = { id: group.coordinator, email: group.email };
+  const theirs = await read();
+  const scoped = await (await api.GET(new Request("https://test.local/api/operations?lite=1"))).json();
+  assert.deepEqual(theirs.sessions.map((s) => s.id).sort(), scoped.sessions.map((s) => s.id).sort(), "a coordinator's own sessions, as in their workspace");
+  assert.deepEqual(theirs.groupRows.map((g) => g.id).sort(), scoped.groups.map((g) => g.id).sort());
+  current = { id: "owner", email: "owner@example.com" };
+});
+
 test("each service row's status picker sets where its order stands, in one step", async () => {
   await dbExec("DELETE FROM rate_limits");
   current = { id: "owner", email: "owner@example.com" };

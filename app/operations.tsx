@@ -31,7 +31,7 @@ import { Opportunities } from "./opportunities";
 import { scoreOf } from "@/lib/domain/feedback";
 import { coachPayout, coachRates } from "@/lib/domain/payouts";
 import { checklistState, confirmOpensAt, confirmWindowOpen, sessionChecklist, type ChecklistItem } from "@/lib/domain/session-checklist";
-import { Suspense, lazy, useState, useEffect } from "react";
+import { Suspense, lazy, startTransition, useMemo, useRef, useState, useEffect } from "react";
 import {
   Home,
   CheckCheck,
@@ -136,6 +136,7 @@ import {
 } from "@/lib/domain/rules";
 import { readSheet, toCSV, toWorkbook, toXLSX } from "@/lib/spreadsheet";
 import { useLiveReload } from "@/lib/use-live-reload";
+import { buildWorkspaceIndex, rememberDates } from "@/lib/workspace-index";
 import { guessKeyColumn, guessMapping, normalizePhone } from "@/lib/domain/sheet-mapping";
 import { whatsappInvite } from "@/lib/domain/whatsapp";
 import { sessionEnded } from "@/lib/domain/session-time";
@@ -162,6 +163,24 @@ function coalesced() {
   };
 }
 type Row = Record<string, any>;
+// Actions on a session or a group's staff: the page shows their result from a
+// small read of those lists; the whole workspace follows a little later, once.
+const sessionActions = new Set([
+  "session",
+  "session_confirm",
+  "session_unavailable",
+  "session_unconfirm",
+  "session_reschedule",
+  "session_cancel",
+  "session_check",
+  "session_coach",
+  "session_done",
+  "session_attendance",
+  "group_whatsapp",
+  "group_coach",
+  "group_coach_remove",
+  "bulk_group_owner",
+]);
 const nav = [
   ["home", "Overview", Home],
   ["dashboard", "Dashboard", LayoutDashboard],
@@ -283,11 +302,12 @@ const actionCopy: Row = {
   group_whatsapp:
     "Paste the group's WhatsApp invite link (in WhatsApp: group info → Invite via link → Copy link). It opens in one tap from the group's card.",
 };
-const formatDay = (v: string, locale = "en-GB") =>
+const formatDay = rememberDates((v: string, locale: string) =>
   new Date(v).toLocaleDateString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", {
     day: "numeric",
     month: "short",
-  });
+  }),
+);
 const today = () => new Date().toISOString().slice(0, 10);
 /**
  * An Egyptian mobile as "01xxxxxxxxx", whether it was stored with the leading
@@ -298,17 +318,27 @@ const mobileOf = (phone: unknown) => {
   const first = String(normalizePhone(phone)).split("/")[0].trim();
   return /^01\d{9}$/.test(first) ? first : null;
 };
+const programDayFormat = new Intl.DateTimeFormat("en", {
+  timeZone: "Africa/Cairo",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
 const programDay = (value: Date = new Date()) => {
-  const parts = new Intl.DateTimeFormat("en", {
-    timeZone: "Africa/Cairo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(value);
+  const parts = programDayFormat.formatToParts(value);
   const part = (type: string) =>
     parts.find((item) => item.type === type)?.value || "";
   return `${part("year")}-${part("month")}-${part("day")}`;
 };
+const cairoWeekday = rememberDates((iso: string) => new Date(iso).toLocaleDateString("en-US", { weekday: "long", timeZone: "Africa/Cairo" }));
+const cairoTime = rememberDates((iso: string, locale: string) =>
+  new Date(iso).toLocaleTimeString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { hour: "numeric", hour12: true, minute: "2-digit", timeZone: "Africa/Cairo" }),
+);
+const cairoClock = rememberDates((iso: string) => {
+  const d = new Date(new Date(iso).toLocaleString("en-US", { timeZone: "Africa/Cairo" }));
+  return d.getHours() * 60 + d.getMinutes();
+});
+const cairoDayOf = rememberDates((iso: string) => programDay(new Date(iso)));
 /** The end of the programme week (Friday to Thursday, Cairo): the coming Thursday, end of day. */
 /** An instant as the browser's wall time, which is what a datetime-local field shows and sends back. */
 const localInput = (value?: string | number | Date) => {
@@ -624,6 +654,40 @@ export default function Operations({ module: initialModule }: { module: string }
   // page ends on the latest data without loading it once per click.
   const [reloadQueue] = useState(coalesced);
   const refreshSoon = () => void reloadQueue(refresh);
+  // After a session or group action only what it changed is read, at once;
+  // other tabs catch up with one whole reload 20 seconds after the last such
+  // action, so marking several sessions does not reload the workspace each
+  // time (4 November 2026).
+  const [sessionsQueue] = useState(coalesced);
+  const [fullReload] = useState(() => ({ timer: undefined as ReturnType<typeof setTimeout> | undefined }));
+  const latestRefreshSoon = useRef(refreshSoon);
+  useEffect(() => {
+    latestRefreshSoon.current = refreshSoon;
+  });
+  async function refreshSessions() {
+    try {
+      const v = await (await fetch("/api/operations?part=sessions")).json();
+      if (v.error) return;
+      const { groupRows, ...lists } = v;
+      const fresh = new Map<string, Row>((groupRows || []).map((g: Row) => [g.id, g]));
+      startTransition(() => {
+        setData((current: Row | null) =>
+          current ? { ...current, ...lists, groups: (current.groups || []).map((g: Row) => ({ ...g, ...fresh.get(g.id) })) } : current,
+        );
+      });
+    } catch {
+      // The whole reload below brings them.
+    }
+  }
+  const afterAction = (action?: string) => {
+    if (!action || !sessionActions.has(action)) {
+      refreshSoon();
+      return;
+    }
+    void sessionsQueue(refreshSessions);
+    clearTimeout(fullReload.timer);
+    fullReload.timer = setTimeout(() => latestRefreshSoon.current(), 20000);
+  };
   // The workspace opens without every contact and without the service links,
   // which only some pages show (see GET /api/operations): the Quality page
   // and the account form load the service links when they open, and a
@@ -662,7 +726,10 @@ export default function Operations({ module: initialModule }: { module: string }
       const r = await fetch("/api/operations?lite=1");
       const d = await r.json();
       if (d.error) throw Error(d.error);
-      setData(d);
+      // New data redraws the page; a reload in the background gives way to
+      // whatever the person is doing. The first load shows at once.
+      if (data) startTransition(() => setData(d));
+      else setData(d);
       if (serviceParts) void loadServiceLinks();
       if (weeklyParts) void loadWeekly();
       if (selected?.id) void loadStudentParts(selected.id);
@@ -693,6 +760,9 @@ export default function Operations({ module: initialModule }: { module: string }
     if (selected?.id && data?.lite) void loadStudentParts(selected.id);
   }, [selected?.id, data?.lite]);
   const d = data || {};
+  // Lookups over the lists, built once each time the data arrives.
+  const index = useMemo(() => buildWorkspaceIndex(data || {}), [data]);
+  const marksOf = (sessionId: string): Row[] => index.marksBySession.get(sessionId) || [];
   const staff = d.staff || [];
   const user = d.user || { roles: [], name: "Staff member" };
   const students: Row[] = d.students || [];
@@ -746,9 +816,9 @@ export default function Operations({ module: initialModule }: { module: string }
     ? Math.round(((activeCount - noContact.length) / activeCount) * 100)
     : 0;
   const name = (id: string) =>
-    students.find((s) => s.id === id)?.name || id || "—";
+    index.studentsById.get(id)?.name || id || "—";
   const owner = (id: string) =>
-    staff.find((s: Row) => s.id === id)?.name || t("Unassigned");
+    index.staffById.get(id)?.name || t("Unassigned");
   // Published services are reviewed by the quality team. Everyone else with a
   // stake — the coordinator of the group, their supervisor, Project Operations
   // — watches the queue and the coverage without deciding on it.
@@ -1010,7 +1080,7 @@ export default function Operations({ module: initialModule }: { module: string }
       await mutate(modal!.action, f);
       toast.success(t("Saved to the activity history"));
       setModal(null);
-      refreshSoon();
+      afterAction(modal!.action);
     } catch (e: any) {
       setFormError(e.message);
     } finally {
@@ -1032,7 +1102,7 @@ export default function Operations({ module: initialModule }: { module: string }
             ? t("Synthetic pilot loaded · {v0} students across {v1} groups", { v0: result.summary.students, v1: result.summary.groups })
           : t("Updated"),
       );
-      refreshSoon();
+      afterAction(action);
       return true;
     } catch (e: any) {
       toast.error(e.message);
@@ -1448,7 +1518,7 @@ export default function Operations({ module: initialModule }: { module: string }
       </button>
     ),
   };
-  const sessionGroupOf = (r: Row) => groups.find((g) => g.id === r.group_id);
+  const sessionGroupOf = (r: Row) => index.groupsById.get(r.group_id);
   // The page's main "add" button is offered only to people the server lets
   // add that kind of record: supervisors add no students, sessions or groups.
   // The roles the server accepts for each action a button opens, so nobody is
@@ -1645,14 +1715,11 @@ See you there!`,
     return `https://wa.me/2${digits}?text=${encodeURIComponent(text)}`;
   };
   // Students' feedback on a session, and an average of one of its ratings.
-  const feedbackOf = (sessionId: string) => (d.sessionFeedback || []).filter((f: Row) => f.session_id === sessionId);
+  const feedbackOf = (sessionId: string): any[] => index.feedbackBySession.get(sessionId) || [];
   const average = (rows: Row[], key: string) =>
     rows.length ? (rows.reduce((n, r) => n + Number(r[key] || 0), 0) / rows.length).toFixed(1) : "—";
   // A session's register: its group's active students, by name.
-  const rosterOf = (r: Row) =>
-    (d.students || [])
-      .filter((s: Row) => s.group_id === r.group_id && s.lifecycle === "Active")
-      .sort((a: Row, b: Row) => String(a.name).localeCompare(String(b.name)));
+  const rosterOf = (r: Row): Row[] => index.activeByGroup.get(r.group_id) || [];
   // Attendance is taken from the session itself once it has started, by its
   // group's coordinator, its coach or a leader.
   // The coordinator and the coach take attendance until the end of the
@@ -1665,7 +1732,7 @@ See you there!`,
   const openAttendance = (r: Row) => {
     const marks: Row = {};
     for (const st of rosterOf(r)) marks[st.id] = "Present";
-    for (const a of attendance.filter((a) => a.session_id === r.id))
+    for (const a of marksOf(r.id))
       marks[a.student_id] = a.status === "Absent" ? "Absent" : "Present";
     open("session_attendance", { ...r, marks, teams: "" });
   };
@@ -1700,18 +1767,9 @@ See you there!`,
   // The coordinator's checklist: coach confirmed, coach entered, and
   // attendance taken, which the app works out from the register.
   const checklistOf = (r: Row) => {
-    const active = (d.students || [])
-      .filter((s: Row) => s.group_id === r.group_id && s.lifecycle === "Active")
-      .map((s: Row) => s.id);
-    const marked = new Set<string>(
-      (d.attendance || []).filter((a: Row) => a.session_id === r.id).map((a: Row) => a.student_id),
-    );
-    return checklistState(
-      r,
-      (d.sessionChecks || []).filter((c: Row) => c.session_id === r.id),
-      active,
-      marked,
-    );
+    const active = rosterOf(r).map((s: Row) => s.id);
+    const marked = new Set<string>(marksOf(r.id).map((a: Row) => a.student_id));
+    return checklistState(r, (index.checksBySession.get(r.id) || []) as any[], active, marked);
   };
   const ticksStep = (r: Row, item: ChecklistItem) =>
     r.status !== "Cancelled" &&
@@ -1842,14 +1900,14 @@ See you there!`,
       let present = 0;
       let marked = 0;
       for (const s of list) {
-        const marks = attendance.filter((a) => a.session_id === s.id);
+        const marks = marksOf(s.id);
         marked += marks.length;
         present += marks.filter((a) => a.status === "Present").length;
       }
       return marked ? Math.round((100 * present) / marked) : null;
     };
     const unmarkedOf = (list: Row[]) =>
-      list.reduce((n, s) => n + Math.max(0, rosterOf(s).length - attendance.filter((a) => a.session_id === s.id).length), 0);
+      list.reduce((n, s) => n + Math.max(0, rosterOf(s).length - marksOf(s.id).length), 0);
     const withUnmarked = (list: Row[], detail: string) => {
       const n = unmarkedOf(list);
       return n ? `${detail} · ${t("{v0} not marked", { v0: n })}` : detail;
@@ -1973,7 +2031,7 @@ See you there!`,
             {
               key: "attendance",
               label: "Attendance",
-              render: (s) => (ended(s) || Date.parse(s.starts_at) <= Date.now() ? `${attendance.filter((a) => a.session_id === s.id).length}/${rosterOf(s).length}` : "—"),
+              render: (s) => (ended(s) || Date.parse(s.starts_at) <= Date.now() ? `${marksOf(s.id).length}/${rosterOf(s).length}` : "—"),
             },
           ],
           extra,
@@ -2260,6 +2318,13 @@ See you there!`,
       options={[{ value: "All", label: t("Every provider") }, ...providers.map((v) => ({ value: v, label: v }))]}
     />
   );
+  // The page under any open form. Typing in a form, marking a register or
+  // opening and closing a dialog changes only the form, and nothing here reads
+  // it, so the page is not worked out and drawn again for each of them: at the
+  // programme's size that took seconds per letter on a staff laptop (measured
+  // 4 November 2026). Every other piece of state is listed; a test holds this
+  // list to the states declared above.
+  const content: any = useMemo(() => {
   let content: any;
   if (module === "home" && dashboardRole) {
     content = roleDashboard(dashboardRole);
@@ -2781,16 +2846,8 @@ See you there!`,
     const activeSessions = sessions.filter((s) => s.status !== "Cancelled");
     const missingAttendance = activeSessions.filter((session) => {
       if (Date.parse(session.starts_at) > Date.now()) return false;
-      const expected = students.filter(
-        (student) =>
-          student.group_id === session.group_id &&
-          student.lifecycle === "Active",
-      ).length;
-      const recorded = new Set(
-        attendance
-          .filter((row) => row.session_id === session.id)
-          .map((row) => row.student_id),
-      ).size;
+      const expected = rosterOf(session).length;
+      const recorded = new Set(marksOf(session.id).map((row) => row.student_id)).size;
       return expected > recorded;
     });
     const coverageGaps = groups.filter(
@@ -2804,13 +2861,11 @@ See you there!`,
         ),
     );
     // Day of the week and start time, in Cairo, for the filters.
-    const sessionDay = (s: Row) =>
-      new Date(s.starts_at).toLocaleDateString("en-US", { weekday: "long", timeZone: "Africa/Cairo" });
-    const sessionTime = (s: Row) =>
-      new Date(s.starts_at).toLocaleTimeString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { hour: "numeric", hour12: true, minute: "2-digit", timeZone: "Africa/Cairo" });
+    const sessionDay = (s: Row) => cairoWeekday(s.starts_at);
+    const sessionTime = (s: Row) => cairoTime(s.starts_at, locale);
     const weekdays = ["Saturday", "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
     // Start times in clock order (the labels are 12-hour, so they cannot sort as text).
-    const clock = (s: Row) => { const d = new Date(new Date(s.starts_at).toLocaleString("en-US", { timeZone: "Africa/Cairo" })); return d.getHours() * 60 + d.getMinutes(); };
+    const clock = (s: Row) => cairoClock(s.starts_at);
     const times = Array.from(new Map([...sessions].sort((a, b) => clock(a) - clock(b)).map((s) => [sessionTime(s), true])).keys());
     // One week at a time, Friday to Thursday in Cairo (the programme's week),
     // with arrows to step back and forward.
@@ -2821,7 +2876,7 @@ See you there!`,
     })();
     const weekEnd = new Date(weekStart.getTime() + 7 * 86400000);
     const inShownWeek = (s: Row) => {
-      const day = programDay(new Date(s.starts_at));
+      const day = cairoDayOf(s.starts_at);
       return day >= weekStart.toISOString().slice(0, 10) && day < weekEnd.toISOString().slice(0, 10);
     };
     const weekLabel = (() => {
@@ -2859,7 +2914,7 @@ See you there!`,
     const heldSessions = insightSessions.filter(ended).sort((a, b) => b.starts_at.localeCompare(a.starts_at));
     const registerOf = (x: Row) => {
       const roster = rosterOf(x);
-      const marks = attendance.filter((a) => a.session_id === x.id);
+      const marks = marksOf(x.id);
       const present = marks.filter((a) => a.status !== "Absent").length;
       return { roster: roster.length, present, absent: marks.length - present, unmarked: Math.max(0, roster.length - marks.length) };
     };
@@ -2872,7 +2927,7 @@ See you there!`,
         for (const st of rosterOf(x)) {
           const row = byStudent.get(st.id) || { id: st.id, name: st.name, group_id: st.group_id, held: 0, present: 0, absent: 0, last: "" };
           row.held += 1;
-          const mark = attendance.find((a) => a.session_id === x.id && a.student_id === st.id);
+          const mark = index.markOf(x.id, st.id);
           if (mark?.status === "Absent") row.absent += 1;
           else if (mark) {
             row.present += 1;
@@ -3090,7 +3145,7 @@ See you there!`,
               takesAttendance(r) ? (
                 <button className="text-link session-open" onClick={() => openAttendance(r)} title={t("Take attendance")}>
                   <strong>{sessionName(r.title)}</strong>
-                  <small className="table-subline">{t("Attendance: {v0}/{v1}", { v0: attendance.filter((a) => a.session_id === r.id).length, v1: rosterOf(r).length })}</small>
+                  <small className="table-subline">{t("Attendance: {v0}/{v1}", { v0: marksOf(r.id).length, v1: rosterOf(r).length })}</small>
                 </button>
               ) : (
                 <strong>{sessionName(r.title)}</strong>
@@ -5522,6 +5577,9 @@ See you there!`,
         text={t("Choose a workspace from the navigation.")}
       />
     );
+  return content;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locale, module, data, error, loading, search, filter, page, statusPage, selected, busy, notifications, importOpen, importModule, importMode, sheetHeaders, importMapping, importKey, mappingFields, mappingKeys, savedMappings, mappingName, importRows, preview, importId, serviceFilters, submissionFilters, studentServices, moreFilters, saved, checklistFor, accountSecrets, groupMessage, feedbackFor, sessionTab, svcFilters, boughtFilters, accountFilters, insightFilters, sessionFilters, providerFilter, sessionWeek, joinLogin, joinLeft, joinShowPassword, joinEdit, serviceParts, studentParts, weeklyParts]);
   useEffect(() => {
     if (module === "students") {
       const g = sessionStorage.getItem("depi-group-search");

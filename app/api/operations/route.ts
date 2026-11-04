@@ -5,6 +5,7 @@ import {
   serviceLinkLists,
   studentRecords,
   weeklyLists,
+  sessionLists,
   actor,
   identity,
   stmt,
@@ -445,6 +446,11 @@ export async function GET(req?: Request) {
       slimForBrowser(records);
       lap("load");
       return jsonResponse(records, timings);
+    }
+    if (params.get("part") === "sessions") {
+      const lists = await sessionLists(u);
+      lap("load");
+      return jsonResponse(lists, timings);
     }
     if (params.get("part") === "weekly") {
       const lists = await weeklyLists(u);
