@@ -318,6 +318,7 @@ const mobileOf = (phone: unknown) => {
   const first = String(normalizePhone(phone)).split("/")[0].trim();
   return /^01\d{9}$/.test(first) ? first : null;
 };
+const moneyFormat = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 const programDayFormat = new Intl.DateTimeFormat("en", {
   timeZone: "Africa/Cairo",
   year: "numeric",
@@ -567,6 +568,8 @@ export default function Operations({ module: initialModule }: { module: string }
     [page, setPage] = useState(1),
     // The Service links page's second list (each student's status) pages on its own.
     [statusPage, setStatusPage] = useState(1),
+    [registersPage, setRegistersPage] = useState(1),
+    [attendancePage, setAttendancePage] = useState(1),
     [selected, setSelected] = useState<Row | null>(null),
     [modal, setModal] = useState<Row | null>(null),
     [form, setForm] = useState<Row>({}),
@@ -793,8 +796,9 @@ export default function Operations({ module: initialModule }: { module: string }
     return { ...r, student_name: s.name, group_id: s.group_id, lifecycle: s.lifecycle, track: s.track, coordinator: s.coordinator, coordinator_name: s.coordinator_name, supervisor: s.supervisor };
   });
   const openTasks = tasks.filter((t) => t.status === "Open");
-  const overdue = openTasks.filter((t) => t.due < new Date().toISOString());
-  const dueToday = openTasks.filter((t) => t.due.slice(0, 10) === today());
+  const nowIso = new Date().toISOString();
+  const overdue = openTasks.filter((t) => t.due < nowIso);
+  const dueToday = openTasks.filter((t) => t.due.slice(0, 10) === nowIso.slice(0, 10));
   const noContact = students.filter((s) => s.contact_due);
   const critical = students.filter((s) => s.risk.status === "Critical");
   const atRisk = students.filter((s) => s.risk.status === "At Risk");
@@ -3399,8 +3403,8 @@ See you there!`,
           {panel(
             t("Session registers"),
             registers.length
-              ? generic(
-                  registers,
+              ? paginate(registers, (pageRows) => generic(
+                  pageRows,
                   [
                     { key: "starts_at", label: t("Date"), render: (x) => <span>{fmt(x.starts_at)}<small className="table-subline">{t("Week {v0}", { v0: x.week })}</small></span> },
                     { key: "group_id", label: t("Group") },
@@ -3411,14 +3415,14 @@ See you there!`,
                     { key: "rate", label: t("Rate"), render: (x) => { const pct = pctOf(x.register.present, x.register.present + x.register.absent); return <Cue tone={rateTone(pct)}>{pct === null ? "—" : pct + "%"}</Cue>; } },
                   ],
                   (x) => (takesAttendance(x) ? <button className="small-btn" onClick={() => openAttendance(x)}>{x.register.unmarked ? t("Take attendance") : t("Edit")}</button> : null),
-                )
+                ), [registersPage, setRegistersPage])
               : <Empty title={t("No session has been held in this period")} />,
           )}
           {panel(
             t("Students' attendance"),
             studentAttendance.length
-              ? generic(
-                  studentAttendance.slice(0, 300),
+              ? paginate(studentAttendance, (pageRows) => generic(
+                  pageRows,
                   [
                     { key: "name", label: t("Student"), render: (r) => <span><strong>{r.name}</strong><small className="table-subline">{r.group_id}</small></span> },
                     { key: "present", label: t("Attended"), render: (r) => <Cue tone="ok">{`${r.present}/${r.held}`}</Cue> },
@@ -3427,7 +3431,7 @@ See you there!`,
                     { key: "last", label: t("Last attended"), render: (r) => (r.last ? fmt(r.last) : "—") },
                   ],
                   (r) => <button className="small-btn" onClick={() => setSelected(students.find((x) => x.id === r.id) || null)}>{t("Open student")}</button>,
-                )
+                ), [attendancePage, setAttendancePage])
               : <Empty title={t("No attendance to show")} />,
           )}
         </TabsContent>
@@ -3550,7 +3554,7 @@ See you there!`,
   } else if (module === "accounts") {
     const accounts: Row[] = d.accounts || [];
     const requests: Row[] = d.requests || [];
-    const money = (v: any) => "$" + Number(v || 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
+    const money = (v: any) => "$" + moneyFormat.format(Number(v || 0));
     const attention = ["Blocked", "Access Issue", "Funding Block", "Under Review"];
     const activeReservation = (requestId: string) =>
       (d.reservations || []).find(
@@ -3686,7 +3690,7 @@ See you there!`,
     // and where each service's order stands.
     const svcMatched = new Set(svcShown.map((r) => r.student_id));
     const studentLines = [...svcMatched].map((id) => {
-      const s = students.find((x) => x.id === id) || {};
+      const s = index.studentsById.get(id as string) || {};
       const rows = serviceRows
         .filter((r) => r.student_id === id)
         .sort((x, y) => String(x.linked_at || "").localeCompare(String(y.linked_at || "")) || String(x.id).localeCompare(String(y.id)));
@@ -4179,8 +4183,8 @@ See you there!`,
             {panel(
               t("Controlled client accounts"),
               pool.length ? (
-                generic(
-                  pool,
+                paginate(pool, (pageRows) => generic(
+                  pageRows,
                   [
                     {
                       key: "label",
@@ -4318,7 +4322,7 @@ See you there!`,
                         )}
                       </div>
                     ),
-                )
+                ))
               ) : (
                 <Empty title={accounts.length ? t("No account matches these filters") : t("No client accounts yet. The people who keep the accounts add them one at a time or upload the accounts sheet; top-ups are then recorded on the Credit tracker.")} />
               ),
@@ -5579,7 +5583,7 @@ See you there!`,
     );
   return content;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locale, module, data, error, loading, search, filter, page, statusPage, selected, busy, notifications, importOpen, importModule, importMode, sheetHeaders, importMapping, importKey, mappingFields, mappingKeys, savedMappings, mappingName, importRows, preview, importId, serviceFilters, submissionFilters, studentServices, moreFilters, saved, checklistFor, accountSecrets, groupMessage, feedbackFor, sessionTab, svcFilters, boughtFilters, accountFilters, insightFilters, sessionFilters, providerFilter, sessionWeek, joinLogin, joinLeft, joinShowPassword, joinEdit, serviceParts, studentParts, weeklyParts]);
+  }, [locale, module, data, error, loading, search, filter, page, statusPage, registersPage, attendancePage, selected, busy, notifications, importOpen, importModule, importMode, sheetHeaders, importMapping, importKey, mappingFields, mappingKeys, savedMappings, mappingName, importRows, preview, importId, serviceFilters, submissionFilters, studentServices, moreFilters, saved, checklistFor, accountSecrets, groupMessage, feedbackFor, sessionTab, svcFilters, boughtFilters, accountFilters, insightFilters, sessionFilters, providerFilter, sessionWeek, joinLogin, joinLeft, joinShowPassword, joinEdit, serviceParts, studentParts, weeklyParts]);
   useEffect(() => {
     if (module === "students") {
       const g = sessionStorage.getItem("depi-group-search");

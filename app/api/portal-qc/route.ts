@@ -302,8 +302,9 @@ export async function GET() {
         if (g.link && g.gig_day) byLinkDay.set(g.link + " " + g.gig_day, [...(byLinkDay.get(g.link + " " + g.gig_day) || []), g.portal_gig_id]);
       }
       const others = (list: string[] | undefined, id: string) => (list || []).filter((x) => x !== id);
+      const sheetById = new Map((sheet as any[]).map((g: any) => [g.portal_gig_id, g]));
       for (const r of reviews as any[]) {
-        const z = sheet.find((g: any) => g.portal_gig_id === r.portal_gig_id);
+        const z = sheetById.get(r.portal_gig_id);
         r.same_proof = z?.proof ? others(byProof.get(z.proof), r.portal_gig_id) : [];
         r.same_link_day = z?.link && z.gig_day ? others(byLinkDay.get(z.link + " " + z.gig_day), r.portal_gig_id) : [];
         const mine = printOf.get(r.portal_gig_id);

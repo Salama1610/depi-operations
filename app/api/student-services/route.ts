@@ -41,23 +41,19 @@ function parseLink(row: any) {
 }
 
 async function studentView(studentId: string) {
-  const submission: any = await stmt(
-    "SELECT * FROM service_submissions WHERE student_id=?",
-    studentId,
-  ).first();
-  const rows = await all(
-    "SELECT * FROM service_links WHERE student_id=? ORDER BY slot",
-    studentId,
-  );
-  const bySlot = new Map(rows.map((row) => [row.slot, parseLink(row)]));
-  const reviews = await all(
-    `SELECT r.id,r.service_link_id,l.slot,r.revision,r.decision,r.comment,r.reviewed_at,u.name reviewer_name
+  const [submission, rows, reviews]: [any, any[], any[]] = await Promise.all([
+    stmt("SELECT * FROM service_submissions WHERE student_id=?", studentId).first(),
+    all("SELECT * FROM service_links WHERE student_id=? ORDER BY slot", studentId),
+    all(
+      `SELECT r.id,r.service_link_id,l.slot,r.revision,r.decision,r.comment,r.reviewed_at,u.name reviewer_name
      FROM service_link_reviews r
      JOIN service_links l ON l.id=r.service_link_id
      JOIN users u ON u.id=r.reviewed_by
      WHERE l.student_id=? ORDER BY r.reviewed_at DESC LIMIT 50`,
-    studentId,
-  );
+      studentId,
+    ),
+  ]);
+  const bySlot = new Map(rows.map((row) => [row.slot, parseLink(row)]));
   return {
     submitted: Boolean(submission),
     submission: submission
@@ -184,12 +180,13 @@ async function sessionFeedback(x: any) {
 export async function GET() {
   try {
     const s = await currentStudent();
+    const [view, feedback_sessions, client_orders] = await Promise.all([studentView(s.id), sessionsForFeedback(s.id), clientOrders(s.id)]);
     return Response.json({
       ok: true,
       student: { id: s.id, name: s.name, email: s.email },
-      ...(await studentView(s.id)),
-      feedback_sessions: await sessionsForFeedback(s.id),
-      client_orders: await clientOrders(s.id),
+      ...view,
+      feedback_sessions,
+      client_orders,
     });
   } catch (e: any) {
     return Response.json({ error: e.message }, { status: 403 });

@@ -14,6 +14,7 @@ import { useLiveReload } from "@/lib/use-live-reload";
 import { servicesComplete } from "@/lib/domain/service-links";
 import { sumPortalFigures } from "@/lib/domain/portal-figures";
 import { sessionEnded } from "@/lib/domain/session-time";
+import { rememberDates } from "@/lib/workspace-index";
 import { SearchableSelect } from "@/components/searchable-select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { scoreOf } from "@/lib/domain/feedback";
@@ -27,7 +28,9 @@ const GRID = "#e6eaf1";
 const INK = "#52627b";
 
 const DAY = 86400000;
-const cairoDay = (v: any) => (v ? new Date(v).toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" }) : "");
+const cairoDayFormat = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit" });
+const rememberedDay = rememberDates((v: string) => cairoDayFormat.format(new Date(v)));
+const cairoDay = (v: any) => (v ? rememberedDay(v instanceof Date ? v.toISOString() : String(v)) : "");
 
 /** The programme week runs Friday to Thursday, Cairo time. */
 function programmeWeekStart(now = new Date()) {
@@ -223,7 +226,17 @@ export function Dashboard() {
   const bothConfirmed = (s: Row) => !!s.coordinator_confirmed_at && !!s.coach_confirmed_at;
   const marksBySession = new Map<string, number>();
   for (const a of attendance) marksBySession.set(a.session_id, (marksBySession.get(a.session_id) || 0) + 1);
-  const rosterOf = (groupId: string) => active.filter((s) => s.group_id === groupId).length;
+  // Counted once, not searched for each session, member and group.
+  const activeInGroup = new Map<string, Row[]>();
+  for (const s of active) activeInGroup.set(s.group_id, [...(activeInGroup.get(s.group_id) || []), s]);
+  const marksOfStudent = new Map<string, Row[]>();
+  const marksOfGroup = new Map<string, Row[]>();
+  for (const a of attendance) {
+    marksOfStudent.set(a.student_id, [...(marksOfStudent.get(a.student_id) || []), a]);
+    const gid = sessionById.get(a.session_id)?.group_id;
+    if (gid) marksOfGroup.set(gid, [...(marksOfGroup.get(gid) || []), a]);
+  }
+  const rosterOf = (groupId: string) => (activeInGroup.get(groupId) || []).length;
   const unmarkedRegisters = held.filter((s) => (marksBySession.get(s.id) || 0) < rosterOf(s.group_id));
   const openTasks = tasks.filter((x) => x.status === "Open");
   const overdueTasks = openTasks.filter((x) => Date.parse(x.due) < now);
@@ -253,10 +266,8 @@ export function Dashboard() {
     .filter((p) => p.active !== false && p.active !== 0)
     .map((p) => {
       const theirs = groups.filter((g) => g.coordinator === p.id || g.supervisor === p.id || g.coach === p.id);
-      const gids = new Set(theirs.map((g) => g.id));
-      const st = active.filter((s) => gids.has(s.group_id));
-      const ids = new Set(st.map((s) => s.id));
-      const marks = attendance.filter((a) => ids.has(a.student_id));
+      const st = [...new Set(theirs.map((g) => g.id))].flatMap((id) => activeInGroup.get(id) || []);
+      const marks = st.flatMap((s) => marksOfStudent.get(s.id) || []);
       const portal = sumPortalFigures(st.map((s) => portalOf.get(s.id) as any));
       return {
         id: p.id,
@@ -374,7 +385,7 @@ export function Dashboard() {
   // Attendance rate per group, lowest first.
   const groupAttendance = groups
     .map((g) => {
-      const marks = attendance.filter((a) => sessionById.get(a.session_id)?.group_id === g.id);
+      const marks = marksOfGroup.get(g.id) || [];
       return { id: g.id, name: g.id, value: pct(marks.filter((a) => a.status === "Present").length, marks.length) ?? -1 };
     })
     .filter((x) => x.value >= 0)

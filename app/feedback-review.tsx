@@ -9,6 +9,7 @@
 // or week. The Students tab (the quality team only, not a coach) reads it
 // student by student, with each student's responses one by one.
 
+import { rememberDates } from "@/lib/workspace-index";
 import { useEffect, useMemo, useState } from "react";
 import { Download, RefreshCw, Shuffle, X } from "lucide-react";
 import { toast } from "sonner";
@@ -31,14 +32,15 @@ const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Frida
 
 const yes = (v: any) => v === true || v === 1 || v === "1" || v === "true";
 const average = (values: number[]) => (values.length ? Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10 : null);
-const cairoParts = (iso: string) => {
+const sessionsPage = 50;
+const cairoParts = rememberDates((iso: string) => {
   const d = new Date(iso);
   return {
     day: d.toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" }),
     weekday: d.toLocaleDateString("en-US", { timeZone: "Africa/Cairo", weekday: "long" }),
     time: d.toLocaleTimeString("en-GB", { timeZone: "Africa/Cairo", hour: "2-digit", minute: "2-digit" }),
   };
-};
+});
 
 /** Each response of one session with the student who gave it (the quality team only). */
 function ResponseList({ responses }: { responses: Row[] }) {
@@ -188,6 +190,7 @@ export function FeedbackReview() {
   const [by, setBy] = useState("coach");
   const [openId, setOpenId] = useState<string | null>(null);
   const [note, setNote] = useState("");
+  const [limit, setLimit] = useState(sessionsPage);
 
   async function load() {
     setLoading(true);
@@ -309,7 +312,10 @@ export function FeedbackReview() {
 
   const pending = shown.filter((s) => s.status === "Pending").length;
   const flagged = shown.filter((s) => levelOf(scoreOfSession(s.id)) === "flag").length;
-  const set = (k: string, v: any) => setF({ ...f, [k]: v });
+  const set = (k: string, v: any) => {
+    setF({ ...f, [k]: v });
+    setLimit(sessionsPage);
+  };
   const opt = (all: string, values: { value: string; label: string }[]) => [{ value: "All", label: all }, ...values];
   const active = JSON.stringify(f) !== JSON.stringify(blank);
 
@@ -436,7 +442,7 @@ export function FeedbackReview() {
                     </tr>
                   </thead>
                   <tbody>
-                    {shown.map((s) => (
+                    {shown.slice(0, limit).map((s) => (
                       <tr key={s.id}>
                         <td>
                           <strong>{s.title || t("Session")}</strong>
@@ -464,6 +470,11 @@ export function FeedbackReview() {
                     ))}
                   </tbody>
                 </table>
+                {shown.length > limit && (
+                  <button type="button" className="small-btn ac-more" onClick={() => setLimit(limit + sessionsPage)}>
+                    {t("Show {v0} more", { v0: Math.min(sessionsPage, shown.length - limit) })} · {t("{v0} of {v1}", { v0: limit, v1: shown.length })}
+                  </button>
+                )}
               </div>
             ) : (
               <p className="fr-empty">{sessions.length ? t("No session matches these filters.") : t("No session feedback to review yet.")}</p>

@@ -6,6 +6,7 @@ import { useLocale, useT } from "@/lib/i18n/context";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { can } from "@/lib/domain/rules";
 import { sessionEnded } from "@/lib/domain/session-time";
+import { rememberDates } from "@/lib/workspace-index";
 import { SearchableSelect } from "@/components/searchable-select";
 
 type Row = Record<string, any>;
@@ -15,16 +16,18 @@ type Row = Record<string, any>;
  * in a week by its Cairo calendar day, so a contact logged at 1 a.m. on Friday
  * belongs to the new week however the browser's clock is set.
  */
-const cairoDay = (value: string | Date) => {
-  const parts = new Intl.DateTimeFormat("en", {
-    timeZone: "Africa/Cairo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date(value));
+const cairoFormat = new Intl.DateTimeFormat("en", {
+  timeZone: "Africa/Cairo",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+const rememberedDay = rememberDates((value: string) => {
+  const parts = cairoFormat.formatToParts(new Date(value));
   const part = (type: string) => parts.find((p) => p.type === type)?.value || "";
   return `${part("year")}-${part("month")}-${part("day")}`;
-};
+});
+const cairoDay = (value: string | Date) => rememberedDay(value instanceof Date ? value.toISOString() : value);
 const addDays = (day: string, n: number) => {
   const d = new Date(day + "T12:00:00Z");
   d.setUTCDate(d.getUTCDate() + n);

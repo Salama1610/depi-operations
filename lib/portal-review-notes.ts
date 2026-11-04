@@ -32,14 +32,18 @@ export function noteStmt(proofKey: string, portalGigId: string | null, kind: Not
 export async function reviewNotes(keys: string[], withAuthors = true) {
   const out = new Map<string, ReviewNote[]>();
   const unique = [...new Set(keys.filter(Boolean))];
-  for (let i = 0; i < unique.length; i += 200) {
-    const slice = unique.slice(i, i + 200);
-    const rows = await all(
+  const slices: string[][] = [];
+  for (let i = 0; i < unique.length; i += 200) slices.push(unique.slice(i, i + 200));
+  // Read together, one trip; each proof's rows stay in order within their slice.
+  const reads = slices.map((slice) =>
+    all(
       `SELECT n.proof_key,n.kind,n.status,n.comment,n.created_at,u.name author_name
        FROM portal_gig_review_notes n LEFT JOIN users u ON u.id=n.author
        WHERE n.proof_key IN (${slice.map(() => "?").join(",")}) ORDER BY n.created_at,n.id`,
       ...slice,
-    );
+    ),
+  );
+  for (const rows of await Promise.all(reads)) {
     for (const r of rows as any[]) {
       const note: ReviewNote = { kind: r.kind, status: r.status ?? null, comment: r.comment ?? null, created_at: r.created_at };
       if (withAuthors) note.author_name = r.author_name ?? null;

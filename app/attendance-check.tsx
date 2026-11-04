@@ -6,6 +6,7 @@
 // or Has problems with a comment. The marks themselves are not changed here;
 // Coach Operations and Project Operations read the checks and act on them.
 
+import { rememberDates } from "@/lib/workspace-index";
 import { useEffect, useState } from "react";
 import { Download, RefreshCw, X } from "lucide-react";
 import { toast } from "sonner";
@@ -17,7 +18,7 @@ type Row = Record<string, any>;
 
 const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const page = 25;
-const cairoParts = (iso: string) => {
+const cairoParts = rememberDates((iso: string) => {
   const d = new Date(iso);
   return {
     day: d.toLocaleDateString("en-CA", { timeZone: "Africa/Cairo" }),
@@ -25,7 +26,7 @@ const cairoParts = (iso: string) => {
     // 24-hour key for sorting and filtering; shown to people in 12-hour form.
     time: d.toLocaleTimeString("en-GB", { timeZone: "Africa/Cairo", hour: "2-digit", minute: "2-digit" }),
   };
-};
+});
 const checkOf = (s: Row) => s.check_status || "Not checked";
 const cueOf = (status: string) => (status === "Valid" ? "is-ok" : status === "Has problems" ? "is-bad" : "is-warn");
 

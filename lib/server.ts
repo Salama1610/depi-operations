@@ -44,15 +44,12 @@ export async function rateLimit(
   const bucket = Math.floor(Date.now() / (windowSeconds * 1000)),
     id = `${subject}:${bucket}`,
     expires = new Date((bucket + 2) * windowSeconds * 1000).toISOString();
-  await stmt(
-    "INSERT INTO rate_limits(id,count,expires_at) VALUES(?,1,?) ON CONFLICT(id) DO UPDATE SET count=count+1",
-    id,
-    expires,
-  ).run();
-  const row: any = await stmt(
-    "SELECT count FROM rate_limits WHERE id=?",
-    id,
-  ).first();
+  // Counted and read in one trip: this runs on every request.
+  const counted: any = await db().batch([
+    stmt("INSERT INTO rate_limits(id,count,expires_at) VALUES(?,1,?) ON CONFLICT(id) DO UPDATE SET count=count+1", id, expires),
+    stmt("SELECT count FROM rate_limits WHERE id=?", id),
+  ]);
+  const row: any = counted[1]?.results?.[0];
   ensure(
     row && row.count <= limit,
     "Too many requests. Wait a moment and try again.",
@@ -653,6 +650,10 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
     linkReviewers,
     portalStudentRows,
     portalGigRows,
+    activeCoachTypes,
+    accountOrders,
+    purchasedRows,
+    teamCoordinatorIds,
   ] = await Promise.all([
     all(
       `SELECT g.*,c.name coordinator_name,s.name supervisor_name,s.title supervisor_title,s.team supervisor_team,h.name coach_name,m.name account_manager_name FROM groups g JOIN users c ON c.id=g.coordinator JOIN users s ON s.id=g.supervisor JOIN users h ON h.id=g.coach LEFT JOIN users m ON m.id=g.account_manager WHERE ${qg.sql}`,
@@ -844,6 +845,13 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
        WHERE ${q.sql}`,
       ...q.args,
     ),
+    all("SELECT user_id,coach_type FROM group_coaches WHERE status='Active'"),
+    accountOrdersFor(u),
+    all(
+      `SELECT DISTINCT o.student_id FROM account_orders o JOIN students s ON s.id=o.student_id JOIN groups g ON g.id=s.group_id WHERE o.status<>'Cancelled' AND ${q.sql}`,
+      ...q.args,
+    ),
+    teamCoordinators(u),
   ]);
   loadTimings.db = Date.now() - loadStarted;
   const initialized: any = initializedRows[0];
@@ -988,7 +996,7 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
   // A coach's title is the kind of coach they are on their groups (Outcome
   // Coach, Support Coach), read from the assignments rather than typed in.
   const coachTypes = new Map<string, Set<string>>();
-  for (const c of await all("SELECT user_id,coach_type FROM group_coaches WHERE status='Active'")) {
+  for (const c of activeCoachTypes) {
     if (!c.coach_type) continue;
     const set = coachTypes.get(c.user_id) || new Set<string>();
     set.add(String(c.coach_type));
@@ -1063,19 +1071,14 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
     evidencePackageItems,
     serviceSubmissionStatus,
     accounts,
-    accountOrders: await accountOrdersFor(u),
+    accountOrders,
     // Students in scope with a service bought through a client account (any
     // order not cancelled): the coach pay screen reads only these ids, for the
     // graduate bonus, which is for graduates without a purchased service.
-    purchasedStudents: (
-      await all(
-        `SELECT DISTINCT o.student_id FROM account_orders o JOIN students s ON s.id=o.student_id JOIN groups g ON g.id=s.group_id WHERE o.status<>'Cancelled' AND ${q.sql}`,
-        ...q.args,
-      )
-    ).map((r: any) => r.student_id),
+    purchasedStudents: purchasedRows.map((r: any) => r.student_id),
     staff: visibleStaff,
     // Who this person may make a group's coordinator; null means anyone.
-    teamCoordinators: await teamCoordinators(u),
+    teamCoordinators: teamCoordinatorIds,
     policies: p,
     audit: logs,
     roles,

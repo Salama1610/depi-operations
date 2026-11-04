@@ -88,14 +88,14 @@ async function requireAssignedCoach(u: any, groupId: string, coachType?: string)
 async function programData(u: any) {
   const q = scopeSql(u);
   const qg = scopeSql(u, "g", null);
-  const tracks = await all("SELECT * FROM tracks WHERE active=1 ORDER BY name");
-  const groups = await all(
+  const tracksRead = all("SELECT * FROM tracks WHERE active=1 ORDER BY name");
+  const groupsRead = all(
     `SELECT g.*,c.name coordinator_name,s.name supervisor_name FROM groups g
      JOIN users c ON c.id=g.coordinator JOIN users s ON s.id=g.supervisor
      WHERE ${qg.sql} ORDER BY g.start_date DESC,g.id`,
     ...qg.args,
   );
-  const students = await all(
+  const studentsRead = all(
     `SELECT s.*,g.name group_name,g.track,g.status group_status,g.coordinator,g.supervisor,
       (SELECT l.result FROM graduation_ledger l WHERE l.student_id=s.id ORDER BY l.calculated_at DESC LIMIT 1) graduation,
       (SELECT c.status FROM certificates c WHERE c.student_id=s.id ORDER BY c.issued_at DESC LIMIT 1) certificate_status,
@@ -105,14 +105,13 @@ async function programData(u: any) {
      FROM students s JOIN groups g ON g.id=s.group_id WHERE ${q.sql} ORDER BY s.created_at DESC`,
     ...q.args,
   );
-  for (const s of students) hideNationalId(u, s);
   // Applicants are real people outside any group, so never shown to a demo account.
-  const applications = !isDemo(u) && can(u.roles, [
+  const applicationsRead = !isDemo(u) && can(u.roles, [
     ...operations,
     "Team Supervisor",
     "Operations Systems / Admin",
   ])
-    ? await all(
+    ? all(
         can(u.roles, ["Operations Coordinator"]) &&
           !can(u.roles, ["Project Operations", "Team Supervisor", "Operations Systems / Admin"])
           ? "SELECT * FROM applications WHERE owner=? ORDER BY updated_at DESC LIMIT 1000"
@@ -122,7 +121,10 @@ async function programData(u: any) {
           ? [u.id]
           : []),
       )
-    : [];
+    : Promise.resolve([] as any[]);
+  // Read together, one trip instead of four.
+  const [tracks, groups, students, applications] = await Promise.all([tracksRead, groupsRead, studentsRead, applicationsRead]);
+  for (const s of students) hideNationalId(u, s);
   const screenings = applications.length
     ? await all(
         can(u.roles, ["Operations Coordinator"]) &&

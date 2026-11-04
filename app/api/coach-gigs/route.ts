@@ -13,9 +13,9 @@ export const dynamic = "force-dynamic";
 // the coach finds them there. Reviewers' names are not sent.
 
 async function inChunks<T>(ids: string[], read: (slice: string[]) => Promise<T[]>) {
-  const out: T[] = [];
-  for (let i = 0; i < ids.length; i += 400) out.push(...(await read(ids.slice(i, i + 400))));
-  return out;
+  const slices: string[][] = [];
+  for (let i = 0; i < ids.length; i += 400) slices.push(ids.slice(i, i + 400));
+  return (await Promise.all(slices.map(read))).flat();
 }
 const proofList = (value: unknown) => {
   try {

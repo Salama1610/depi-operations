@@ -38,19 +38,33 @@ export function dhashFromGrey(grey: ArrayLike<number>, size = DHASH_SIZE) {
 }
 
 const bitsIn = [0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4];
+const hexValue = new Uint8Array(128);
+for (let i = 0; i < 16; i++) {
+  hexValue[i.toString(16).charCodeAt(0)] = i;
+  hexValue[i.toString(16).toUpperCase().charCodeAt(0)] = i;
+}
 
 /** Hamming distance between two hex dHashes of the same length. */
 export function hammingHex(a: string, b: string) {
   if (!a || !b || a.length !== b.length) return Infinity;
   let d = 0;
-  for (let i = 0; i < a.length; i++) d += bitsIn[parseInt(a[i], 16) ^ parseInt(b[i], 16)];
+  for (let i = 0; i < a.length; i++) d += bitsIn[hexValue[a.charCodeAt(i)] ^ hexValue[b.charCodeAt(i)]];
   return d;
 }
 
 /** The pictures' hashes of one proof, as stored (space separated). */
 export function picturesOf(dhash: string | null | undefined) {
-  return String(dhash || "").split(/\s+/).filter((h) => /^[0-9a-f]{64}$/.test(h));
+  const key = String(dhash || "");
+  let list = readPictures.get(key);
+  if (!list) {
+    if (readPictures.size > 20000) readPictures.clear();
+    list = key.split(/\s+/).filter((h) => /^[0-9a-f]{64}$/.test(h));
+    readPictures.set(key, list);
+  }
+  return list;
 }
+// Every proof is compared with every other on each open: each is read once.
+const readPictures = new Map<string, string[]>();
 
 export type ProofPrint = { portal_gig_id?: string; student?: string; proof_url: string; sha256: string | null; dhash: string | null };
 

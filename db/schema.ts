@@ -118,7 +118,10 @@ export const tasks = sqliteTable(
     source: text("source").unique(),
     createdAt: text("created_at").notNull(),
   },
-  (t) => [index("idx_tasks_owner_status_due").on(t.owner, t.status, t.due)],
+  (t) => [
+    index("idx_tasks_owner_status_due").on(t.owner, t.status, t.due),
+    index("idx_tasks_student_status_due").on(t.studentId, t.status, t.due),
+  ],
 );
 export const attachments = sqliteTable("attachments", {
   id: text("id").primaryKey(),

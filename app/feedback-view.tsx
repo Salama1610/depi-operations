@@ -9,6 +9,7 @@
 // Operations also see the quality team's note on each session it reviewed.
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { rememberDates } from "@/lib/workspace-index";
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Download, Flag, RefreshCw } from "lucide-react";
 import { useLocale, useT } from "@/lib/i18n/context";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -27,9 +28,14 @@ async function readJson(response: Response, failed: string) {
   return value;
 }
 
+const rememberedDay = rememberDates((value: string, tag: string) =>
+  new Date(value).toLocaleDateString(tag, { timeZone: "Africa/Cairo", day: "numeric", month: "short" }),
+);
+const sessionsStep = 60;
+
 function useDay() {
   const tag = useLocale() === "ar" ? "ar-EG-u-nu-latn" : "en-GB";
-  return (value: string) => new Date(value).toLocaleDateString(tag, { timeZone: "Africa/Cairo", day: "numeric", month: "short" });
+  return (value: string) => rememberedDay(value, tag);
 }
 
 /** A score with its colour, icon and word: never colour alone. */
@@ -544,6 +550,7 @@ function HandleDialog({ target, responses, onClose, onDone }: { target: Row | nu
 
 /** The Feedback tab in Sessions. */
 export function FeedbackView() {
+  const [shownSessions, setShownSessions] = useState(sessionsStep);
   const t = useT();
   const day = useDay();
   const when = useCairoTime();
@@ -673,8 +680,13 @@ export function FeedbackView() {
             {quality && <TableHead>{t("Quality note")}</TableHead>}
           </TableRow>
         </TableHeader>
-        <TableBody>{list.map(flagRow)}</TableBody>
+        <TableBody>{list.slice(0, shownSessions).map(flagRow)}</TableBody>
       </Table>
+      {list.length > shownSessions && (
+        <button type="button" className="small-btn ac-more" onClick={() => setShownSessions(shownSessions + sessionsStep)}>
+          {t("Show {v0} more", { v0: Math.min(sessionsStep, list.length - shownSessions) })} · {t("{v0} of {v1}", { v0: shownSessions, v1: list.length })}
+        </button>
+      )}
     </div>
   );
 

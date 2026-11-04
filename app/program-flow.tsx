@@ -222,6 +222,7 @@ export function ProgramFlow() {
   const tracks: Row[] = d.tracks || [];
   const groups: Row[] = d.groups || [];
   const students: Row[] = d.students || [];
+  const studentName = new Map<string, string>(students.map((s) => [s.id, s.name]));
   const staff: Row[] = d.staff || [];
   const userRoles: string[] = d.user?.roles || [];
   const allowed = (roles: string[]) => userRoles.some((role) => roles.includes(role));
@@ -642,7 +643,7 @@ export function ProgramFlow() {
                 d.certificates.map((c: Row) => (
                   <div className="info-box" key={c.id}>
                     <strong>
-                      {students.find((s) => s.id === c.student_id)?.name}
+                      {studentName.get(c.student_id)}
                     </strong>
                     <span>
                       {c.type} · {c.external_ref}
@@ -667,7 +668,7 @@ export function ProgramFlow() {
                 d.outcomes.map((o: Row) => (
                   <div className="info-box" key={o.id}>
                     <strong>
-                      {students.find((s) => s.id === o.student_id)?.name}
+                      {studentName.get(o.student_id)}
                     </strong>
                     <span>
                       {o.type} · {o.title}
@@ -705,7 +706,7 @@ export function ProgramFlow() {
                 d.withdrawals.map((w: Row) => (
                   <div className="info-box" key={w.id}>
                     <strong>
-                      {students.find((s) => s.id === w.student_id)?.name}
+                      {studentName.get(w.student_id)}
                     </strong>
                     <span>{w.ministry_reference}</span>
                     <Badge value={w.decision} />

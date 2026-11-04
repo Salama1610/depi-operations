@@ -419,8 +419,6 @@ export async function GET(req?: Request) {
       timings[name] = Date.now() - mark;
       mark = Date.now();
     };
-    const i = await identity();
-    lap("identity");
     // A signed-in staff record proves the workspace is initialized, so the
     // setup check only runs when no such record exists. That removes one
     // database round trip from every ordinary request.
@@ -428,6 +426,8 @@ export async function GET(req?: Request) {
     try {
       u = await actor();
     } catch (error) {
+      // Somebody not signed in at all is told so, before anything else.
+      await identity();
       if (
         !(await stmt(
           "SELECT count(*) n FROM users WHERE id NOT LIKE 'system-unassigned-%'",
@@ -438,7 +438,6 @@ export async function GET(req?: Request) {
       }
       throw error;
     }
-    void i;
     lap("actor");
     const student = params.get("student");
     if (student) {
@@ -522,10 +521,13 @@ export async function POST(req: Request) {
     if (isDemo(u)) await demoGuard(x);
     const key = x.request_id || uid("REQ");
     ensure(typeof key === "string" && key.length < 150, "Invalid request key.");
-    const prior: any = await stmt(
-      "SELECT actor FROM audit_events WHERE request_id=?",
-      key,
-    ).first();
+    let sid = x.student_id;
+    // Read together, one trip. A student outside the person's scope still
+    // refuses below, after the replay check, as it always has.
+    const [prior, studentRead]: [any, { row?: any; error?: unknown }] = await Promise.all([
+      stmt("SELECT actor FROM audit_events WHERE request_id=?", key).first(),
+      sid ? student(u, sid).then((row) => ({ row }), (error) => ({ error })) : Promise.resolve({}),
+    ]);
     if (prior) {
       ensure(
         prior.actor === u.id,
@@ -533,10 +535,10 @@ export async function POST(req: Request) {
       );
       return Response.json({ ok: true, replayed: true });
     }
-    let sid = x.student_id;
     let s: any;
     if (sid) {
-      s = await student(u, sid);
+      if (studentRead.error) throw studentRead.error;
+      s = studentRead.row;
       ensure(s.group_status !== "Archived", "Archived groups are read-only.");
     }
     const id = x.id || uid();
