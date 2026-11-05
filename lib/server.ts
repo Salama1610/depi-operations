@@ -532,9 +532,9 @@ export async function weeklyLists(u: any) {
 
 /**
  * What coordinators wrote about their sessions after they ended (4 November
- * 2026), for the session's coach, Coach Operations, Project Operations and the administrators.
+ * 2026), for Coach Operations, Project Operations and the administrators.
  * The group's coordinator and whoever wrote it see it too; nobody else
- * receives it, so a comment can be frank about a coach.
+ * receives it, coaches included, so a comment can be frank about a coach.
  */
 function readSessionNotes(u: any) {
   const everyone = can(u.roles, ["Coach Operations", "Project Operations", "Operations Systems / Admin"]);
@@ -544,10 +544,10 @@ function readSessionNotes(u: any) {
      WHERE COALESCE(g.delivery_model,'Regular')<>'Industry' AND ${sameSide(u, "g.id")}${
        everyone
          ? ""
-         : " AND (n.author=? OR g.coordinator=? OR t.coordinator_id=? OR COALESCE(t.coach_id,g.coach)=? OR (t.coach_id IS NULL AND EXISTS (SELECT 1 FROM group_coaches gc WHERE gc.group_id=g.id AND gc.user_id=? AND gc.status='Active')))"
+         : " AND (n.author=? OR g.coordinator=? OR t.coordinator_id=?)"
      }
      ORDER BY t.starts_at DESC`,
-    ...(everyone ? [] : [u.id, u.id, u.id, u.id, u.id]),
+    ...(everyone ? [] : [u.id, u.id, u.id]),
   );
 }
 

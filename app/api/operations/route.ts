@@ -1627,7 +1627,7 @@ export async function POST(req: Request) {
       }
       case "session_note": {
         // What the coordinator writes about a session once it has ended, for
-        // the session's coach, Coach Operations and Project Operations (lib/server.ts reads it
+        // Coach Operations and Project Operations, not the coach (lib/server.ts reads it
         // back to them). Their own comment stays theirs to edit or clear, even
         // after the group moves to another coordinator. The audit keeps its
         // length, not its words: the audit list reaches more people.

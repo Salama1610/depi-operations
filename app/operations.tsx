@@ -292,7 +292,7 @@ const actionCopy: Row = {
   session_cancel:
     "Cancelled sessions remain in the operational history and require a reason.",
   session_note:
-    "The session's coach, Coach Operations and Project Operations read this, with your name. Students do not see it.",
+    "Coach Operations and Project Operations read this, with your name. Coaches and students do not see it.",
   session_unavailable:
     "Project Operations, Coach Operations and the group's supervisor are notified at once so the session can be covered or moved.",
   service_qc_review:
@@ -2904,7 +2904,7 @@ See you there!`,
     // What coordinators wrote after their sessions; the server sends only what this person may read.
     const sessionNotes: Row[] = d.sessionNotes || [];
     const myNotes = new Map<string, Row>(sessionNotes.filter((n) => n.author === user.id).map((n) => [n.session_id, n]));
-    const readsSessionNotes = sessionNotes.length > 0 || can(user.roles, ["Coach Operations", "Project Operations", "Operations Systems / Admin", "Coach"]);
+    const readsSessionNotes = sessionNotes.length > 0 || can(user.roles, ["Coach Operations", "Project Operations", "Operations Systems / Admin"]);
     // What happened in the sessions: attendance, feedback and who held them.
     const ended = (x: Row) => x.status !== "Cancelled" && sessionEnded(x as any);
     const inRange = (iso: string) =>
