@@ -3061,4 +3061,12 @@ export const ar: Record<string, string> = {
   "The sheet cannot show who came first: it only has the day the gig last changed": "لا يوضح الشيت من قرر أولًا: فيه فقط آخر يوم تغيّر فيه العمل",
   "{v0} where the coach decided first": "{v0} قرر فيها الكوتش أولًا",
   "Against our QC": "عكس قرار جودتنا",
+  "Coaches' students": "طلاب المدربين",
+  "Coaches' students: {v0} assigned, {v1} started, {v2} not started, {v3} graduated": "طلاب المدربين: {v0} مسند، {v1} بدأ، {v2} لم يبدأ، {v3} متخرج",
+  "From the latest students sheet: each student is counted once, by the portal's Final Status. A coach's students are those of the groups the portal's Coaches sheet gives them, or the group's own coach where the sheet names none. No portal status: not on the sheet yet, or the sheet gives no status.": "من أحدث شيت للطلاب: يُحسب كل طالب مرة واحدة حسب الحالة النهائية على البوابة. طلاب المدرب هم طلاب المجموعات المسندة إليه في شيت المدربين على البوابة، أو مدرب المجموعة نفسه إذا لم يذكر الشيت مدربًا لها. بدون حالة على البوابة: غير موجود في الشيت بعد، أو الشيت لا يذكر له حالة.",
+  "Unable to load the coaches' students.": "تعذر تحميل طلاب المدربين.",
+  "Search by coach": "ابحث باسم المدرب",
+  "Assigned students": "الطلاب المسندون",
+  "Not started": "لم يبدأ",
+  "No portal status": "بدون حالة على البوابة",
 };

@@ -5287,6 +5287,22 @@ test("the Overview and the Dashboard take graduation and gigs from the portal sh
   // Every row of the uploaded sheet is there, each with its portal ID, flagged when it is Depi Industry.
   const row = view.students.find((x) => x.portal_id === "PF-1");
   assert.deepEqual([row.student_id, Number(row.industry)], [pupil.id, 0]);
+  // Coach Operations and the administrators see each coach's students by where they stand; nobody else does.
+  assert.equal(view.seesCoachStudents, true);
+  const coachStudents = await route("portal-coach-students");
+  const standing = await (await coachStudents.GET()).json();
+  assert.equal(standing.error, undefined, standing.error);
+  const { coach: pupilCoach } = await dbRow("SELECT COALESCE((SELECT pc.coach_user_id FROM portal_coaches pc WHERE pc.group_id=g.id),g.coach) coach FROM groups g WHERE g.id=?", pupil.group_id);
+  const pupilRow = standing.coaches.find((c) => c.coach_id === (pupilCoach || null));
+  assert.ok(pupilRow.graduated >= 1, "the uploaded student is graduated on the portal");
+  assert.equal(standing.total.assigned, standing.total.started + standing.total.not_started + standing.total.graduated + standing.total.no_status);
+  assert.equal(standing.coaches.reduce((n, c) => n + c.assigned, 0), standing.total.assigned);
+  assert.ok(!JSON.stringify(standing).includes(pupil.email), "counts only");
+  const who = current;
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  assert.ok((await (await coachStudents.GET()).json()).error, "not the Quality Lead");
+  assert.equal((await (await portal.GET(new Request("https://test.local/api/portal"))).json()).seesCoachStudents, false);
+  current = who;
   // The administrators' Dashboard reads the same figures.
   const board = await (await dashboard.GET()).json();
   assert.equal(board.error, undefined, board.error);
