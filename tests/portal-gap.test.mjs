@@ -2,6 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { portalCoachGap } from "../lib/domain/portal-gap.ts";
+import { settledProofs, waitsForCoach } from "../lib/domain/portal-review.ts";
 
 const ours = { student_id: "S1", lifecycle: "Active", delivery_model: "Regular", group_id: "G1", coach_id: "C1", coach_name: "Coach One", coach_active: 1 };
 const gig = (id, fields = {}) => ({
@@ -52,7 +53,7 @@ test("each waiting gig has one place, and the places add up to the portal's coun
   assert.deepEqual(placeOf(gap, "checked-no"), ["coach_tab", null]);
   assert.deepEqual(placeOf(gap, "open"), ["with_qc", null]);
   assert.deepEqual(placeOf(gap, "new"), ["not_in_queue", "new"], "the queue takes it when Portal gigs QC next opens");
-  assert.deepEqual(placeOf(gap, "edited"), ["not_in_queue", "not_pending"], "the queue takes Pending or blank only");
+  assert.deepEqual(placeOf(gap, "edited"), ["not_in_queue", "new"], "an edited gig waits for the coach, so the queue takes it too");
   assert.deepEqual(placeOf(gap, "unlinked"), ["no_coach", "not_linked"]);
   const { not_in_queue, no_coach, with_qc, coach_tab } = gap.places;
   assert.deepEqual([not_in_queue.gigs, no_coach.gigs, with_qc.gigs, coach_tab.gigs], [2, 1, 1, 2]);
@@ -107,4 +108,50 @@ test("the counts by coach add up, those our QC checked first, with the oldest gi
   );
   assert.equal(gap.coaches.reduce((n, c) => n + c.waiting, 0), gap.waiting.gigs);
   assert.deepEqual(gap.gigs.map((g) => g.id).slice(0, 2), ["e", "b"], "oldest first, an undated gig before them");
+});
+
+test("the QC queue takes what waits for the coach: edited gigs yes, gigs the portal settled no", () => {
+  assert.equal(waitsForCoach({ status: "Pending", provider_status: "Pending" }), true);
+  assert.equal(waitsForCoach({ status: "Pending", provider_status: "" }), true);
+  assert.equal(waitsForCoach({ status: "Edited", provider_status: "Edited" }), true);
+  assert.equal(waitsForCoach({ status: "Edited", provider_status: "Pending" }), true);
+  assert.equal(waitsForCoach({ status: "Rejected", provider_status: "Pending" }), false, "the portal has rejected it");
+  assert.equal(waitsForCoach({ status: "Approved", provider_status: "Approved" }), false);
+  assert.equal(waitsForCoach({ status: "Pending", provider_status: "Approved" }), false, "the coach has approved it: it waits for the auditor");
+});
+
+test("a proof is settled only when the sheet has it and no row of it still waits for the coach", () => {
+  const settled = settledProofs([
+    { portal_gig_id: "1", proof_url: "https://p/ONE", status: "Approved", provider_status: "Approved" },
+    { portal_gig_id: "2", proof_url: "https://p/two", status: "Pending", provider_status: "Pending" },
+    { portal_gig_id: "3", proof_url: "https://p/shared", status: "Approved", provider_status: "Approved" },
+    { portal_gig_id: "4", proof_url: "https://p/shared", status: "Pending", provider_status: "Pending" },
+    { portal_gig_id: "5", proof_url: "", status: "Rejected", provider_status: "Pending" },
+  ]);
+  assert.deepEqual([...settled].sort(), ["gig:5", "https://p/one"], "the shared proof still waits on one of its rows");
+  assert.equal(settled.has("https://p/not-in-the-sheet"), false);
+});
+
+test("a coach's decision against our verdict is counted only when the sheet does not show they decided first", () => {
+  const gap = portalCoachGap(
+    [],
+    [],
+    [
+      gig("after", { status: "Approved", provider_status: "Approved", qc: "Rejected", qc_at: "2026-11-02T10:00:00Z", updated_on: "2026-11-03" }),
+      gig("same-day", { status: "Approved", provider_status: "Approved", qc: "Rejected", qc_at: "2026-11-02T10:00:00Z", updated_on: "2026-11-02" }),
+      gig("first", { status: "Rejected", provider_status: "Rejected", qc: "Approved", qc_at: "2026-11-02T10:00:00Z", updated_on: "2026-11-01" }),
+      gig("undated", { status: "Approved", provider_status: "Approved", qc: "Rejected", qc_at: "2026-11-02T10:00:00Z", updated_on: null }),
+      gig("agree-yes", { status: "Approved", provider_status: "Approved", qc: "Approved", qc_at: "2026-11-02T10:00:00Z" }),
+      gig("agree-no", { status: "Rejected", provider_status: "Rejected", qc: "Rejected", qc_at: "2026-11-02T10:00:00Z" }),
+    ],
+  );
+  assert.deepEqual(placeOf(gap, "after"), ["disagree", "unclear"]);
+  assert.deepEqual(placeOf(gap, "same-day"), ["disagree", "unclear"]);
+  assert.deepEqual(placeOf(gap, "undated"), ["disagree", "unclear"]);
+  assert.deepEqual(placeOf(gap, "first"), ["disagree", "coach_first"]);
+  assert.equal(placeOf(gap, "agree-yes"), undefined);
+  assert.equal(placeOf(gap, "agree-no"), undefined);
+  assert.equal(gap.places.disagree.gigs, 4);
+  assert.equal(gap.waiting.gigs, 0, "decided gigs do not change the portal's count");
+  assert.equal(gap.coaches.find((c) => c.coach_id === "C1").against_qc, 3, "not the one the coach decided first");
 });

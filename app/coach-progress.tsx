@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { useDir, useLocale, useT } from "@/lib/i18n/context";
+import { portalGigStage } from "@/lib/domain/portal-figures";
 import { SearchableSelect } from "@/components/searchable-select";
 import { QcThread } from "@/components/qc-thread";
 import { GraduationDots } from "./today";
@@ -51,7 +52,7 @@ function portalTone(value?: string | null) {
 /** Gigs our quality team has decided on that still wait for the coach on the portal. */
 function qcWaiting(s: Row) {
   return (s.portal?.gigs || []).filter(
-    (g: Row) => (g.qc_status === "Approved" || g.qc_status === "Rejected") && /^(pending)?$/i.test(String(g.provider_status || "").trim()),
+    (g: Row) => (g.qc_status === "Approved" || g.qc_status === "Rejected") && portalGigStage(g) === "coach",
   ).length;
 }
 

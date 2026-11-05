@@ -2,7 +2,7 @@ import { actor, all, permit, rateLimit } from "@/lib/server";
 import { policy } from "@/lib/domain/rules";
 import { portalGigStage, portalGraduation } from "@/lib/domain/portal-figures";
 import { sameSide } from "@/lib/demo";
-import { proofKey, proofKeySql } from "@/lib/domain/portal-review";
+import { proofKey, proofKeySql, waitsForCoach } from "@/lib/domain/portal-review";
 import { reviewNotes } from "@/lib/portal-review-notes";
 
 export const dynamic = "force-dynamic";
@@ -144,7 +144,7 @@ export async function GET() {
                   provider_status: p.provider_status,
                   url: p.url || null,
                   // Our quality team's check, for the coach to act on in the portal.
-                  qc_status: p.qc_status || null,
+                  qc_status: p.qc_status === "Pending" && !waitsForCoach(p) ? null : p.qc_status || null,
                   qc_comment: p.qc_comment || null,
                   qc_at: p.qc_reviewed_at || null,
                   qc_notes: qcNotes.get(proofKey(p)) || [],

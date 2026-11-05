@@ -4249,9 +4249,10 @@ test("the Quality Lead and Coach Operations read the gap between the portal's gi
   await upload("students", { ID: "portal_id", Email: "email", "Full Name": "full_name" }, [
     { portal_id: "GAP-P1", email: pupil.email, full_name: "Linked student" },
     { portal_id: "GAP-P2", email: "portal-only-gap@example.org", full_name: "Portal only" },
+    { portal_id: "GAP-P3", email: "portal-only-gap-3@example.org", full_name: "Portal only too" },
   ]);
-  const mapping = { ID: "portal_gig_id", "Student ID": "portal_student_id", Title: "title", URL: "url", Status: "status", "Provider Status": "provider_status", Proof: "proof_url" };
-  const row = (id, student, status, provider) => ({ portal_gig_id: id, portal_student_id: student, title: id, url: "https://example.org/" + id, status, provider_status: provider, proof_url: "https://proof.example.org/" + id });
+  const mapping = { ID: "portal_gig_id", "Student ID": "portal_student_id", Title: "title", URL: "url", Status: "status", "Provider Status": "provider_status", Proof: "proof_url", Updated: "updated_on" };
+  const row = (id, student, status, provider, updated) => ({ portal_gig_id: id, portal_student_id: student, title: id, url: "https://example.org/" + id, status, provider_status: provider, proof_url: "https://proof.example.org/" + id, updated_on: updated || "" });
   await upload("gigs", mapping, [
     row("GAP-1", "GAP-P1", "Pending", "Pending"),
     row("GAP-2", "GAP-P1", "Pending", "Pending"),
@@ -4261,60 +4262,107 @@ test("the Quality Lead and Coach Operations read the gap between the portal's gi
     row("GAP-6", "GAP-P1", "Pending", "Approved"),
     row("GAP-7", "GAP-P2", "Pending", "Pending"),
     row("GAP-8", "GAP-P1", "Pending", "Pending"),
+    row("GAP-9", "GAP-P1", "Pending", "Pending"),
+    row("GAP-10", "GAP-P3", "Pending", "Pending"),
   ]);
 
   // A sheet nobody on the quality team has opened yet: the gap shows the queue has not taken it.
   const before = await readGap();
-  assert.equal(before.waiting.gigs, 5, "Pending and Edited; the coach's approval and the portal's verdicts are not waiting");
+  assert.equal(before.waiting.gigs, 7, "Pending and Edited; the coach's approval and the portal's verdicts are not waiting");
   assert.deepEqual(place(before, "GAP-1"), ["not_in_queue", "new"]);
   assert.equal(before.in_our_system.gigs, 0);
 
   await openQc();
+  const queued = (await dbRows("SELECT portal_gig_id FROM portal_gig_reviews")).map((r) => r.portal_gig_id).sort();
+  assert.deepEqual(queued, ["GAP-1", "GAP-10", "GAP-2", "GAP-3", "GAP-7", "GAP-8", "GAP-9"], "an edited gig goes to QC; a gig the portal rejected, or the coach approved, does not");
   await decide("GAP-2", "Approved");
   await decide("GAP-7", "Rejected");
   await decide("GAP-8", "Approved");
+  await decide("GAP-9", "Rejected");
   const gap = await readGap();
-  assert.equal(gap.waiting.gigs, 5);
-  assert.equal(gap.in_our_system.gigs, 4, "all but the edited gig, which the queue does not take");
+  assert.equal(gap.waiting.gigs, 7);
+  assert.equal(gap.in_our_system.gigs, 7, "nothing waiting is left out of our system");
   assert.deepEqual(place(gap, "GAP-1"), ["with_qc", null]);
   assert.deepEqual(place(gap, "GAP-2"), ["coach_tab", null]);
-  assert.deepEqual(place(gap, "GAP-3"), ["not_in_queue", "not_pending"]);
+  assert.deepEqual(place(gap, "GAP-3"), ["with_qc", null]);
   assert.deepEqual(place(gap, "GAP-7"), ["no_coach", "not_linked"], "checked, but the student is not linked");
-  assert.deepEqual(place(gap, "GAP-4"), ["moved_on", "decided_on_portal"], "the queue took it, but the portal has rejected it");
+  assert.deepEqual(place(gap, "GAP-10"), ["with_qc", "not_linked"]);
+  assert.equal(place(gap, "GAP-4"), undefined, "the portal has rejected it");
   assert.equal(place(gap, "GAP-5"), undefined);
   assert.equal(place(gap, "GAP-6"), undefined, "the coach has approved it: it waits for the auditor");
-  assert.deepEqual(
-    Object.fromEntries(Object.entries(gap.places).map(([k, v]) => [k, v.gigs])),
-    { not_in_queue: 1, no_coach: 1, with_qc: 1, coach_tab: 2, moved_on: 1 },
-  );
-  const staffCoach = gap.coaches.find((c) => c.coach_id === "staff-coach");
-  assert.deepEqual([staffCoach.waiting, staffCoach.qc_approved, staffCoach.qc_rejected, staffCoach.with_qc, staffCoach.not_in_queue], [4, 2, 0, 1, 1]);
+  const counts = (v) => Object.fromEntries(Object.entries(v.places).map(([k, n]) => [k, n.gigs]));
+  assert.deepEqual(counts(gap), { not_in_queue: 0, no_coach: 1, with_qc: 3, coach_tab: 3, moved_on: 0, disagree: 0 });
+  const coachOf = (v) => v.coaches.find((c) => c.coach_id === "staff-coach");
+  assert.deepEqual([coachOf(gap).waiting, coachOf(gap).qc_approved, coachOf(gap).qc_rejected, coachOf(gap).with_qc, coachOf(gap).not_in_queue], [5, 2, 1, 2, 0]);
   assert.ok(!/reviewer|reviewed_by|Checked it/.test(JSON.stringify(gap)), "no reviewer named and no comment sent");
+  current = lead;
+  const firstLook = await (await qc.GET()).json();
+  assert.equal(firstLook.reviewers.reduce((n, p) => n + p.pending, 0), 2, "two students wait for a verdict");
 
   // What the panel says is in the coach's tab is what the coach sees waiting there.
   current = { id: "coach-login", email: "staff-coach@example.invalid" };
   const seen = await (await coachGigs.GET()).json();
-  assert.deepEqual(seen.gigs.filter((g) => g.waiting).map((g) => g.id).sort(), ["GAP-2", "GAP-8"]);
-  // A gig the portal then rejects stops waiting for the coach, though its coach status stays Pending.
+  assert.deepEqual(seen.gigs.filter((g) => g.waiting).map((g) => g.id).sort(), ["GAP-2", "GAP-8", "GAP-9"]);
+
+  // The next sheet: the portal moves on. The coach approves GAP-1 and GAP-10 before our QC looked,
+  // rejects GAP-2 before our verdict, and GAP-9 changed after it. The portal rejects GAP-8.
   await upload("gigs", mapping, [
-    row("GAP-1", "GAP-P1", "Pending", "Pending"),
-    row("GAP-2", "GAP-P1", "Pending", "Pending"),
+    row("GAP-1", "GAP-P1", "Pending", "Approved"),
+    row("GAP-2", "GAP-P1", "Rejected", "Rejected", "2020-01-01"),
     row("GAP-3", "GAP-P1", "Edited", "Edited"),
     row("GAP-8", "GAP-P1", "Rejected", "Pending"),
+    row("GAP-9", "GAP-P1", "Approved", "Approved", "2099-01-01"),
+    row("GAP-10", "GAP-P3", "Approved", "Approved"),
   ]);
   current = { id: "coach-login", email: "staff-coach@example.invalid" };
   const after = await (await coachGigs.GET()).json();
-  assert.deepEqual(after.gigs.filter((g) => g.waiting).map((g) => g.id), ["GAP-2"]);
+  assert.deepEqual(after.gigs.filter((g) => g.waiting).map((g) => g.id), [], "a gig the portal settled stops waiting for the coach, whatever its coach status");
   assert.equal(after.gigs.find((g) => g.id === "GAP-8").waiting, false);
-  await openQc();
+
+  // Those gigs leave our QC's list and load, with nothing written.
+  current = lead;
+  const moved = await (await qc.GET()).json();
+  const card = (v, id) => v.reviews.find((r) => r.portal_gig_id === id);
+  assert.equal(card(moved, "GAP-1").settled, true);
+  assert.equal(card(moved, "GAP-10").settled, true);
+  assert.equal(card(moved, "GAP-1").status, "Pending", "kept as it was");
+  assert.equal(card(moved, "GAP-3").settled, false, "still waits for the coach");
+  assert.equal(card(moved, "GAP-2").settled, false, "our verdict stands");
+  assert.equal(moved.reviewers.reduce((n, p) => n + p.pending, 0), 1, "only the student with GAP-3 still waits");
+  const sharedOut = await (
+    await qc.POST(new Request("https://test.local/api/portal-qc", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "redistribute" }) }))
+  ).json();
+  assert.equal(sharedOut.moved, 1, "a student with nothing left to check is not shared out");
+
   const later = await readGap();
-  assert.equal(place(later, "GAP-8"), undefined, "decided by our QC and settled on the portal: no longer in the gap");
+  assert.equal(later.waiting.gigs, 1);
+  assert.deepEqual(place(later, "GAP-1"), ["moved_on", "decided_on_portal"]);
+  assert.deepEqual(place(later, "GAP-10"), ["moved_on", "decided_on_portal"]);
   assert.equal(place(later, "GAP-7"), undefined, "decided by our QC and gone from the sheet");
-  assert.deepEqual(place(later, "GAP-4"), ["moved_on", "not_in_sheet"], "still open with our QC, gone from the sheet");
+  assert.equal(place(later, "GAP-8"), undefined, "the portal rejected it with no decision from the coach");
+  assert.deepEqual(place(later, "GAP-2"), ["disagree", "coach_first"]);
+  assert.deepEqual(place(later, "GAP-9"), ["disagree", "unclear"]);
+  assert.equal(later.places.disagree.gigs, 2);
+  assert.equal(coachOf(later).against_qc, 1, "not the gig the coach decided before our verdict");
+
+  // Coordinators and coaches read a gig the portal moved past as not checked, not as waiting with QC.
+  current = { id: "owner", email: "owner@example.com" };
+  const student = (await (await portal.GET(new Request("https://test.local/api/portal?student=GAP-P1"))).json()).gigs;
+  assert.equal(student.find((g) => g.portal_gig_id === "GAP-1").qc_status, null);
+  assert.equal(student.find((g) => g.portal_gig_id === "GAP-3").qc_status, "Pending");
+
+  // If a later sheet shows it waiting again, it is back on the list by itself.
+  await upload("gigs", mapping, [row("GAP-1", "GAP-P1", "Edited", "Pending"), row("GAP-3", "GAP-P1", "Edited", "Edited"), row("GAP-10", "GAP-P3", "Approved", "Approved")]);
+  current = lead;
+  const back = await (await qc.GET()).json();
+  assert.equal(card(back, "GAP-1").settled, false);
+  assert.equal(card(back, "GAP-10").settled, true);
+  const final = await readGap();
+  assert.deepEqual(place(final, "GAP-1"), ["with_qc", null]);
 
   // Coach Operations reads it too; the rest of the team and the coaches do not.
   current = { id: "coach-ops-login", email: "staff-coach-ops@example.invalid" };
-  assert.equal((await (await gapApi.GET()).json()).waiting.gigs, later.waiting.gigs);
+  assert.equal((await (await gapApi.GET()).json()).waiting.gigs, final.waiting.gigs);
   for (const who of [
     { id: "staff-quality", email: "staff-quality@example.invalid" },
     { id: "coach-login", email: "staff-coach@example.invalid" },

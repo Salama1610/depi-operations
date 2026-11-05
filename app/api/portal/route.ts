@@ -1,7 +1,7 @@
 import { actor, all, auditStmt, db, now, rateLimit, refuseDemo, scopeSql, stmt, uid } from "@/lib/server";
 import { can, ensure } from "@/lib/domain/rules";
 import { isNationalId, normalizeNationalId } from "@/lib/domain/sheet-mapping";
-import { proofKey, proofKeySql } from "@/lib/domain/portal-review";
+import { proofKey, proofKeySql, waitsForCoach } from "@/lib/domain/portal-review";
 import { portalGapRoles } from "@/lib/domain/portal-gap";
 import { reviewNotes } from "@/lib/portal-review-notes";
 import {
@@ -82,7 +82,11 @@ export async function GET(req: Request) {
         : [];
       // Every comment of our quality team on each gig, the earlier ones with the new.
       const notes = await reviewNotes(rows.map((r: any) => proofKey(r)));
-      for (const r of rows as any[]) r.qc_notes = notes.get(proofKey(r)) || [];
+      for (const r of rows as any[]) {
+        r.qc_notes = notes.get(proofKey(r)) || [];
+        // The portal moved past it before our verdict: not checked, and not waiting with our QC.
+        if (r.qc_status === "Pending" && !waitsForCoach(r)) r.qc_status = null;
+      }
       return Response.json({ gigs: rows });
     }
     // Possible duplicates in the gigs sheet. A student may sell the same

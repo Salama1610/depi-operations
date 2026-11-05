@@ -11,17 +11,17 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { toWorkbook } from "@/lib/spreadsheet";
 
 type Row = Record<string, any>;
-type Place = "not_in_queue" | "no_coach" | "with_qc" | "coach_tab" | "moved_on";
+type Place = "not_in_queue" | "no_coach" | "with_qc" | "coach_tab" | "moved_on" | "disagree";
 
 const placeLabels: Record<Place, string> = {
   not_in_queue: "Not in our system",
   no_coach: "Checked, but no coach sees it",
   with_qc: "With our QC, no verdict yet",
   coach_tab: "In the coach's Gigs tab",
-  moved_on: "Our QC still waiting, the portal moved on",
+  moved_on: "Decided on the portal before our QC",
+  disagree: "Our QC and the coach disagree",
 };
 const whyLabels: Record<string, string> = {
-  not_pending: "Its coach status is not Pending, and our QC queue only takes Pending or blank",
   new: "New in this sheet: the QC queue takes it when Portal gigs QC next opens",
   not_linked: "Not linked to our records",
   revoked: "Revoked",
@@ -30,8 +30,12 @@ const whyLabels: Record<string, string> = {
   no_coach: "No coach with an account for this group",
   decided_on_portal: "The portal moved on before our QC gave a verdict",
   not_in_sheet: "No longer in the latest sheet",
+  coach_first: "The coach decided first, before our QC's verdict",
+  unclear: "The sheet cannot show who came first: it only has the day the gig last changed",
 };
 const noCoach = "none";
+/** The list opens on the first of these with gigs in it: what most needs someone to act comes first. */
+const firstShown: Place[] = ["not_in_queue", "no_coach", "disagree", "moved_on", "with_qc", "coach_tab"];
 
 export function PortalGap({ open = false }: { open?: boolean }) {
   const t = useT();
@@ -39,7 +43,7 @@ export function PortalGap({ open = false }: { open?: boolean }) {
   const day = (value?: string | null) => (value ? new Date(value).toLocaleDateString(tag, { timeZone: "Africa/Cairo", day: "numeric", month: "short" }) : "—");
   const [data, setData] = useState<Row | null>(null);
   const [error, setError] = useState("");
-  const [place, setPlace] = useState<Place>("not_in_queue");
+  const [picked, setPicked] = useState<Place | null>(null);
   const [coach, setCoach] = useState("All");
   const [shown, setShown] = useState(50);
 
@@ -59,13 +63,14 @@ export function PortalGap({ open = false }: { open?: boolean }) {
   const coachName = (c: Row) => c.coach_name || c.coach_id || t("Not linked to our records");
   const students = (n: number) => (n === 1 ? t("1 student") : t("{v0} students", { v0: n }));
   const count = (key: Place) => data?.places[key].gigs ?? 0;
+  const place = picked ?? firstShown.find((key) => count(key) > 0) ?? "not_in_queue";
   const tile = (key: Place, note?: string) => (
     <button
       type="button"
       className="mini-stat-btn"
       aria-pressed={place === key}
       onClick={() => {
-        setPlace(key);
+        setPicked(key);
         setShown(50);
       }}
     >
@@ -90,6 +95,7 @@ export function PortalGap({ open = false }: { open?: boolean }) {
           "Checked by our QC: rejected": c.qc_rejected,
           "With our QC": c.with_qc,
           "Not in our system": c.not_in_queue,
+          "Against our QC": c.against_qc,
           "Oldest since": c.oldest ? String(c.oldest).slice(0, 10) : "",
         })),
       },
@@ -107,6 +113,8 @@ export function PortalGap({ open = false }: { open?: boolean }) {
           "Portal status": g.status || "",
           "Coach status": g.provider_status || "",
           "Our QC": g.qc || "",
+          "Our QC date": g.qc_at ? String(g.qc_at).slice(0, 10) : "",
+          "Portal last changed": g.portal_changed ? String(g.portal_changed).slice(0, 10) : "",
           Date: g.date ? String(g.date).slice(0, 10) : "",
           Gig: g.url || "",
           Proof: g.proof_url || "",
@@ -131,7 +139,7 @@ export function PortalGap({ open = false }: { open?: boolean }) {
       ) : (
         <>
           <small className="footnote">
-            {t("Counted from the latest gigs sheet. A gig waits for the coach until the coach approves it, or the portal approves or rejects it. Our system is our quality team's queue and the coach's Gigs tab.")}
+            {t("Counted from the latest gigs sheet. A gig waits for the coach until the coach approves it, or the portal approves or rejects it. Our system is our quality team's queue and the coach's Gigs tab. A coach is counted against our QC only when the sheet does not show they decided first.")}
           </small>
           <div className="mini-stats">
             <span>
@@ -149,6 +157,7 @@ export function PortalGap({ open = false }: { open?: boolean }) {
             {tile("with_qc")}
             {tile("no_coach")}
             {tile("moved_on")}
+            {tile("disagree", t("{v0} where the coach decided first", { v0: gigs.filter((g) => g.why === "coach_first").length }))}
           </div>
 
           <div className="pqc-table">
@@ -161,6 +170,7 @@ export function PortalGap({ open = false }: { open?: boolean }) {
                   <th>{t("Checked by our QC: rejected")}</th>
                   <th>{t("With our QC")}</th>
                   <th>{t("Not in our system")}</th>
+                  <th>{t("Against our QC")}</th>
                   <th>{t("Oldest since")}</th>
                 </tr>
               </thead>
@@ -173,6 +183,7 @@ export function PortalGap({ open = false }: { open?: boolean }) {
                     <td><bdi dir="ltr">{c.qc_rejected}</bdi></td>
                     <td><bdi dir="ltr">{c.with_qc}</bdi></td>
                     <td><bdi dir="ltr">{c.not_in_queue}</bdi></td>
+                    <td><bdi dir="ltr">{c.against_qc}</bdi></td>
                     <td>{day(c.oldest)}</td>
                   </tr>
                 ))}

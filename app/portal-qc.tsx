@@ -20,6 +20,8 @@ import { PortalGap } from "./portal-gap";
 
 type Row = Record<string, any>;
 const pageSize = 25;
+/** A review the portal moved past before our verdict stands apart from those waiting. */
+const stateOf = (r: Row) => (r.settled ? "Settled" : r.status);
 
 /** One gig: what the portal says, and our verdict or the form to give it. */
 function GigCheck({ g, canDecide, busy, send }: { g: Row; canDecide: boolean; busy: boolean; send: (v: Row) => Promise<boolean> }) {
@@ -27,7 +29,7 @@ function GigCheck({ g, canDecide, busy, send }: { g: Row; canDecide: boolean; bu
   const tag = useLocale() === "ar" ? "ar-EG-u-nu-latn" : "en-GB";
   // A new decision brings a new comment; the earlier ones stay in the thread above.
   const [comment, setComment] = useState("");
-  const [editing, setEditing] = useState(g.status === "Pending");
+  const [editing, setEditing] = useState(g.status === "Pending" && !g.settled);
   const [noting, setNoting] = useState(false);
   const [note, setNote] = useState("");
   // The proof is checked before any decision: opening it unlocks the buttons.
@@ -35,8 +37,8 @@ function GigCheck({ g, canDecide, busy, send }: { g: Row; canDecide: boolean; bu
   const needsProof = Boolean(g.proof_url) && !proofOpened;
   useEffect(() => {
     setComment("");
-    setEditing(g.status === "Pending");
-  }, [g.status, g.comment]);
+    setEditing(g.status === "Pending" && !g.settled);
+  }, [g.status, g.comment, g.settled]);
   const decide = async (status: string) => {
     if (status === "Rejected" && comment.trim().length < 3) {
       toast.error(t("Write why the gig is rejected, so the coach can tell the student."));
@@ -58,7 +60,7 @@ function GigCheck({ g, canDecide, busy, send }: { g: Row; canDecide: boolean; bu
       setNoting(false);
     }
   };
-  const tone = g.status === "Approved" ? "is-ok" : g.status === "Rejected" ? "is-bad" : "is-warn";
+  const tone = g.settled ? "is-info" : g.status === "Approved" ? "is-ok" : g.status === "Rejected" ? "is-bad" : "is-warn";
   return (
     <li className={"pqc-gig " + tone}>
       <div className="pqc-gig-head">
@@ -132,7 +134,7 @@ function GigCheck({ g, canDecide, busy, send }: { g: Row; canDecide: boolean; bu
         </div>
       ) : (
         <div className="pqc-verdict">
-          <span className={"cue " + tone}>{g.status === "Pending" ? t("Waiting for review") : t(g.status)}</span>
+          <span className={"cue " + tone}>{g.settled ? t("Decided on the portal before our QC") : g.status === "Pending" ? t("Waiting for review") : t(g.status)}</span>
           {g.reviewed_by_name && <small>{g.reviewed_by_name}{g.reviewed_at ? " · " + new Date(g.reviewed_at).toLocaleDateString(tag) : ""}</small>}
           {g.comment && !(g.notes || []).length && <p className="wrap-text">{g.comment}</p>}
           {canDecide && g.status !== "Pending" && (
@@ -284,7 +286,7 @@ export function PortalQc() {
     const needle = q.trim().toLowerCase();
     return reviews.filter(
       (r) =>
-        (status === "All" || r.status === status) &&
+        (status === "All" || stateOf(r) === status) &&
         (reviewer === "All" || r.reviewer === reviewer) &&
         (provider === "All" || r.provider === provider) &&
         (!needle || [r.student_name, r.title, r.group_id, r.portal_student_id, r.url].some((v) => String(v || "").toLowerCase().includes(needle))),
@@ -300,7 +302,7 @@ export function PortalQc() {
 
   if (error) return <section className="panel"><p role="alert">{t(error)}</p><button className="small-btn" onClick={load}>{t("Try again")}</button></section>;
   if (!data) return <div className="dash-loading">{t("Loading…")}</div>;
-  const count = (s: string) => reviews.filter((r) => r.status === s).length;
+  const count = (s: string) => reviews.filter((r) => stateOf(r) === s).length;
   const providers = [...new Set(reviews.map((r) => r.provider).filter(Boolean))].sort();
 
   return (
@@ -340,6 +342,7 @@ export function PortalQc() {
         <div><span>{t("Waiting for review")}</span><strong><bdi dir="ltr">{count("Pending")}</bdi></strong></div>
         <div><span>{t("Approved")}</span><strong><bdi dir="ltr">{count("Approved")}</bdi></strong></div>
         <div className={count("Rejected") ? "is-bad" : ""}><span>{t("Rejected")}</span><strong><bdi dir="ltr">{count("Rejected")}</bdi></strong></div>
+        {count("Settled") > 0 && <div><span>{t("Decided on the portal before our QC")}</span><strong><bdi dir="ltr">{count("Settled")}</bdi></strong></div>}
         <div><span>{t("Students")}</span><strong><bdi dir="ltr">{new Set(reviews.map((r) => r.portal_student_id)).size}</bdi></strong></div>
       </div>
       {data.lead && (data.reviewers || []).length > 0 && (
@@ -361,6 +364,7 @@ export function PortalQc() {
             { value: "Pending", label: t("Waiting for review") },
             { value: "Approved", label: t("Approved") },
             { value: "Rejected", label: t("Rejected") },
+            { value: "Settled", label: t("Decided on the portal before our QC") },
             { value: "All", label: t("All") },
           ]}
         />

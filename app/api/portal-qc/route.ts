@@ -2,7 +2,7 @@ import { actor, all, auditStmt, db, now, permit, rateLimit, refuseDemo, revokesS
 import { sameSide } from "@/lib/demo";
 import { can, ensure } from "@/lib/domain/rules";
 import { fingerprint, samePicture, type ProofPrint } from "@/lib/domain/proof-image";
-import { proofKey, waitsForCoach } from "@/lib/domain/portal-review";
+import { proofKey, settledProofs, waitsForCoach } from "@/lib/domain/portal-review";
 import { noteStmt, reviewNotes } from "@/lib/portal-review-notes";
 
 export const dynamic = "force-dynamic";
@@ -18,13 +18,18 @@ export const dynamic = "force-dynamic";
 //
 // The assignment is per student, not per gig. Each portal student (the
 // sheet's Student ID, a GUID) has one Quality Member, who gets every gig of
-// theirs that waits for the coach (provider status Pending or blank), in this
+// theirs that waits for the coach (lib/domain/portal-figures: Pending, blank or
+// Edited, until the portal settles it), in this
 // sheet and in the ones uploaded later; a new student goes to whoever has the
 // fewest students waiting. Each review is found again in a new upload by its
 // proof link (lib/domain/portal-review), so the proof comes back to the same
 // member with its verdict. A member sees their students; the Quality Lead and
 // the administrators see them all and can move a student to someone else or
 // share the students out again.
+//
+// A review still open whose gig the portal has since moved past leaves the
+// list and the member's load. Nothing is written: it comes back by itself if
+// a later sheet shows the gig waiting for the coach again.
 const lead = ["Quality Lead", "Operations Systems / Admin"];
 const team = ["Quality Member", ...lead];
 const noStore = { headers: { "Cache-Control": "no-store" } };
@@ -34,15 +39,19 @@ type Member = { id: string; name: string; pending: number };
 type Review = { portal_gig_id: string; proof_key: string; portal_student_id: string; reviewer: string; status: string };
 
 /** The active Quality Members (not the lead, who hands the work out), with how many of their students wait for a verdict. */
-async function members(u: any): Promise<Member[]> {
-  const people = await all(
-    `SELECT u.id,u.name,u.roles,(SELECT count(DISTINCT r.portal_student_id) FROM portal_gig_reviews r WHERE r.reviewer=u.id AND r.status='Pending') pending
-     FROM users u WHERE u.active=1 AND ${sameSide(u, "u.id")} ORDER BY u.id`,
-  );
+async function members(u: any, settled: Set<string> = new Set()): Promise<Member[]> {
+  const [people, open] = await Promise.all([
+    all(`SELECT u.id,u.name,u.roles FROM users u WHERE u.active=1 AND ${sameSide(u, "u.id")} ORDER BY u.id`),
+    all("SELECT reviewer,portal_student_id,proof_key FROM portal_gig_reviews WHERE status='Pending'"),
+  ]);
+  const waiting = new Map<string, Set<string>>();
+  for (const r of open as any[]) {
+    if (!settled.has(r.proof_key)) waiting.set(r.reviewer, (waiting.get(r.reviewer) || new Set<string>()).add(r.portal_student_id));
+  }
   return people
     .map((p: any) => ({ ...p, roles: typeof p.roles === "string" ? JSON.parse(p.roles || "[]") : p.roles || [] }))
     .filter((p: any) => p.roles.includes("Quality Member") && !p.roles.includes("Quality Lead"))
-    .map((p: any) => ({ id: p.id as string, name: p.name as string, pending: Number(p.pending) }));
+    .map((p: any) => ({ id: p.id as string, name: p.name as string, pending: waiting.get(p.id)?.size || 0 }));
 }
 
 /** One of the members with the fewest students waiting, at random, charged with one more. */
@@ -95,10 +104,10 @@ async function inBatches(statements: any[]) {
  * checked again, gigs new to the queue go to their student's member, and a
  * student whose gigs sit with two members is put back with one.
  */
-async function syncQueue(u: any, pool: Member[], gigsBatch: string, studentsBatch: string) {
+async function syncQueue(u: any, pool: Member[], settled: Set<string>, gigsBatch: string, studentsBatch: string) {
   // Reports whether anything was written, so the caller knows the loads moved.
   const sheet = await all(
-    `SELECT z.portal_gig_id,z.portal_student_id,z.student_name,z.title,z.url,z.proof_url,z.provider_status,p.student_id,s.name linked_name,s.lifecycle
+    `SELECT z.portal_gig_id,z.portal_student_id,z.student_name,z.title,z.url,z.proof_url,z.status,z.provider_status,p.student_id,s.name linked_name,s.lifecycle
      FROM portal_gigs z
      LEFT JOIN portal_students p ON p.batch_id=? AND p.portal_id=z.portal_student_id
      LEFT JOIN students s ON s.id=p.student_id
@@ -135,10 +144,11 @@ async function syncQueue(u: any, pool: Member[], gigsBatch: string, studentsBatc
     rows.set(key, current || [...list].sort(first)[0]);
   }
   // Each student's member: the one holding their gigs still waiting, else the latest given.
+  const open = (r: Review) => r.status === "Pending" && !settled.has(r.proof_key);
   const holder = new Map<string, string>();
   for (const r of reviews) holder.set(r.portal_student_id, r.reviewer);
-  for (const r of reviews) if (r.status === "Pending") holder.set(r.portal_student_id, r.reviewer);
-  const waiting = new Set(reviews.filter((r) => r.status === "Pending").map((r) => r.portal_student_id));
+  for (const r of reviews) if (open(r)) holder.set(r.portal_student_id, r.reviewer);
+  const waiting = new Set(reviews.filter(open).map((r) => r.portal_student_id));
   const inPool = (id?: string) => Boolean(id) && pool.some((p) => p.id === id);
   const t = now();
   let followed = 0;
@@ -233,7 +243,15 @@ export async function GET() {
     await rateLimit("portal-qc:" + u.id, 60, 60);
     const leads = can(u.roles, lead);
     const [gigsBatch, studentsBatch] = await Promise.all([activeGigsBatch(), activeStudentsBatch()]);
-    const pool = await members(u);
+    // The sheet's rows, read once: what the portal has moved past, and what repeats on a card below.
+    const sheet = gigsBatch
+      ? await all(
+          "SELECT portal_gig_id,lower(trim(url)) link,lower(trim(proof_url)) proof_url,status,provider_status,substr(CAST(created_on AS TEXT),1,10) AS gig_day FROM portal_gigs WHERE batch_id=?",
+          gigsBatch.batch_id,
+        )
+      : [];
+    const settled = settledProofs(sheet);
+    const pool = await members(u, settled);
 
     // The queue follows the latest sheet: new gigs waiting for the coach are handed out now.
     // Each decision reloads this page, and the queue only changes with a new
@@ -242,10 +260,10 @@ export async function GET() {
     const syncKey = [gigsBatch?.batch_id, studentsBatch?.batch_id, ...pool.map((p) => p.id)].join("|");
     let synced = false;
     if (gigsBatch && (syncKey !== lastSync.key || Date.now() - lastSync.at > syncEveryMs)) {
-      synced = await syncQueue(u, pool, gigsBatch.batch_id, studentsBatch?.batch_id || "");
+      synced = await syncQueue(u, pool, settled, gigsBatch.batch_id, studentsBatch?.batch_id || "");
       lastSync = { key: syncKey, at: Date.now() };
     }
-    const loads = synced ? await members(u) : pool;
+    const loads = synced ? await members(u, settled) : pool;
     const mine = leads ? "" : " AND r.reviewer=?";
     const hidden = revokesStudents(u) ? "" : " AND COALESCE(s.lifecycle,'')<>'Revoked'";
     const reviews = await all(
@@ -264,10 +282,6 @@ export async function GET() {
     // or the same link entered again on the same day. Shown on the card, so
     // the reviewer checks the proof against them before deciding.
     if (gigsBatch && reviews.length) {
-      const sheet = await all(
-        "SELECT portal_gig_id,lower(trim(url)) link,lower(trim(proof_url)) proof,substr(CAST(created_on AS TEXT),1,10) AS gig_day FROM portal_gigs WHERE batch_id=?",
-        gigsBatch.batch_id,
-      );
       // The same picture under another link, from the fingerprints already taken.
       const prints = await all(
         `SELECT z.portal_gig_id,z.portal_student_id student,trim(z.proof_url) proof_url,i.sha256,i.dhash FROM portal_gigs z
@@ -280,14 +294,14 @@ export async function GET() {
       const byProof = new Map<string, string[]>();
       const byLinkDay = new Map<string, string[]>();
       for (const g of sheet) {
-        if (g.proof) byProof.set(g.proof, [...(byProof.get(g.proof) || []), g.portal_gig_id]);
+        if (g.proof_url) byProof.set(g.proof_url, [...(byProof.get(g.proof_url) || []), g.portal_gig_id]);
         if (g.link && g.gig_day) byLinkDay.set(g.link + " " + g.gig_day, [...(byLinkDay.get(g.link + " " + g.gig_day) || []), g.portal_gig_id]);
       }
       const others = (list: string[] | undefined, id: string) => (list || []).filter((x) => x !== id);
       const sheetById = new Map((sheet as any[]).map((g: any) => [g.portal_gig_id, g]));
       for (const r of reviews as any[]) {
         const z = sheetById.get(r.portal_gig_id);
-        r.same_proof = z?.proof ? others(byProof.get(z.proof), r.portal_gig_id) : [];
+        r.same_proof = z?.proof_url ? others(byProof.get(z.proof_url), r.portal_gig_id) : [];
         r.same_link_day = z?.link && z.gig_day ? others(byLinkDay.get(z.link + " " + z.gig_day), r.portal_gig_id) : [];
         const mine = printOf.get(r.portal_gig_id);
         r.proof_checked = Boolean(mine);
@@ -300,7 +314,10 @@ export async function GET() {
     }
     // Every comment so far, the earlier ones next to the new.
     const notes = await reviewNotes(reviews.map((r: any) => r.proof_key));
-    for (const r of reviews as any[]) r.notes = notes.get(r.proof_key) || [];
+    for (const r of reviews as any[]) {
+      r.notes = notes.get(r.proof_key) || [];
+      r.settled = r.status === "Pending" && settled.has(r.proof_key);
+    }
     return Response.json(
       {
         reviews,
@@ -446,7 +463,10 @@ export async function POST(req: Request) {
     if (x.action === "redistribute") {
       // The students waiting for a verdict shared out again evenly, each with all their gigs.
       ensure(pool.length, "There is no active Quality Member to give reviews to.");
-      const students = (await all("SELECT DISTINCT portal_student_id FROM portal_gig_reviews WHERE status='Pending'")).map((r: any) => String(r.portal_student_id));
+      const batch: any = await activeGigsBatch();
+      const settled = batch ? settledProofs(await all("SELECT portal_gig_id,proof_url,status,provider_status FROM portal_gigs WHERE batch_id=?", batch.batch_id)) : new Set<string>();
+      const open = await all("SELECT portal_student_id,proof_key FROM portal_gig_reviews WHERE status='Pending'");
+      const students = [...new Set(open.filter((r: any) => !settled.has(r.proof_key)).map((r: any) => String(r.portal_student_id)))];
       for (const p of pool) p.pending = 0;
       for (let i = students.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));

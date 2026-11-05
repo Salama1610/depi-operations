@@ -1431,9 +1431,9 @@ td .searchable-select,td .pick-inline{max-width:240px;min-width:0}
 /* The portal's gigs waiting for the coach against our system (app/portal-gap). */
 .portal-gap{padding:12px 16px;display:flex;flex-direction:column;gap:12px}
 .portal-gap>summary{cursor:pointer;font-weight:600}
-.portal-gap .mini-stats{margin:0;flex-wrap:wrap}
+.portal-gap .mini-stats{margin:0;flex-wrap:wrap;row-gap:10px}
 .portal-gap .mini-stats small{display:block}
-.portal-gap .mini-stats>span{padding:6px 10px;margin:-7px 0;margin-inline-end:12px}
+.portal-gap .mini-stats>span,.portal-gap .mini-stats .mini-stat-btn{padding:6px 10px;margin:0;margin-inline-end:12px}
 .portal-gap td small{display:block}
 .portal-gap-tools{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px}
 .portal-gap-tools h3{margin:0;flex:1 1 220px;font-size:15px}
