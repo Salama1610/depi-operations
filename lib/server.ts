@@ -534,10 +534,11 @@ export async function weeklyLists(u: any) {
  * What coordinators wrote about their sessions after they ended (4 November
  * 2026), for Coach Operations, Project Operations and the administrators.
  * The group's coordinator and whoever wrote it see it too; nobody else
- * receives it, coaches included, so a comment can be frank about a coach.
+ * receives it, so a comment can be frank about a coach. Anyone holding the Coach
+ * role is held to the coordinator's view, whatever other roles they hold.
  */
 function readSessionNotes(u: any) {
-  const everyone = can(u.roles, ["Coach Operations", "Project Operations", "Operations Systems / Admin"]);
+  const everyone = can(u.roles, ["Coach Operations", "Project Operations", "Operations Systems / Admin"]) && !can(u.roles, ["Coach"]);
   return all(
     `SELECT n.id,n.session_id,n.author,a.name author_name,n.comments,n.created_at,n.updated_at,t.title,t.week,t.starts_at,t.group_id,COALESCE(t.coach_id,g.coach) coach_id
      FROM session_notes n JOIN sessions t ON t.id=n.session_id JOIN groups g ON g.id=t.group_id JOIN users a ON a.id=n.author

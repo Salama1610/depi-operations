@@ -4718,6 +4718,19 @@ test("a coordinator writes feedback once a session has ended; Coach Operations a
   current = { id: "coordinator-other", email: "staff-quality@example.invalid" };
   assert.equal((await notes()).length, 0);
 
+  // A coach who also holds a reading role still sees nothing, unless they are the group's coordinator.
+  const heldBy = async (id) => { const { roles } = await dbRow("SELECT roles FROM users WHERE id=?", id); return typeof roles === "string" ? roles : JSON.stringify(roles); };
+  const coachRoles = await heldBy(group.coach);
+  await dbExec("UPDATE users SET roles=? WHERE id=?", JSON.stringify(["Coach", "Project Operations"]), group.coach);
+  current = { id: group.coach, email: group.coach_email };
+  assert.equal((await notes()).length, 0);
+  await dbExec("UPDATE users SET roles=? WHERE id=?", coachRoles, group.coach);
+  const coordinatorRoles = await heldBy(group.coordinator);
+  await dbExec("UPDATE users SET roles=? WHERE id=?", JSON.stringify(["Coach", "Operations Coordinator"]), group.coordinator);
+  current = asCoordinator;
+  assert.equal((await notes()).length, 1);
+  await dbExec("UPDATE users SET roles=? WHERE id=?", coordinatorRoles, group.coordinator);
+
   // Clearing it removes it.
   current = asCoordinator;
   await check("session_note", { id: "SES-NOTE-1", comments: "" });

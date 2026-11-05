@@ -2904,7 +2904,7 @@ See you there!`,
     // What coordinators wrote after their sessions; the server sends only what this person may read.
     const sessionNotes: Row[] = d.sessionNotes || [];
     const myNotes = new Map<string, Row>(sessionNotes.filter((n) => n.author === user.id).map((n) => [n.session_id, n]));
-    const readsSessionNotes = sessionNotes.length > 0 || can(user.roles, ["Coach Operations", "Project Operations", "Operations Systems / Admin"]);
+    const readsSessionNotes = sessionNotes.length > 0 || (can(user.roles, ["Coach Operations", "Project Operations", "Operations Systems / Admin"]) && !can(user.roles, ["Coach"]));
     // What happened in the sessions: attendance, feedback and who held them.
     const ended = (x: Row) => x.status !== "Cancelled" && sessionEnded(x as any);
     const inRange = (iso: string) =>
