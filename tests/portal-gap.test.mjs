@@ -118,6 +118,8 @@ test("the QC queue takes what waits for the coach: edited gigs yes, gigs the por
   assert.equal(waitsForCoach({ status: "Rejected", provider_status: "Pending" }), false, "the portal has rejected it");
   assert.equal(waitsForCoach({ status: "Approved", provider_status: "Approved" }), false);
   assert.equal(waitsForCoach({ status: "Pending", provider_status: "Approved" }), false, "the coach has approved it: it waits for the auditor");
+  assert.equal(waitsForCoach({ status: "Pending", trainer_status: "Approved", provider_status: "Pending" }), false, "Trainer Status is the coach: approved, it waits for the portal's QC");
+  assert.equal(waitsForCoach({ status: "Pending", trainer_status: "Pending", provider_status: "Approved" }), true, "the portal's QC does not decide for the coach");
 });
 
 test("a proof is settled only when the sheet has it and no row of it still waits for the coach", () => {

@@ -107,7 +107,7 @@ async function inBatches(statements: any[]) {
 async function syncQueue(u: any, pool: Member[], settled: Set<string>, gigsBatch: string, studentsBatch: string) {
   // Reports whether anything was written, so the caller knows the loads moved.
   const sheet = await all(
-    `SELECT z.portal_gig_id,z.portal_student_id,z.student_name,z.title,z.url,z.proof_url,z.status,z.provider_status,p.student_id,s.name linked_name,s.lifecycle
+    `SELECT z.portal_gig_id,z.portal_student_id,z.student_name,z.title,z.url,z.proof_url,z.status,z.trainer_status,z.provider_status,p.student_id,s.name linked_name,s.lifecycle
      FROM portal_gigs z
      LEFT JOIN portal_students p ON p.batch_id=? AND p.portal_id=z.portal_student_id
      LEFT JOIN students s ON s.id=p.student_id
@@ -246,7 +246,7 @@ export async function GET() {
     // The sheet's rows, read once: what the portal has moved past, and what repeats on a card below.
     const sheet = gigsBatch
       ? await all(
-          "SELECT portal_gig_id,lower(trim(url)) link,lower(trim(proof_url)) proof_url,status,provider_status,substr(CAST(created_on AS TEXT),1,10) AS gig_day FROM portal_gigs WHERE batch_id=?",
+          "SELECT portal_gig_id,lower(trim(url)) link,lower(trim(proof_url)) proof_url,status,trainer_status,provider_status,substr(CAST(created_on AS TEXT),1,10) AS gig_day FROM portal_gigs WHERE batch_id=?",
           gigsBatch.batch_id,
         )
       : [];
@@ -268,7 +268,7 @@ export async function GET() {
     const hidden = revokesStudents(u) ? "" : " AND COALESCE(s.lifecycle,'')<>'Revoked'";
     const reviews = await all(
       `SELECT r.*,p.name reviewer_name,d.name reviewed_by_name,s.group_id,g.track,g.provider,
-              z.status portal_status,z.provider_status,z.auditor_status,z.price,z.created_on,z.category,z.proof_url,z.comment portal_comment,
+              z.status portal_status,z.trainer_status,z.provider_status,z.auditor_status,z.price,z.created_on,z.category,z.proof_url,z.comment portal_comment,
               CASE WHEN z.portal_gig_id IS NULL THEN 0 ELSE 1 END in_sheet
        FROM portal_gig_reviews r
        LEFT JOIN users p ON p.id=r.reviewer LEFT JOIN users d ON d.id=r.reviewed_by
@@ -464,7 +464,7 @@ export async function POST(req: Request) {
       // The students waiting for a verdict shared out again evenly, each with all their gigs.
       ensure(pool.length, "There is no active Quality Member to give reviews to.");
       const batch: any = await activeGigsBatch();
-      const settled = batch ? settledProofs(await all("SELECT portal_gig_id,proof_url,status,provider_status FROM portal_gigs WHERE batch_id=?", batch.batch_id)) : new Set<string>();
+      const settled = batch ? settledProofs(await all("SELECT portal_gig_id,proof_url,status,trainer_status,provider_status FROM portal_gigs WHERE batch_id=?", batch.batch_id)) : new Set<string>();
       const open = await all("SELECT portal_student_id,proof_key FROM portal_gig_reviews WHERE status='Pending'");
       const students = [...new Set(open.filter((r: any) => !settled.has(r.proof_key)).map((r: any) => String(r.portal_student_id)))];
       for (const p of pool) p.pending = 0;

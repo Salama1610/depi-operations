@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { useLocale, useT } from "@/lib/i18n/context";
 import { SearchableSelect } from "@/components/searchable-select";
 import { QcThread } from "@/components/qc-thread";
+import { coachStatusOf } from "@/lib/domain/portal-figures";
 
 type Row = Record<string, any>;
 
@@ -175,7 +176,7 @@ export function CoachGigs() {
                 <small>
                   {g.price !== null && g.price !== undefined ? "$" + g.price + " · " : ""}
                   {day(g.date)}
-                  {g.provider_status ? " · " + t("Coach on the portal: {v0}", { v0: t(g.provider_status) }) : ""}
+                  {coachStatusOf(g) ? " · " + t("Coach on the portal: {v0}", { v0: t(coachStatusOf(g)) }) : ""}
                 </small>
                 <span className="coach-gigs-links">
                   {g.url ? (

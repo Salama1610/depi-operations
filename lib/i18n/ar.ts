@@ -3069,4 +3069,9 @@ export const ar: Record<string, string> = {
   "Assigned students": "الطلاب المسندون",
   "Not started": "لم يبدأ",
   "No portal status": "بدون حالة على البوابة",
+  // Portal gigs: Trainer Status is the coach (7 Nov 2026)
+  "Trainer status (the coach)": "حالة المدرب (الكوتش)",
+  "Provider status (the portal's QC)": "حالة المزود (مراجعة الجودة على البوابة)",
+  "Portal QC": "جودة البوابة",
+  "The portal's own quality check, after the coach": "مراجعة الجودة الخاصة بالبوابة، بعد الكوتش",
 };

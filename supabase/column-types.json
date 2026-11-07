@@ -753,7 +753,8 @@
     "auditor_status": "text",
     "comment": "text",
     "action_by": "text",
-    "proof_url": "text"
+    "proof_url": "text",
+    "trainer_status": "text"
   },
   "feedback_flags": {
     "session_id": "text",

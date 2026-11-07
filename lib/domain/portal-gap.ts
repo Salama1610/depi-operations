@@ -9,7 +9,7 @@
 // from our quality team's verdict. Read only: nothing here changes the queue,
 // which syncs itself when Portal gigs QC opens (app/api/portal-qc).
 
-import { portalGigStage } from "./portal-figures.ts";
+import { portalGigStage, coachStatusOf } from "./portal-figures.ts";
 import { proofKey } from "./portal-review.ts";
 
 export const portalGapRoles = ["Quality Lead", "Coach Operations", "Operations Systems / Admin"];
@@ -48,6 +48,7 @@ export type SheetGig = Ours & {
   created_on?: unknown;
   updated_on?: unknown;
   status?: unknown;
+  trainer_status?: unknown;
   provider_status?: unknown;
   qc?: unknown;
   qc_at?: unknown;
@@ -79,7 +80,7 @@ const lower = (v: unknown) => String(v ?? "").trim().toLowerCase();
 
 /** The coach's decision on the portal is the opposite of our quality team's verdict. */
 const disagrees = (g: SheetGig) =>
-  (lower(g.provider_status) === "approved" && g.qc === "Rejected") || (lower(g.provider_status) === "rejected" && g.qc === "Approved");
+  (lower(coachStatusOf(g)) === "approved" && g.qc === "Rejected") || (lower(coachStatusOf(g)) === "rejected" && g.qc === "Approved");
 
 /**
  * The sheet has only the day a gig last changed, and the auditor moves it too.
@@ -105,6 +106,7 @@ const line = (g: SheetGig, place: GapPlace, why: GapWhy | null) => ({
   proof_url: text(g.proof_url),
   date: text(g.created_on),
   status: text(g.status),
+  trainer_status: text(g.trainer_status),
   provider_status: text(g.provider_status),
   qc: text(g.qc),
   qc_at: text(g.qc_at),

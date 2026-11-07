@@ -9,6 +9,7 @@ import { Download, ExternalLink } from "lucide-react";
 import { useLocale, useT } from "@/lib/i18n/context";
 import { SearchableSelect } from "@/components/searchable-select";
 import { toWorkbook } from "@/lib/spreadsheet";
+import { coachStatusOf } from "@/lib/domain/portal-figures";
 
 type Row = Record<string, any>;
 type Place = "not_in_queue" | "no_coach" | "with_qc" | "coach_tab" | "moved_on" | "disagree";
@@ -111,7 +112,8 @@ export function PortalGap({ open = false }: { open?: boolean }) {
           Group: g.group_id || "",
           Coach: g.coach_name || g.coach_id || "",
           "Portal status": g.status || "",
-          "Coach status": g.provider_status || "",
+          "Coach status": coachStatusOf(g),
+          "Portal QC status": g.trainer_status ? g.provider_status || "" : "",
           "Our QC": g.qc || "",
           "Our QC date": g.qc_at ? String(g.qc_at).slice(0, 10) : "",
           "Portal last changed": g.portal_changed ? String(g.portal_changed).slice(0, 10) : "",
@@ -242,7 +244,7 @@ export function PortalGap({ open = false }: { open?: boolean }) {
                       <td>{g.coach_name || g.coach_id || "—"}</td>
                       <td><bdi dir="ltr">{g.id}</bdi></td>
                       <td>{g.status ? t(g.status) : "—"}</td>
-                      <td>{g.provider_status ? t(g.provider_status) : "—"}</td>
+                      <td>{coachStatusOf(g) ? t(coachStatusOf(g)) : "—"}</td>
                       <td>{g.qc ? t(g.qc) : "—"}</td>
                       <td>{day(g.date)}</td>
                       <td>{g.why ? t(whyLabels[g.why]) : "—"}</td>

@@ -8,21 +8,37 @@ export type PortalGigStage = "approved" | "rejected" | "coach" | "auditor";
 
 const decided = (v: unknown) => String(v ?? "").trim().toLowerCase();
 
+type GigStatuses = { status?: unknown; trainer_status?: unknown; provider_status?: unknown; auditor_status?: unknown };
+
 /**
- * The gig's stage from its three statuses. The overall status settles it when
- * it is Approved or Rejected; otherwise the coach decides first (Pending,
- * blank or Edited after a change), then the auditor.
+ * The coach's decision on the portal: the sheet's Trainer Status. Provider
+ * Status is the portal's own quality check, after the coach (7 November 2026).
+ * Sheets uploaded before then had no Trainer Status, so for their rows the
+ * Provider Status stands in, as the app read it until then.
  */
-export function portalGigStage(g: { status?: unknown; provider_status?: unknown; auditor_status?: unknown }): PortalGigStage {
+export function coachStatusOf(g: GigStatuses) {
+  return String(g.trainer_status ?? "").trim() || String(g.provider_status ?? "").trim();
+}
+
+/** coachStatusOf as SQL on a portal_gigs alias. */
+export const coachStatusSql = (z = "z") => `coalesce(nullif(trim(${z}.trainer_status),''),${z}.provider_status,'')`;
+
+/**
+ * The gig's stage from its statuses. The overall status settles it when it is
+ * Approved or Rejected; otherwise the coach decides first (Pending, blank or
+ * Edited after a change). "auditor" is everything after the coach: the
+ * portal's own QC (Provider Status), then the auditor, neither in our hands.
+ */
+export function portalGigStage(g: GigStatuses): PortalGigStage {
   const status = decided(g.status);
   if (status === "approved") return "approved";
   if (status === "rejected") return "rejected";
-  return decided(g.provider_status) === "approved" ? "auditor" : "coach";
+  return decided(coachStatusOf(g)) === "approved" ? "auditor" : "coach";
 }
 
 /** Narrows a read to the gigs of the "coach" stage above, as SQL on a portal_gigs alias. */
 export const portalWaitsForCoachSql = (z = "z") =>
-  `lower(trim(coalesce(${z}.status,''))) NOT IN ('approved','rejected') AND lower(trim(coalesce(${z}.provider_status,'')))<>'approved'`;
+  `lower(trim(coalesce(${z}.status,''))) NOT IN ('approved','rejected') AND lower(trim(${coachStatusSql(z)}))<>'approved'`;
 
 export type PortalFigures = {
   /** The portal's Final Status is Graduated. */
@@ -51,7 +67,7 @@ const progress = (finalStatus: unknown) => ({ graduated: 2, started: 1 })[decide
  */
 export function portalFiguresByStudent(
   students: { student_id?: unknown; final_status?: unknown; graduate_type?: unknown }[],
-  gigs: { student_id?: unknown; status?: unknown; provider_status?: unknown; auditor_status?: unknown; qc?: unknown }[],
+  gigs: { student_id?: unknown; status?: unknown; trainer_status?: unknown; provider_status?: unknown; auditor_status?: unknown; qc?: unknown }[],
 ) {
   const out = new Map<string, PortalFigures>();
   for (const p of students) {

@@ -861,7 +861,7 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
       ...q.args,
     ),
     all(
-      `SELECT p.student_id,z.status,z.provider_status,z.auditor_status,r.status qc FROM portal_gigs z
+      `SELECT p.student_id,z.status,z.trainer_status,z.provider_status,z.auditor_status,r.status qc FROM portal_gigs z
        JOIN portal_uploads gb ON gb.batch_id=z.batch_id AND gb.sheet='gigs' AND gb.status='Active'
        JOIN portal_students p ON p.portal_id=z.portal_student_id
        JOIN portal_uploads sb ON sb.batch_id=p.batch_id AND sb.sheet='students' AND sb.status='Active'

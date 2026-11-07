@@ -64,7 +64,7 @@ export async function GET() {
     const rows = portalIds.length
       ? await inChunks(portalIds, (slice) =>
           all(
-            `SELECT z.portal_gig_id,z.portal_student_id,z.title,z.url,z.proof_url,z.price,z.created_on,z.status,z.provider_status,z.auditor_status,
+            `SELECT z.portal_gig_id,z.portal_student_id,z.title,z.url,z.proof_url,z.price,z.created_on,z.status,z.trainer_status,z.provider_status,z.auditor_status,
                     r.status qc_status,r.comment qc_comment,r.reviewed_at qc_reviewed_at
              FROM portal_gigs z JOIN portal_gig_reviews r ON r.proof_key=${proofKeySql("z")} AND r.status IN ('Approved','Rejected')
              WHERE z.batch_id=? AND z.portal_student_id IN (${marks(slice)})
@@ -87,6 +87,7 @@ export async function GET() {
         price: g.price === null || g.price === undefined ? null : Number(g.price),
         date: g.created_on,
         portal_status: g.status || null,
+        trainer_status: g.trainer_status || null,
         provider_status: g.provider_status || null,
         auditor_status: g.auditor_status || null,
         // Still waiting for the coach on the portal, the rule every count uses.

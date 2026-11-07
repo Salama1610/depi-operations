@@ -1399,6 +1399,8 @@ export const portalGigs = sqliteTable(
     comment: text("comment"),
     actionBy: text("action_by"),
     proofUrl: text("proof_url"),
+    // The coach's decision; Provider Status is the portal's own QC (7 Nov 2026).
+    trainerStatus: text("trainer_status"),
   },
   (t) => [index("portal_gigs_batch_idx").on(t.batchId, t.portalStudentId)],
 );

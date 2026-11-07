@@ -19,14 +19,14 @@ export const proofKeySql = (z = "z") =>
   `CASE WHEN coalesce(trim(${z}.proof_url),'')<>'' THEN lower(trim(${z}.proof_url)) ELSE 'gig:' || trim(${z}.portal_gig_id) END`;
 
 /** Whether the gig still waits for the coach on the portal: the only gigs worth checking first. */
-export const waitsForCoach = (gig: { status?: unknown; provider_status?: unknown; auditor_status?: unknown }) => portalGigStage(gig) === "coach";
+export const waitsForCoach = (gig: { status?: unknown; trainer_status?: unknown; provider_status?: unknown; auditor_status?: unknown }) => portalGigStage(gig) === "coach";
 
 /**
  * The proofs in a sheet's rows that wait for the coach on no row: the portal
  * has moved past them, so nothing is left for our quality team to check. A
  * proof that is not in the sheet is not among them; the sheet says nothing of it.
  */
-export function settledProofs(rows: { proof_url?: unknown; portal_gig_id?: unknown; status?: unknown; provider_status?: unknown }[]) {
+export function settledProofs(rows: { proof_url?: unknown; portal_gig_id?: unknown; status?: unknown; trainer_status?: unknown; provider_status?: unknown }[]) {
   const inSheet = new Set<string>();
   const waiting = new Set<string>();
   for (const g of rows) {

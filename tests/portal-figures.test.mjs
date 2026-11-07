@@ -2,7 +2,21 @@
 // read graduation and gigs from here, so they follow every upload.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { portalFiguresByStudent, portalGigStage, portalGraduation, sumPortalFigures } from "../lib/domain/portal-figures.ts";
+import { coachStatusOf, portalFiguresByStudent, portalGigStage, portalGraduation, sumPortalFigures } from "../lib/domain/portal-figures.ts";
+
+test("the coach's decision is Trainer Status; Provider Status is the portal's QC, after the coach", () => {
+  // The coach approved; the portal's QC has not decided yet: no longer the coach's.
+  assert.equal(portalGigStage({ status: "Pending", trainer_status: "Approved", provider_status: "Pending", auditor_status: "Pending" }), "auditor");
+  assert.equal(portalGigStage({ status: "Edited", trainer_status: "Approved", provider_status: "Pending", auditor_status: "Pending" }), "auditor");
+  // Still the coach's, whatever the portal's QC says.
+  assert.equal(portalGigStage({ status: "Pending", trainer_status: "Pending", provider_status: "Approved" }), "coach");
+  assert.equal(portalGigStage({ status: "Edited", trainer_status: "Edited", provider_status: "Pending" }), "coach");
+  assert.equal(portalGigStage({ status: "Rejected", trainer_status: "Approved", provider_status: "Rejected" }), "rejected");
+  assert.equal(coachStatusOf({ trainer_status: "Edited", provider_status: "Approved" }), "Edited");
+  // A sheet from before 7 November has no Trainer Status: Provider Status stands in.
+  assert.equal(coachStatusOf({ trainer_status: null, provider_status: "Approved" }), "Approved");
+  assert.equal(portalGigStage({ status: "Pending", provider_status: "Approved" }), "auditor");
+});
 
 test("a portal gig is approved or rejected for good, or waits for the coach, then the auditor", () => {
   assert.equal(portalGigStage({ status: "Approved", provider_status: "Approved", auditor_status: "Approved" }), "approved");

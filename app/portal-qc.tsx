@@ -17,6 +17,7 @@ import { useLocale, useT } from "@/lib/i18n/context";
 import { SearchableSelect } from "@/components/searchable-select";
 import { QcThread } from "@/components/qc-thread";
 import { PortalGap } from "./portal-gap";
+import { coachStatusOf } from "@/lib/domain/portal-figures";
 
 type Row = Record<string, any>;
 const pageSize = 25;
@@ -93,7 +94,8 @@ function GigCheck({ g, canDecide, busy, send }: { g: Row; canDecide: boolean; bu
         </div>
       </div>
       <div className="pqc-portal">
-        <span className="cue is-info" title={t("Coach on the portal")}>{t("Coach")}: {g.provider_status ? t(g.provider_status) : t("Pending")}</span>
+        <span className="cue is-info" title={t("Coach on the portal")}>{t("Coach")}: {coachStatusOf(g) ? t(coachStatusOf(g)) : t("Pending")}</span>
+        {g.trainer_status && <span className="cue is-info" title={t("The portal's own quality check, after the coach")}>{t("Portal QC")}: {g.provider_status ? t(g.provider_status) : t("Pending")}</span>}
         <span className="cue is-info" title={t("Auditor")}>{t("Auditor")}: {g.auditor_status ? t(g.auditor_status) : "—"}</span>
         {!Number(g.in_sheet) && <span className="cue is-warn">{t("No longer in the latest gigs sheet")}</span>}
         {(g.same_proof || []).length > 0 && (
