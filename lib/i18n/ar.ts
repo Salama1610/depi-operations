@@ -3074,4 +3074,13 @@ export const ar: Record<string, string> = {
   "Provider status (the portal's QC)": "حالة المزود (مراجعة الجودة على البوابة)",
   "Portal QC": "جودة البوابة",
   "The portal's own quality check, after the coach": "مراجعة الجودة الخاصة بالبوابة، بعد الكوتش",
+  // The coaches ranked from the furthest behind (app/portal-coach-students).
+  "Coaches ranked, furthest behind first": "ترتيب الكوتشز، الأكثر تأخرًا أولًا",
+  "Rank": "الترتيب",
+  "Not started or not on the portal": "لم يبدأ أو غير موجود على البوابة",
+  "Share of students": "نسبة الطلاب",
+  "Waiting over {v0} days": "تنتظر أكثر من {v0} أيام",
+  "Longest wait (days)": "أطول انتظار (أيام)",
+  "Download the ranking (Excel)": "تنزيل الترتيب (Excel)",
+  "Rank 1 is the coach furthest behind. Two measures, each ranking the coaches on its own: the share of their students not started on the portal or not on its students sheet yet, and their students' gigs waiting for the coach's decision for more than {v0} days. The overall rank adds the two, so neither outweighs the other.": "الترتيب 1 هو الكوتش الأكثر تأخرًا. مقياسان، كل منهما يرتب الكوتشز وحده: نسبة طلابه الذين لم يبدؤوا على البوابة أو غير موجودين في شيت الطلاب بعد، وأعمال طلابه التي تنتظر قرار الكوتش أكثر من {v0} أيام. الترتيب العام يجمع الاثنين، فلا يطغى أحدهما على الآخر.",
 };

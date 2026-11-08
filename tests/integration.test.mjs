@@ -5307,6 +5307,10 @@ test("the Overview and the Dashboard take graduation and gigs from the portal sh
     await dbExec("INSERT INTO portal_coaches(group_id,coach_name,coach_email,coach_user_id,uploaded_by,uploaded_at) VALUES(?,?,?,?,?,?)", r.group_id, r.coach_name, r.coach_email, r.coach_user_id, r.uploaded_by, r.uploaded_at);
   assert.equal(standing.total.assigned, standing.total.started + standing.total.not_started + standing.total.graduated + standing.total.no_status);
   assert.equal(standing.coaches.reduce((n, c) => n + c.assigned, 0), standing.total.assigned);
+  // The ranking holds every coach with a coach, from 1, the furthest behind.
+  assert.deepEqual(standing.ranking.map((r) => r.rank), standing.ranking.map((_, i) => i + 1));
+  assert.equal(standing.ranking.length, standing.coaches.filter((c) => c.coach_id && c.coach_id !== "system-unassigned-coach").length);
+  assert.ok(standing.ranking.every((r) => r.not_moving === r.not_started + r.no_status && r.slow <= r.waiting));
   assert.ok(!JSON.stringify(standing).includes(pupil.email), "counts only");
   const who = current;
   current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };

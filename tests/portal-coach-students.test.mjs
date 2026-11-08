@@ -2,7 +2,7 @@
 // one count, so the counts add up to the students assigned.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { coachStudentCounts, portalStanding } from "../lib/domain/portal-coach-students.ts";
+import { coachStudentCounts, portalStanding, rankCoaches } from "../lib/domain/portal-coach-students.ts";
 
 test("the portal's Final Status gives where a student stands", () => {
   assert.equal(portalStanding("Graduated"), "graduated");
@@ -41,4 +41,32 @@ test("each coach's students are counted once, and a group without a coach comes 
   assert.deepEqual(coaches[0], { coach_id: "C1", coach_name: "Amal", groups: 1, assigned: 1, started: 0, not_started: 1, graduated: 0, no_status: 0 });
   assert.deepEqual(coaches[2], { coach_id: null, coach_name: null, groups: 1, assigned: 1, started: 0, not_started: 0, graduated: 0, no_status: 1 });
   assert.deepEqual(total, { assigned: 6, started: 2, not_started: 1, graduated: 1, no_status: 2 });
+});
+
+test("the coaches are ranked from the furthest behind: students not moving, as a share, and gigs left waiting", () => {
+  const row = (coach_id, assigned, not_started, no_status) => ({ coach_id, coach_name: coach_id, groups: 1, assigned, started: assigned - not_started - no_status, not_started, graduated: 0, no_status });
+  const today = new Date("2026-11-08T12:00:00Z");
+  const ranking = rankCoaches(
+    [row("A", 10, 8, 1), row("B", 40, 10, 0), row("C", 10, 2, 0), row(null, 5, 5, 0)],
+    [
+      { coach_id: "B", created_on: "2026-10-20" },
+      { coach_id: "B", created_on: "2026-10-25" },
+      { coach_id: "B", created_on: "2026-11-07" },
+      // Sent again after an edit yesterday: waiting one day, not three weeks.
+      { coach_id: "C", created_on: "2026-10-15", updated_on: "2026-11-07" },
+      { coach_id: "A", created_on: "2026-10-30" },
+      { coach_id: null, created_on: "2026-10-01" },
+    ],
+    today,
+  );
+  assert.deepEqual(ranking.map((r) => r.coach_id), ["A", "B", "C"], "a group without a coach is not ranked");
+  assert.deepEqual(
+    ranking.map((r) => [r.coach_id, r.rank, r.not_moving, r.not_moving_pct, r.waiting, r.slow, r.oldest_days]),
+    [
+      ["A", 1, 9, 90, 1, 1, 9],
+      ["B", 2, 10, 25, 3, 2, 19],
+      ["C", 3, 2, 20, 1, 0, 1],
+    ],
+  );
+  assert.deepEqual(rankCoaches([row("D", 0, 0, 0)], [], today)[0], { ...row("D", 0, 0, 0), not_moving: 0, not_moving_pct: 0, waiting: 0, slow: 0, oldest_days: null, rank: 1 });
 });

@@ -58,3 +58,75 @@ export function coachStudentCounts(
     .sort((a, b) => Number(!a.coach_id) - Number(!b.coach_id) || String(a.coach_name ?? a.coach_id).localeCompare(String(b.coach_name ?? b.coach_id)));
   return { coaches, total };
 }
+
+/** A gig waits too long for the coach's decision after this many days. */
+export const slowAfterDays = 7;
+
+export type CoachRankRow = CoachStudentsRow & {
+  /** Not started on the portal, or not on the students sheet at all. */
+  not_moving: number;
+  not_moving_pct: number;
+  /** Gigs of the coach's students waiting for the coach's decision on the portal. */
+  waiting: number;
+  /** Of those, waiting longer than slowAfterDays. */
+  slow: number;
+  oldest_days: number | null;
+  /** 1 is the coach furthest behind. */
+  rank: number;
+};
+
+/**
+ * The coaches ranked from the furthest behind (8 November 2026), on two
+ * measures read from the portal sheets: the share of their students who have
+ * not started or are not on the portal yet, and how many of their students'
+ * gigs have waited for their decision longer than slowAfterDays. Each measure
+ * ranks the coaches on its own; the overall rank adds the two ranks, so
+ * neither measure outweighs the other. A share, not a count, for students, so
+ * a coach is not ranked lower for having more of them. Students of a group
+ * without a coach are left out of the ranking.
+ */
+export function rankCoaches(
+  coaches: CoachStudentsRow[],
+  waits: { coach_id?: unknown; created_on?: unknown; updated_on?: unknown }[],
+  today: Date = new Date(),
+): CoachRankRow[] {
+  const day = 86400000;
+  const gigs = new Map<string, { waiting: number; slow: number; oldest: number | null }>();
+  for (const w of waits) {
+    if (!w.coach_id) continue;
+    const key = String(w.coach_id);
+    const g = gigs.get(key) || { waiting: 0, slow: 0, oldest: null };
+    gigs.set(key, g);
+    g.waiting++;
+    // Waiting since the gig was sent, or sent again after an edit.
+    const since = Date.parse(String(w.updated_on || w.created_on || ""));
+    if (Number.isNaN(since)) continue;
+    const days = Math.max(0, Math.floor((today.getTime() - since) / day));
+    if (days > slowAfterDays) g.slow++;
+    if (g.oldest === null || days > g.oldest) g.oldest = days;
+  }
+  const rows = coaches
+    .filter((c) => c.coach_id && c.coach_id !== "system-unassigned-coach")
+    .map((c) => {
+      const g = gigs.get(String(c.coach_id)) || { waiting: 0, slow: 0, oldest: null };
+      const notMoving = c.not_started + c.no_status;
+      return { ...c, not_moving: notMoving, not_moving_pct: c.assigned ? Math.round((notMoving / c.assigned) * 100) : 0, waiting: g.waiting, slow: g.slow, oldest_days: g.oldest, rank: 0 };
+    });
+  // Equal values share a rank, as in a league table.
+  const rankBy = (value: (r: (typeof rows)[number]) => number) => {
+    const values = rows.map(value).sort((a, b) => b - a);
+    return new Map(rows.map((r) => [r, values.indexOf(value(r)) + 1]));
+  };
+  const byStudents = rankBy((r) => r.not_moving_pct);
+  const byGigs = rankBy((r) => r.slow);
+  const score = (r: (typeof rows)[number]) => byStudents.get(r)! + byGigs.get(r)!;
+  rows.sort(
+    (a, b) =>
+      score(a) - score(b) ||
+      b.not_moving_pct - a.not_moving_pct ||
+      b.slow - a.slow ||
+      String(a.coach_name ?? a.coach_id).localeCompare(String(b.coach_name ?? b.coach_id)),
+  );
+  rows.forEach((r, i) => (r.rank = i + 1));
+  return rows;
+}
