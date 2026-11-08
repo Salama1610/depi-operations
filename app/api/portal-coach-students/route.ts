@@ -1,12 +1,13 @@
 import { actor, all, permit, rateLimit, refuseDemo } from "@/lib/server";
 import { coachStudentCounts, coachStudentRoles } from "@/lib/domain/portal-coach-students";
-import { portalCoachSql } from "@/lib/portal-coaches";
 
 export const dynamic = "force-dynamic";
 
 // Each coach's students by where they stand on the portal, for Coach Operations
 // and the administrators (see lib/domain/portal-coach-students). Counts only:
-// no student's name or contact is sent.
+// no student's name or contact is sent. A student counts under their group's
+// coach in our system, not the portal's coach from its Coaches sheet
+// (8 November 2026); the gigs to carry out on the portal still go to that one.
 
 export async function GET() {
   try {
@@ -20,8 +21,8 @@ export async function GET() {
     const [students, portal] = await Promise.all([
       // Graduates whose record we have closed stay among the coach's students.
       all(
-        `SELECT s.id,s.group_id,${portalCoachSql("g")} coach_id,c.name coach_name
-         FROM students s JOIN groups g ON g.id=s.group_id LEFT JOIN users c ON c.id=${portalCoachSql("g")}
+        `SELECT s.id,s.group_id,g.coach coach_id,c.name coach_name
+         FROM students s JOIN groups g ON g.id=s.group_id LEFT JOIN users c ON c.id=g.coach
          WHERE s.lifecycle IN ('Active','Graduate Closed') AND COALESCE(g.delivery_model,'Regular')<>'Industry' AND g.id NOT LIKE 'DEMO-%'`,
       ),
       all("SELECT student_id,final_status FROM portal_students WHERE batch_id=? AND student_id IS NOT NULL", batchId),

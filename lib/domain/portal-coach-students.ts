@@ -1,7 +1,8 @@
 // How far each coach's students have come on the ministry portal, for Coach
 // Operations and the administrators (5 November 2026). A coach's students are
-// those of the groups they carry out on the portal (lib/portal-coaches), and
-// where each student stands is the portal's Final Status. Every student is in
+// those of the groups they coach in our system (groups.coach; since 8 November
+// 2026, not the portal's coach), and where each student stands is the portal's
+// Final Status. Every student is in
 // exactly one count, so the counts add up to the students assigned.
 
 export const coachStudentRoles = ["Coach Operations", "Operations Systems / Admin"];

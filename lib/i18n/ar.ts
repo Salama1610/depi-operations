@@ -3063,7 +3063,7 @@ export const ar: Record<string, string> = {
   "Against our QC": "عكس قرار جودتنا",
   "Coaches' students": "طلاب المدربين",
   "Coaches' students: {v0} assigned, {v1} started, {v2} not started, {v3} graduated": "طلاب المدربين: {v0} مسند، {v1} بدأ، {v2} لم يبدأ، {v3} متخرج",
-  "From the latest students sheet: each student is counted once, by the portal's Final Status. A coach's students are those of the groups the portal's Coaches sheet gives them, or the group's own coach where the sheet names none. No portal status: not on the sheet yet, or the sheet gives no status.": "من أحدث شيت للطلاب: يُحسب كل طالب مرة واحدة حسب الحالة النهائية على البوابة. طلاب المدرب هم طلاب المجموعات المسندة إليه في شيت المدربين على البوابة، أو مدرب المجموعة نفسه إذا لم يذكر الشيت مدربًا لها. بدون حالة على البوابة: غير موجود في الشيت بعد، أو الشيت لا يذكر له حالة.",
+  "From the latest students sheet: each student is counted once, by the portal's Final Status, under the coach of their group in our system (not the portal's coach). No portal status: not on the sheet yet, or the sheet gives no status.": "من أحدث شيت للطلاب: يُحسب كل طالب مرة واحدة حسب الحالة النهائية على البوابة، ضمن مدرب مجموعته في نظامنا (وليس مدرب البوابة). بدون حالة على البوابة: لم يظهر في الشيت بعد، أو لا يذكر الشيت حالة له.",
   "Unable to load the coaches' students.": "تعذر تحميل طلاب المدربين.",
   "Search by coach": "ابحث باسم المدرب",
   "Assigned students": "الطلاب المسندون",

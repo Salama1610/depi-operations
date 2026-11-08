@@ -47,7 +47,7 @@ export function PortalCoachStudents() {
       ) : (
         <>
           <small className="footnote">
-            {t("From the latest students sheet: each student is counted once, by the portal's Final Status. A coach's students are those of the groups the portal's Coaches sheet gives them, or the group's own coach where the sheet names none. No portal status: not on the sheet yet, or the sheet gives no status.")}
+            {t("From the latest students sheet: each student is counted once, by the portal's Final Status, under the coach of their group in our system (not the portal's coach). No portal status: not on the sheet yet, or the sheet gives no status.")}
           </small>
           <div className="portal-gap-tools">
             <label className="field">

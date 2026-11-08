@@ -5292,9 +5292,19 @@ test("the Overview and the Dashboard take graduation and gigs from the portal sh
   const coachStudents = await route("portal-coach-students");
   const standing = await (await coachStudents.GET()).json();
   assert.equal(standing.error, undefined, standing.error);
-  const { coach: pupilCoach } = await dbRow("SELECT COALESCE((SELECT pc.coach_user_id FROM portal_coaches pc WHERE pc.group_id=g.id),g.coach) coach FROM groups g WHERE g.id=?", pupil.group_id);
+  const { coach: pupilCoach } = await dbRow("SELECT coach FROM groups WHERE id=?", pupil.group_id);
   const pupilRow = standing.coaches.find((c) => c.coach_id === (pupilCoach || null));
   assert.ok(pupilRow.graduated >= 1, "the uploaded student is graduated on the portal");
+  // A different coach on the portal's Coaches sheet does not move them: our system's coach counts.
+  const kept = await dbRows("SELECT * FROM portal_coaches WHERE group_id=?", pupil.group_id);
+  const other = await dbRow("SELECT id FROM users WHERE id<>? AND roles LIKE '%\"Coach\"%' AND id NOT LIKE 'DEMO-%' ORDER BY id LIMIT 1", pupilCoach);
+  await dbExec("DELETE FROM portal_coaches WHERE group_id=?", pupil.group_id);
+  await dbExec("INSERT INTO portal_coaches(group_id,coach_name,coach_email,coach_user_id,uploaded_by,uploaded_at) VALUES(?,?,?,?,?,?)", pupil.group_id, "Portal coach", null, other.id, "owner", new Date().toISOString());
+  const moved = await (await coachStudents.GET()).json();
+  assert.equal(moved.coaches.find((c) => c.coach_id === pupilCoach).graduated, pupilRow.graduated, "still under our coach");
+  await dbExec("DELETE FROM portal_coaches WHERE group_id=?", pupil.group_id);
+  for (const r of kept)
+    await dbExec("INSERT INTO portal_coaches(group_id,coach_name,coach_email,coach_user_id,uploaded_by,uploaded_at) VALUES(?,?,?,?,?,?)", r.group_id, r.coach_name, r.coach_email, r.coach_user_id, r.uploaded_by, r.uploaded_at);
   assert.equal(standing.total.assigned, standing.total.started + standing.total.not_started + standing.total.graduated + standing.total.no_status);
   assert.equal(standing.coaches.reduce((n, c) => n + c.assigned, 0), standing.total.assigned);
   assert.ok(!JSON.stringify(standing).includes(pupil.email), "counts only");
