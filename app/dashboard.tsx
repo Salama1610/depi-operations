@@ -29,8 +29,15 @@ const INK = "#52627b";
 
 const DAY = 86400000;
 const cairoDayFormat = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit" });
-const rememberedDay = rememberDates((v: string) => cairoDayFormat.format(new Date(v)));
-const cairoDay = (v: any) => (v ? rememberedDay(v instanceof Date ? v.toISOString() : String(v)) : "");
+// A value that is not a date is no day, rather than an error that blanks the page.
+const rememberedDay = rememberDates((v: string) => {
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? "" : cairoDayFormat.format(d);
+});
+// Timestamps in milliseconds (Date.now() and arithmetic on it) are read as
+// instants: as text, "1762790000000" is not a date (4 to 10 November 2026).
+const cairoDay = (v: any) =>
+  v || v === 0 ? rememberedDay(v instanceof Date ? v.toISOString() : typeof v === "number" ? new Date(v).toISOString() : String(v)) : "";
 
 /** The programme week runs Friday to Thursday, Cairo time. */
 function programmeWeekStart(now = new Date()) {
