@@ -29,7 +29,7 @@ import {
   revokesStudents,
   unlocksAccounts,
 } from "@/lib/server";
-import { accountStates, accountsPerStudent, linkAccountKey, serviceFixCategory, serviceFixStatements, serviceFollowUpSweep, submissionStatus, taskProgressStates } from "@/lib/service-followup";
+import { accountStates, accountsPerStudent, buysServices, linkAccountKey, serviceFixCategory, studentAccountsSql, serviceFixStatements, serviceFollowUpSweep, submissionStatus, taskProgressStates } from "@/lib/service-followup";
 import { demoPeople, demoPlan, demoStudentEmail, isDemo, sameSide } from "@/lib/demo";
 import {
   ensure,
@@ -123,6 +123,20 @@ const demoActions = new Set([
  * cancelled. Each movement is a credit-ledger row naming the order, so the
  * amount still charged to an order is the sum of its rows.
  */
+/**
+ * The student an order on this account is for, and the service it buys: the
+ * account's first student, or `wanted`, a second student whose service the
+ * account buys (service_links.account_id, 10 November 2026).
+ */
+async function orderStudent(a: any, wanted?: unknown) {
+  const id = wanted ? String(wanted) : a.student_id;
+  ensure(id, "Link the account to a student before recording an order.");
+  if (id === a.student_id) return { student_id: a.student_id as string, service_link_id: (a.service_link_id || null) as string | null };
+  const link: any = await stmt("SELECT id FROM service_links WHERE account_id=? AND student_id=? ORDER BY qc_at LIMIT 1", a.id, id).first();
+  ensure(link, "This account does not buy from that student.");
+  return { student_id: id, service_link_id: link.id as string };
+}
+
 async function orderCreditJobs(accountId: string, orderId: string, wanted: number, actorId: string, t: string) {
   const tag = `[order ${orderId}]`;
   const account: any = await stmt("SELECT credits FROM accounts WHERE id=?", accountId).first();
@@ -2173,6 +2187,8 @@ export async function POST(req: Request) {
           "Access Issue": ["Available", "Under Review", "Retired"],
           "Funding Block": ["Available", "Under Review", "Retired"],
           "Under Review": ["Available", "Blocked", "Retired"],
+          // Used, but not on the accounts sheet of 10 November 2026: kept for its history, never given out.
+          Locked: ["Available", "Retired"],
         };
         ensure(
           flow[a.status]?.includes(x.status) && x.reason?.trim(),
@@ -3218,15 +3234,32 @@ export async function POST(req: Request) {
         ensure(unlocksAccounts(u), "Only the people allowed to unlock accounts can release one.");
         const a: any = await stmt("SELECT * FROM accounts WHERE id=?", id).first();
         ensure(a, "Account not found.");
-        ensure(a.student_id, "This account is not linked to a student.");
         const reason = String(x.reason || "").trim();
         ensure(reason.length >= 3, "Say why the account is being released.");
+        // A second student: only the service it buys is released; the account keeps its first student.
+        if (x.student_id && String(x.student_id) !== a.student_id) {
+          const second = await orderStudent(a, x.student_id);
+          auditPrevious = { student_id: second.student_id, service_link_id: second.service_link_id };
+          auditValue = { account_id: id, student_id: null, released: second.student_id };
+          for (const open of await all("SELECT id FROM account_orders WHERE account_id=? AND student_id=? AND status NOT IN ('Proof Uploaded','Cancelled')", id, second.student_id))
+            jobs.push(...(await orderCreditJobs(id, String((open as any).id), 0, u.id, t)));
+          jobs.push(
+            stmt("UPDATE service_links SET account_id=NULL WHERE account_id=? AND student_id=?", id, second.student_id),
+            stmt(
+              "UPDATE account_orders SET status='Cancelled',note=COALESCE(note||' · ','')||?,cancelled_at=?,updated_at=? WHERE account_id=? AND student_id=? AND status NOT IN ('Proof Uploaded','Cancelled')",
+              "Closed: the account was released from this student.", t, t, id, second.student_id,
+            ),
+          );
+          break;
+        }
+        ensure(a.student_id, "This account is not linked to a student.");
         auditPrevious = { student_id: a.student_id, service_link_id: a.service_link_id, linked_at: a.linked_at, linked_by: a.linked_by, coordinator_id: a.coordinator_id };
         auditValue = { account_id: id, student_id: null, service_link_id: null };
         for (const open of await all("SELECT id FROM account_orders WHERE account_id=? AND student_id=? AND status NOT IN ('Proof Uploaded','Cancelled')", id, a.student_id || ""))
           jobs.push(...(await orderCreditJobs(id, String((open as any).id), 0, u.id, t)));
         jobs.push(
           stmt("UPDATE accounts SET student_id=NULL,service_link_id=NULL,linked_at=NULL,linked_by=NULL WHERE id=?", id),
+          stmt("UPDATE service_links SET account_id=NULL WHERE account_id=? AND student_id=?", id, a.student_id),
           // An order belongs to the student it was placed for: one still open
           // when the account is released is closed, with why (2 November 2026).
           stmt(
@@ -3256,7 +3289,7 @@ export async function POST(req: Request) {
           const a: any = await stmt("SELECT * FROM accounts WHERE id=?", String(x.account_id || "")).first();
           ensure(a, "Account not found.");
           ensure(mayOrder(a), "Only this account's coordinator, its keepers or the leaders update its orders.");
-          ensure(a.student_id, "Link the account to a student before recording an order.");
+          const pupil = await orderStudent(a, x.student_id);
           const to = String(x.status || "");
           // Buy (bought through the account) comes first, as on the team's sheet (23 October 2026).
           ensure(["Buy", "In Progress", "Done", "Proof Uploaded", "Cancelled"].includes(to), "Choose the order's status.");
@@ -3264,12 +3297,12 @@ export async function POST(req: Request) {
           if (to === "Cancelled") ensure(note.length >= 3, "Say why the order was cancelled.");
           if (to === "Proof Uploaded") {
             ensure(x.proof_id, "Upload the proof first.");
-            await proof(u, String(x.proof_id), a.student_id);
+            await proof(u, String(x.proof_id), pupil.student_id);
           }
           const current: any = await stmt(
             "SELECT * FROM account_orders WHERE account_id=? AND student_id=? AND status<>'Proof Uploaded' ORDER BY created_at DESC LIMIT 1",
             a.id,
-            a.student_id,
+            pupil.student_id,
           ).first();
           const stamps = (from: any) => ({
             done: to === "Done" || to === "Proof Uploaded" ? from?.done_at || t : from?.done_at || null,
@@ -3281,7 +3314,7 @@ export async function POST(req: Request) {
             jobs.push(
               stmt(
                 "INSERT INTO account_orders(id,account_id,student_id,service_link_id,coordinator,order_ref,amount,note,status,proof_id,created_at,updated_at,done_at,proof_at,cancelled_at) VALUES(?,?,?,?,?,NULL,NULL,?,?,?,?,?,?,?,?)",
-                id, a.id, a.student_id, a.service_link_id || null, u.id, note || null, to, to === "Proof Uploaded" ? String(x.proof_id) : null, t, t, at.done, at.proof, at.cancelled,
+                id, a.id, pupil.student_id, pupil.service_link_id, u.id, note || null, to, to === "Proof Uploaded" ? String(x.proof_id) : null, t, t, at.done, at.proof, at.cancelled,
               ),
             );
           } else {
@@ -3302,8 +3335,8 @@ export async function POST(req: Request) {
           const a: any = await stmt("SELECT * FROM accounts WHERE id=?", String(x.account_id || "")).first();
           ensure(a, "Account not found.");
           ensure(mayOrder(a), "Only this account's coordinator, its keepers or the leaders record its orders.");
-          ensure(a.student_id, "Link the account to a student before recording an order.");
-          const pupil = await student(u, a.student_id);
+          const which = await orderStudent(a, x.student_id);
+          const pupil = await student(u, which.student_id);
           const orderRef = String(x.order_ref || "").trim();
           ensure(orderRef.length <= 120, "Keep the order number under 120 characters.");
           const amount = x.amount === "" || x.amount === null || x.amount === undefined ? null : Number(x.amount);
@@ -3312,7 +3345,7 @@ export async function POST(req: Request) {
           jobs.push(
             stmt(
               "INSERT INTO account_orders(id,account_id,student_id,service_link_id,coordinator,order_ref,amount,note,status,proof_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,'In Progress',NULL,?,?)",
-              id, a.id, pupil.id, a.service_link_id || null, u.id, orderRef || null, amount, note, t, t,
+              id, a.id, pupil.id, which.service_link_id, u.id, orderRef || null, amount, note, t, t,
             ),
           );
           break;
@@ -3363,7 +3396,7 @@ export async function POST(req: Request) {
           can(u.roles, ["Project Operations", "Operations Systems / Admin"]) || keepsAccounts(u) || a.coordinator_id === u.id || a.coordinator_2_id === u.id,
           "Only this account's coordinator, its keepers or the leaders update its orders.",
         );
-        ensure(a.student_id, "Link the account to a student before recording an order.");
+        const pupil = await orderStudent(a, x.student_id);
         const sets: string[] = [];
         const values: any[] = [];
         if ("amount" in x) {
@@ -3380,7 +3413,7 @@ export async function POST(req: Request) {
           values.push(where || null);
         }
         ensure(sets.length, "Enter the price or the marketplace.");
-        const current: any = await stmt("SELECT * FROM account_orders WHERE account_id=? AND student_id=? ORDER BY created_at DESC LIMIT 1", a.id, a.student_id).first();
+        const current: any = await stmt("SELECT * FROM account_orders WHERE account_id=? AND student_id=? ORDER BY created_at DESC LIMIT 1", a.id, pupil.student_id).first();
         // The price comes off the account's credit (a cancelled order's does not).
         if ("amount" in x) {
           const raw = String(x.amount ?? "").trim();
@@ -3394,7 +3427,7 @@ export async function POST(req: Request) {
           jobs.push(
             stmt(
               "INSERT INTO account_orders(id,account_id,student_id,service_link_id,coordinator,status,created_at,updated_at) VALUES(?,?,?,?,?,'Buy',?,?)",
-              id, a.id, a.student_id, a.service_link_id || null, u.id, t, t,
+              id, a.id, pupil.student_id, pupil.service_link_id, u.id, t, t,
             ),
             stmt(`UPDATE account_orders SET ${sets.join(",")} WHERE id=?`, ...values, id),
           );
@@ -3420,15 +3453,18 @@ export async function POST(req: Request) {
           ensure(pupil.lifecycle === "Active", "Choose an active student.");
           // A real account never goes to a demo student, nor a demo account to a real one.
           ensure(String(pupil.id).startsWith("DEMO-") === String(id).startsWith("DEMO-"), "Demo accounts are for demo students only, and real accounts for real students.");
-          // Client accounts are for the Service Team's students only.
-          const team: any = await stmt("SELECT u.team FROM students s JOIN groups g ON g.id=s.group_id JOIN users u ON u.id=g.supervisor WHERE s.id=?", studentId).first();
-          ensure(team?.team === "Service Team", "Client accounts are for Service Team students only.");
-          const others = Number((await stmt("SELECT count(*) n FROM accounts WHERE student_id=? AND id<>?", studentId, id).first() as any)?.n || 0);
-          ensure(others < accountsPerStudent, "This student already has two accounts. Remove one of them first.");
+          // Client accounts are for the service groups' students only (10 November 2026).
+          const group: any = await stmt("SELECT group_id FROM students WHERE id=?", studentId).first();
+          ensure(String(id).startsWith("DEMO-") || buysServices(group?.group_id), "Client accounts are for the students of the service groups only.");
+          const others = (await all(studentAccountsSql, studentId, studentId)).filter((r: any) => r.account_id !== id).length;
+          ensure(others < accountsPerStudent, "This student already has three accounts. Remove one of them first.");
           if (x.service_link_id) {
             const link: any = await stmt("SELECT id,student_id,qc_status FROM service_links WHERE id=?", String(x.service_link_id)).first();
             ensure(link && link.student_id === studentId, "Choose one of this student's services.");
-            const taken: any = await stmt("SELECT id FROM accounts WHERE service_link_id=? AND id<>?", link.id, id).first();
+            const taken: any = await stmt(
+              "SELECT id FROM accounts WHERE service_link_id=? AND id<>? UNION SELECT account_id FROM service_links WHERE id=? AND account_id IS NOT NULL AND account_id<>?",
+              link.id, id, link.id, id,
+            ).first();
             ensure(!taken, "Another account is already linked to this service.");
             serviceId = link.id;
           }
@@ -3466,6 +3502,9 @@ export async function POST(req: Request) {
             coordinatorId,
             id,
           ),
+          // The service the account now buys, and not the previous student's.
+          ...(a.student_id && !sameStudent ? [stmt("UPDATE service_links SET account_id=NULL WHERE account_id=? AND student_id=?", id, a.student_id)] : []),
+          ...(serviceId ? [stmt("UPDATE service_links SET account_id=? WHERE id=?", id, serviceId)] : []),
         );
         if (coordinatorId && studentId && (coordinatorId !== a.coordinator_id || !sameStudent))
           jobs.push(

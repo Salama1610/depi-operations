@@ -3083,4 +3083,12 @@ export const ar: Record<string, string> = {
   "Longest wait (days)": "أطول انتظار (أيام)",
   "Download the ranking (Excel)": "تنزيل الترتيب (Excel)",
   "Rank 1 is the coach furthest behind. Two measures, each ranking the coaches on its own: the share of their students not started on the portal or not on its students sheet yet, and their students' gigs waiting for the coach's decision for more than {v0} days. The overall rank adds the two, so neither outweighs the other.": "الترتيب 1 هو الكوتش الأكثر تأخرًا. مقياسان، كل منهما يرتب الكوتشز وحده: نسبة طلابه الذين لم يبدؤوا على البوابة أو غير موجودين في شيت الطلاب بعد، وأعمال طلابه التي تنتظر قرار الكوتش أكثر من {v0} أيام. الترتيب العام يجمع الاثنين، فلا يطغى أحدهما على الآخر.",
+  // Client accounts: two students each, three accounts per student, the service groups (10 November 2026).
+  "Locked: not given out again": "مقفل: لا يُعطى لطالب مرة أخرى",
+  "Second student": "الطالب الثاني",
+  "Remove the second student": "إزالة الطالب الثاني",
+  "A student holds three accounts at most, each a different one, and an account buys from two students at most. Choosing a student fills in their coordinator; you can change it.": "يحصل الطالب على ثلاثة حسابات على الأكثر، كل منها حساب مختلف، ويشتري الحساب من طالبين على الأكثر. اختيار الطالب يملأ منسقه، ويمكنك تغييره.",
+  "This account does not buy from that student.": "هذا الحساب لا يشتري من هذا الطالب.",
+  "Client accounts are for the students of the service groups only.": "حسابات العملاء لطلاب جروبات الخدمات فقط.",
+  "This student already has three accounts. Remove one of them first.": "لدى هذا الطالب ثلاثة حسابات بالفعل. أزل أحدها أولًا.",
 };

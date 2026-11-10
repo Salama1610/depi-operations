@@ -13,20 +13,51 @@ function notify(recipient: string, title: string, entityType: string, entityId: 
 // until the quality team approves the corrected link; a new correction comment
 // replaces it with a new task.
 //
-// Each approved service of a Service Team student on Kafiil or Nafezly (not
-// Khamsat, which is not covered) earns an available client account on the same marketplace (the one
-// with the most credit; a $0 account once none with credit is free, 22 Oct), linked to the student, that service and the student's
-// coordinator: up to two accounts per student, so a third approved service
-// earns none (19 October 2026). It is the coordinator's key: the account to
-// order that service from. The student never sees it. One student per account,
-// and the link is locked: only the people holding the "account-unlock" scope
-// change or remove it.
+// Each approved service on Kafiil or Nafezly (not Khamsat, which is not
+// covered) of a student in one of the service groups earns an available
+// client account on the same marketplace (the one with the most credit), linked
+// to the student, that service and the student's coordinator. It is the
+// coordinator's key: the account to order that service from. The student
+// never sees it, and the link is locked: only the people holding the
+// "account-unlock" scope change or remove it.
+//
+// Since 10 November 2026: only the students of the service groups below get
+// accounts; a student gets up to three, each a different account; an account
+// buys from two students at most, one service each, and never two students
+// of the same job profile. The service link records the account that buys it
+// (service_links.account_id); the account's first student stays on the
+// account itself, and the second student's coordinator shares the account.
+// Accounts that are not Available (Locked ones among them) are never given out.
 
 export const serviceFixCategory = "Service correction";
 export const taskProgressStates = ["Contacted the student", "Could not reach the student", "Student is fixing it"];
 export const accountStates = ["In use", "Not used yet", "Needs a new account", "Does not work"];
-/** The most client accounts one student is linked to, one per approved service. */
-export const accountsPerStudent = 2;
+/** The most client accounts one student is linked to, one per approved service, each a different account. */
+export const accountsPerStudent = 3;
+/** The most students one account buys from, one service each. */
+export const studentsPerAccount = 2;
+/** The groups whose students' services are bought through client accounts (10 November 2026). */
+export const serviceGroups = [
+  "ALX5_DRT1_S1",
+  "DKH5_DRT2_S1",
+  "ONL5_DRT2_S2",
+  "ALX5_DRT1_G1",
+  "CAI5_DRT1_G2",
+  "CAI5_DRT1_S1",
+  "CAI5_DRT1_S2",
+  "ALX5_DRT7_S1",
+  "CAI5_DRT3_S1",
+  "ONL5_DRT2_G1",
+  "ONL5_DRT2_G2",
+];
+export const buysServices = (groupId: unknown) => serviceGroups.includes(String(groupId ?? "").trim().toUpperCase());
+
+/** The accounts a student is linked to: as an account's first student, or through a service it buys. */
+export const studentAccountsSql = `SELECT id account_id FROM accounts WHERE student_id=? UNION SELECT account_id FROM service_links WHERE student_id=? AND account_id IS NOT NULL`;
+
+/** How many students an account buys from, as SQL on an accounts alias. */
+export const accountUsesSql = (a = "a") =>
+  `((CASE WHEN ${a}.student_id IS NULL THEN 0 ELSE 1 END) + (SELECT count(DISTINCT l.student_id) FROM service_links l WHERE l.account_id=${a}.id AND l.student_id<>coalesce(${a}.student_id,'')))`;
 
 // Service-link platforms are spelled as students see them; client accounts as
 // the accounts sheet does.
@@ -69,60 +100,84 @@ export async function serviceFixStatements(link: any, decision: "Locked" | "Need
 
 /**
  * Links client accounts to the student's approved services, oldest approval
- * first, until they hold two. Safe to call any number of times: services that
- * have an account, or a student who has two, are left as they are. `actor` is
+ * first, until they hold three. Safe to call any number of times: services that
+ * have an account, or a student who has three, are left as they are. `actor` is
  * whoever's action prompted it, for the audit; linked_by stays empty because
  * the app did it. Returns the accounts linked and what stopped it.
  */
 export async function linkAccountKey(studentId: string, actor: any | null) {
   const s: any = await stmt(
-    `SELECT s.id,s.name,s.lifecycle,g.id group_id,g.coordinator,g.supervisor,coalesce(g.delivery_model,'Regular') model,u.team
-     FROM students s JOIN groups g ON g.id=s.group_id LEFT JOIN users u ON u.id=g.supervisor WHERE s.id=?`,
+    `SELECT s.id,s.name,s.lifecycle,s.job_profile,g.id group_id,g.coordinator,g.supervisor,coalesce(g.delivery_model,'Regular') model
+     FROM students s JOIN groups g ON g.id=s.group_id WHERE s.id=?`,
     studentId,
   ).first();
-  // Service Team students only: theirs are the services ordered from client accounts.
-  if (!s || s.lifecycle !== "Active" || s.team !== "Service Team" || s.model === "Industry" || !s.coordinator)
+  // The service groups' students only: theirs are the services ordered from client accounts.
+  const demo = String(s?.group_id || "").startsWith("DEMO-");
+  if (!s || s.lifecycle !== "Active" || (!demo && !buysServices(s.group_id)) || s.model === "Industry" || !s.coordinator)
     return { linked: 0, reason: "not eligible" } as const;
-  const held = Number((await stmt("SELECT count(*) n FROM accounts WHERE student_id=?", studentId).first() as any)?.n || 0);
-  if (held >= accountsPerStudent) return { linked: 0, reason: "has two" } as const;
+  const accountsOf = async () => new Set((await all(studentAccountsSql, studentId, studentId)).map((r: any) => String(r.account_id)));
+  let mine = await accountsOf();
+  if (mine.size >= accountsPerStudent) return { linked: 0, reason: "has three" } as const;
   const waiting = await all(
     `SELECT l.id,l.platform,l.slot FROM service_links l
-     WHERE l.student_id=? AND l.qc_status='Locked' AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.service_link_id=l.id)
+     WHERE l.student_id=? AND l.qc_status='Locked' AND l.account_id IS NULL AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.service_link_id=l.id)
      ORDER BY l.qc_at,l.updated_at,l.slot`,
     studentId,
   );
+  const profile = String(s.job_profile || "").trim().toLowerCase();
   // Demo students try things out on demo accounts only; real students never get one (22 Oct).
   const side = String(s.group_id).startsWith("DEMO-") ? "id LIKE 'DEMO-%'" : "id NOT LIKE 'DEMO-%'";
   let linked = 0;
-  let count = held;
   const missing: string[] = [];
   const t = now();
   for (const link of waiting) {
-    if (count >= accountsPerStudent) break;
+    if (mine.size >= accountsPerStudent) break;
     const platform = marketplace[link.platform];
     if (!platform) continue;
+    // A free account first, then one with a student left to share; never one
+    // this student already has, nor one buying from a student of the same job profile.
+    const sameProfile = profile
+      ? `EXISTS (SELECT 1 FROM students x WHERE lower(trim(coalesce(x.job_profile,'')))=? AND (x.id=a.student_id OR x.id IN (SELECT l.student_id FROM service_links l WHERE l.account_id=a.id)))`
+      : "0=1";
     const account: any = await stmt(
-      `SELECT id,label FROM accounts WHERE platform=? AND status='Available' AND student_id IS NULL AND active_assignment IS NULL AND ${side}
-       ORDER BY credits DESC,id LIMIT 1`,
-      platform,
+      `SELECT a.id,a.label,a.student_id FROM accounts a WHERE a.platform=? AND a.status='Available' AND a.active_assignment IS NULL AND a.${side}
+         AND ${accountUsesSql("a")}<? AND coalesce(a.student_id,'')<>? AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.account_id=a.id AND l.student_id=?)
+         AND NOT ${sameProfile}
+       ORDER BY CASE WHEN a.student_id IS NULL THEN 0 ELSE 1 END,a.credits DESC,a.id LIMIT 1`,
+      platform, studentsPerAccount, studentId, studentId, ...(profile ? [profile] : []),
     ).first();
     if (!account) {
       missing.push(platform);
       continue;
     }
-    // Guarded: the account is still free and the student still under two.
+    // Guarded: the service still has no account, the account is still under
+    // two students and the student still under three accounts.
+    const guard = `(SELECT count(*) FROM (${studentAccountsSql}) y)<?`;
     await db().batch([
       stmt(
-        `UPDATE accounts SET student_id=?,service_link_id=?,linked_at=?,linked_by=?,coordinator_id=?,
-           coordinator_2_id=CASE WHEN coordinator_2_id=? THEN NULL ELSE coordinator_2_id END
-         WHERE id=? AND student_id IS NULL AND (SELECT count(*) FROM accounts x WHERE x.student_id=?)<?`,
-        studentId, link.id, t, null, s.coordinator, s.coordinator, account.id, studentId, accountsPerStudent,
+        `UPDATE service_links SET account_id=? WHERE id=? AND account_id IS NULL AND ${guard}
+           AND (SELECT ${accountUsesSql("a")} FROM accounts a WHERE a.id=?)<?`,
+        account.id, link.id, studentId, studentId, accountsPerStudent, account.id, studentsPerAccount,
       ),
     ]);
-    const now_linked: any = await stmt("SELECT student_id,service_link_id FROM accounts WHERE id=?", account.id).first();
-    if (now_linked?.student_id !== studentId || now_linked?.service_link_id !== link.id) continue;
+    const now_linked: any = await stmt("SELECT account_id FROM service_links WHERE id=?", link.id).first();
+    if (now_linked?.account_id !== account.id) continue;
+    // The first student is kept on the account itself; a second one's coordinator shares it.
+    await db().batch([
+      account.student_id
+        ? stmt(
+            "UPDATE accounts SET coordinator_2_id=COALESCE(coordinator_2_id,CASE WHEN coordinator_id=? THEN NULL ELSE ? END) WHERE id=?",
+            s.coordinator, s.coordinator, account.id,
+          )
+        : stmt(
+            `UPDATE accounts SET student_id=?,service_link_id=?,linked_at=?,linked_by=?,coordinator_id=?,
+               coordinator_2_id=CASE WHEN coordinator_2_id=? THEN NULL ELSE coordinator_2_id END
+             WHERE id=? AND student_id IS NULL`,
+            studentId, link.id, t, null, s.coordinator, s.coordinator, account.id,
+          ),
+    ]);
     linked++;
-    count++;
+    mine = await accountsOf();
     await db().batch([
       notify(s.coordinator, `Client account linked to ${s.name}'s ${link.platform} service ${link.slot}: use ${account.label}`, "student", studentId, "Information", `account-key:${account.id}:${link.id}`),
       auditStmt(actor || { id: "system" }, "account_link", account.id, { student_id: studentId, service_link_id: link.id, coordinator_id: s.coordinator, platform, automatic: true }, null),
@@ -162,13 +217,13 @@ export async function serviceFollowUpSweep(actor: any) {
     await db().batch(jobs);
     tasks++;
   }
-  const candidates = await all(
-    `SELECT DISTINCT l.student_id FROM service_links l JOIN students s ON s.id=l.student_id
-     WHERE l.qc_status='Locked' AND s.lifecycle='Active' AND l.platform IN ('Kafiil','Nafezly')
-       AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.service_link_id=l.id)
-       AND (SELECT count(*) FROM accounts a WHERE a.student_id=l.student_id)<?`,
-    accountsPerStudent,
-  );
+  const candidates = (
+    await all(
+      `SELECT DISTINCT l.student_id,s.group_id FROM service_links l JOIN students s ON s.id=l.student_id
+       WHERE l.qc_status='Locked' AND s.lifecycle='Active' AND l.platform IN ('Kafiil','Nafezly') AND l.account_id IS NULL
+         AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.service_link_id=l.id)`,
+    )
+  ).filter((c: any) => buysServices(c.group_id));
   let linked = 0;
   const missing = new Set<string>();
   for (const c of candidates) {

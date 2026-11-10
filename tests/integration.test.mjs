@@ -2119,6 +2119,16 @@ test("controlled platforms and separately approved FX applications are enforced"
     /immutable/,
   );
 });
+/** A copy of a group under a service group's ID (lib/service-followup), so the students moved into it get client accounts. */
+async function asServiceGroup(groupId, serviceId = "CAI5_DRT1_S1") {
+  if (!(await dbRow("SELECT id FROM groups WHERE id=?", serviceId))) {
+    const g = await dbRow("SELECT * FROM groups WHERE id=?", groupId);
+    const cols = Object.keys(g);
+    await dbExec(`INSERT INTO groups(${cols.join(",")}) VALUES(${cols.map(() => "?").join(",")})`, ...cols.map((c) => (c === "id" ? serviceId : g[c])));
+  }
+  return serviceId;
+}
+
 async function route(name) {
   const output = join(testDirectory, "route-" + name + ".mjs");
   await build({
@@ -4379,7 +4389,7 @@ test("the Quality Lead and Coach Operations read the gap between the portal's gi
   await dbExec("DELETE FROM portal_gig_reviews");
 });
 
-test("a service link sent back is the coordinator's task until approved, and each approved service earns a locked client account, two at most", async () => {
+test("a service link sent back is the coordinator's task until approved, and each approved service earns a locked client account, three at most", async () => {
   await dbExec("DELETE FROM rate_limits");
   current = { id: "owner", email: "owner@example.com" };
   const group = await dbRow(
@@ -4393,8 +4403,9 @@ test("a service link sent back is the coordinator's task until approved, and eac
     "SELECT s.id FROM students s WHERE s.group_id=? AND s.lifecycle='Active' AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=s.id) ORDER BY s.id LIMIT 1",
     group.id,
   );
-  const team = (await dbRow("SELECT team FROM users WHERE id=?", group.supervisor)).team;
-  await dbExec("UPDATE users SET team='Service Team' WHERE id=?", group.supervisor);
+  // Only the service groups' students get client accounts (10 November 2026).
+  const serviceGroup = await asServiceGroup(group.id);
+  await dbExec("UPDATE students SET group_id=? WHERE id=?", serviceGroup, learner.id);
   const at = new Date().toISOString();
   for (const [i, id] of ["SLK-KEY-1", "SLK-KEY-2", "SLK-KEY-3"].entries())
     await dbExec(
@@ -4430,7 +4441,7 @@ test("a service link sent back is the coordinator's task until approved, and eac
   assert.equal((await dbRow("SELECT status FROM tasks WHERE id=?", first.id)).status, "Closed");
   assert.equal((await dbRow("SELECT status FROM tasks WHERE source='service-fix:SLK-KEY-1:2'")).status, "Open");
 
-  // Each approved service earns an account on its marketplace, two at most.
+  // Each approved service earns an account on its marketplace, three at most, each a different one.
   current = { id: "owner", email: "owner@example.com" };
   await check("account", { id: "ACC-KEY-2", label: "key-two@example.org", platform: "Kafeel", credits: 99998 });
   current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
@@ -4449,13 +4460,18 @@ test("a service link sent back is the coordinator's task until approved, and eac
   current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
   await check("service_qc_review", { service_id: "SLK-KEY-3", decision: "Lock" });
   held = await dbRows("SELECT id,service_link_id FROM accounts WHERE student_id=? ORDER BY id", learner.id);
-  assert.deepEqual(held.map((a) => [a.id, a.service_link_id]), [["ACC-KEY-1", "SLK-KEY-2"], ["ACC-KEY-2", "SLK-KEY-1"]], "a third approved service earns no third account");
-  assert.equal((await dbRow("SELECT student_id FROM accounts WHERE id='ACC-KEY-3'")).student_id, null);
+  assert.deepEqual(
+    held.map((a) => [a.id, a.service_link_id]),
+    [["ACC-KEY-1", "SLK-KEY-2"], ["ACC-KEY-2", "SLK-KEY-1"], ["ACC-KEY-3", "SLK-KEY-3"]],
+    "a third approved service earns a third account",
+  );
+  const bought = await dbRows("SELECT id,account_id FROM service_links WHERE student_id=? ORDER BY id", learner.id);
+  assert.deepEqual(bought.map((l) => [l.id, l.account_id]), [["SLK-KEY-1", "ACC-KEY-2"], ["SLK-KEY-2", "ACC-KEY-1"], ["SLK-KEY-3", "ACC-KEY-3"]], "each service records the account that buys it");
 
   // Locked: nobody else reassigns it, and the coordinator gives their word on it.
   current = { id: "owner", email: "owner@example.com" };
   assert.match((await post("account_coordinator", { id: "ACC-KEY-1", account_ids: ["ACC-KEY-1"], coordinator_id: "" })).error, /locked/);
-  assert.match((await post("account_assign", { id: "ACC-KEY-3", key_student: learner.id })).error, /allowed to change/);
+  assert.match((await post("account_assign", { id: "ACC-KEY-EMPTY", key_student: learner.id })).error, /allowed to change/);
   current = { id: group.coordinator, email: group.email };
   assert.match((await post("account_state", { id: "ACC-KEY-1", state: "Does not work" })).error, /what is wrong/);
   await check("account_state", { id: "ACC-KEY-1", state: "Does not work", note: "Login asks for a phone code" });
@@ -4467,9 +4483,7 @@ test("a service link sent back is the coordinator's task until approved, and eac
   assert.match((await post("account_unlock", { id: "ACC-KEY-1", reason: "Broken" })).error, /allowed to unlock/, "not every administrator");
   const scopes = (await dbRow("SELECT scopes FROM users WHERE email='owner@example.com'")).scopes;
   await dbExec("UPDATE users SET scopes=? WHERE email='owner@example.com'", JSON.stringify([...JSON.parse(scopes || "[]"), "account-unlock"]));
-  assert.match((await post("account_assign", { id: "ACC-KEY-3", key_student: learner.id })).error, /already has two accounts/);
-  await check("account_assign", { id: "ACC-KEY-2", key_student: learner.id, service_link_id: "SLK-KEY-3", coordinator_id: group.coordinator });
-  assert.equal((await dbRow("SELECT service_link_id FROM accounts WHERE id='ACC-KEY-2'")).service_link_id, "SLK-KEY-3", "moved to another of their services");
+  assert.match((await post("account_assign", { id: "ACC-KEY-EMPTY", key_student: learner.id })).error, /already has three accounts/);
   assert.match((await post("account_unlock", { id: "ACC-KEY-1", reason: "" })).error, /why/);
   const orderOn = await dbRow("SELECT student_id FROM accounts WHERE id='ACC-KEY-1'");
   await dbExec(
@@ -4484,17 +4498,94 @@ test("a service link sent back is the coordinator's task until approved, and eac
   const freed = await dbRow("SELECT student_id,service_link_id,coordinator_id FROM accounts WHERE id='ACC-KEY-1'");
   assert.deepEqual([freed.student_id, freed.service_link_id], [null, null]);
   assert.equal(freed.coordinator_id, group.coordinator, "the coordinator stays");
+  assert.equal((await dbRow("SELECT account_id FROM service_links WHERE id='SLK-KEY-2'")).account_id, null, "the service is free for another account");
   await check("account_status", { id: "ACC-KEY-1", status: "Access Issue", reason: "Broken login" });
+  await check("account", { id: "ACC-KEY-4", label: "key-four@example.org", platform: "Kafeel", credits: 99996 });
   const swept = await check("account_link_sweep", {});
   assert.ok(swept.linked >= 1);
   held = await dbRows("SELECT id,platform,status FROM accounts WHERE student_id=?", learner.id);
-  assert.equal(held.length, 2, "back to two");
+  assert.equal(held.length, 3, "back to three");
   assert.ok(held.every((a) => a.id !== "ACC-KEY-1" && a.platform === "Kafeel" && a.status === "Available"));
 
   await dbExec("UPDATE users SET scopes=? WHERE email='owner@example.com'", scopes);
-  await dbExec("UPDATE accounts SET student_id=NULL,service_link_id=NULL,status='Retired' WHERE id IN ('ACC-KEY-1','ACC-KEY-2','ACC-KEY-3','ACC-KEY-EMPTY')");
+  await dbExec("UPDATE service_links SET account_id=NULL WHERE account_id IN ('ACC-KEY-1','ACC-KEY-2','ACC-KEY-3','ACC-KEY-4','ACC-KEY-EMPTY')");
+  await dbExec("UPDATE accounts SET student_id=NULL,service_link_id=NULL,status='Retired' WHERE id IN ('ACC-KEY-1','ACC-KEY-2','ACC-KEY-3','ACC-KEY-4','ACC-KEY-EMPTY')");
   await dbExec("UPDATE accounts SET student_id=NULL,service_link_id=NULL WHERE student_id IS NOT NULL");
-  await dbExec("UPDATE users SET team=? WHERE id=?", team, group.supervisor);
+  await dbExec("UPDATE students SET group_id=? WHERE id=?", group.id, learner.id);
+});
+
+test("an account buys from two students at most, never two of the same job profile, and orders say which student", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const group = await dbRow(
+    `SELECT g.id,g.coordinator,u.email FROM groups g JOIN users u ON u.id=g.coordinator
+     WHERE g.status='Active' AND g.id NOT LIKE 'DEMO-%' AND coalesce(g.delivery_model,'Regular')<>'Industry'
+       AND (SELECT count(*) FROM students s WHERE s.group_id=g.id AND s.lifecycle='Active' AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=s.id))>=3
+     ORDER BY g.id LIMIT 1`,
+  );
+  assert.ok(group, "a group with three students without services");
+  const pupils = await dbRows(
+    "SELECT s.id FROM students s WHERE s.group_id=? AND s.lifecycle='Active' AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=s.id) ORDER BY s.id LIMIT 3",
+    group.id,
+  );
+  const serviceGroup = await asServiceGroup(group.id, "CAI5_DRT1_S2");
+  const [first, second, same] = pupils.map((p) => p.id);
+  for (const [id, profile] of [[first, "Digital Marketing Specialist"], [second, "UI & UX Web Designer"], [same, "Digital Marketing Specialist"]])
+    await dbExec("UPDATE students SET group_id=?,job_profile=? WHERE id=?", serviceGroup, profile, id);
+  // Only one free Nafezly account: the others are out of the way for this test.
+  const parked = (await dbRows("SELECT id FROM accounts WHERE platform='Nafezly' AND status='Available'")).map((a) => a.id);
+  if (parked.length) await dbExec(`UPDATE accounts SET status='Under Review' WHERE id IN (${parked.map(() => "?").join(",")})`, ...parked);
+  await check("account", { id: "ACC-PAIR-1", label: "pair-one@example.org", platform: "Nafezly", credits: 40 });
+  await check("account", { id: "ACC-PAIR-LOCKED", label: "pair-locked@example.org", platform: "Nafezly", credits: 900 });
+  await dbExec("UPDATE accounts SET status='Locked' WHERE id='ACC-PAIR-LOCKED'");
+  const at = new Date().toISOString();
+  const approved = async (id, student) =>
+    dbExec(
+      "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,account_id,submitted_at,updated_at) VALUES(?,?,1,?,?,'Nafezly','Valid','{}',?,'Locked',NULL,'staff-quality',?,1,NULL,?,?)",
+      id, student, `https://nafezly.com/services/${id}`, `nafezly.com/services/${id}`, at, at, at, at,
+    );
+  await approved("SLK-PAIR-1", first);
+  await approved("SLK-PAIR-2", second);
+  await approved("SLK-PAIR-3", same);
+  const swept = await check("account_link_sweep", {});
+  assert.ok(swept.linked >= 2, JSON.stringify(swept));
+  const accountOf = async (id) => (await dbRow("SELECT account_id FROM service_links WHERE id=?", id)).account_id;
+  assert.equal(await accountOf("SLK-PAIR-1"), "ACC-PAIR-1", "the free account, never the locked one");
+  assert.equal(await accountOf("SLK-PAIR-2"), "ACC-PAIR-1", "a second student of another job profile shares it");
+  assert.equal(await accountOf("SLK-PAIR-3"), null, "a student of the same job profile does not, and a third never does");
+  const account = await dbRow("SELECT student_id,service_link_id,status FROM accounts WHERE id='ACC-PAIR-1'");
+  assert.deepEqual([account.student_id, account.service_link_id], [first, "SLK-PAIR-1"], "the first student stays on the account");
+  assert.equal((await dbRow("SELECT student_id FROM accounts WHERE id='ACC-PAIR-LOCKED'")).student_id, null);
+
+  // The workspace shows both students; an order says which one it is for.
+  const pool = (await (await api.GET()).json()).accounts.find((a) => a.id === "ACC-PAIR-1");
+  assert.equal(pool.student_id, first);
+  assert.equal(pool.second?.student_id, second);
+  current = { id: group.coordinator, email: group.email };
+  await check("account_service_status", { id: "ORD-PAIR-2", account_id: "ACC-PAIR-1", student_id: second, status: "Buy" });
+  await check("account_service_status", { id: "ORD-PAIR-1", account_id: "ACC-PAIR-1", status: "Buy" });
+  const orders = await dbRows("SELECT id,student_id,service_link_id FROM account_orders WHERE account_id='ACC-PAIR-1' ORDER BY id");
+  assert.deepEqual(orders.map((o) => [o.id, o.student_id, o.service_link_id]), [["ORD-PAIR-1", first, "SLK-PAIR-1"], ["ORD-PAIR-2", second, "SLK-PAIR-2"]]);
+  assert.match((await post("account_service_status", { account_id: "ACC-PAIR-1", student_id: same, status: "Buy" })).error, /does not buy from that student/);
+
+  // Releasing the second student leaves the first where they are.
+  current = { id: "owner", email: "owner@example.com" };
+  const scopes = (await dbRow("SELECT scopes FROM users WHERE email='owner@example.com'")).scopes;
+  await dbExec("UPDATE users SET scopes=? WHERE email='owner@example.com'", JSON.stringify([...new Set([...JSON.parse(scopes || "[]"), "account-unlock"])]));
+  await check("account_unlock", { id: "ACC-PAIR-1", student_id: second, reason: "Wrong pairing" });
+  assert.equal(await accountOf("SLK-PAIR-2"), null);
+  assert.equal((await dbRow("SELECT student_id FROM accounts WHERE id='ACC-PAIR-1'")).student_id, first);
+  assert.equal((await dbRow("SELECT status FROM account_orders WHERE id='ORD-PAIR-2'")).status, "Cancelled");
+  assert.equal((await dbRow("SELECT status FROM account_orders WHERE id='ORD-PAIR-1'")).status, "Buy");
+
+  await dbExec("UPDATE users SET scopes=? WHERE email='owner@example.com'", scopes);
+  await dbExec("DELETE FROM account_credit_ledger WHERE account_id IN ('ACC-PAIR-1','ACC-PAIR-LOCKED') AND reason LIKE '%[order %'");
+  await dbExec("DELETE FROM account_orders WHERE account_id='ACC-PAIR-1'");
+  await dbExec("UPDATE service_links SET account_id=NULL WHERE id IN ('SLK-PAIR-1','SLK-PAIR-2','SLK-PAIR-3')");
+  await dbExec("UPDATE accounts SET student_id=NULL,service_link_id=NULL,status='Retired' WHERE id IN ('ACC-PAIR-1','ACC-PAIR-LOCKED')");
+  if (parked.length) await dbExec(`UPDATE accounts SET status='Available' WHERE id IN (${parked.map(() => "?").join(",")})`, ...parked);
+  await dbExec("DELETE FROM service_links WHERE id IN ('SLK-PAIR-1','SLK-PAIR-2','SLK-PAIR-3')");
+  for (const id of [first, second, same]) await dbExec("UPDATE students SET group_id=?,job_profile=NULL WHERE id=?", group.id, id);
 });
 
 
@@ -4919,7 +5010,7 @@ test("coordinators follow each order on a student's client account, and the lead
   const theirs = (await (await api.GET()).json()).accountOrders;
   assert.ok(theirs.some((o) => o.id === "ORD-1") && theirs.every((o) => o.group_id), "the supervisor sees their groups' orders");
 
-  // Client accounts are for Service Team students only.
+  // Client accounts are for the service groups' students only.
   current = { id: "owner", email: "owner@example.com" };
   const scopes = (await dbRow("SELECT scopes FROM users WHERE email='owner@example.com'")).scopes;
   await dbExec("UPDATE users SET scopes=? WHERE email='owner@example.com'", JSON.stringify([...new Set([...JSON.parse(scopes || "[]"), "account-unlock"])]));
@@ -4928,7 +5019,7 @@ test("coordinators follow each order on a student's client account, and the lead
   );
   if (outsider) {
     await check("account", { id: "ACC-ORDER-2", label: "orders-2@example.org", platform: "Kafeel", credits: 10 });
-    assert.match((await post("account_assign", { id: "ACC-ORDER-2", key_student: outsider.id })).error, /Service Team students only/);
+    assert.match((await post("account_assign", { id: "ACC-ORDER-2", key_student: outsider.id })).error, /service groups only/);
   }
   await dbExec("UPDATE users SET scopes=? WHERE email='owner@example.com'", scopes);
   await dbExec("DELETE FROM account_orders WHERE account_id='ACC-ORDER-1'");

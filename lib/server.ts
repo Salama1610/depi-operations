@@ -294,7 +294,9 @@ export function scopeSql(u: any, alias = "g", studentAlias: string | null = "s")
   // A coordinator also sees the students whose client accounts they hold,
   // to record orders on them and upload their proof.
   if (studentAlias && can(u.roles, ["Operations Coordinator"])) {
-    clauses.push(`EXISTS (SELECT 1 FROM accounts ac WHERE ac.student_id=${studentAlias}.id AND (ac.coordinator_id=? OR ac.coordinator_2_id=?))`);
+    clauses.push(
+      `EXISTS (SELECT 1 FROM accounts ac WHERE (ac.student_id=${studentAlias}.id OR ac.id IN (SELECT sl.account_id FROM service_links sl WHERE sl.student_id=${studentAlias}.id)) AND (ac.coordinator_id=? OR ac.coordinator_2_id=?))`,
+    );
     args.push(u.id, u.id);
   }
   // A quality reviewer sees the students whose work is assigned to them —
@@ -811,10 +813,28 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
         LEFT JOIN groups g ON g.id=s.group_id
         LEFT JOIN users c ON c.id=g.coordinator
         LEFT JOIN service_links l ON l.id=a.service_link_id AND l.student_id=s.id`;
+      // An account's second student (10 November 2026): the one whose service it
+      // buys, other than the student on the account itself, with the same details.
+      const second = `SELECT l.account_id,l.student_id,l.id service_link_id,s.name student_name,s.group_id student_group,c.name student_coordinator_name,
+          l.url service_url,l.platform service_platform,l.slot service_slot
+        FROM service_links l JOIN accounts a ON a.id=l.account_id
+        JOIN students s ON s.id=l.student_id AND ${revokesStudents(u) ? "1=1" : "s.lifecycle<>'Revoked'"}
+        LEFT JOIN groups g ON g.id=s.group_id LEFT JOIN users c ON c.id=g.coordinator
+        WHERE l.student_id<>coalesce(a.student_id,'')`;
+      const withSecond = async (list: Promise<any[]>, seconds: Promise<any[]>) => {
+        const [rows, extra] = await Promise.all([list, seconds]);
+        const byAccount = new Map<string, any>();
+        for (const r of extra) if (!byAccount.has(r.account_id)) byAccount.set(r.account_id, r);
+        for (const a of rows) a.second = byAccount.get(a.id) || null;
+        return rows;
+      };
       if (can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin", "Team Supervisor"]) || keepsAccounts(u))
-        return all(`${linked} WHERE ${sameSide(u, "a.id")}`);
+        return withSecond(all(`${linked} WHERE ${sameSide(u, "a.id")}`), all(`${second} AND ${sameSide(u, "a.id")}`));
       if (can(u.roles, ["Operations Coordinator"]))
-        return all(`${linked} WHERE (a.coordinator_id=? OR a.coordinator_2_id=?) AND ${sameSide(u, "a.id")}`, u.id, u.id);
+        return withSecond(
+          all(`${linked} WHERE (a.coordinator_id=? OR a.coordinator_2_id=?) AND ${sameSide(u, "a.id")}`, u.id, u.id),
+          all(`${second} AND (a.coordinator_id=? OR a.coordinator_2_id=?) AND ${sameSide(u, "a.id")}`, u.id, u.id),
+        );
       return none;
     })(),
     // Everyone sees who their colleagues are and how to reach them; the

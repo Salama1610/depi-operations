@@ -3590,7 +3590,7 @@ See you there!`,
     const accounts: Row[] = d.accounts || [];
     const requests: Row[] = d.requests || [];
     const money = (v: any) => "$" + moneyFormat.format(Number(v || 0));
-    const attention = ["Blocked", "Access Issue", "Funding Block", "Under Review"];
+    const attention = ["Blocked", "Access Issue", "Funding Block", "Under Review", "Locked"];
     const activeReservation = (requestId: string) =>
       (d.reservations || []).find(
         (z: Row) => z.request_id === requestId && z.status === "Active" && z.expires_at > new Date().toISOString(),
@@ -3616,16 +3616,17 @@ See you there!`,
     // An account's orders for the student it is linked to now; one placed for
     // an earlier student is theirs, not the new student's (2 November 2026).
     const ordersOf = (a: Row) => accountOrders.filter((o) => o.account_id === a.id && o.student_id === a.student_id);
-    const latestOrderOf = (accountId: string) =>
-      ordersOf(accounts.find((a) => a.id === accountId) || { id: accountId }).sort((x, y) => String(y.updated_at).localeCompare(String(x.updated_at)))[0] || null;
+    // A row is one of the account's students: its first, or a second whose service it buys.
+    const latestOrderOf = (r: Row) => ordersOf(r).sort((x, y) => String(y.updated_at).localeCompare(String(x.updated_at)))[0] || null;
+    const secondRow = (a: Row) => (a.second ? { ...a, ...a.second, linked_at: null, linked_by: null, use: 2 } : null);
     const setsServiceStatus = (r: Row) => Boolean(r.student_id) && (wordOn(r) || can(user.roles, ["Project Operations", "Operations Systems / Admin"]));
     const servicePicker = (r: Row) => {
-      const latest = latestOrderOf(r.id);
+      const latest = latestOrderOf(r);
       const choose = (status: string) => {
         if (!status || status === latest?.status) return;
         if (status === "Proof Uploaded" || status === "Cancelled")
           open("account_service_status", { account_id: r.id, status, student_id: r.student_id, student_name: r.student_name || name(r.student_id), account_label: r.label, note: "", proof_id: "" });
-        else quick("account_service_status", { account_id: r.id, status });
+        else quick("account_service_status", { account_id: r.id, student_id: r.student_id, status });
       };
       return (
         <span className="service-status-pick">
@@ -3651,16 +3652,36 @@ See you there!`,
         </span>
       );
     };
+    // An account's second student, under its first (10 November 2026).
+    const secondStudent = (a: Row) => {
+      const r = secondRow(a);
+      if (!r) return null;
+      return (
+        <span className="account-key account-key-second">
+          <strong><Lock size={13} /> {r.student_name || name(r.student_id)}</strong>
+          <small className="table-subline"><bdi>{r.student_id}{r.student_group ? " · " + r.student_group : ""}</bdi> · {t("Second student")}</small>
+          {r.student_coordinator_name && <small className="table-subline">{t("Student's coordinator: {v0}", { v0: r.student_coordinator_name })}</small>}
+          {r.service_url && (
+            <a className="table-subline text-link service-open" href={r.service_url} target="_blank" rel="noreferrer" title={r.service_url}>
+              <span>{t("For their {v0} service {v1}", { v0: r.service_platform, v1: r.service_slot })} <ExternalLink size={11} /></span>
+              <small className="service-url" dir="ltr">{r.service_url}</small>
+            </a>
+          )}
+          {setsServiceStatus(r) && servicePicker(r)}
+        </span>
+      );
+    };
     // Service status (supervisors and Project Operations): one row per service
     // that has a client account, with where its latest order stands.
     const leadsAll = can(user.roles, ["Project Operations", "Operations Systems / Admin"]);
     const coordinatesAccount = (a: Row) => a.coordinator_id === user.id || a.coordinator_2_id === user.id;
     const followsServices =
       can(user.roles, ["Team Supervisor", "Project Operations", "Operations Systems / Admin"]) ||
-      accounts.some((a) => a.student_id && coordinatesAccount(a));
+      accounts.some((a) => (a.student_id || a.second) && coordinatesAccount(a));
     const groupOfRow = (id: string) => groups.find((g) => g.id === id);
+    // One row per student an account buys from: up to two per account (10 November 2026).
     const serviceRows: Row[] = accounts
-      .filter((a) => a.student_id)
+      .flatMap((a) => [a.student_id ? a : null, secondRow(a)].filter(Boolean) as Row[])
       .filter((a) => leadsAll || groupOfRow(a.student_group)?.supervisor === user.id || coordinatesAccount(a))
       .map((a) => {
         const orders = ordersOf(a).sort((x, y) => String(y.updated_at).localeCompare(String(x.updated_at)));
@@ -3833,7 +3854,7 @@ See you there!`,
                   onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
                   onBlur={(e) => {
                     const next = e.target.value.trim();
-                    if (next !== String(value)) quick("account_order_cost", { account_id: r.id, [key]: next });
+                    if (next !== String(value)) quick("account_order_cost", { account_id: r.id, student_id: r.student_id, [key]: next });
                   }}
                 />
               </label>
@@ -4152,6 +4173,7 @@ See you there!`,
                   { value: "Attention", label: t("Need attention") },
                   { value: "Cooldown", label: t("Cooldown") },
                   { value: "Retired", label: t("Retired") },
+                  { value: "Locked", label: t("Locked: not given out again") },
                 ]}
               />
               <Pick
@@ -4266,7 +4288,8 @@ See you there!`,
                         ),
                     },
                     ...(seesOwner ? [{ key: "owner_name", label: t("Owner"), render: (r: Row) => r.owner_name || "—" }] : []),
-                    { key: "status", label: t("State"), render: (r) => <Badge value={r.status} /> },
+                    // "Locked" reads as approved elsewhere (service links), so a locked account says what it means.
+                    { key: "status", label: t("State"), render: (r) => <Badge value={r.status === "Locked" ? t("Locked: not given out again") : r.status} /> },
                     {
                       key: "credits",
                       label: t("Available credit"),
@@ -4300,8 +4323,10 @@ See you there!`,
                               )}
                               {setsServiceStatus(r) && servicePicker(r)}
                               <small className="table-subline">{r.linked_by ? t("Linked by {v0}", { v0: owner(r.linked_by) }) : t("Linked automatically")}{r.linked_at ? " · " + fmt(r.linked_at) : ""}</small>
+                              {secondStudent(r)}
                             </span>
                           );
+                        if (r.second) return <span className="account-key">{secondStudent(r)}</span>;
                         const request = r.active_assignment ? requests.find((q) => q.status === "Assigned" && (d.reservations || []).some((z: Row) => z.account_id === r.id && z.request_id === q.id)) : null;
                         return request ? <span>{name(request.student_id)}<small className="table-subline">{request.task}</small></span> : "—";
                       },
@@ -4345,6 +4370,11 @@ See you there!`,
                         {unlocks && r.student_id && (
                           <button className="small-btn" onClick={() => open("account_unlock", { id: r.id, label: r.label, platform: r.platform, key_student: r.student_id, reason: "", student_id: "" })}>
                             <Unlock size={14} /> {t("Remove assignment")}
+                          </button>
+                        )}
+                        {unlocks && r.second && (
+                          <button className="small-btn" onClick={() => open("account_unlock", { id: r.id, label: r.label, platform: r.platform, key_student: r.second.student_id, reason: "", student_id: r.second.student_id })}>
+                            <Unlock size={14} /> {t("Remove the second student")}
                           </button>
                         )}
                         {assignsAccounts && r.coordinator_id && (
@@ -8015,7 +8045,7 @@ See you there!`,
                         options={[{ value: "", label: t("No coordinator") }, ...staff.filter((s: Row) => !(s.active === 0 || s.active === false) && heldRoles(s).includes("Operations Coordinator")).map((s: Row) => ({ value: s.id, label: s.name }))]}
                       />
                     </label>
-                    <p className="footnote">{t("A student holds two accounts at most. Choosing a student fills in their coordinator; you can change it.")}</p>
+                    <p className="footnote">{t("A student holds three accounts at most, each a different one, and an account buys from two students at most. Choosing a student fills in their coordinator; you can change it.")}</p>
                   </>
                 );
               }
@@ -8043,6 +8073,7 @@ See you there!`,
                   "Access Issue": ["Available", "Under Review", "Retired"],
                   "Funding Block": ["Available", "Under Review", "Retired"],
                   "Under Review": ["Available", "Blocked", "Retired"],
+                  Locked: ["Available", "Retired"],
                 };
                 const moves = flow[modal!.status] || [];
                 return (
