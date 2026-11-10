@@ -4227,7 +4227,7 @@ See you there!`,
                 ]}
               />
               {keepsAccounts && (
-                <button className="small-btn" disabled={busy} onClick={() => quick("account_link_sweep", {})} title={t("Links an account to every Service Team student with two approved services who has none yet")}>
+                <button className="small-btn" disabled={busy} onClick={() => quick("account_link_sweep", {})} title={t("Gives each approved service of the service groups’ students an account: three accounts per student at most, two students per account, never two of the same job profile")}>
                   <Link2 size={15} /> {t("Link accounts to eligible students")}
                 </button>
               )}

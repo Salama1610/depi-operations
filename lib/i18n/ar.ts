@@ -2663,7 +2663,7 @@ export const ar: Record<string, string> = {
   "Email A–Z": "البريد أبجديًا",
   "Latest linked first": "الأحدث ربطًا أولًا",
   "Latest coordinator status first": "أحدث حالة من المنسق أولًا",
-  "Links an account to every Service Team student with two approved services who has none yet": "يربط حسابًا بكل طالب في فريق الخدمات لديه خدمتان مقبولتان وليس له حساب بعد",
+  "Gives each approved service of the service groups’ students an account: three accounts per student at most, two students per account, never two of the same job profile": "يعطي كل خدمة معتمدة لطلاب جروبات الخدمات حسابًا: ثلاثة حسابات للطالب على الأكثر، وطالبان للحساب، ولا يكونان من نفس المسار الوظيفي",
   "Link accounts to eligible students": "ربط الحسابات بالطلاب المستحقين",
   "Linked by {v0}": "ربطه {v0}",
   "Linked automatically": "رُبط تلقائيًا",
