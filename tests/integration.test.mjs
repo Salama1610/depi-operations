@@ -269,7 +269,6 @@ test("full seeded backend workflow and permission gates", async () => {
   const c = {
     student_id: "S10001",
     outcome: "Responded",
-    proof_id: "PROOF-1",
     next_action: "Next contact",
     owner: "owner",
     due: "2027-01-01T00:00:00Z",
@@ -278,7 +277,9 @@ test("full seeded backend workflow and permission gates", async () => {
     notes: "Talked about the first gig",
     request_id: "contact-once",
   };
-  // Neither the comment (2 Nov 2026) nor the screenshot (10 Oct 2026) is required.
+  // Neither the comment (2 Nov 2026) nor the screenshot (10 Oct 2026) is required,
+  // and since 12 November 2026 a screenshot is refused: only an order's POH is uploaded.
+  assert.match((await post("contact", { ...c, proof_id: "PROOF-1", request_id: "contact-with-screenshot" })).error, /Only the POH/);
   await check("contact", { ...c, notes: "", proof_id: "", request_id: "contact-no-comment" });
   assert.equal((await dbRow("SELECT count(*) n FROM contacts WHERE student_id='S10001' AND notes IS NULL")).n, 1, "no comment is stored as none");
   const noShot = { ...c, proof_id: "", request_id: "contact-no-screenshot" };
@@ -289,11 +290,7 @@ test("full seeded backend workflow and permission gates", async () => {
   assert.equal(
     (await dbRow("SELECT count(*) n FROM contacts WHERE student_id='S10001'")).n,
     3,
-    "the contact without a comment, the one without a screenshot, then the one with it, recorded once despite the retry",
-  );
-  assert.equal(
-    (await dbRow("SELECT activity_type FROM attachment_context WHERE attachment_id='PROOF-1'")).activity_type,
-    "Student contact",
+    "the contact without a comment, then the two with one, the last recorded once despite the retry",
   );
   // The recorder owns the action, whatever name the form sent.
   const someoneElse = (await dbRow("SELECT id FROM users WHERE id<>'owner' AND active=1")).id;
@@ -360,95 +357,16 @@ test("full seeded backend workflow and permission gates", async () => {
     account: "ACC-102",
   });
   assert.match(r.error, /unavailable|assigned/);
+  // Gigs and their screenshots are no longer recorded (12 November 2026): they
+  // come from the portal sheets, and an order's POH is the only upload.
   const gig = (await dbRow("SELECT * FROM gigs WHERE student_id='S10001'"));
-  r = await post("gig_transition", {
-    id: gig.id,
-    status: "Paid",
-    proof_id: "PROOF-1",
-    occurred_at: new Date().toISOString(),
-  });
-  assert.match(r.error, /transition/);
-  for (const status of ["Gig Opened", "Work Submitted", "Delivered", "Paid"])
-    await check("gig_transition", {
-      id: gig.id,
-      status,
-      proof_id: "PROOF-1",
-      occurred_at: new Date().toISOString(),
-    });
-  await check("evidence", {
-    id: "EV1",
-    gig_id: gig.id,
-    proof_id: "PROOF-1",
-    payment_proof_id: "PROOF-2",
-    source: "WhatsApp",
-  });
-  // Whoever recorded the gig reviews none of it; neither a quality reviewer
-  // nor a coach takes the coordinator check.
-  r = await post("review", { id: "EV1", notes: "Looks complete" });
-  assert.match(r.error, /You recorded this gig/);
-  current = { id: "quality-login", email: "staff-quality@example.invalid" };
-  r = await post("review", { id: "EV1", notes: "Looks complete" });
-  assert.ok(r.error, "a quality reviewer does not take the coordinator check");
-  current = { id: "coach-login", email: "staff-coach@example.invalid" };
-  r = await post("review", { id: "EV1", notes: "Coach confirms delivery" });
-  assert.ok(r.error, "coaches no longer check services");
-  current = { id: "supervisor-login", email: "staff-nour@example.invalid" };
-  await check("review", { id: "EV1", notes: "Completeness checked" });
-  current = { id: "coach-login", email: "staff-coach@example.invalid" };
-  r = await post("review", { id: "EV1", decision: "Accept", notes: "Approve" });
-  assert.ok(r.error, "a coach cannot take the quality stage");
-  current = opsOnly;
-  // Quality members see only the students whose services they were assigned,
-  // so the evidence chain's quality stage is taken by the team leader here.
-  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
-  await check("review", {
-    id: "EV1",
-    decision: "Reject",
-    code: "EV01",
-    notes: "Need delivery screenshot",
-    request_id: "reject-once",
-  });
-  await check("review", {
-    id: "EV1",
-    decision: "Reject",
-    code: "EV01",
-    notes: "Need delivery screenshot",
-    request_id: "reject-once",
-  });
-  assert.equal(
-    (await dbRow("SELECT count(*) n FROM tasks WHERE category='Correction'")).n,
-    1,
-  );
-  current = { id: "owner", email: "owner@example.com" };
-  await check("review", {
-    id: "EV1",
-    proof_id: "PROOF-1",
-    payment_proof_id: "PROOF-2",
-    notes: "Corrected package",
-  });
-  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
-  await check("review", {
-    id: "EV1",
-    decision: "Accept",
-    notes: "All seven checks passed",
-    checklist: [
-      "Completeness",
-      "Identity",
-      "Delivery",
-      "Payment/value",
-      "Authenticity",
-      "Source consistency",
-      "Duplicate checks",
-    ],
-  });
-  assert.equal(
-    (await dbRow("SELECT status FROM evidence WHERE id='EV1'")).status,
-    "Accepted",
-  );
-  assert.equal(
-    (await dbRow(`SELECT result FROM graduation_ledger WHERE student_id='S10001' ORDER BY ${ROWID} DESC LIMIT 1`)).result,
-    "1/3",
-  );
+  for (const [action, body] of [
+    ["gig_transition", { id: gig.id, status: "Gig Opened", proof_id: "PROOF-1", occurred_at: new Date().toISOString() }],
+    ["evidence", { id: "EV1", gig_id: gig.id, proof_id: "PROOF-1", payment_proof_id: "PROOF-2", source: "WhatsApp" }],
+    ["gig", { student_id: "S10001", platform: "Upwork", value: 50 }],
+  ])
+    assert.match((await post(action, body)).error, /portal sheets/, action);
+  assert.equal((await dbRow("SELECT count(*) n FROM evidence WHERE id='EV1'")).n, 0);
   current = { id: "coordinator-login", email: "staff-omar@example.invalid" };
   r = await post("contact", c);
   assert.ok(r.error);
@@ -1837,43 +1755,6 @@ test("program roles enforce functional coach and approval boundaries", async () 
   );
   current = { id: "owner", email: "owner@example.com" };
 });
-test("second evidence rejection routes through L3 and closes correction work", async () => {
-  const created = new Date().toISOString();
-  for (const [id, key, hash] of [
-    ["L3-DELIVERY-1", "l3-delivery-1", "l3hash1"],
-    ["L3-PAYMENT-1", "l3-payment-1", "l3hash2"],
-    ["L3-DELIVERY-2", "l3-delivery-2", "l3hash3"],
-    ["L3-PAYMENT-2", "l3-payment-2", "l3hash4"],
-  ]) {
-    await dbExec("INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)", 
-      id, "S10002", key, `${id}.png`, "image/png", 120, hash, "owner", created,
-    );
-  }
-  await dbExec("INSERT INTO gigs(id,student_id,platform,title,value,currency,status,due,created_at) VALUES(?,?,?,?,?,?,?,?,?)", 
-    "GIG-L3", "S10002", "Upwork", "L3 recovery test", 15, "USD", "Paid", "2027-01-01T00:00:00Z", created,
-  );
-  await dbExec("INSERT INTO evidence(id,student_id,gig_id,proof_id,source,status,rejections,code,requirements,recorder,stage_at,created_at,policy_id) VALUES(?,?,?,?,?, 'Quality Review',1,'EV01','First correction','owner',?,?,?)", 
-    "EV-L3", "S10002", "GIG-L3", "L3-DELIVERY-1", "Platform", created, created, "R5-v1",
-  );
-  await dbExec("INSERT INTO evidence_packages VALUES(?,?,?,?,?,?)", "EPK-L3-1", "EV-L3", 1, "Submitted", "owner", created);
-  await dbExec("INSERT INTO evidence_package_items VALUES(?,?,?,?,?)", "EPI-L3-1", "EPK-L3-1", "Delivery", "L3-DELIVERY-1", created);
-  await dbExec("INSERT INTO evidence_package_items VALUES(?,?,?,?,?)", "EPI-L3-2", "EPK-L3-1", "Payment", "L3-PAYMENT-1", created);
-  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
-  await check("review", { id: "EV-L3", decision: "Reject", code: "EV07", notes: "Second rejection requires L3 review" });
-  current = { id: "owner", email: "owner@example.com" };
-  await check("review", {
-    id: "EV-L3",
-    proof_id: "L3-DELIVERY-2",
-    payment_proof_id: "L3-PAYMENT-2",
-    notes: "Corrected evidence package resubmitted",
-  });
-  assert.equal((await dbRow("SELECT status FROM evidence WHERE id='EV-L3'")).status, "L3 Review");
-  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
-  await check("review", { id: "EV-L3", decision: "Final resolution", notes: "Final non-qualifying resolution recorded" });
-  assert.equal((await dbRow("SELECT status FROM evidence WHERE id='EV-L3'")).status, "Closed L3");
-  assert.ok((await dbRow("SELECT id FROM cases WHERE source='L3-EV-L3'")));
-  current = { id: "owner", email: "owner@example.com" };
-});
 test("database allocation guard protects stale concurrent eligibility", async () => {
   const now = new Date().toISOString();
   await assert.rejects(dbExec("INSERT INTO account_assignments VALUES(?,?,?,?,?,?)", "ASN-late", "ACC-102", "S10002", "G101", "REQ2", now),
@@ -1991,74 +1872,22 @@ test("policy checks create recovery and supervisor actions without duplicates", 
   current = { id: "coordinator", email: "staff-sara@example.invalid" };
   assert.match((await post("policy_check")).error, /role/);
 });
-test("a gig is recorded once, paid, with its delivery and payment proof going straight into review", async () => {
-  current = { id: "owner", email: "owner@example.com" };
+test("only an order's POH is uploaded: gigs, evidence and other screenshots are refused", async () => {
   await dbExec("DELETE FROM rate_limits");
-  const created = new Date().toISOString();
-  const [mine, theirs] = await dbRows("SELECT id FROM students WHERE group_id='G122' ORDER BY id LIMIT 2");
-  for (const [id, student] of [["GIG-DELIVERY", mine.id], ["GIG-PAYMENT", mine.id], ["GIG-OTHER", theirs.id], ["GIG-DELIVERY-2", mine.id], ["GIG-PAYMENT-2", mine.id], ["GIG-DELIVERY-3", mine.id], ["GIG-PAYMENT-3", mine.id]])
-    await dbExec("INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)", id, student, id.toLowerCase(), id + ".png", "image/png", 120, id + "-hash", "owner", created);
-  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo" }).format(new Date());
-  const gig = { student_id: mine.id, title: "Logo design", platform: "Khamsat", value: 25, currency: "USD", order_ref: "KH-84211", paid_on: today };
-
-  assert.match((await post("gig", { ...gig, id: "GIG-1" })).error, /Upload the delivery proof and the payment proof/);
-  assert.match((await post("gig", { ...gig, id: "GIG-1", proof_id: "GIG-DELIVERY", payment_proof_id: "GIG-DELIVERY" })).error, /separate/);
-  assert.ok((await post("gig", { ...gig, id: "GIG-1", proof_id: "GIG-DELIVERY", payment_proof_id: "GIG-OTHER" })).error, "another student's screenshot is refused");
-
-  // When the client paid: required, not in the future, not before the group started.
-  const proofs = { proof_id: "GIG-DELIVERY", payment_proof_id: "GIG-PAYMENT" };
-  assert.match((await post("gig", { ...gig, ...proofs, id: "GIG-1", paid_on: "" })).error, /date the client paid/);
-  assert.match((await post("gig", { ...gig, ...proofs, id: "GIG-1", paid_on: "2999-01-01" })).error, /cannot be in the future/);
-  const group = await dbRow("SELECT g.start_date FROM groups g JOIN students s ON s.group_id=g.id WHERE s.id=?", mine.id);
-  await dbExec("UPDATE groups SET start_date=? WHERE id=(SELECT group_id FROM students WHERE id=?)", today, mine.id);
-  assert.match((await post("gig", { ...gig, ...proofs, id: "GIG-1", paid_on: "2020-01-01" })).error, /on or after the day the group started/);
-  await dbExec("UPDATE groups SET start_date=? WHERE id=(SELECT group_id FROM students WHERE id=?)", group.start_date, mine.id);
-
-  await check("gig", { ...gig, ...proofs, id: "GIG-1" });
-  assert.equal((await dbRow("SELECT paid_on FROM gigs WHERE id='GIG-1'")).paid_on.slice(0, 10), today);
-  assert.equal((await dbRow("SELECT status FROM gigs WHERE id='GIG-1'")).status, "Paid");
-  const evidence = await dbRow("SELECT * FROM evidence WHERE gig_id='GIG-1'");
-  assert.equal(evidence.status, "Coordinator L1", "the proof goes straight to the coordinator check");
-  assert.equal(evidence.proof_id, "GIG-DELIVERY");
-  const items = await dbRows(
-    "SELECT i.item_type, i.attachment_id FROM evidence_package_items i JOIN evidence_packages p ON p.id=i.package_id WHERE p.evidence_id=? ORDER BY i.item_type",
-    evidence.id,
-  );
-  assert.deepEqual(items.map((i) => [i.item_type, i.attachment_id]), [["Delivery", "GIG-DELIVERY"], ["Payment", "GIG-PAYMENT"]]);
-  assert.equal((await dbRow("SELECT status FROM gig_events WHERE gig_id='GIG-1'")).status, "Paid");
-
-  // A screenshot proves one gig: reusing it, even as a fresh upload of the same image, is refused.
-  assert.match((await post("gig", { ...gig, id: "GIG-2", order_ref: "KH-99999", proof_id: "GIG-DELIVERY", payment_proof_id: "GIG-PAYMENT-2" })).error, /already proof for another gig/);
-  await dbExec("UPDATE attachments SET hash=(SELECT hash FROM attachments WHERE id='GIG-PAYMENT') WHERE id='GIG-PAYMENT-3'");
-  assert.match((await post("gig", { ...gig, id: "GIG-2", order_ref: "KH-99999", proof_id: "GIG-DELIVERY-3", payment_proof_id: "GIG-PAYMENT-3" })).error, /already proof for another gig/);
-  // The same order on the same platform is the same gig.
-  assert.match((await post("gig", { ...gig, id: "GIG-2", proof_id: "GIG-DELIVERY-2", payment_proof_id: "GIG-PAYMENT-2" })).error, /already recorded/);
-  // Its evidence is already in review; a second submission is refused.
-  assert.match((await post("evidence", { gig_id: "GIG-1", source: "Form", proof_id: "GIG-DELIVERY", payment_proof_id: "GIG-PAYMENT" })).error, /already has its evidence/);
-
-  // The chain: the coordinator side checks, then the QC team decides.
-  const evidenceId = evidence.id;
-  current = { id: "coach-ops-login", email: "staff-coach-ops@example.invalid" };
-  assert.ok((await post("review", { id: evidenceId, notes: "Delivery confirmed" })).error, "Coach Operations no longer checks services");
-  current = { id: "supervisor-login", email: "staff-nour@example.invalid" };
-  await check("review", { id: evidenceId, notes: "Complete and consistent" });
-  const atQuality = await dbRow("SELECT status, qc_actor FROM evidence WHERE id=?", evidenceId);
-  assert.equal(atQuality.status, "Quality Review");
-  const reviewer = await dbRow("SELECT id, email, roles FROM users WHERE id=?", atQuality.qc_actor);
-  assert.ok(reviewer && reviewer.roles.includes("Quality Member") && !reviewer.roles.includes("Quality Lead"), "assigned to a QC member on arrival");
-  current = { id: "ops-only-login", email: "ops-only@example.com" };
-  assert.match((await post("review", { id: evidenceId, decision: "Accept", notes: "x" })).error, /role/, "the Quality step is the QC team's");
-  current = { id: reviewer.id, email: reviewer.email };
-  await check("review", {
-    id: evidenceId,
-    decision: "Accept",
-    notes: "All seven checks passed",
-    checklist: ["Completeness", "Identity", "Delivery", "Payment/value", "Authenticity", "Source consistency", "Duplicate checks"],
-  });
-  assert.equal((await dbRow("SELECT status FROM evidence WHERE id=?", evidenceId)).status, "Accepted");
   current = { id: "owner", email: "owner@example.com" };
+  const files = await route("files");
+  const send = async (purpose) => {
+    const f = new FormData();
+    f.append("file", new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0])], "shot.png", { type: "image/png" }));
+    f.append("student_id", "S10001");
+    if (purpose) f.append("purpose", purpose);
+    return (await files.POST(new Request("https://test.local/api/files", { method: "POST", body: f }))).json();
+  };
+  assert.match((await send("")).error, /Only the POH/, "no purpose: refused");
+  assert.match((await send("gig")).error, /Only the POH/);
+  for (const action of ["gig", "evidence", "gig_transition"]) assert.match((await post(action, { student_id: "S10001" })).error, /portal sheets/, action);
+  assert.match((await post("review", { id: "EV-NONE", proof_id: "X", payment_proof_id: "Y", notes: "Corrected" })).error, /Only the POH/);
 });
-
 test("controlled platforms and separately approved FX applications are enforced", async () => {
   current = { id: "owner", email: "owner@example.com" };
   await assert.rejects(dbExec("INSERT INTO accounts(id,platform,label,status,credits) VALUES('BAD-PLATFORM','Fiverr','Invalid','Available',10)"),
@@ -2918,28 +2747,6 @@ test("students give feedback after each session, once, and the group's people se
   current = { id: "owner", email: "owner@example.com" };
 });
 
-test("services (paid gigs) are recorded by the coordinators of Service Team groups only", async () => {
-  current = { id: "owner", email: "owner@example.com" };
-  await dbExec("DELETE FROM rate_limits");
-  const group = await dbRow("SELECT g.id,g.supervisor,g.coordinator,u.email FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.status='Active' AND EXISTS (SELECT 1 FROM students s WHERE s.group_id=g.id AND s.lifecycle='Active') LIMIT 1");
-  const learner = await dbRow("SELECT id FROM students WHERE group_id=? AND lifecycle='Active' LIMIT 1", group.id);
-  const created = new Date().toISOString();
-  for (const id of ["ST-DELIVERY", "ST-PAYMENT"])
-    await dbExec("INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)", id, learner.id, id.toLowerCase(), id + ".png", "image/png", 120, id + "-hash", "owner", created);
-  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo" }).format(new Date());
-  await dbExec("UPDATE groups SET start_date=? WHERE id=?", "2020-01-01", group.id);
-  const gig = { student_id: learner.id, title: "Banner design", platform: "Khamsat", value: 20, currency: "USD", order_ref: "KH-ST-1", paid_on: today, proof_id: "ST-DELIVERY", payment_proof_id: "ST-PAYMENT" };
-  const title = (await dbRow("SELECT title FROM users WHERE id=?", group.supervisor)).title;
-  current = { id: group.coordinator, email: group.email };
-  await dbExec("UPDATE users SET team='Target Team' WHERE id=?", group.supervisor);
-  assert.match((await post("gig", { ...gig, id: "GIG-ST-1" })).error, /Service Team groups only/);
-  await dbExec("UPDATE users SET team='Service Team' WHERE id=?", group.supervisor);
-  await check("gig", { ...gig, id: "GIG-ST-1" });
-  assert.ok(await dbRow("SELECT id FROM gigs WHERE id='GIG-ST-1'"));
-  await dbExec("UPDATE users SET title=? WHERE id=?", title, group.supervisor);
-  current = { id: "owner", email: "owner@example.com" };
-});
-
 test("the Service Team supervisor records account top-ups, each a new row in the credit history", async () => {
   current = { id: "owner", email: "owner@example.com" };
   await check("account", { id: "ACC-TOPUP-1", label: "Nafezly client 1", platform: "Nafezly", credits: 40 });
@@ -3291,19 +3098,19 @@ test("staff carry a title and a team chosen from two, set in the staff form and 
   assert.deepEqual(JSON.parse(audit.value).team_change, { from: "Service Team", to: "Target Team" });
 });
 
-test("one screenshot of a group message logs a contact for every active student in the group", async () => {
+test("one group message logs a contact for every active student in the group", async () => {
   current = { id: "owner", email: "owner@example.com" };
   const group = await dbRow("SELECT g.id,g.coordinator,u.email FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.status='Active' AND (SELECT count(*) FROM students s WHERE s.group_id=g.id AND s.lifecycle='Active')>=2 LIMIT 1");
   const members = await dbRows("SELECT id FROM students WHERE group_id=? AND lifecycle='Active' ORDER BY id", group.id);
-  await dbExec("INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)", "GROUP-SHOT-1", members[0].id, "group-shot-1", "group.png", "image/png", 100, "group-shot-hash", "owner", new Date().toISOString());
   const at = new Date().toISOString();
   current = { id: group.coordinator, email: group.email };
   const other = await dbRow("SELECT id FROM groups WHERE coordinator<>? AND status='Active' LIMIT 1", group.coordinator);
-  assert.match((await post("group_contact", { group_id: other.id, proof_id: "GROUP-SHOT-1", channel: "WhatsApp", outcome: "Responded", occurred_at: at, notes: "Weekly reminder" })).error, /only your own groups/);
+  assert.match((await post("group_contact", { group_id: other.id, channel: "WhatsApp", outcome: "Responded", occurred_at: at, notes: "Weekly reminder" })).error, /only your own groups/);
+  assert.match((await post("group_contact", { group_id: group.id, proof_id: "ANY", channel: "WhatsApp", outcome: "Responded", occurred_at: at, notes: "Weekly reminder" })).error, /Only the POH/, "no screenshot any more");
   assert.match((await post("group_contact", { group_id: group.id, channel: "WhatsApp", outcome: "Responded", occurred_at: at })).error, /comment/);
-  await check("group_contact", { group_id: group.id, proof_id: "GROUP-SHOT-1", channel: "WhatsApp", outcome: "Responded", occurred_at: at, notes: "Weekly reminder" });
-  const logged = await dbRows("SELECT c.student_id FROM contacts c JOIN attachments a ON a.id=c.proof_id WHERE a.hash='group-shot-hash' AND c.occurred_at=?", at);
-  assert.equal(logged.length, members.length, "every active student has the contact, each with the same screenshot");
+  await check("group_contact", { group_id: group.id, channel: "WhatsApp", outcome: "Responded", occurred_at: at, notes: "Weekly reminder" });
+  const logged = await dbRows("SELECT c.student_id FROM contacts c JOIN students s ON s.id=c.student_id WHERE s.group_id=? AND c.occurred_at=?", group.id, at);
+  assert.equal(logged.length, members.length, "every active student has the contact");
   for (const m of members) assert.equal((await dbRow("SELECT last_contact FROM students WHERE id=?", m.id)).last_contact.slice(0, 16), at.slice(0, 16));
   current = { id: "owner", email: "owner@example.com" };
 });

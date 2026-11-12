@@ -571,6 +571,13 @@ export async function POST(req: Request) {
     // the record is written.
     let signIn: { email: string; nationalId: string; name: string; active: boolean; reset: boolean } | null = null;
     let auditValue: any = { ...x };
+    // Gigs and their screenshots are no longer recorded here (12 November 2026):
+    // they come from the portal sheets, and an order's POH is the only upload.
+    ensure(!["gig", "evidence", "gig_transition"].includes(x.action), "Gigs now come from the portal sheets; they are not recorded here.");
+    ensure(
+      !(x.proof_id || x.payment_proof_id) || ["account_service_status", "account_order_status", "account_order"].includes(x.action),
+      "Only the POH of a client-account order can be uploaded.",
+    );
     delete auditValue.request_id;
     // The person who records an action owns it. Nobody hands their follow-up
     // to someone else by picking a name, so whatever the form sent is ignored.

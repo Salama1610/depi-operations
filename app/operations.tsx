@@ -211,6 +211,10 @@ const nav = [
 ] as const;
 /** Where students take paid work. One spelling each, so an order number is unique per platform. */
 const gigPlatforms = ["Khamsat", "Mostaql", "Kafeel", "Nafezly", "Upwork", "Fiverr", "Freelancer", "Freelance Yard", "Other"];
+// Recording gigs and their screenshots ended on 12 November 2026: gigs and
+// graduation come from the portal sheets, and the only upload left is an
+// order's POH. Gigs already recorded stay readable, and their reviews open.
+const retiredGigActions = new Set(["gig", "evidence", "gig_transition"]);
 const moduleAction: Row = {
   students: "student",
   groups: "group",
@@ -1131,6 +1135,7 @@ export default function Operations({ module: initialModule }: { module: string }
         throw Error(t("Choose the student before uploading proof."));
       const f = new FormData();
       f.append("file", file);
+      f.append("purpose", "poh");
       f.append("student_id", form.student_id);
       f.append(
         "activity_type",
@@ -1584,7 +1589,7 @@ export default function Operations({ module: initialModule }: { module: string }
     if (m) return t("Only {v0} service links are accepted", { v0: m[1] });
     return t(s);
   };
-  const may = (action: string) => can(user.roles, ["Operations Systems / Admin", ...(actionRoles[action] || [])]);
+  const may = (action: string) => !retiredGigActions.has(action) && can(user.roles, ["Operations Systems / Admin", ...(actionRoles[action] || [])]);
   // A service's proof, at its current step: the coordinator check for the
   // group's coordinator, supervisor or Project Operations (never whoever
   // recorded it); the Quality decision for the assigned reviewer or the Quality
@@ -5933,7 +5938,7 @@ See you there!`,
                         </button>
                       </div>
                     )}
-                    {moduleAction[module] && canCreate(module) && (
+                    {moduleAction[module] && !retiredGigActions.has(moduleAction[module]) && canCreate(module) && (
                       <button
                         className="primary"
                         onClick={() => open(moduleAction[module])}
@@ -7538,15 +7543,7 @@ See you there!`,
                       )}
                     {modal!.status === "Accepted" &&
                       choice("decision", t("Controlled reopening"), ["Reopen"])}
-                    {modal!.status === "Rejected" && (
-                      <>
-                        {proofField("proof_id", t("Corrected delivery proof"))}
-                        {proofField(
-                          "payment_proof_id",
-                          t("Corrected payment proof"),
-                        )}
-                      </>
-                    )}
+
                     {field("notes", t("Decision notes / correction requirements"))}
                   </>
                 );

@@ -3105,4 +3105,7 @@ export const ar: Record<string, string> = {
   "All your links are on one marketplace. Add one on {v0}: two on one marketplace and one on the other.": "كل روابطك على سوق واحد. أضف رابطًا على {v0}: اثنان على سوق واحد وواحد على الآخر.",
   "Add 1 more link, on {v0}, to submit.": "أضف رابطًا آخر على {v0} للإرسال.",
   "Add {v0} more links, at least one on {v1}, to submit.": "أضف {v0} روابط أخرى، رابط واحد منها على الأقل على {v1}، للإرسال.",
+  // Uploads: an order's POH only (12 Nov 2026)
+  "Only the POH of a client-account order can be uploaded.": "يُرفع فقط إثبات الطلب (POH) لطلب على حساب عميل.",
+  "Gigs now come from the portal sheets; they are not recorded here.": "الجيجز تأتي الآن من شيتات البوابة، ولا تُسجَّل هنا.",
 };
