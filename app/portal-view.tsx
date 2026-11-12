@@ -14,7 +14,7 @@ import { QcThread } from "@/components/qc-thread";
 import { PortalGap } from "./portal-gap";
 import { PortalCoachStudents } from "./portal-coach-students";
 import { readSheet, toWorkbook } from "@/lib/spreadsheet";
-import { guessPortalMapping, mappingProblems, nationalIdColumn, type PortalSheet } from "@/lib/domain/portal-sheets";
+import { mappingProblems, portalMappingFor, nationalIdColumn, type PortalSheet } from "@/lib/domain/portal-sheets";
 
 type Row = Record<string, any>;
 type Draft = { sheet: PortalSheet; fileName: string; headers: string[]; rows: Row[]; mapping: Record<string, string>; nidColumn: string | null };
@@ -165,10 +165,7 @@ export function PortalView({ staffName }: { staffName: (id: string) => string })
       if (!rows.length) throw new Error(t("The sheet has no rows."));
       const headers = Object.keys(rows[0]);
       const saved: Record<string, string> | null = data?.mappings?.[sheet] || null;
-      const mapping =
-        saved && Object.keys(saved).some((h) => headers.includes(h))
-          ? Object.fromEntries(Object.entries(saved).filter(([h]) => headers.includes(h)))
-          : guessPortalMapping(sheet, headers);
+      const mapping = portalMappingFor(sheet, headers, saved);
       // The column holding national IDs, found from its values: it matches a
       // portal student to ours first, before email and phone.
       const nidColumn = sheet === "students" ? nationalIdColumn(headers, rows) : null;

@@ -8,7 +8,7 @@
 // coordinators record in the app are internal validation; these sheets are
 // the cohort's official one.
 
-import { isNationalId, normalizeDigits, normalizeHeader, normalizeNationalId, normalizePhone } from "./sheet-mapping";
+import { isNationalId, normalizeDigits, normalizeHeader, normalizeNationalId, normalizePhone } from "./sheet-mapping.ts";
 
 export type PortalSheet = "students" | "gigs";
 
@@ -81,6 +81,26 @@ export function guessPortalMapping(sheet: PortalSheet, headers: string[]) {
     if (!spec) continue;
     mapping[header] = spec.field;
     used.add(spec.field);
+  }
+  return mapping;
+}
+
+/**
+ * The mapping an upload starts from: the saved one for the columns this sheet
+ * still has, then every other column recognised by its name for a field the
+ * saved one does not already fill. (12 Nov 2026: the saved mapping alone was
+ * used whenever one of its columns matched, so a column it lacked, such as
+ * Final Status or Trainer Status, was never read, and graduates showed 0.)
+ */
+export function portalMappingFor(sheet: PortalSheet, headers: string[], saved?: Record<string, string> | null) {
+  const known = new Set(portalFields[sheet].map((f) => f.field));
+  const kept = Object.entries(saved || {}).filter(([h, f]) => headers.includes(h) && known.has(f));
+  const mapping: Record<string, string> = Object.fromEntries(kept);
+  const used = new Set(kept.map(([, f]) => f));
+  for (const [header, field] of Object.entries(guessPortalMapping(sheet, headers.filter((h) => !(h in mapping))))) {
+    if (used.has(field)) continue;
+    mapping[header] = field;
+    used.add(field);
   }
   return mapping;
 }
