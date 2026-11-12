@@ -31,7 +31,7 @@ import { Opportunities } from "./opportunities";
 import { scoreOf } from "@/lib/domain/feedback";
 import { coachPayout, coachRates } from "@/lib/domain/payouts";
 import { checklistState, confirmOpensAt, confirmWindowOpen, sessionChecklist, type ChecklistItem } from "@/lib/domain/session-checklist";
-import { Suspense, lazy, startTransition, useMemo, useRef, useState, useEffect } from "react";
+import { Suspense, lazy, startTransition, useDeferredValue, useMemo, useRef, useState, useEffect } from "react";
 import { safeHref } from "@/lib/safe-href";
 import {
   Home,
@@ -769,6 +769,9 @@ export default function Operations({ module: initialModule }: { module: string }
   // called each time, so loaded service links and the open student reload too.
   useLiveReload(refreshSoon);
   useEffect(() => setPage(1), [search, filter, module]);
+  // The box shows each letter at once; the page's lists follow a moment later,
+  // without redrawing the whole page on every keystroke (12 November 2026).
+  const searchQuery = useDeferredValue(search);
   const needsServiceLinks = module === "quality" || modal?.action === "account_assign";
   useEffect(() => {
     if (needsServiceLinks && data?.lite && !serviceParts) void loadServiceLinks();
@@ -1305,7 +1308,7 @@ export default function Operations({ module: initialModule }: { module: string }
     if (s) setSearch(s);
   }, []);
   const qMatch = (r: Row) =>
-    JSON.stringify(r).toLowerCase().includes(search.toLowerCase());
+    JSON.stringify(r).toLowerCase().includes(searchQuery.toLowerCase());
   const selectedStudent = selected
     ? students.find((s) => s.id === selected.id) || selected
     : null;
@@ -5678,7 +5681,7 @@ See you there!`,
     );
   return content;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locale, module, data, error, loading, search, filter, page, statusPage, registersPage, attendancePage, svcPage, sessionNotesPage, selected, busy, notifications, importOpen, importModule, importMode, sheetHeaders, importMapping, importKey, mappingFields, mappingKeys, savedMappings, mappingName, importRows, preview, importId, serviceFilters, submissionFilters, studentServices, moreFilters, saved, checklistFor, accountSecrets, groupMessage, feedbackFor, sessionTab, svcFilters, boughtFilters, accountFilters, insightFilters, sessionFilters, providerFilter, sessionWeek, joinLogin, joinLeft, joinShowPassword, joinEdit, serviceParts, studentParts, weeklyParts]);
+  }, [locale, module, data, error, loading, searchQuery, filter, page, statusPage, registersPage, attendancePage, svcPage, sessionNotesPage, selected, busy, notifications, importOpen, importModule, importMode, sheetHeaders, importMapping, importKey, mappingFields, mappingKeys, savedMappings, mappingName, importRows, preview, importId, serviceFilters, submissionFilters, studentServices, moreFilters, saved, checklistFor, accountSecrets, groupMessage, feedbackFor, sessionTab, svcFilters, boughtFilters, accountFilters, insightFilters, sessionFilters, providerFilter, sessionWeek, joinLogin, joinLeft, joinShowPassword, joinEdit, serviceParts, studentParts, weeklyParts]);
   useEffect(() => {
     if (module === "students") {
       const g = sessionStorage.getItem("depi-group-search");

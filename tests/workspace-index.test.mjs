@@ -58,7 +58,9 @@ test("the page under a form follows every state except the form's own", () => {
   const listed = new Set(list[1].split(",").map((v) => v.trim()));
   const formOnly = new Set(["form", "formError", "modal"]);
   for (const name of declared)
-    if (!formOnly.has(name)) assert.ok(listed.has(name), `add ${name} to the page's list in app/operations.tsx, or the page will not redraw when it changes`);
+    // The search box's text is followed through its deferred copy (12 Nov 2026): the
+    // lists catch up a moment after each letter instead of redrawing on every one.
+    if (!formOnly.has(name)) assert.ok(listed.has(name) || (name === "search" && listed.has("searchQuery")), `add ${name} to the page's list in app/operations.tsx, or the page will not redraw when it changes`);
   for (const name of formOnly) assert.ok(!listed.has(name), `${name} stays off the list, so typing does not redraw the page`);
   // Nothing in the page reads the form, or it would go stale while someone types.
   const page = body.slice(body.indexOf("const content: any = useMemo("), body.indexOf("}, [locale, "));
