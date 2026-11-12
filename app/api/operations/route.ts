@@ -138,9 +138,10 @@ async function orderStudent(a: any, wanted?: unknown, u?: any) {
   ensure(id, "Link the account to a student before recording an order.");
   // On an account two coordinators share, each works on their own student only (12 November 2026).
   if (u && !can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin", "Team Supervisor"]) && !keepsAccounts(u)) {
+    // The coordinator of the student's group manages them, whoever is written
+    // on the account (13 November 2026).
     const group: any = await stmt("SELECT g.coordinator FROM students s JOIN groups g ON g.id=s.group_id WHERE s.id=?", id).first();
-    const other = group?.coordinator && group.coordinator !== u.id && [a.coordinator_id, a.coordinator_2_id].includes(group.coordinator);
-    ensure(!other, "This student is the other coordinator's on this account.");
+    ensure(group?.coordinator === u.id, "This student is another coordinator's: their group's coordinator manages their account orders.");
   }
   if (id === a.student_id) return { student_id: a.student_id as string, service_link_id: (a.service_link_id || null) as string | null };
   const link: any = await stmt("SELECT id FROM service_links WHERE account_id=? AND student_id=? ORDER BY qc_at LIMIT 1", a.id, id).first();
@@ -585,8 +586,7 @@ export async function POST(req: Request) {
     // refuses below, after the replay check, as it always has.
     const [prior, studentRead]: [any, { row?: any; error?: unknown }] = await Promise.all([
       stmt("SELECT actor FROM audit_events WHERE request_id=?", key).first(),
-      // An account action may name a student reached through a client account the coordinator holds.
-      sid ? student(u, sid, { accounts: /^account_/.test(String(x.action)) }).then((row) => ({ row }), (error) => ({ error })) : Promise.resolve({}),
+      sid ? student(u, sid).then((row) => ({ row }), (error) => ({ error })) : Promise.resolve({}),
     ]);
     if (prior) {
       ensure(
@@ -3349,8 +3349,10 @@ export async function POST(req: Request) {
         // student's client account, and follows it: In Progress, Done, then
         // Proof Uploaded once the proof is in; or Cancelled, with a note. The
         // account's coordinators, its keepers and the leaders can do this.
+        // A coordinator acts for their own groups' students on any account
+        // (orderStudent checks the student is theirs), whoever is written on it.
         const mayOrder = (a: any) =>
-          can(u.roles, ["Project Operations", "Operations Systems / Admin"]) || keepsAccounts(u) || a.coordinator_id === u.id || a.coordinator_2_id === u.id;
+          can(u.roles, ["Project Operations", "Operations Systems / Admin", "Operations Coordinator"]) || keepsAccounts(u) || a.coordinator_id === u.id || a.coordinator_2_id === u.id;
         if (x.action === "account_service_status") {
           // The status picker on a service row: it sets where the service's
           // current order stands, any of the four, and starts a new order when
@@ -3404,7 +3406,7 @@ export async function POST(req: Request) {
           ensure(a, "Account not found.");
           ensure(mayOrder(a), "Only this account's coordinator, its keepers or the leaders record its orders.");
           const which = await orderStudent(a, x.student_id, u);
-          const pupil = await student(u, which.student_id, { accounts: true });
+          const pupil = await student(u, which.student_id);
           const orderRef = String(x.order_ref || "").trim();
           ensure(orderRef.length <= 120, "Keep the order number under 120 characters.");
           const amount = x.amount === "" || x.amount === null || x.amount === undefined ? null : Number(x.amount);
@@ -3424,6 +3426,7 @@ export async function POST(req: Request) {
         ensure(order, "Order not found.");
         const a: any = await stmt("SELECT * FROM accounts WHERE id=?", order.account_id).first();
         ensure(a && (mayOrder(a) || order.coordinator === u.id), "Only this account's coordinator, its keepers or the leaders update its orders.");
+        if (!can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin", "Team Supervisor"]) && !keepsAccounts(u)) await orderStudent(a, order.student_id, u);
         const to = String(x.status || "");
         const allowed: Record<string, string[]> = {
           Buy: ["In Progress", "Done", "Cancelled"],

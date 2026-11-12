@@ -1,6 +1,6 @@
 import { failure } from "@/lib/errors";
 import { env } from "@/lib/env";
-import { actor, all, keepsAccounts, permit, stmt, auditStmt, db, uid, now, rateLimit, scopeSql, refuseDemo } from "@/lib/server";
+import { actor, all, coordinatorAccountSql, keepsAccounts, permit, stmt, auditStmt, db, uid, now, rateLimit, scopeSql, refuseDemo } from "@/lib/server";
 import { can, ensure } from "@/lib/domain/rules";
 import { credentialKey, credentialKeyConfigured, openCredential, sealCredential } from "@/lib/domain/account-secrets";
 import { resealLegacyCredentials } from "@/lib/credential-reseal";
@@ -23,9 +23,11 @@ async function mayReveal(u: any, accountId: string) {
   // supervisor and Project Operations), who also store the passwords.
   if (can(u.roles, custodians) || keepsAccounts(u)) return true;
   if (!can(u.roles, ["Project Operations", "Operations Coordinator", "Team Supervisor"])) return false;
-  // The coordinators the account is assigned to work it, so may sign in to it.
+  // The coordinator who works the account signs in to it: the coordinator of
+  // its student's group, or the one it is assigned to before it has a student (13 November 2026).
   if (can(u.roles, ["Operations Coordinator"])) {
-    const mine = await stmt("SELECT id FROM accounts WHERE id=? AND (coordinator_id=? OR coordinator_2_id=?)", accountId, u.id, u.id).first();
+    const own = coordinatorAccountSql(u);
+    const mine = await stmt(`SELECT a.id FROM accounts a WHERE a.id=? AND ${own.sql}`, accountId, ...own.args).first();
     if (mine) return true;
   }
   const scope = scopeSql(u, "g", null);
@@ -54,13 +56,13 @@ async function listCredentials(u: any) {
     rows = await all("SELECT s.* FROM account_secrets s JOIN accounts a ON a.id=s.account_id");
   } else {
     const scope = scopeSql(u, "g", null);
+    const own = can(u.roles, ["Operations Coordinator"]) ? coordinatorAccountSql(u) : { sql: "0=1", args: [] as string[] };
     rows = await all(
       `SELECT s.* FROM account_secrets s JOIN accounts a ON a.id=s.account_id
        WHERE a.status NOT IN ('Retired','Blocked','Under Review')
-         AND (a.coordinator_id=? OR a.coordinator_2_id=?
+         AND (${own.sql}
               OR EXISTS (SELECT 1 FROM account_assignments n JOIN groups g ON g.id=n.group_id WHERE n.account_id=a.id AND ${scope.sql}))`,
-      u.id,
-      u.id,
+      ...own.args,
       ...scope.args,
     );
   }

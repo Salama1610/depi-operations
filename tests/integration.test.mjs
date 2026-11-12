@@ -4793,24 +4793,31 @@ test("an account's coordinator sees the service it is for, with the student and 
   const account = await dbRow("SELECT id FROM accounts WHERE id NOT LIKE 'DEMO-%' AND student_id IS NULL ORDER BY id LIMIT 1");
   const before = await dbRow("SELECT coordinator_id,student_id,service_link_id FROM accounts WHERE id=?", account.id);
   await dbExec("UPDATE accounts SET coordinator_id=?,student_id=?,service_link_id=? WHERE id=?", other.id, pupil.id, "SLK-ACCT-VIEW", account.id);
-  current = { id: other.id, email: other.email };
+  // The account is written to coordinator A, but its student is in coordinator
+  // B's group: B manages the student, so B sees and works the account and A
+  // does not (13 November 2026).
+  const mine = await dbRow("SELECT u.id,u.email FROM users u WHERE u.id=?", pupil.coordinator);
+  current = { id: mine.id, email: mine.email };
   const view = await (await api.GET()).json();
   assert.equal(view.error, undefined, view.error);
   const row = view.accounts.find((a) => a.id === account.id);
-  assert.ok(row, "the coordinator sees the account given to them");
+  assert.ok(row, "the student's own coordinator sees the account");
   assert.equal(row.service_link_id, "SLK-ACCT-VIEW");
   assert.equal(row.service_url, url);
   assert.equal(row.service_platform, "Kafiil");
   assert.equal(row.student_name, pupil.name);
   assert.equal(row.student_coordinator_name, pupil.coordinator_name);
-  // The student is another coordinator's: outside the Accounts tab, this
-  // coordinator's lists stay their own groups' (13 November 2026).
+  await check("account_service_status", { account_id: account.id, student_id: pupil.id, status: "In Progress" });
+  assert.equal((await dbRow("SELECT status FROM account_orders WHERE account_id=? AND student_id=?", account.id, pupil.id)).status, "In Progress");
+  // Coordinator A, written on the account, sees neither the account nor the student, and cannot act on them.
   if (!(await dbRow("SELECT 1 x FROM groups WHERE id=? AND (coordinator=? OR supervisor=? OR coach=?)", pupil.group_id, other.id, other.id, other.id))) {
-    assert.ok(!view.students.some((s) => s.id === pupil.id), "not in the coordinator's students");
-    assert.ok(!view.groups.some((g) => g.id === pupil.group_id), "nor their group");
-    // The account work still reaches the student: the service status is set.
-    await check("account_service_status", { account_id: account.id, student_id: pupil.id, status: "In Progress" });
-    assert.equal((await dbRow("SELECT status FROM account_orders WHERE account_id=? AND student_id=?", account.id, pupil.id)).status, "In Progress");
+    current = { id: other.id, email: other.email };
+    const theirs = await (await api.GET()).json();
+    assert.equal(theirs.error, undefined, theirs.error);
+    assert.ok(!theirs.accounts.some((a) => a.id === account.id), "not the account");
+    assert.ok(!theirs.students.some((s) => s.id === pupil.id), "nor the student");
+    assert.ok(!(theirs.accountOrders || []).some((o) => o.student_id === pupil.id), "nor the orders");
+    assert.ok((await post("account_service_status", { account_id: account.id, student_id: pupil.id, status: "Done" })).error, "cannot set the status");
   }
   current = { id: "owner", email: "owner@example.com" };
   await dbExec("DELETE FROM account_orders WHERE account_id=?", account.id);
@@ -4879,7 +4886,7 @@ test("coordinators follow each order on a student's client account, and the lead
   // Someone else's coordinator cannot record on it.
   const other = await dbRow("SELECT id,email FROM users WHERE roles LIKE '%Operations Coordinator%' AND active=1 AND id<>? AND id NOT LIKE 'DEMO-%' ORDER BY id LIMIT 1", pupil.coordinator);
   current = { id: other.id, email: other.email };
-  assert.match((await post("account_order", { account_id: "ACC-ORDER-1", order_ref: "K-1" })).error, /Only this account's coordinator/);
+  assert.match((await post("account_order", { account_id: "ACC-ORDER-1", order_ref: "K-1" })).error, /another coordinator's/);
 
   current = { id: pupil.coordinator, email: pupil.email };
   await check("account_order", { id: "ORD-1", account_id: "ACC-ORDER-1", order_ref: "K-1001", amount: 5, note: "Logo" });

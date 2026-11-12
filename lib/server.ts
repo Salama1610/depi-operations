@@ -275,7 +275,7 @@ export function permit(u: any, allowed: string[]) {
  * no students in it passes null and gets the same rule expressed through the
  * group, so a reviewer sees the groups their students are in.
  */
-export function scopeSql(u: any, alias = "g", studentAlias: string | null = "s", options: { accounts?: boolean } = {}) {
+export function scopeSql(u: any, alias = "g", studentAlias: string | null = "s") {
   // Depi Industry was dropped from Round 5. Its groups stay in the database for
   // the record, but nobody sees them; delete this line to bring them back.
   // Demo sign-ins see the demo groups and nothing else; nobody else sees them.
@@ -296,18 +296,10 @@ export function scopeSql(u: any, alias = "g", studentAlias: string | null = "s",
     `(${alias}.coordinator=? OR ${alias}.supervisor=? OR ${alias}.coach=? OR ${alias}.account_manager=? OR EXISTS (SELECT 1 FROM group_coaches gc WHERE gc.group_id=${alias}.id AND gc.user_id=? AND gc.status='Active'))`,
   ];
   const args: string[] = [u.id, u.id, u.id, u.id, u.id];
-  // A coordinator also reaches the students whose client accounts they hold,
-  // to record orders on them and upload their proof; on an account two
-  // coordinators share, only their own half (12 November 2026). Only for
-  // that work (options.accounts): the coordinator's lists, groups, sessions and
-  // weekly figures stay their own groups' (13 November 2026), and the Accounts
-  // tab shows each account's student, group and coordinator by itself.
-  if (options.accounts && studentAlias && can(u.roles, ["Operations Coordinator"])) {
-    clauses.push(
-      `EXISTS (SELECT 1 FROM accounts ac WHERE (ac.student_id=${studentAlias}.id OR ac.id IN (SELECT sl.account_id FROM service_links sl WHERE sl.student_id=${studentAlias}.id)) AND (ac.coordinator_id=? OR ac.coordinator_2_id=?) AND NOT (${alias}.coordinator<>? AND ${alias}.coordinator IN (coalesce(ac.coordinator_id,''),coalesce(ac.coordinator_2_id,''))))`,
-    );
-    args.push(u.id, u.id, u.id);
-  }
+  // A coordinator's students are their own groups' students, the Accounts tab
+  // included: a client account's student is worked by the coordinator of the
+  // student's group, whoever is written on the account (13 November 2026; see
+  // coordinatorAccountSql).
   // A quality reviewer sees the students whose work is assigned to them —
   // their services or their gig evidence, handed out automatically or by the
   // Quality Lead — and nobody else.
@@ -339,12 +331,27 @@ export async function accountOrdersFor(u: any) {
   if (can(u.roles, ["Team Supervisor"]))
     return all(`${select} WHERE ${side} AND g.supervisor=? ORDER BY o.updated_at DESC LIMIT 3000`, u.id);
   if (can(u.roles, ["Operations Coordinator"]))
-    // On an account two coordinators share, not the other coordinator's student's orders.
-    return all(`${select} WHERE ${side} AND (a.coordinator_id=? OR a.coordinator_2_id=? OR o.coordinator=?) AND NOT (g.coordinator<>? AND g.coordinator IN (coalesce(a.coordinator_id,''),coalesce(a.coordinator_2_id,''))) ORDER BY o.updated_at DESC LIMIT 3000`, u.id, u.id, u.id, u.id);
+    // The orders of their own groups' students, whoever is written on the account (13 November 2026).
+    return all(`${select} WHERE ${side} AND g.coordinator=? ORDER BY o.updated_at DESC LIMIT 3000`, u.id);
   return [];
 }
-export async function student(u: any, id: string, options: { accounts?: boolean } = {}) {
-  const q = scopeSql(u, "g", "s", options);
+
+/**
+ * The client accounts a coordinator works, as SQL on an accounts alias
+ * (13 November 2026): an account whose student, first or second, is in one of
+ * their groups, since the coordinator of the student's group is the one who
+ * manages them; and an account assigned to them that has no student yet.
+ * Whoever else is written on the account does not see that student.
+ */
+export function coordinatorAccountSql(u: any, a = "a") {
+  return {
+    sql: `((${a}.student_id IS NULL AND NOT EXISTS (SELECT 1 FROM service_links cl WHERE cl.account_id=${a}.id) AND (${a}.coordinator_id=? OR ${a}.coordinator_2_id=?))
+      OR EXISTS (SELECT 1 FROM students cs JOIN groups cg ON cg.id=cs.group_id WHERE cg.coordinator=? AND (cs.id=${a}.student_id OR cs.id IN (SELECT cl.student_id FROM service_links cl WHERE cl.account_id=${a}.id))))`,
+    args: [u.id, u.id, u.id],
+  };
+}
+export async function student(u: any, id: string) {
+  const q = scopeSql(u);
   const s: any = await stmt(
     `SELECT s.*,g.track,g.coordinator,g.supervisor,g.coach,g.policy_id,g.status group_status FROM students s JOIN groups g ON g.id=s.group_id WHERE s.id=? AND ${q.sql}`,
     id,
@@ -360,8 +367,7 @@ export async function proof(u: any, id: string, sid: string) {
     sid,
   ).first();
   ensure(a, "Upload proof linked to this student first.");
-  // A proof is an order's POH now, so it may be for a student reached through an account.
-  await student(u, sid, { accounts: true });
+  await student(u, sid);
   return a;
 }
 /**
@@ -850,8 +856,9 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
       // own half, never the other coordinator's student, service or orders.
       const ownHalf = (rows: any[]) =>
         rows.map((a) => {
-          const others = new Set([a.coordinator_id, a.coordinator_2_id].filter((id) => id && id !== u.id));
-          const theirs = (coordinator: unknown) => Boolean(coordinator) && others.has(coordinator);
+          // A student of another coordinator's group is theirs to manage, not
+          // this coordinator's, whoever is written on the account (13 November 2026).
+          const theirs = (coordinator: unknown) => coordinator !== u.id;
           const view = { ...a };
           if (view.second && theirs(view.second.student_coordinator_id)) view.second = null;
           if (view.student_id && theirs(view.student_coordinator_id)) {
@@ -861,11 +868,13 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
           }
           return view;
         });
-      if (can(u.roles, ["Operations Coordinator"]))
+      if (can(u.roles, ["Operations Coordinator"])) {
+        const mine = coordinatorAccountSql(u);
         return withSecond(
-          all(`${linked} WHERE (a.coordinator_id=? OR a.coordinator_2_id=?) AND ${sameSide(u, "a.id")}`, u.id, u.id),
-          all(`${second} AND (a.coordinator_id=? OR a.coordinator_2_id=?) AND ${sameSide(u, "a.id")}`, u.id, u.id),
+          all(`${linked} WHERE ${mine.sql} AND ${sameSide(u, "a.id")}`, ...mine.args),
+          all(`${second} AND ${mine.sql} AND ${sameSide(u, "a.id")}`, ...mine.args),
         ).then(ownHalf);
+      }
       return none;
     })(),
     // Everyone sees who their colleagues are and how to reach them; the

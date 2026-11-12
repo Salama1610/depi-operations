@@ -3131,4 +3131,5 @@ export const ar: Record<string, string> = {
   "This screenshot is over 4 MB. Crop it or save it as a JPEG, then upload it again.": "لقطة الشاشة أكبر من 4 ميجابايت. قصّها أو احفظها بصيغة JPEG ثم ارفعها مرة أخرى.",
   "The upload did not go through. Try again.": "لم يكتمل الرفع. حاول مرة أخرى.",
   "The order is finished. A screenshot of the proof is optional.": "اكتمل الطلب. لقطة شاشة الإثبات اختيارية.",
+  "This student is another coordinator's: their group's coordinator manages their account orders.": "هذا الطالب تابع لمنسق آخر: منسق مجموعته هو من يدير طلبات حسابه.",
 };
