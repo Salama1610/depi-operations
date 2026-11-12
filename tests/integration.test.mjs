@@ -5626,9 +5626,8 @@ test("in a service group the three services must cover both marketplaces, and on
   // Locking a service can link a client account to it: free those before the links go.
   await dbExec("UPDATE accounts SET student_id=NULL,service_link_id=NULL,linked_at=NULL,linked_by=NULL WHERE student_id=? OR service_link_id IN (SELECT id FROM service_links WHERE student_id=?)", learner.id, learner.id);
   await dbExec("UPDATE service_links SET account_id=NULL WHERE student_id=?", learner.id);
-  await dbExec("DELETE FROM service_link_reviews WHERE service_link_id IN (SELECT id FROM service_links WHERE student_id=?)", learner.id);
-  await dbExec("DELETE FROM service_links WHERE student_id=?", learner.id);
-  await dbExec("DELETE FROM service_submissions WHERE student_id=?", learner.id);
+  // Its services stay: their QC reviews are immutable (Postgres refuses the delete), and this
+  // student was picked for having none, so a later run picks another.
   current = { id: "owner", email: "owner@example.com" };
 });
 
