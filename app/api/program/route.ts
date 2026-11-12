@@ -1,3 +1,5 @@
+import { failure } from "@/lib/errors";
+import { Refusal } from "@/lib/domain/rules";
 import {
   actor,
   all,
@@ -459,7 +461,7 @@ export async function GET(req: Request) {
       headers: { "Cache-Control": "private,no-store" },
     });
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "program");
   }
 }
 
@@ -1382,7 +1384,7 @@ export async function POST(req: Request) {
         break;
       }
       default:
-        throw new Error("This program-flow operation is not supported.");
+        throw new Refusal("This program-flow operation is not supported.");
     }
     jobs.push(
       auditStmt(u, x.action, entity, x, previous, requestId, x.reason || null),

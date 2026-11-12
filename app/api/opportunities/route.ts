@@ -1,3 +1,5 @@
+import { failure } from "@/lib/errors";
+import { Refusal } from "@/lib/domain/rules";
 import { actor, all, auditStmt, currentStudent, db, now, rateLimit, stmt, uid } from "@/lib/server";
 import { can, ensure } from "@/lib/domain/rules";
 import { sameSide } from "@/lib/demo";
@@ -56,7 +58,7 @@ export async function GET() {
       : [];
     return Response.json({ opportunities, track: s.track || null }, noStore);
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "opportunities");
   }
 }
 
@@ -96,7 +98,7 @@ export async function POST(req: Request) {
     try {
       url = new URL(String(x.url ?? "").trim());
     } catch {
-      throw new Error("Enter the job's full link, starting with https://");
+      throw new Refusal("Enter the job's full link, starting with https://");
     }
     ensure(url.protocol === "https:" && !url.username && !url.password && url.href.length <= 2000, "Enter the job's full link, starting with https://");
     ensure(
@@ -113,6 +115,6 @@ export async function POST(req: Request) {
     ]);
     return Response.json({ ok: true, id });
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "opportunities");
   }
 }

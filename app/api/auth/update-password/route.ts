@@ -13,7 +13,8 @@ export async function POST(request: Request) {
     const { error } = await supabase.auth.updateUser({ password: body.password, data: { password_changed_at: new Date().toISOString() } });
     if (error) return Response.json({ error: "Unable to update this password. Request a new reset link." }, { status: 400 });
     return Response.json({ ok: true });
-  } catch {
+  } catch (error: any) {
+    console.error(JSON.stringify({ level: "error", route: "auth/update-password", message: String(error?.message ?? error).slice(0, 500) }));
     return Response.json({ error: "Password update is temporarily unavailable." }, { status: 500 });
   }
 }

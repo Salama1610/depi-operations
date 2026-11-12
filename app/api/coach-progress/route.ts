@@ -1,3 +1,4 @@
+import { failure } from "@/lib/errors";
 import { actor, all, permit, rateLimit } from "@/lib/server";
 import { policy } from "@/lib/domain/rules";
 import { portalGigStage, portalGraduation } from "@/lib/domain/portal-figures";
@@ -156,6 +157,6 @@ export async function GET() {
     });
     return Response.json({ students: result, needed: policy.gigCount }, { headers: { "Cache-Control": "no-store" } });
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "coach-progress");
   }
 }

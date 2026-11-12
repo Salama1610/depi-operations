@@ -1,3 +1,4 @@
+import { failure } from "@/lib/errors";
 import { actor, auditStmt, rateLimit } from "@/lib/server";
 import { report } from "@/lib/reports";
 import { toCSV, toXLSX } from "@/lib/spreadsheet";
@@ -42,6 +43,6 @@ export async function GET(req: Request) {
       headers: { "Cache-Control": "private,no-store" },
     });
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "reports");
   }
 }

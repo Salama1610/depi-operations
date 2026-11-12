@@ -1,3 +1,4 @@
+import { failure } from "@/lib/errors";
 import { actor, all, permit, rateLimit, refuseDemo, revokesStudents } from "@/lib/server";
 import { portalWaitsForCoachSql, coachStatusSql } from "@/lib/domain/portal-figures";
 import { portalCoachGap, portalGapRoles } from "@/lib/domain/portal-gap";
@@ -66,6 +67,6 @@ export async function GET() {
     ]);
     return Response.json({ sheet: true, ...portalCoachGap(sheet, openReviews, decided) }, { headers: { "Cache-Control": "no-store" } });
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "portal-gap");
   }
 }

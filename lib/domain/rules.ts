@@ -39,8 +39,21 @@ export const policy = {
   milestoneWeek7: 7,
   milestoneWeek8: 8,
 };
+/**
+ * A deliberate "no", with a message written for the person (12 November 2026).
+ * Routes answer it with its message and a 4xx; any other error is a fault,
+ * logged and answered with a general message (lib/errors.ts).
+ */
+export class Refusal extends Error {
+  readonly status: number;
+  constructor(message: string, status = 400) {
+    super(message);
+    this.name = "Refusal";
+    this.status = status;
+  }
+}
 export function ensure(ok: unknown, message: string): asserts ok {
-  if (!ok) throw new Error(message);
+  if (!ok) throw new Refusal(message);
 }
 /**
  * A value matched literally inside a LIKE pattern: its %, _ and \ lose their

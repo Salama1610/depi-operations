@@ -1,3 +1,5 @@
+import { failure } from "@/lib/errors";
+import { Refusal } from "@/lib/domain/rules";
 import { actor, all, auditStmt, db, now, permit, rateLimit, refuseDemo, revokesStudents, stmt, uid } from "@/lib/server";
 import { sameSide } from "@/lib/demo";
 import { can, ensure } from "@/lib/domain/rules";
@@ -344,7 +346,7 @@ export async function GET() {
       noStore,
     );
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "portal-qc");
   }
 }
 
@@ -486,8 +488,8 @@ export async function POST(req: Request) {
       return Response.json({ ok: true, moved: students.length });
     }
 
-    throw new Error("Choose a portal gig review action.");
+    throw new Refusal("Choose a portal gig review action.");
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "portal-qc");
   }
 }

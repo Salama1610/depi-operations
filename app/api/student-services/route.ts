@@ -1,3 +1,5 @@
+import { failure } from "@/lib/errors";
+import { Refusal } from "@/lib/domain/rules";
 import { linkAccountKey, serviceFixStatements, submissionStatus } from "@/lib/service-followup";
 import { sessionEnd, sessionEnded } from "@/lib/domain/session-time";
 import {
@@ -139,7 +141,7 @@ async function clientOrders(studentId: string) {
 
 const rating = (value: unknown, question: string) => {
   const n = Number(value);
-  if (!Number.isInteger(n) || n < 1 || n > 5) throw new Error(`Answer "${question}" from 1 to 5.`);
+  if (!Number.isInteger(n) || n < 1 || n > 5) throw new Refusal(`Answer "${question}" from 1 to 5.`);
   return n;
 };
 
@@ -148,14 +150,14 @@ async function sessionFeedback(x: any) {
   const s = await currentStudent();
   await rateLimit("session-feedback:" + s.id, 30, 60);
   const session: any = await stmt("SELECT * FROM sessions WHERE id=?", x.session_id).first();
-  if (!session || session.group_id !== s.group_id) throw new Error("This session is not one of your group's.");
-  if (session.status === "Cancelled") throw new Error("This session was cancelled.");
+  if (!session || session.group_id !== s.group_id) throw new Refusal("This session is not one of your group's.");
+  if (session.status === "Cancelled") throw new Refusal("This session was cancelled.");
   const ended = sessionEnd(session);
-  if (ended > Date.now()) throw new Error("Feedback opens once the session has ended.");
-  if (Date.now() - ended > FEEDBACK_DAYS * 86400000) throw new Error("Feedback on this session has closed.");
+  if (ended > Date.now()) throw new Refusal("Feedback opens once the session has ended.");
+  if (Date.now() - ended > FEEDBACK_DAYS * 86400000) throw new Refusal("Feedback on this session has closed.");
   if (await stmt("SELECT id FROM session_feedback WHERE session_id=? AND student_id=?", session.id, s.id).first())
-    throw new Error("You have already given feedback on this session.");
-  if (typeof x.searched_gig !== "boolean") throw new Error('Answer "Did you search for a gig through platforms?"');
+    throw new Refusal("You have already given feedback on this session.");
+  if (typeof x.searched_gig !== "boolean") throw new Refusal('Answer "Did you search for a gig through platforms?"');
   const text = (value: unknown) => String(value || "").trim().slice(0, 1000) || null;
   const t = now();
   await db().batch([
@@ -190,23 +192,23 @@ export async function GET() {
       client_orders,
     });
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 403 });
+    return failure(e, "student-services", { refusalStatus: 403 });
   }
 }
 
 export async function POST(req: Request) {
   try {
     const contentLength = Number(req.headers.get("content-length") || 0);
-    if (contentLength > 20_000) throw new Error("The request is too large.");
+    if (contentLength > 20_000) throw new Refusal("The request is too large.");
     const origin = req.headers.get("origin");
     if (origin) {
       if (origin !== new URL(req.url).origin)
-        throw new Error("Cross-site requests are not allowed.");
+        throw new Refusal("Cross-site requests are not allowed.");
     }
     const x = await req.json();
     if (x.action === "qc_review") return await qcReview(x);
     if (x.action === "session_feedback") return await sessionFeedback(x);
-    if (x.action !== "submit_services") throw new Error("Choose a service-link action.");
+    if (x.action !== "submit_services") throw new Refusal("Choose a service-link action.");
     // An administrator can send a student's links for them, from the student's
     // details: the same checks, reviewer and notifications as the student's own
     // Send, with the administrator recorded as the one who sent them.
@@ -217,7 +219,7 @@ export async function POST(req: Request) {
       permit(staff, ["Operations Systems / Admin"]);
       s = await student(staff, String(x.student_id));
       if (["Removed", "Withdrawn", "Graduate Closed", "Non-Graduate Closed", "Revoked"].includes(s.lifecycle))
-        throw new Error("This student record is closed and can no longer be updated.");
+        throw new Refusal("This student record is closed and can no longer be updated.");
     } else s = await currentStudent();
     await rateLimit("student-services:" + (staff ? staff.id : s.id), 30, 60);
     const existing = await all(
@@ -232,7 +234,7 @@ export async function POST(req: Request) {
     // cannot change, and a link is never dropped.
     let values: string[] = Array.isArray(x.services) ? x.services : [];
     if (values.length < existing.length)
-      throw new Error("Keep every link you already submitted. Replace a link that needs correction instead of removing it.");
+      throw new Refusal("Keep every link you already submitted. Replace a link that needs correction instead of removing it.");
     values = normalizeServiceSlots(values, s.group_id);
     // A service is the student's own listing. It is never tied to one of the
     // programme's client accounts, which only order gigs, so account_id stays
@@ -290,11 +292,11 @@ export async function POST(req: Request) {
       if (!normalized) continue;
       const earlier = placeOf.get(normalized);
       if (earlier)
-        throw new Error(`Link ${index + 1} is the same as link ${earlier}. Each link goes in once. If you fixed a rejected link on the same page, press "I fixed it" under it instead of pasting it again.`);
+        throw new Refusal(`Link ${index + 1} is the same as link ${earlier}. Each link goes in once. If you fixed a rejected link on the same page, press "I fixed it" under it instead of pasting it again.`);
       placeOf.set(normalized, index + 1);
       const owner = existing.find((row: any) => row.normalized_url === normalized);
       if (owner && Number(owner.slot) !== index + 1)
-        throw new Error(`Link ${index + 1} is already your service ${owner.slot}. Keep each link in its own place. If you fixed a rejected link on the same page, press "I fixed it" under it instead of pasting it again.`);
+        throw new Refusal(`Link ${index + 1} is already your service ${owner.slot}. Keep each link in its own place. If you fixed a rejected link on the same page, press "I fixed it" under it instead of pasting it again.`);
     }
     for (let index = 0; index < values.length; index += 1) {
       const slot = index + 1;
@@ -310,7 +312,7 @@ export async function POST(req: Request) {
       if (prior && prior.normalized_url === check.normalizedUrl && !fixedInPlace) continue;
       if (prior && prior.qc_status !== "Needs Correction") {
         if (prior.normalized_url !== check.normalizedUrl)
-          throw new Error(
+          throw new Refusal(
             prior.qc_status === "Locked"
               ? `Service ${slot} is locked and cannot be changed.`
               : `Service ${slot} is awaiting QC and cannot be changed yet.`,
@@ -318,7 +320,7 @@ export async function POST(req: Request) {
         continue;
       }
       if (await takenElsewhere(check))
-        throw new Error(
+        throw new Refusal(
           `Link ${slot} is already submitted by another student. Each student submits their own services.`,
         );
       const revision = prior ? Number(prior.revision || 1) + 1 : 1;
@@ -423,19 +425,19 @@ async function qcReview(x: any) {
   const u = await actor();
   permit(u, ["Quality Member", "Quality Lead"]);
   if (!["Lock", "Needs Correction"].includes(x.decision))
-    throw new Error("Choose Approve or Reject.");
+    throw new Refusal("Choose Approve or Reject.");
   const comment = String(x.comment || "").trim();
-  if (comment.length > 1000) throw new Error("Review comments must be 1,000 characters or fewer.");
+  if (comment.length > 1000) throw new Refusal("Review comments must be 1,000 characters or fewer.");
   if (x.decision === "Needs Correction" && !comment)
-    throw new Error("Add a comment telling the student why the link is rejected.");
+    throw new Refusal("Add a comment telling the student why the link is rejected.");
   const link: any = await stmt("SELECT * FROM service_links WHERE id=?", x.service_id).first();
-  if (!link) throw new Error("Service link not found.");
+  if (!link) throw new Refusal("Service link not found.");
   if (link.qc_status === "Locked")
-    throw new Error("This service link is already approved. The student submits a new link instead.");
+    throw new Refusal("This service link is already approved. The student submits a new link instead.");
   if (link.auto_status === "Failed" && x.decision === "Lock")
-    throw new Error("The automatic check failed for this link, so it can only be rejected.");
+    throw new Refusal("The automatic check failed for this link, so it can only be rejected.");
   if (link.qc_actor && link.qc_actor !== u.id && !u.roles.includes("Quality Lead"))
-    throw new Error("This student is assigned to another reviewer.");
+    throw new Refusal("This student is assigned to another reviewer.");
   await student(u, link.student_id);
   const t = now();
   const next = x.decision === "Lock" ? "Locked" : "Needs Correction";
@@ -499,7 +501,7 @@ async function reviewerPool(demo: boolean) {
  * resubmission goes back to the person who asked for the correction, and
  * otherwise whoever currently holds the fewest students.
  */
-export async function reviewerFor(studentId: string, priorActor?: string | null) {
+async function reviewerFor(studentId: string, priorActor?: string | null) {
   const pool = await reviewerPool(String(studentId).startsWith("DEMO-"));
   if (!pool.length) return null;
   if (priorActor && pool.includes(priorActor)) return priorActor;

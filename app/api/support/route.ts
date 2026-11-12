@@ -1,3 +1,4 @@
+import { failure } from "@/lib/errors";
 import { actor, all, auditStmt, bucket, db, now, permit, rateLimit, stmt, uid } from "@/lib/server";
 import { can, ensure } from "@/lib/domain/rules";
 import { isDemo } from "@/lib/demo";
@@ -45,7 +46,7 @@ export async function GET(req: Request) {
       : await all(`SELECT ${columns} FROM support_reports r LEFT JOIN users p ON p.id=r.reporter LEFT JOIN users h ON h.id=r.handled_by WHERE r.reporter=? ORDER BY r.created_at DESC LIMIT 100`, u.id);
     return Response.json({ reports, admin, me: { id: u.id, name: u.name, roles: u.roles } }, { headers: { "Cache-Control": "no-store" } });
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "support");
   }
 }
 
@@ -119,6 +120,6 @@ export async function POST(req: Request) {
     return Response.json({ ok: true, id });
   } catch (e: any) {
     if (key) await bucket().delete(key).catch(() => {});
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "support");
   }
 }

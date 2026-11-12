@@ -1,3 +1,4 @@
+import { failure } from "@/lib/errors";
 import { env } from "@/lib/env";
 import { actor, all, keepsAccounts, permit, stmt, auditStmt, db, uid, now, rateLimit, scopeSql, refuseDemo } from "@/lib/server";
 import { can, ensure } from "@/lib/domain/rules";
@@ -215,6 +216,6 @@ export async function POST(req: Request) {
       { headers: { "Cache-Control": "no-store", Pragma: "no-cache" } },
     );
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400, headers: { "Cache-Control": "no-store" } });
+    return failure(e, "credentials", { headers: { "Cache-Control": "no-store" } });
   }
 }

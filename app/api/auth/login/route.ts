@@ -61,7 +61,8 @@ export async function POST(request: Request) {
       return Response.json({ error: "Email or password is incorrect." }, { status: 401 });
     }
     return Response.json({ ok: true, redirect: "/" });
-  } catch {
+  } catch (error: any) {
+    console.error(JSON.stringify({ level: "error", route: "auth/login", message: String(error?.message ?? error).slice(0, 500) }));
     return Response.json({ error: "Sign-in is temporarily unavailable. Please try again." }, { status: 500 });
   }
 }

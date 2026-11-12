@@ -3118,4 +3118,9 @@ export const ar: Record<string, string> = {
   "Leave it as it is": "اتركه كما هو",
   "Only Project Operations or an administrator changes a student's email": "فقط عمليات المشروع أو المسؤول يغيّر بريد الطالب",
   "Only Project Operations or an administrator changes a student's national id": "فقط عمليات المشروع أو المسؤول يغيّر الرقم القومي للطالب",
+  "Could not refresh. What you see may be a few minutes old.": "تعذر التحديث. قد يكون ما تراه أقدم ببضع دقائق.",
+  "This screen could not be shown. Nothing you saved is lost.": "تعذر عرض هذه الشاشة. لم يضع شيء مما حفظته.",
+  "Reload the page": "أعد تحميل الصفحة",
+  "Reference: {v0}": "المرجع: {v0}",
+  "Something went wrong on our side. Please try again; if it keeps happening, report it from the Support page.": "حدث خطأ من جهتنا. حاول مرة أخرى؛ وإذا تكرر، أبلغ عنه من صفحة الدعم.",
 };

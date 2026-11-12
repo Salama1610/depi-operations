@@ -1,3 +1,4 @@
+import { failure } from "@/lib/errors";
 import { actor, all, permit, rateLimit, refuseDemo } from "@/lib/server";
 import { portalFiguresByStudent } from "@/lib/domain/portal-figures";
 import { proofKeySql } from "@/lib/domain/portal-review";
@@ -121,6 +122,6 @@ export async function GET() {
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 403 });
+    return failure(e, "dashboard", { refusalStatus: 403 });
   }
 }

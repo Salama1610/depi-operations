@@ -1,3 +1,4 @@
+import { failure } from "@/lib/errors";
 import { actor, all, rateLimit, scopeSql } from "@/lib/server";
 import { can, ensure } from "@/lib/domain/rules";
 import { isDemo, sameSide } from "@/lib/demo";
@@ -41,6 +42,6 @@ export async function GET(req: Request) {
       { headers: { "Cache-Control": "private,no-store" } },
     );
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "search");
   }
 }

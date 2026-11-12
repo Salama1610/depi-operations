@@ -1,3 +1,4 @@
+import { failure } from "@/lib/errors";
 import { actor, loadData, auditStmt, stmt, db, uid, now, rateLimit } from "@/lib/server";
 import { toCSV, toWorkbook, type Sheet } from "@/lib/spreadsheet";
 import { can, dataTransferRefusal, dataTransferRoles, ensure } from "@/lib/domain/rules";
@@ -78,6 +79,6 @@ export async function GET(req: Request) {
       },
     });
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "export");
   }
 }

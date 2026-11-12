@@ -749,7 +749,11 @@ export default function Operations({ module: initialModule }: { module: string }
       if (weeklyParts) void loadWeekly();
       if (selected?.id) void loadStudentParts(selected.id);
     } catch (e: any) {
-      setError(e.message);
+      // A reload that fails while the page already shows the workspace keeps
+      // the page as it is and says so, rather than wiping it (12 November
+      // 2026): a laptop waking from sleep often drops the first request.
+      if (data) toast.error(t("Could not refresh. What you see may be a few minutes old."), { id: "refresh-failed" });
+      else setError(e.message);
     } finally {
       setLoading(false);
     }

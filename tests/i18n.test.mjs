@@ -22,6 +22,15 @@ after(async () => {
 
 const pages = [
   "app/operations.tsx",
+  "app/error.tsx",
+  "app/accounts-sheet.tsx",
+  "app/attendance-check.tsx",
+  "app/feedback-view.tsx",
+  "app/portal-coaches.tsx",
+  "app/quality-reports.tsx",
+  "app/today.tsx",
+  "components/qc-thread.tsx",
+  "components/searchable-select.tsx",
   "app/program-flow.tsx",
   "app/weekly-progress.tsx",
   "app/control-center.tsx",

@@ -1,3 +1,5 @@
+import { failure } from "@/lib/errors";
+import { Refusal } from "@/lib/domain/rules";
 import { actor, auditStmt, db, permit, rateLimit, stmt, refuseDemo } from "@/lib/server";
 import { ensure } from "@/lib/domain/rules";
 
@@ -235,8 +237,8 @@ export async function POST(request: Request) {
     if (x.stage === "students") return Response.json(await importStudents(x));
     if (x.stage === "sources") return Response.json(await importSources(x));
     if (x.stage === "finalize") return Response.json(await finalizeImport(x, user));
-    throw new Error("Choose a valid roster import stage.");
+    throw new Refusal("Choose a valid roster import stage.");
   } catch (error: any) {
-    return Response.json({ error: error.message || "Roster import failed." }, { status: 400 });
+    return failure(error, "roster-import");
   }
 }

@@ -1,3 +1,5 @@
+import { failure } from "@/lib/errors";
+import { Refusal } from "@/lib/domain/rules";
 import { actor, all, auditStmt, db, notRevoked, now, permit, rateLimit, stmt, uid } from "@/lib/server";
 import { sameSide } from "@/lib/demo";
 import { can, ensure } from "@/lib/domain/rules";
@@ -22,7 +24,7 @@ const held = (u: any) =>
   `${sameSide(u, "g.id")} AND coalesce(g.delivery_model,'Regular')<>'Industry' AND t.status<>'Cancelled' AND t.starts_at<=?`;
 const realName = (n: any) => (n && !/unassigned/i.test(String(n)) ? n : null);
 
-export async function GET(req?: Request) {
+export async function GET(req: Request) {
   try {
     const u = await actor();
     permit(u, [...team, ...readers]);
@@ -33,7 +35,7 @@ export async function GET(req?: Request) {
 
     // One session's register, on request: every student marked, then the
     // group's current students nobody marked yet.
-    const sessionId = req ? new URL(req.url).searchParams.get("session") : null;
+    const sessionId = new URL(req.url).searchParams.get("session");
     if (sessionId) {
       const session: any = await stmt(
         `SELECT t.id,t.group_id FROM sessions t JOIN groups g ON g.id=t.group_id WHERE t.id=? AND ${held(u)}`,
@@ -104,7 +106,7 @@ export async function GET(req?: Request) {
       noStore,
     );
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "attendance-check");
   }
 }
 
@@ -168,8 +170,8 @@ export async function POST(req: Request) {
       return Response.json({ ok: true });
     }
 
-    throw new Error("Choose an attendance check action.");
+    throw new Refusal("Choose an attendance check action.");
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "attendance-check");
   }
 }

@@ -1,3 +1,4 @@
+import { failure } from "@/lib/errors";
 import { env } from "@/lib/env";
 import { actor, permit, all, stmt, auditStmt, db, uid, now, rateLimit, refuseDemo } from "@/lib/server";
 import { ensure } from "@/lib/domain/rules";
@@ -23,7 +24,7 @@ export async function GET() {
       runs: await all("SELECT id,kind,status,result,created_at,updated_at FROM automation_runs ORDER BY created_at DESC LIMIT 50"),
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 403 });
+    return failure(e, "system", { refusalStatus: 403 });
   }
 }
 
@@ -44,6 +45,6 @@ export async function POST(req: Request) {
     ]);
     return Response.json({ ok: true });
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "system");
   }
 }

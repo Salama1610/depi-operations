@@ -1,3 +1,4 @@
+import { failure } from "@/lib/errors";
 import { actor, all, auditStmt, db, now, permit, rateLimit, stmt, uid } from "@/lib/server";
 import { sameSide } from "@/lib/demo";
 import { ensure } from "@/lib/domain/rules";
@@ -117,7 +118,7 @@ export async function GET() {
       noStore,
     );
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "coach-availability");
   }
 }
 
@@ -162,6 +163,6 @@ export async function POST(req: Request) {
     ]);
     return Response.json({ ok: true, slots });
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "coach-availability");
   }
 }

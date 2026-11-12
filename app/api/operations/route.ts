@@ -1,3 +1,5 @@
+import { failure } from "@/lib/errors";
+import { Refusal } from "@/lib/domain/rules";
 import { notify, policyChecks } from "@/lib/automation";
 import { distributeEvenly, spread } from "@/lib/domain/qc-assignment";
 import {
@@ -529,7 +531,7 @@ export async function GET(req?: Request) {
     slimForBrowser(data);
     return jsonResponse(data, timings);
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 403 });
+    return failure(e, "operations", { refusalStatus: 403 });
   }
 }
 export async function POST(req: Request) {
@@ -2685,7 +2687,7 @@ export async function POST(req: Request) {
           );
           next = "L3 Review";
         } else
-          throw new Error(
+          throw new Refusal(
             "This evidence is not in an actionable review stage.",
           );
         ensure(x.notes?.trim(), "Record the review or correction guidance.");
@@ -3893,7 +3895,7 @@ export async function POST(req: Request) {
         break;
       }
       default:
-        throw new Error("This operation is not supported.");
+        throw new Refusal("This operation is not supported.");
     }
     if (sid && ["review", "gig_transition", "fx_apply"].includes(x.action))
       jobs.push(graduationStmt(sid));
@@ -3938,11 +3940,6 @@ export async function POST(req: Request) {
     }
     return Response.json({ ok: true });
   } catch (e: any) {
-    const message = /UNIQUE constraint/.test(e.message)
-      ? "A duplicate record or concurrent assignment was blocked. Refresh and review the existing record."
-      : /FOREIGN KEY/.test(e.message)
-        ? "A linked record does not exist. Check the selected student, owner and group."
-        : e.message;
-    return Response.json({ error: message }, { status: 400 });
+    return failure(e, "operations");
   }
 }

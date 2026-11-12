@@ -14,7 +14,8 @@ export async function POST(request: Request) {
     const supabase = await createSupabaseServerClient();
     await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${siteOrigin}/auth/callback?next=/auth/update-password` });
     return Response.json({ ok: true, message: "If this email is registered, a reset link is on its way." });
-  } catch {
+  } catch (error: any) {
+    console.error(JSON.stringify({ level: "error", route: "auth/reset", message: String(error?.message ?? error).slice(0, 500) }));
     return Response.json({ error: "Password reset is temporarily unavailable." }, { status: 500 });
   }
 }

@@ -1,3 +1,4 @@
+import { failure } from "@/lib/errors";
 import { actor, all, auditStmt, db, now, permit, rateLimit, refuseDemo, stmt } from "@/lib/server";
 import { ensure } from "@/lib/domain/rules";
 import { readPortalCoachRows } from "@/lib/portal-coaches";
@@ -27,7 +28,7 @@ export async function GET() {
     refuseDemo(u);
     return Response.json({ rows: await current() }, { headers: { "Cache-Control": "no-store" } });
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "portal-coaches");
   }
 }
 
@@ -101,6 +102,6 @@ export async function POST(req: Request) {
     }
     return Response.json({ summary, applied: Boolean(body.apply) });
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "portal-coaches");
   }
 }

@@ -1,3 +1,4 @@
+import { failure } from "@/lib/errors";
 import { actor, all, auditStmt, db, notRevoked, now, permit, rateLimit, scopeSql, stmt, uid } from "@/lib/server";
 import { can, ensure } from "@/lib/domain/rules";
 import { levelOf, scoreOf } from "@/lib/domain/feedback";
@@ -80,7 +81,7 @@ export async function GET(req: Request) {
       noStore,
     );
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "feedback");
   }
 }
 
@@ -134,6 +135,6 @@ export async function POST(req: Request) {
     await db().batch(jobs);
     return Response.json({ ok: true, case_id: caseId });
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "feedback");
   }
 }

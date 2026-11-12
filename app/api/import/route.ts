@@ -1,3 +1,4 @@
+import { failure } from "@/lib/errors";
 import {
   actor,
   stmt,
@@ -608,7 +609,7 @@ export async function GET(req: Request) {
       })),
     });
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "import");
   }
 }
 
@@ -851,7 +852,7 @@ export async function POST(req: Request) {
     ]);
     return Response.json(result);
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "import");
   }
 }
 

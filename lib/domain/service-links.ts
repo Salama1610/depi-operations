@@ -1,3 +1,5 @@
+import { Refusal } from "./rules.ts";
+
 export type ServiceLinkAutoStatus = "Needs Review" | "Failed";
 
 export type ServiceLinkVerification = {
@@ -280,22 +282,22 @@ export function serviceProgress(platforms: string[], groupId?: unknown) {
  * three in each section, and no service twice.
  */
 export function normalizeServiceSlots(input: unknown, groupId?: unknown) {
-  if (!Array.isArray(input) || input.length === 0) throw new Error("Add your service links.");
-  if (input.length > maxServiceLinks) throw new Error(`Submit at most ${maxServiceLinks} service links.`);
+  if (!Array.isArray(input) || input.length === 0) throw new Refusal("Add your service links.");
+  if (input.length > maxServiceLinks) throw new Refusal(`Submit at most ${maxServiceLinks} service links.`);
   const values = input.map((value) => (typeof value === "string" ? value.trim() : ""));
-  if (values.some((value) => !value)) throw new Error("Fill in every service link you added, or remove it.");
+  if (values.some((value) => !value)) throw new Refusal("Fill in every service link you added, or remove it.");
   const counts = linksPerCategory(values);
   for (const category of serviceCategories)
     if (counts[category] > maxLinksPerPlatform)
-      throw new Error(`At most ${maxLinksPerPlatform} ${category} links can be submitted; this has ${counts[category]}.`);
+      throw new Refusal(`At most ${maxLinksPerPlatform} ${category} links can be submitted; this has ${counts[category]}.`);
   if (counts.Kafiil + counts.Nafezly < minServiceLinks)
-    throw new Error(`Add at least ${minServiceLinks} Kafiil or Nafezly links, in any mix. Links on other sites do not count toward them.`);
+    throw new Refusal(`Add at least ${minServiceLinks} Kafiil or Nafezly links, in any mix. Links on other sites do not count toward them.`);
   if (mustCoverBothMarketplaces(groupId) && (counts.Kafiil === 0 || counts.Nafezly === 0))
-    throw new Error(`Add at least ${minServiceLinks} links with at least one on Kafiil and one on Nafezly: two on one marketplace and one on the other. Links on other sites do not count toward them.`);
+    throw new Refusal(`Add at least ${minServiceLinks} links with at least one on Kafiil and one on Nafezly: two on one marketplace and one on the other. Links on other sites do not count toward them.`);
   const identity = values.map((value) => {
     const check = verifyServiceLink(value, { open: true });
     return serviceKey(check) || value.toLowerCase();
   });
-  if (new Set(identity).size !== values.length) throw new Error("Each service link must be different.");
+  if (new Set(identity).size !== values.length) throw new Refusal("Each service link must be different.");
   return values;
 }

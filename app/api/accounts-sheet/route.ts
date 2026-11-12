@@ -1,3 +1,4 @@
+import { failure } from "@/lib/errors";
 import { env } from "@/lib/env";
 import { actor, all, auditStmt, db, keepsAccounts, now, rateLimit, refuseDemo, stmt, uid } from "@/lib/server";
 import { ensure } from "@/lib/domain/rules";
@@ -99,6 +100,6 @@ export async function POST(req: Request) {
     }
     return Response.json({ ok: true, applied: x.apply === true, summary }, { headers: { "Cache-Control": "no-store" } });
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "accounts-sheet");
   }
 }

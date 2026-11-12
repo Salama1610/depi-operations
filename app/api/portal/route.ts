@@ -1,3 +1,5 @@
+import { failure } from "@/lib/errors";
+import { Refusal } from "@/lib/domain/rules";
 import { actor, all, auditStmt, db, now, rateLimit, refuseDemo, scopeSql, stmt, uid } from "@/lib/server";
 import { can, ensure } from "@/lib/domain/rules";
 import { isNationalId, normalizeNationalId } from "@/lib/domain/sheet-mapping";
@@ -241,7 +243,7 @@ export async function GET(req: Request) {
       ),
     });
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "portal");
   }
 }
 
@@ -451,8 +453,8 @@ export async function POST(req: Request) {
       ]);
       return Response.json({ ok: true });
     }
-    throw new Error("Choose a portal upload action.");
+    throw new Refusal("Choose a portal upload action.");
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "portal");
   }
 }

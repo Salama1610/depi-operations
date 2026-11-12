@@ -1,3 +1,5 @@
+import { failure } from "@/lib/errors";
+import { Refusal } from "@/lib/domain/rules";
 import { actor, all, auditStmt, db, now, permit, rateLimit, refuseDemo, stmt, uid } from "@/lib/server";
 import { can, ensure } from "@/lib/domain/rules";
 
@@ -62,7 +64,7 @@ export async function GET() {
       noStore,
     );
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "quality-reports");
   }
 }
 
@@ -132,8 +134,8 @@ export async function POST(req: Request) {
       return Response.json({ ok: true });
     }
 
-    throw new Error("Choose a report action.");
+    throw new Refusal("Choose a report action.");
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "quality-reports");
   }
 }

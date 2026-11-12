@@ -1,0 +1,42 @@
+# Every push and pull request: lint, type check, the full test suite on
+# SQLite and on a real PostgreSQL (the production engine), and a production
+# build. Several sessions push straight to main, which deploys to live, so
+# this is the check that catches a broken change before people do
+# (12 November 2026).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install
+        run: npm ci --include=dev --include=optional
+      - name: Lint
+        run: npm run lint
+      - name: Type check
+        run: npm run typecheck
+      - name: Tests (SQLite, and the migrations on embedded PostgreSQL)
+        run: npm test
+      - name: Tests on PostgreSQL
+        run: npm run test:postgres
+      - name: Tests on PostgreSQL through the HTTPS transport
+        run: npm run test:postgres-rpc
+      - name: Build
+        run: npx next build

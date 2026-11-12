@@ -1,3 +1,4 @@
+import { failure } from "@/lib/errors";
 import { actor, all, permit, rateLimit, refuseDemo } from "@/lib/server";
 import { coachStudentCounts, coachStudentRoles, rankCoaches } from "@/lib/domain/portal-coach-students";
 import { portalWaitsForCoachSql } from "@/lib/domain/portal-figures";
@@ -47,6 +48,6 @@ export async function GET() {
     const counts = coachStudentCounts(students, portal);
     return Response.json({ sheet: true, ...counts, ranking: rankCoaches(counts.coaches, waits) }, { headers: { "Cache-Control": "no-store" } });
   } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 400 });
+    return failure(e, "portal-coach-students");
   }
 }

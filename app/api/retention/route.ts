@@ -1,3 +1,4 @@
+import { failure } from "@/lib/errors";
 import {actor,all,auditStmt,db,now,permit,rateLimit,stmt,uid,refuseDemo} from '@/lib/server';
 import {ensure} from '@/lib/domain/rules';
 
@@ -10,7 +11,7 @@ export async function GET(){
     const configurations=await all("SELECT key,value,classification,updated_by,updated_at FROM system_configuration WHERE key LIKE 'retention:%' ORDER BY key");
     const history=await all('SELECT * FROM retention_actions ORDER BY created_at DESC LIMIT 50');
     return Response.json({configurations,history,notice:'Execution remains disabled until an approved organizational/legal period is configured for the exact data scope.'},{headers:{'Cache-Control':'private,no-store'}});
-  }catch(e:any){return Response.json({error:e.message},{status:403});}
+  }catch(e:any){return failure(e,"retention",{refusalStatus:403});}
 }
 
 export async function POST(req:Request){
@@ -27,5 +28,5 @@ export async function POST(req:Request){
       auditStmt(u,'Retention policy recorded',key,value,null,uid('REQ'),x.reason)
     ]);
     return Response.json({ok:true,id,execution_status:'pending'});
-  }catch(e:any){return Response.json({error:e.message},{status:400});}
+  }catch(e:any){return failure(e,"retention");}
 }
