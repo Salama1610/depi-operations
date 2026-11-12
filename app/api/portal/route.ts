@@ -157,8 +157,10 @@ export async function GET(req: Request) {
     }
     // Every row of the students sheet. A Depi Industry row (dropped from Round 5)
     // is flagged: counted in the total uploaded, kept out of the cohort shown.
-    const studentRows = students
-      ? await all(
+    // The five reads below are independent: they start together and travel
+    // in one trip (12 November 2026).
+    const studentRowsRead: Promise<any[]> = students
+      ? all(
           `SELECT p.portal_id,p.email,p.full_name,p.phone,p.round_code,p.provider,p.track,p.profile,p.status,p.final_status,
                   p.graduate_type,p.total_gigs,p.approved_gigs,p.rejected_gigs,p.total_revenue,p.student_id,
                   s.name app_name,s.group_id,g.coordinator,c.name coordinator_name,
@@ -173,10 +175,10 @@ export async function GET(req: Request) {
            WHERE p.batch_id=?`,
           students.batch_id,
         )
-      : [];
+      : Promise.resolve([]);
     // The gigs sheet, counted per student, so the list carries what the portal says.
-    const gigCounts = gigs
-      ? await all(
+    const gigCountsRead: Promise<any[]> = gigs
+      ? all(
           `SELECT portal_student_id,count(*) total,
                   sum(CASE WHEN status='Approved' THEN 1 ELSE 0 END) approved,
                   sum(CASE WHEN status='Rejected' THEN 1 ELSE 0 END) rejected,
@@ -187,24 +189,32 @@ export async function GET(req: Request) {
            FROM portal_gigs z WHERE batch_id=? GROUP BY portal_student_id`,
           gigs.batch_id,
         )
-      : [];
+      : Promise.resolve([]);
     // Our active students, and whether the students sheet has them. The sheet
     // lists the students registered on the ministry portal, and it grows with
     // each export (105 on 11 Oct, 1,968 on 3 Nov 2026); our students it does
     // not have are not registered there yet, or are there under another email
     // and phone. Counted by group, so each coordinator sees who to chase.
-    const ourActive: any[] = students
-      ? (
-          await all(
+    const ourActiveRead: Promise<any[]> = students
+      ? all(
             `SELECT s.id,s.name,s.email,s.phone,s.group_id,g.track,g.provider,c.name coordinator_name,
                     CASE WHEN EXISTS (SELECT 1 FROM portal_students p WHERE p.batch_id=? AND p.student_id=s.id) THEN 1 ELSE 0 END on_portal
              FROM students s JOIN groups g ON g.id=s.group_id LEFT JOIN users c ON c.id=g.coordinator
              WHERE s.lifecycle='Active' AND COALESCE(g.delivery_model,'Regular')<>'Industry' AND g.id NOT LIKE 'DEMO-%'
              ORDER BY s.group_id,s.name`,
             students.batch_id,
-          )
-        ).filter((r: any) => scope === null || scope.has(r.id))
-      : [];
+          ).then((rows) => rows.filter((r: any) => scope === null || scope.has(r.id)))
+      : Promise.resolve([]);
+    // The sheets in use now; each upload before them is a line in the activity history.
+    const historyRead = all("SELECT id,sheet,status,file_name,rows_total,rows_linked,uploaded_by,created_at,committed_at FROM portal_uploads WHERE status='Active' ORDER BY sheet");
+    const mappingsRead = Promise.all(
+      sheets.map(async (sheet) => {
+        const saved: any = await stmt("SELECT mapping FROM import_mappings WHERE module=? AND name=?", "portal_" + sheet, mappingName).first();
+        return [sheet, saved ? JSON.parse(saved.mapping) : null];
+      }),
+    );
+    const [studentRows, gigCounts, ourActive, history, mappingPairs] = await Promise.all([studentRowsRead, gigCountsRead, ourActiveRead, historyRead, mappingsRead]);
+    const mappings = Object.fromEntries(mappingPairs);
     const notInSheet = ourActive.filter((r) => !Number(r.on_portal)).map(({ on_portal: _onPortal, ...r }) => r);
     const groupsGap = new Map<string, { group_id: string; coordinator_name: string | null; active: number; on_portal: number }>();
     for (const r of ourActive) {
@@ -214,16 +224,6 @@ export async function GET(req: Request) {
       groupsGap.set(r.group_id, g);
     }
     const portalByGroup = [...groupsGap.values()].sort((a, b) => b.active - b.on_portal - (a.active - a.on_portal) || a.group_id.localeCompare(b.group_id));
-    // The sheets in use now; each upload before them is a line in the activity history.
-    const history = await all("SELECT id,sheet,status,file_name,rows_total,rows_linked,uploaded_by,created_at,committed_at FROM portal_uploads WHERE status='Active' ORDER BY sheet");
-    const mappings = Object.fromEntries(
-      await Promise.all(
-        sheets.map(async (sheet) => {
-          const saved: any = await stmt("SELECT mapping FROM import_mappings WHERE module=? AND name=?", "portal_" + sheet, mappingName).first();
-          return [sheet, saved ? JSON.parse(saved.mapping) : null];
-        }),
-      ),
-    );
     return Response.json({
       canUpload: uploads(u),
       canLink: linksByHand(u),

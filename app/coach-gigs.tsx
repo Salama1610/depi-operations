@@ -16,11 +16,21 @@ import { coachStatusOf } from "@/lib/domain/portal-figures";
 
 type Row = Record<string, any>;
 
-async function loadGigs(): Promise<Row[]> {
-  const r = await fetch("/api/coach-gigs", { cache: "no-store" });
-  const v = await r.json().catch(() => null);
-  if (!r.ok || !v || v.error) throw new Error(v?.error || "Request failed");
-  return v.gigs || [];
+// The Overview notice and the Gigs tab share one read: opening the tab right
+// after the Overview does not ask again within a minute (12 November 2026).
+// The tab's Refresh button always asks afresh.
+let shared: { at: number; gigs: Promise<Row[]> } | null = null;
+async function loadGigs(fresh = false): Promise<Row[]> {
+  if (!fresh && shared && Date.now() - shared.at < 60_000) return shared.gigs;
+  const gigs = (async () => {
+    const r = await fetch("/api/coach-gigs", { cache: "no-store" });
+    const v = await r.json().catch(() => null);
+    if (!r.ok || !v || v.error) throw new Error(v?.error || "Request failed");
+    return (v.gigs || []) as Row[];
+  })();
+  shared = { at: Date.now(), gigs };
+  gigs.catch(() => (shared = null));
+  return gigs;
 }
 
 /** On the coach's Overview: how many checked gigs wait for them, and a way to the Gigs tab. */
@@ -54,10 +64,10 @@ export function CoachGigs() {
   const [group, setGroup] = useState("All");
   const [query, setQuery] = useState("");
 
-  async function load() {
+  async function load(fresh = false) {
     setError("");
     try {
-      setGigs(await loadGigs());
+      setGigs(await loadGigs(fresh));
     } catch (e: any) {
       setError(e.message);
     }
@@ -77,7 +87,7 @@ export function CoachGigs() {
     return (
       <div className="error-panel" role="alert">
         <p>{t(error)}</p>
-        <button className="primary" onClick={load}>{t("Try again")}</button>
+        <button className="primary" onClick={() => load(true)}>{t("Try again")}</button>
       </div>
     );
   if (!gigs) return <div className="dash-loading">{t("Loading…")}</div>;
@@ -120,7 +130,7 @@ export function CoachGigs() {
           {t("Student")}
           <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("Name, ID, portal ID, email or phone")} />
         </label>
-        <button type="button" className="small-btn" onClick={load}>
+        <button type="button" className="small-btn" onClick={() => load(true)}>
           <RefreshCw size={14} /> {t("Refresh")}
         </button>
       </div>

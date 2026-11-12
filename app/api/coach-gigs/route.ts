@@ -32,25 +32,28 @@ export async function GET() {
   try {
     const u = await actor();
     permit(u, ["Coach"]);
-    await rateLimit("coach-gigs:" + u.id, 60, 60);
-    // The students of the groups this coach carries out on the portal: the
-    // portal's own coach for the group, from its Coaches sheet, or the group's
-    // coach here when the sheet names nobody with an account (3 November 2026).
-    const students = await all(
-      `SELECT s.id,s.name,s.group_id FROM students s JOIN groups g ON g.id=s.group_id
-       WHERE s.lifecycle='Active' AND COALESCE(g.delivery_model,'Regular')<>'Industry' AND ${sameSide(u, "g.id")}
-         AND ${portalCoachSql("g")}=?`,
-      u.id,
-    );
+    // The rate limit, the coach's students and the two sheets in use, together (12 November 2026).
+    const latest = (sheet: string) =>
+      all("SELECT batch_id FROM portal_uploads WHERE sheet=? AND status='Active' ORDER BY committed_at DESC LIMIT 1", sheet).then(
+        (rows) => rows[0]?.batch_id as string | undefined,
+      );
+    const [, students, studentsBatch, gigsBatch] = await Promise.all([
+      rateLimit("coach-gigs:" + u.id, 60, 60),
+      // The students of the groups this coach carries out on the portal: the
+      // portal's own coach for the group, from its Coaches sheet, or the group's
+      // coach here when the sheet names nobody with an account (3 November 2026).
+      all(
+        `SELECT s.id,s.name,s.group_id FROM students s JOIN groups g ON g.id=s.group_id
+         WHERE s.lifecycle='Active' AND COALESCE(g.delivery_model,'Regular')<>'Industry' AND ${sameSide(u, "g.id")}
+           AND ${portalCoachSql("g")}=?`,
+        u.id,
+      ),
+      latest("students"),
+      latest("gigs"),
+    ]);
     const byId = new Map(students.map((s: any) => [String(s.id), s]));
     const ids = [...byId.keys()];
     const marks = (slice: string[]) => slice.map(() => "?").join(",");
-    const [studentsBatch, gigsBatch] = await Promise.all(
-      ["students", "gigs"].map(async (sheet) => {
-        const rows = await all("SELECT batch_id FROM portal_uploads WHERE sheet=? AND status='Active' ORDER BY committed_at DESC LIMIT 1", sheet);
-        return rows[0]?.batch_id as string | undefined;
-      }),
-    );
     if (!studentsBatch || !gigsBatch || !ids.length) return Response.json({ gigs: [] }, { headers: { "Cache-Control": "no-store" } });
 
     const portalStudents = await inChunks(ids, (slice) =>

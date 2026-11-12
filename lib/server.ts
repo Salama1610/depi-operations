@@ -81,14 +81,19 @@ export async function actor() {
   return { ...u, roles: JSON.parse(u.roles), scopes: JSON.parse(u.scopes) };
 }
 export async function studentByIdentity(i: { id: string; email: string }) {
-  const byId = i.id
-    ? await stmt("SELECT s.*,g.track,g.provider,g.pathway,g.status group_status FROM students s JOIN groups g ON g.id=s.group_id WHERE s.id=?", i.id).first()
-    : null;
-  if (byId || !i.email) return byId as any;
-  return (await stmt(
-    "SELECT s.*,g.track,g.provider,g.pathway,g.status group_status FROM students s JOIN groups g ON g.id=s.group_id WHERE s.email IS NOT NULL AND trim(s.email)<>'' AND lower(s.email)=?",
-    i.email,
-  ).first()) as any;
+  // Both lookups travel together; the one by id wins.
+  const [byId, byEmail] = await Promise.all([
+    i.id
+      ? stmt("SELECT s.*,g.track,g.provider,g.pathway,g.status group_status FROM students s JOIN groups g ON g.id=s.group_id WHERE s.id=?", i.id).first()
+      : null,
+    i.email
+      ? stmt(
+          "SELECT s.*,g.track,g.provider,g.pathway,g.status group_status FROM students s JOIN groups g ON g.id=s.group_id WHERE s.email IS NOT NULL AND trim(s.email)<>'' AND lower(s.email)=?",
+          i.email,
+        ).first()
+      : null,
+  ]);
+  return (byId || byEmail || null) as any;
 }
 export async function currentStudent() {
   const i = await identity();

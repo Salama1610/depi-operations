@@ -49,18 +49,14 @@ export default async function Page(){
   let destination: "student" | "staff" | "denied" = "denied";
   try {
     const i = await identity();
-    const userCount = await stmt(
-      "SELECT count(*) n FROM users WHERE id NOT LIKE 'system-unassigned-%'",
-    ).first<{ n: number }>();
-    if (!userCount?.n) destination = "staff";
-    else {
-      try {
-        await actor();
-        destination = "staff";
-      } catch {
-        if (await studentByIdentity(i)) destination = "student";
-      }
-    }
+    // Staff, student and the first-run check read together, in one trip.
+    const [staff, pupil, userCount] = await Promise.all([
+      actor().then(() => true, () => false),
+      studentByIdentity(i).catch(() => null),
+      stmt("SELECT count(*) n FROM users WHERE id NOT LIKE 'system-unassigned-%'").first<{ n: number }>(),
+    ]);
+    if (!userCount?.n || staff) destination = "staff";
+    else if (pupil) destination = "student";
   } catch {}
 
   if (destination === "student") return <StudentServicesPage />;

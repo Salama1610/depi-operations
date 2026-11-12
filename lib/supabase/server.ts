@@ -1,5 +1,6 @@
 import "server-only";
 
+import { cache } from "react";
 import { createServerClient } from "@supabase/ssr";
 import type { User } from "@supabase/supabase-js";
 import { env } from "@/lib/env";
@@ -46,9 +47,11 @@ export async function createSupabaseServerClient() {
   });
 }
 
-export async function getSupabaseUser(): Promise<User | null> {
+// Asked once per page render, not once per helper that needs it: the first
+// page asked the sign-in service three times before drawing (12 November 2026).
+export const getSupabaseUser = cache(async (): Promise<User | null> => {
   if (!isSupabaseConfigured()) return null;
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase.auth.getUser();
   return error ? null : data.user;
-}
+});
