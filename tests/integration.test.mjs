@@ -3096,7 +3096,7 @@ test("staff carry a title and a team chosen from two, set in the staff form and 
   await check("staff", { name: "Team Probe", email: "team.probe@example.org", roles: ["Operations Coordinator"], team: "Target Team", reason: "Moved to the Target Team" });
   row = await dbRow("SELECT title,team FROM users WHERE email='team.probe@example.org'");
   assert.deepEqual([row.title, row.team], ["Operations Coordinator", "Target Team"], "the title stays when only the team changes");
-  const audit = await dbRow("SELECT value,reason FROM audit_events WHERE action='staff' ORDER BY created_at DESC LIMIT 1");
+  const audit = await dbRow("SELECT value,reason FROM audit_events WHERE action='staff' AND value LIKE '%team_change%' AND value LIKE '%Target Team%' ORDER BY created_at DESC LIMIT 1");
   assert.deepEqual(JSON.parse(audit.value).team_change, { from: "Service Team", to: "Target Team" });
 });
 
@@ -5542,4 +5542,72 @@ test("only Project Operations or an administrator changes a student's email or n
   assert.ok(row.errors.some((e) => /Project Operations or an administrator/.test(e.error)));
   assert.equal((await dbRow("SELECT email FROM students WHERE id=?", pupil.id)).email, pupil.email);
   current = { id: "owner", email: "owner@example.com" };
+});
+
+// The fixes of the 12 November 2026 audit, step 2.
+
+test("an account moved to another of the same student's services frees the earlier one", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const pupil = await dbRow(
+    `SELECT s.id,s.group_id FROM students s WHERE s.lifecycle='Active' AND s.group_id NOT LIKE 'DEMO-%'
+       AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=s.id) AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.student_id=s.id) ORDER BY s.id DESC LIMIT 1`,
+  );
+  // Client accounts are for the service groups' students: move the student into one.
+  await dbExec("UPDATE students SET group_id=? WHERE id=?", await asServiceGroup(pupil.group_id, "ONL5_DRT2_S2"), pupil.id);
+  const at = new Date().toISOString();
+  for (const [id, slot] of [["SLK-AUDIT-L1", 1], ["SLK-AUDIT-L2", 2]])
+    await dbExec(
+      "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,account_id,submitted_at,updated_at) VALUES(?,?,?,?,?,'Kafiil','Needs Review','{}',?,'Pending',NULL,NULL,NULL,1,NULL,?,?)",
+      id, pupil.id, slot, "https://kafiil.com/x/" + id, "https://kafiil.com/x/" + id, at, at, at,
+    );
+  await dbExec("INSERT INTO accounts(id,platform,label,status,credits,student_id,service_link_id) VALUES('ACC-AUDIT-MOVE','Kafeel','audit-move@example.com','Available',0,?,'SLK-AUDIT-L1')", pupil.id);
+  await dbExec("UPDATE service_links SET account_id='ACC-AUDIT-MOVE' WHERE id='SLK-AUDIT-L1'");
+  const scopes = (await dbRow("SELECT scopes FROM users WHERE email='owner@example.com'")).scopes;
+  await dbExec("UPDATE users SET scopes=? WHERE email='owner@example.com'", JSON.stringify([...new Set([...JSON.parse(scopes || "[]"), "account-unlock"])]));
+  try {
+    await check("account_assign", { id: "ACC-AUDIT-MOVE", key_student: pupil.id, service_link_id: "SLK-AUDIT-L2" });
+  } finally {
+    await dbExec("UPDATE users SET scopes=? WHERE email='owner@example.com'", scopes);
+  }
+  assert.equal((await dbRow("SELECT account_id FROM service_links WHERE id='SLK-AUDIT-L1'")).account_id, null, "the earlier service is free again");
+  assert.equal((await dbRow("SELECT account_id FROM service_links WHERE id='SLK-AUDIT-L2'")).account_id, "ACC-AUDIT-MOVE");
+  assert.equal((await dbRow("SELECT service_link_id FROM accounts WHERE id='ACC-AUDIT-MOVE'")).service_link_id, "SLK-AUDIT-L2");
+});
+
+test("a transfer is on the student's status history, and a shared account follows the student to the new coordinator", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  // Two active groups with different coordinators, under one supervisor's reach for Project Operations.
+  const from = await dbRow(
+    "SELECT g.id,g.coordinator,g.track FROM groups g WHERE g.status='Active' AND g.id NOT LIKE 'DEMO-%' AND g.coordinator IS NOT NULL AND EXISTS (SELECT 1 FROM students s WHERE s.group_id=g.id AND s.lifecycle='Active') ORDER BY g.id LIMIT 1",
+  );
+  const to = await dbRow(
+    "SELECT g.id,g.coordinator FROM groups g WHERE g.status='Active' AND g.id NOT LIKE 'DEMO-%' AND g.coordinator IS NOT NULL AND g.coordinator<>? AND g.track=? ORDER BY g.id LIMIT 1",
+    from.coordinator, from.track,
+  );
+  assert.ok(to, "the fixtures have a second group on the same track");
+  const mover = await dbRow("SELECT id FROM students WHERE group_id=? AND lifecycle='Active' AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=students.id) ORDER BY id LIMIT 1", from.id);
+  const first = await dbRow("SELECT id FROM students WHERE lifecycle='Active' AND id<>? ORDER BY id LIMIT 1", mover.id);
+  const at = new Date().toISOString();
+  // The account's first student is someone else; the mover shares it, with their coordinator second.
+  await dbExec(
+    "INSERT INTO accounts(id,platform,label,status,credits,student_id,coordinator_id,coordinator_2_id) VALUES('ACC-AUDIT-SHARE','Kafeel','audit-share@example.com','Available',0,?,'owner',?)",
+    first.id, from.coordinator,
+  );
+  await dbExec(
+    "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,account_id,submitted_at,updated_at) VALUES('SLK-AUDIT-SHARE',?,1,?,?,'Kafiil','Needs Review','{}',?,'Pending',NULL,NULL,NULL,1,'ACC-AUDIT-SHARE',?,?)",
+    mover.id, "https://kafiil.com/x/audit-share", "https://kafiil.com/x/audit-share", at, at, at,
+  );
+  const users = await dbRow("SELECT roles FROM users WHERE email='owner@example.com'");
+  const roles = JSON.parse(users.roles);
+  if (!roles.includes("Project Operations")) await dbExec("UPDATE users SET roles=? WHERE email='owner@example.com'", JSON.stringify([...roles, "Project Operations"]));
+  try {
+    await check("transfer", { student_id: mover.id, group_id: to.id, reason: "Audit test move" });
+  } finally {
+    await dbExec("UPDATE users SET roles=? WHERE email='owner@example.com'", users.roles);
+  }
+  assert.equal((await dbRow("SELECT coordinator_2_id FROM accounts WHERE id='ACC-AUDIT-SHARE'")).coordinator_2_id, to.coordinator, "the new coordinator shares the account");
+  const history = await dbRow("SELECT previous,value,reason FROM student_status_events WHERE student_id=? AND dimension='Group' ORDER BY created_at DESC LIMIT 1", mover.id);
+  assert.deepEqual([history.previous, history.value, history.reason], [from.id, to.id, "Audit test move"]);
 });

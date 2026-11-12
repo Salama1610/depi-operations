@@ -1125,6 +1125,15 @@ export async function POST(req: Request) {
             before?.coordinator || "",
           ),
           stmt("UPDATE accounts SET coordinator_id=? WHERE student_id=? AND coordinator_id=?", g.coordinator, sid, before?.coordinator || ""),
+          // An account the student shares as its second: the new coordinator
+          // takes the second place the old one held (12 November 2026).
+          stmt(
+            `UPDATE accounts SET coordinator_2_id=CASE WHEN coordinator_id=? THEN NULL ELSE ? END
+             WHERE coordinator_2_id=? AND COALESCE(student_id,'')<>? AND id IN (SELECT account_id FROM service_links WHERE student_id=? AND account_id IS NOT NULL)`,
+            g.coordinator, g.coordinator, before?.coordinator || "", sid, sid,
+          ),
+          // The move is on the student's status history, with its reason.
+          stmt("INSERT INTO student_status_events VALUES(?,?,?,?,?,?,?,?)", uid("STATUS"), sid, "Group", s.group_id, x.group_id, u.id, x.reason, t),
         );
         break;
       }
@@ -3566,6 +3575,11 @@ export async function POST(req: Request) {
           ),
           // The service the account now buys, and not the previous student's.
           ...(a.student_id && !sameStudent ? [stmt("UPDATE service_links SET account_id=NULL WHERE account_id=? AND student_id=?", id, a.student_id)] : []),
+          // The same student on another of their services: the earlier one is
+          // free for an account again (12 November 2026).
+          ...(sameStudent && a.service_link_id && a.service_link_id !== serviceId
+            ? [stmt("UPDATE service_links SET account_id=NULL WHERE id=? AND account_id=?", a.service_link_id, id)]
+            : []),
           ...(serviceId ? [stmt("UPDATE service_links SET account_id=? WHERE id=?", id, serviceId)] : []),
         );
         if (coordinatorId && studentId && (coordinatorId !== a.coordinator_id || !sameStudent))

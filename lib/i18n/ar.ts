@@ -3110,4 +3110,12 @@ export const ar: Record<string, string> = {
   "Gigs now come from the portal sheets; they are not recorded here.": "الجيجز تأتي الآن من شيتات البوابة، ولا تُسجَّل هنا.",
   // Portal gigs QC: a gig gone from the latest sheet keeps its proof (12 Nov 2026)
   "Proof (from an earlier sheet)": "الإثبات (من شيت سابق)",
+  "Already in the app but missing their password: it is added": "موجود في التطبيق لكن بدون كلمة المرور: ستُضاف",
+  "Invalid record ID.": "معرّف السجل غير صالح.",
+  "A demo student's email ends in @example.com.": "بريد الطالب التجريبي ينتهي بـ ‎@example.com.",
+  "One or more of these accounts are with another team's coordinator.": "حساب أو أكثر من هذه الحسابات مع منسق في فريق آخر.",
+  "This student's access is revoked; restore them before updating their record": "تم سحب وصول هذا الطالب؛ أعِده قبل تحديث بياناته",
+  "Leave it as it is": "اتركه كما هو",
+  "Only Project Operations or an administrator changes a student's email": "فقط عمليات المشروع أو المسؤول يغيّر بريد الطالب",
+  "Only Project Operations or an administrator changes a student's national id": "فقط عمليات المشروع أو المسؤول يغيّر الرقم القومي للطالب",
 };

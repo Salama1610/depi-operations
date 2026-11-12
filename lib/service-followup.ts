@@ -160,29 +160,33 @@ export async function linkAccountKey(studentId: string, actor: any | null) {
     // Guarded: the service still has no account, the account is still under
     // two students and the student still under three accounts.
     const guard = `(SELECT count(*) FROM (${studentAccountsSql}) y)<?`;
+    // One save (12 November 2026): the link and the account change together
+    // or not at all, and whether this student is the account's first or its
+    // second is decided by the database at that moment, not by the read
+    // above, so two students approved at once both end up on the account.
+    const linkedHere = "EXISTS (SELECT 1 FROM service_links k WHERE k.id=? AND k.account_id=?)";
     await db().batch([
       stmt(
         `UPDATE service_links SET account_id=? WHERE id=? AND account_id IS NULL AND ${guard}
            AND (SELECT ${accountUsesSql("a")} FROM accounts a WHERE a.id=?)<?`,
         account.id, link.id, studentId, studentId, accountsPerStudent, account.id, studentsPerAccount,
       ),
+      // A second student: their coordinator shares the account.
+      stmt(
+        `UPDATE accounts SET coordinator_2_id=COALESCE(coordinator_2_id,CASE WHEN coordinator_id=? THEN NULL ELSE ? END)
+         WHERE id=? AND student_id IS NOT NULL AND student_id<>? AND ${linkedHere}`,
+        s.coordinator, s.coordinator, account.id, studentId, link.id, account.id,
+      ),
+      // The first student is kept on the account itself.
+      stmt(
+        `UPDATE accounts SET student_id=?,service_link_id=?,linked_at=?,linked_by=?,coordinator_id=?,
+           coordinator_2_id=CASE WHEN coordinator_2_id=? THEN NULL ELSE coordinator_2_id END
+         WHERE id=? AND student_id IS NULL AND ${linkedHere}`,
+        studentId, link.id, t, null, s.coordinator, s.coordinator, account.id, link.id, account.id,
+      ),
     ]);
     const now_linked: any = await stmt("SELECT account_id FROM service_links WHERE id=?", link.id).first();
     if (now_linked?.account_id !== account.id) continue;
-    // The first student is kept on the account itself; a second one's coordinator shares it.
-    await db().batch([
-      account.student_id
-        ? stmt(
-            "UPDATE accounts SET coordinator_2_id=COALESCE(coordinator_2_id,CASE WHEN coordinator_id=? THEN NULL ELSE ? END) WHERE id=?",
-            s.coordinator, s.coordinator, account.id,
-          )
-        : stmt(
-            `UPDATE accounts SET student_id=?,service_link_id=?,linked_at=?,linked_by=?,coordinator_id=?,
-               coordinator_2_id=CASE WHEN coordinator_2_id=? THEN NULL ELSE coordinator_2_id END
-             WHERE id=? AND student_id IS NULL`,
-            studentId, link.id, t, null, s.coordinator, s.coordinator, account.id,
-          ),
-    ]);
     linked++;
     mine = await accountsOf();
     heldPlatforms = await platformsOf(mine);

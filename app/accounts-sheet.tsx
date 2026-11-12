@@ -84,6 +84,7 @@ export function AccountsSheetUpload({ onDone }: { onDone: () => void }) {
   const changes: [string, string][] = [
     ["new", "New accounts to add"],
     ["already_in_app", "Already in the app (left as they are)"],
+    ["password_added", "Already in the app but missing their password: it is added"],
     ["repeated_in_sheet", "Listed twice in the sheet"],
     ["only_in_app", "In the app but not in the sheet (left alone)"],
   ];

@@ -95,7 +95,9 @@ export async function POST(req: Request) {
         ),
         auditStmt(u, "portal_coaches_upload", "portal_coaches", { groups: kept.length, different: differs.length, without_account: withoutAccount.length }),
       ];
-      for (let i = 0; i < jobs.length; i += 150) await db().batch(jobs.slice(i, i + 150));
+      // One save: the list is replaced whole or not at all, never left half
+      // empty by a failure partway (12 November 2026). A row per group, so it stays small.
+      await db().batch(jobs);
     }
     return Response.json({ summary, applied: Boolean(body.apply) });
   } catch (e: any) {

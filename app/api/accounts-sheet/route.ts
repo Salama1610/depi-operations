@@ -35,31 +35,46 @@ export async function POST(req: Request) {
     );
     const key = await credentialKey(env.CREDENTIAL_ENCRYPTION_KEY);
     const live = new Set((await all("SELECT id FROM accounts")).map((a: any) => a.id as string));
+    // An account an earlier upload left without its password (a failure
+    // partway) gets it now, rather than being skipped for good (12 November 2026).
+    const sealedAlready = new Set((await all("SELECT account_id FROM account_secrets")).map((a: any) => a.account_id as string));
     const t = now();
-    const n = { new: 0, already_in_app: 0 };
-    const jobs: any[] = [];
+    const n = { new: 0, already_in_app: 0, password_added: 0 };
+    // Each account's statements stay together in one save.
+    const units: any[][] = [];
     for (const a of read.accounts) {
       if (live.has(a.id)) {
         n.already_in_app++;
+        if (!sealedAlready.has(a.id) && a.password) {
+          const sealed = await sealCredential(key, a.id, a.label, a.password);
+          units.push([
+            stmt(
+              "INSERT INTO account_secrets(account_id,username,secret,iv,updated_by,updated_at) VALUES(?,?,?,?,?,?)",
+              a.id, sealed.username, sealed.secret, sealed.iv, u.id, t,
+            ),
+          ]);
+          n.password_added++;
+        }
         continue;
       }
       n.new++;
       const sealed = await sealCredential(key, a.id, a.label, a.password);
       // The account first: its password row points at it.
-      jobs.push(
+      const unit = [
         stmt("INSERT INTO accounts(id,platform,label,status,credits,pending_credits,owner_name,comments) VALUES(?,?,?,?,?,?,?,?)", a.id, a.platform, a.label, a.status, a.credits, a.pending, a.owner, a.comments),
         stmt(
           "INSERT INTO account_secrets(account_id,username,secret,iv,updated_by,updated_at) VALUES(?,?,?,?,?,?)",
           a.id, sealed.username, sealed.secret, sealed.iv, u.id, t,
         ),
-      );
+      ];
       if (a.credits > 0)
-        jobs.push(
+        unit.push(
           stmt(
             "INSERT INTO account_credit_ledger(id,account_id,delta,balance_after,reason,actor,created_at) VALUES(?,?,?,?,?,?,?)",
             uid("CR"), a.id, a.credits, a.credits, "Opening balance from the accounts sheet", u.id, t,
           ),
         );
+      units.push(unit);
     }
     const ids = new Set(read.accounts.map((a) => a.id));
     const summary = {
@@ -70,7 +85,16 @@ export async function POST(req: Request) {
       only_in_app: [...live].filter((id) => !ids.has(id)).length,
     };
     if (x.apply === true) {
-      for (let i = 0; i < jobs.length; i += 150) await db().batch(jobs.slice(i, i + 150));
+      // Saves of about 150 statements, each ending on an account boundary.
+      let batch: any[] = [];
+      for (const unit of units) {
+        if (batch.length && batch.length + unit.length > 150) {
+          await db().batch(batch);
+          batch = [];
+        }
+        batch.push(...unit);
+      }
+      if (batch.length) await db().batch(batch);
       await auditStmt(u, "Accounts sheet uploaded", "accounts", { ...summary, skipped: undefined }).run();
     }
     return Response.json({ ok: true, applied: x.apply === true, summary }, { headers: { "Cache-Control": "no-store" } });
