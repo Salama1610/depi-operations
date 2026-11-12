@@ -275,7 +275,7 @@ export function permit(u: any, allowed: string[]) {
  * no students in it passes null and gets the same rule expressed through the
  * group, so a reviewer sees the groups their students are in.
  */
-export function scopeSql(u: any, alias = "g", studentAlias: string | null = "s") {
+export function scopeSql(u: any, alias = "g", studentAlias: string | null = "s", options: { accounts?: boolean } = {}) {
   // Depi Industry was dropped from Round 5. Its groups stay in the database for
   // the record, but nobody sees them; delete this line to bring them back.
   // Demo sign-ins see the demo groups and nothing else; nobody else sees them.
@@ -296,10 +296,13 @@ export function scopeSql(u: any, alias = "g", studentAlias: string | null = "s")
     `(${alias}.coordinator=? OR ${alias}.supervisor=? OR ${alias}.coach=? OR ${alias}.account_manager=? OR EXISTS (SELECT 1 FROM group_coaches gc WHERE gc.group_id=${alias}.id AND gc.user_id=? AND gc.status='Active'))`,
   ];
   const args: string[] = [u.id, u.id, u.id, u.id, u.id];
-  // A coordinator also sees the students whose client accounts they hold,
+  // A coordinator also reaches the students whose client accounts they hold,
   // to record orders on them and upload their proof; on an account two
-  // coordinators share, only their own half (12 November 2026).
-  if (studentAlias && can(u.roles, ["Operations Coordinator"])) {
+  // coordinators share, only their own half (12 November 2026). Only for
+  // that work (options.accounts): the coordinator's lists, groups, sessions and
+  // weekly figures stay their own groups' (13 November 2026), and the Accounts
+  // tab shows each account's student, group and coordinator by itself.
+  if (options.accounts && studentAlias && can(u.roles, ["Operations Coordinator"])) {
     clauses.push(
       `EXISTS (SELECT 1 FROM accounts ac WHERE (ac.student_id=${studentAlias}.id OR ac.id IN (SELECT sl.account_id FROM service_links sl WHERE sl.student_id=${studentAlias}.id)) AND (ac.coordinator_id=? OR ac.coordinator_2_id=?) AND NOT (${alias}.coordinator<>? AND ${alias}.coordinator IN (coalesce(ac.coordinator_id,''),coalesce(ac.coordinator_2_id,''))))`,
     );
@@ -340,8 +343,8 @@ export async function accountOrdersFor(u: any) {
     return all(`${select} WHERE ${side} AND (a.coordinator_id=? OR a.coordinator_2_id=? OR o.coordinator=?) AND NOT (g.coordinator<>? AND g.coordinator IN (coalesce(a.coordinator_id,''),coalesce(a.coordinator_2_id,''))) ORDER BY o.updated_at DESC LIMIT 3000`, u.id, u.id, u.id, u.id);
   return [];
 }
-export async function student(u: any, id: string) {
-  const q = scopeSql(u);
+export async function student(u: any, id: string, options: { accounts?: boolean } = {}) {
+  const q = scopeSql(u, "g", "s", options);
   const s: any = await stmt(
     `SELECT s.*,g.track,g.coordinator,g.supervisor,g.coach,g.policy_id,g.status group_status FROM students s JOIN groups g ON g.id=s.group_id WHERE s.id=? AND ${q.sql}`,
     id,
@@ -357,7 +360,8 @@ export async function proof(u: any, id: string, sid: string) {
     sid,
   ).first();
   ensure(a, "Upload proof linked to this student first.");
-  await student(u, sid);
+  // A proof is an order's POH now, so it may be for a student reached through an account.
+  await student(u, sid, { accounts: true });
   return a;
 }
 /**

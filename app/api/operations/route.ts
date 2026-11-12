@@ -585,7 +585,8 @@ export async function POST(req: Request) {
     // refuses below, after the replay check, as it always has.
     const [prior, studentRead]: [any, { row?: any; error?: unknown }] = await Promise.all([
       stmt("SELECT actor FROM audit_events WHERE request_id=?", key).first(),
-      sid ? student(u, sid).then((row) => ({ row }), (error) => ({ error })) : Promise.resolve({}),
+      // An account action may name a student reached through a client account the coordinator holds.
+      sid ? student(u, sid, { accounts: /^account_/.test(String(x.action)) }).then((row) => ({ row }), (error) => ({ error })) : Promise.resolve({}),
     ]);
     if (prior) {
       ensure(
@@ -3403,7 +3404,7 @@ export async function POST(req: Request) {
           ensure(a, "Account not found.");
           ensure(mayOrder(a), "Only this account's coordinator, its keepers or the leaders record its orders.");
           const which = await orderStudent(a, x.student_id, u);
-          const pupil = await student(u, which.student_id);
+          const pupil = await student(u, which.student_id, { accounts: true });
           const orderRef = String(x.order_ref || "").trim();
           ensure(orderRef.length <= 120, "Keep the order number under 120 characters.");
           const amount = x.amount === "" || x.amount === null || x.amount === undefined ? null : Number(x.amount);

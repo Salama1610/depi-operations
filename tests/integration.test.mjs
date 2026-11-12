@@ -4802,7 +4802,17 @@ test("an account's coordinator sees the service it is for, with the student and 
   assert.equal(row.service_platform, "Kafiil");
   assert.equal(row.student_name, pupil.name);
   assert.equal(row.student_coordinator_name, pupil.coordinator_name);
+  // The student is another coordinator's: outside the Accounts tab, this
+  // coordinator's lists stay their own groups' (13 November 2026).
+  if (!(await dbRow("SELECT 1 x FROM groups WHERE id=? AND (coordinator=? OR supervisor=? OR coach=?)", pupil.group_id, other.id, other.id, other.id))) {
+    assert.ok(!view.students.some((s) => s.id === pupil.id), "not in the coordinator's students");
+    assert.ok(!view.groups.some((g) => g.id === pupil.group_id), "nor their group");
+    // The account work still reaches the student: the service status is set.
+    await check("account_service_status", { account_id: account.id, student_id: pupil.id, status: "In Progress" });
+    assert.equal((await dbRow("SELECT status FROM account_orders WHERE account_id=? AND student_id=?", account.id, pupil.id)).status, "In Progress");
+  }
   current = { id: "owner", email: "owner@example.com" };
+  await dbExec("DELETE FROM account_orders WHERE account_id=?", account.id);
   await dbExec("UPDATE accounts SET coordinator_id=?,student_id=?,service_link_id=? WHERE id=?", before.coordinator_id, before.student_id, before.service_link_id, account.id);
   await dbExec("DELETE FROM service_links WHERE id='SLK-ACCT-VIEW'");
 });
