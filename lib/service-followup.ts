@@ -1,4 +1,9 @@
 import { all, auditStmt, db, now, stmt, uid } from "./server";
+import { accountMixProblem, otherMarketplace } from "./domain/student-accounts";
+import { buysServices, serviceGroups } from "./domain/service-links";
+
+// The groups that buy services through client accounts live with the rest of the service rules (lib/domain/service-links).
+export { buysServices, serviceGroups };
 
 // The same notice as lib/automation's notify; kept here so neither file imports the other.
 function notify(recipient: string, title: string, entityType: string, entityId: string, severity: string, source: string) {
@@ -28,6 +33,12 @@ function notify(recipient: string, title: string, entityType: string, entityId: 
 // (service_links.account_id); the account's first student stays on the
 // account itself, and the second student's coordinator shares the account.
 // Accounts that are not Available (Locked ones among them) are never given out.
+//
+// Since 12 November 2026 a student's three accounts are two on one marketplace
+// and one on the other (Kafeel and Nafezly), never all three on the same one.
+// A student who holds two accounts on one marketplace gets no third account for
+// another service on it: their coordinator is told the third service has to be
+// on the other marketplace (lib/domain/student-accounts).
 
 export const serviceFixCategory = "Service correction";
 export const taskProgressStates = ["Contacted the student", "Could not reach the student", "Student is fixing it"];
@@ -36,21 +47,6 @@ export const accountStates = ["In use", "Not used yet", "Needs a new account", "
 export const accountsPerStudent = 3;
 /** The most students one account buys from, one service each. */
 export const studentsPerAccount = 2;
-/** The groups whose students' services are bought through client accounts (10 November 2026). */
-export const serviceGroups = [
-  "ALX5_DRT1_S1",
-  "DKH5_DRT2_S1",
-  "ONL5_DRT2_S2",
-  "ALX5_DRT1_G1",
-  "CAI5_DRT1_G2",
-  "CAI5_DRT1_S1",
-  "CAI5_DRT1_S2",
-  "ALX5_DRT7_S1",
-  "CAI5_DRT3_S1",
-  "ONL5_DRT2_G1",
-  "ONL5_DRT2_G2",
-];
-export const buysServices = (groupId: unknown) => serviceGroups.includes(String(groupId ?? "").trim().toUpperCase());
 
 /** The accounts a student is linked to: as an account's first student, or through a service it buys. */
 export const studentAccountsSql = `SELECT id account_id FROM accounts WHERE student_id=? UNION SELECT account_id FROM service_links WHERE student_id=? AND account_id IS NOT NULL`;
@@ -116,7 +112,11 @@ export async function linkAccountKey(studentId: string, actor: any | null) {
   if (!s || s.lifecycle !== "Active" || (!demo && !buysServices(s.group_id)) || s.model === "Industry" || !s.coordinator)
     return { linked: 0, reason: "not eligible" } as const;
   const accountsOf = async () => new Set((await all(studentAccountsSql, studentId, studentId)).map((r: any) => String(r.account_id)));
+  // The marketplaces of the accounts the student holds, for the two-and-one rule.
+  const platformsOf = async (ids: Set<string>) =>
+    ids.size ? (await all(`SELECT platform FROM accounts WHERE id IN (${[...ids].map(() => "?").join(",")})`, ...ids)).map((r: any) => String(r.platform)) : [];
   let mine = await accountsOf();
+  let heldPlatforms = await platformsOf(mine);
   if (mine.size >= accountsPerStudent) return { linked: 0, reason: "has three" } as const;
   const waiting = await all(
     `SELECT l.id,l.platform,l.slot FROM service_links l
@@ -129,11 +129,17 @@ export async function linkAccountKey(studentId: string, actor: any | null) {
   const side = String(s.group_id).startsWith("DEMO-") ? "id LIKE 'DEMO-%'" : "id NOT LIKE 'DEMO-%'";
   let linked = 0;
   const missing: string[] = [];
+  const sameMarketplace: { platform: string; linkId: string }[] = [];
   const t = now();
   for (const link of waiting) {
     if (mine.size >= accountsPerStudent) break;
     const platform = marketplace[link.platform];
     if (!platform) continue;
+    // Two accounts on this marketplace already: a third here would make three on one.
+    if (accountMixProblem(heldPlatforms, platform) === "same") {
+      sameMarketplace.push({ platform, linkId: String(link.id) });
+      continue;
+    }
     // A free account first, then one with a student left to share; never one
     // this student already has, nor one buying from a student of the same job profile.
     const sameProfile = profile
@@ -178,10 +184,23 @@ export async function linkAccountKey(studentId: string, actor: any | null) {
     ]);
     linked++;
     mine = await accountsOf();
+    heldPlatforms = await platformsOf(mine);
     await db().batch([
       notify(s.coordinator, `Client account linked to ${s.name}'s ${link.platform} service ${link.slot}: use ${account.label}`, "student", studentId, "Information", `account-key:${account.id}:${link.id}`),
       auditStmt(actor || { id: "system" }, "account_link", account.id, { student_id: studentId, service_link_id: link.id, coordinator_id: s.coordinator, platform, automatic: true }, null),
     ]);
+  }
+  if (sameMarketplace.length) {
+    // The coordinator hears once per service: the third service has to be on the other marketplace.
+    await db().batch(
+      sameMarketplace.map((blocked) =>
+        notify(
+          s.coordinator,
+          `${s.name}'s two accounts are both on ${blocked.platform}: the third service has to be on ${otherMarketplace(blocked.platform)}`,
+          "student", studentId, "Action Required", `account-mix:${studentId}:${blocked.linkId}:${s.coordinator}`,
+        ),
+      ),
+    );
   }
   if (missing.length) {
     // Nobody to link: the people who keep the accounts hear about it once per student and marketplace.
@@ -196,7 +215,12 @@ export async function linkAccountKey(studentId: string, actor: any | null) {
       ),
     );
   }
-  return { linked, reason: missing.length ? "no account" : "done", platforms: [...new Set(missing)] } as const;
+  return {
+    linked,
+    reason: missing.length ? "no account" : sameMarketplace.length ? "same marketplace" : "done",
+    platforms: [...new Set(missing)],
+    sameMarketplace: sameMarketplace.length,
+  } as const;
 }
 
 /**
@@ -225,13 +249,15 @@ export async function serviceFollowUpSweep(actor: any) {
     )
   ).filter((c: any) => buysServices(c.group_id));
   let linked = 0;
+  let sameMarketplaceBlocked = 0;
   const missing = new Set<string>();
   for (const c of candidates) {
     const result = await linkAccountKey(c.student_id, actor);
     linked += result.linked;
+    sameMarketplaceBlocked += "sameMarketplace" in result ? Number(result.sameMarketplace) || 0 : 0;
     if ("platforms" in result) for (const p of result.platforms || []) missing.add(p);
   }
-  return { tasks, linked, candidates: candidates.length, no_account_on: [...missing] };
+  return { tasks, linked, candidates: candidates.length, no_account_on: [...missing], same_marketplace: sameMarketplaceBlocked };
 }
 
 /**
@@ -243,8 +269,11 @@ export async function serviceFollowUpSweep(actor: any) {
  */
 export function submissionStatus(studentId: string, t: string, completedAt: "now" | "latest") {
   const done = `(NOT EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND qc_status='Pending')
-    AND (SELECT count(*) FROM service_links WHERE student_id=? AND platform IN ('Kafiil','Nafezly') AND qc_status='Locked')>=3)`;
-  const doneArgs = [studentId, studentId];
+    AND (SELECT count(*) FROM service_links WHERE student_id=? AND platform IN ('Kafiil','Nafezly') AND qc_status='Locked')>=3
+    AND ((SELECT group_id FROM students WHERE id=?) NOT IN (${serviceGroups.map((g) => `'${g}'`).join(",")})
+      OR (EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND platform='Kafiil' AND qc_status='Locked')
+          AND EXISTS (SELECT 1 FROM service_links WHERE student_id=? AND platform='Nafezly' AND qc_status='Locked'))))`;
+  const doneArgs = [studentId, studentId, studentId, studentId, studentId];
   return stmt(
     `UPDATE service_submissions SET status=CASE
        WHEN ${done} THEN 'Complete'

@@ -4458,6 +4458,16 @@ test("a service link sent back is the coordinator's task until approved, and eac
   current = { id: "owner", email: "owner@example.com" };
   await check("account", { id: "ACC-KEY-3", label: "key-three@example.org", platform: "Kafeel", credits: 99997 });
   current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  // Two accounts on Kafeel already: a third service on Kafiil gets no account, and the coordinator is told why (12 November 2026).
+  await check("service_qc_review", { service_id: "SLK-KEY-3", decision: "Lock" });
+  assert.equal((await dbRows("SELECT id FROM accounts WHERE student_id=?", learner.id)).length, 2, "never three accounts on one marketplace");
+  assert.ok(
+    await dbRow("SELECT id FROM notifications WHERE recipient=? AND source=?", group.coordinator, `account-mix:${learner.id}:SLK-KEY-3:${group.coordinator}`),
+    "the coordinator hears that the third service has to be on the other marketplace",
+  );
+  // The student's third service is on Nafezly instead: it earns a Nafezly account, two and one.
+  await dbExec("UPDATE service_links SET platform='Nafezly',qc_status='Pending',qc_comment=NULL,revision=2 WHERE id='SLK-KEY-3'");
+  await dbExec("UPDATE accounts SET platform='Nafezly' WHERE id='ACC-KEY-3'");
   await check("service_qc_review", { service_id: "SLK-KEY-3", decision: "Lock" });
   held = await dbRows("SELECT id,service_link_id FROM accounts WHERE student_id=? ORDER BY id", learner.id);
   assert.deepEqual(
@@ -4505,12 +4515,44 @@ test("a service link sent back is the coordinator's task until approved, and eac
   assert.ok(swept.linked >= 1);
   held = await dbRows("SELECT id,platform,status FROM accounts WHERE student_id=?", learner.id);
   assert.equal(held.length, 3, "back to three");
-  assert.ok(held.every((a) => a.id !== "ACC-KEY-1" && a.platform === "Kafeel" && a.status === "Available"));
+  assert.ok(held.every((a) => a.id !== "ACC-KEY-1" && a.status === "Available"));
+  assert.deepEqual(held.map((a) => a.platform).sort(), ["Kafeel", "Kafeel", "Nafezly"], "two on one marketplace and one on the other");
 
   await dbExec("UPDATE users SET scopes=? WHERE email='owner@example.com'", scopes);
   await dbExec("UPDATE service_links SET account_id=NULL WHERE account_id IN ('ACC-KEY-1','ACC-KEY-2','ACC-KEY-3','ACC-KEY-4','ACC-KEY-EMPTY')");
   await dbExec("UPDATE accounts SET student_id=NULL,service_link_id=NULL,status='Retired' WHERE id IN ('ACC-KEY-1','ACC-KEY-2','ACC-KEY-3','ACC-KEY-4','ACC-KEY-EMPTY')");
   await dbExec("UPDATE accounts SET student_id=NULL,service_link_id=NULL WHERE student_id IS NOT NULL");
+  await dbExec("UPDATE students SET group_id=? WHERE id=?", group.id, learner.id);
+});
+
+test("by hand, a third account on the marketplace of two identical ones is refused; the other marketplace is accepted", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const group = await dbRow(
+    `SELECT g.id,g.coordinator FROM groups g
+     WHERE g.status='Active' AND g.id NOT LIKE 'DEMO-%' AND coalesce(g.delivery_model,'Regular')<>'Industry' AND g.coordinator IS NOT NULL
+       AND EXISTS (SELECT 1 FROM students s WHERE s.group_id=g.id AND s.lifecycle='Active' AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=s.id)
+         AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.student_id=s.id)) ORDER BY g.id LIMIT 1`,
+  );
+  const learner = await dbRow(
+    "SELECT s.id FROM students s WHERE s.group_id=? AND s.lifecycle='Active' AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=s.id) AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.student_id=s.id) ORDER BY s.id LIMIT 1",
+    group.id,
+  );
+  await dbExec("UPDATE students SET group_id=? WHERE id=?", await asServiceGroup(group.id), learner.id);
+  const ids = ["ACC-MIX-1", "ACC-MIX-2", "ACC-MIX-3", "ACC-MIX-4"];
+  for (const [id, platform] of [["ACC-MIX-1", "Kafeel"], ["ACC-MIX-2", "Kafeel"], ["ACC-MIX-3", "Kafeel"], ["ACC-MIX-4", "Nafezly"]])
+    await check("account", { id, label: `${id.toLowerCase()}@example.org`, platform, credits: 10 });
+  const scopes = (await dbRow("SELECT scopes FROM users WHERE email='owner@example.com'")).scopes;
+  await dbExec("UPDATE users SET scopes=? WHERE email='owner@example.com'", JSON.stringify([...JSON.parse(scopes || "[]"), "account-unlock"]));
+  await check("account_assign", { id: "ACC-MIX-1", key_student: learner.id });
+  await check("account_assign", { id: "ACC-MIX-2", key_student: learner.id });
+  assert.match((await post("account_assign", { id: "ACC-MIX-3", key_student: learner.id })).error, /both on Kafeel, so the third has to be on Nafezly/);
+  assert.equal((await dbRows("SELECT id FROM accounts WHERE student_id=?", learner.id)).length, 2, "the refused account was not given");
+  await check("account_assign", { id: "ACC-MIX-4", key_student: learner.id });
+  assert.deepEqual((await dbRows("SELECT platform FROM accounts WHERE student_id=?", learner.id)).map((a) => a.platform).sort(), ["Kafeel", "Kafeel", "Nafezly"]);
+
+  await dbExec("UPDATE users SET scopes=? WHERE email='owner@example.com'", scopes);
+  await dbExec(`UPDATE accounts SET student_id=NULL,service_link_id=NULL,status='Retired' WHERE id IN (${ids.map(() => "?").join(",")})`, ...ids);
   await dbExec("UPDATE students SET group_id=? WHERE id=?", group.id, learner.id);
 });
 
@@ -5542,3 +5584,51 @@ test("a coach's Gigs tab lists the portal gigs our QC decided, with links and th
   current = { id: "owner", email: "owner@example.com" };
   await dbExec("DELETE FROM portal_gig_reviews WHERE portal_gig_id IN ('CG-1','CG-2')");
 });
+
+test("in a service group the three services must cover both marketplaces, and only then are they complete", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  const servicesApi = await route("student-services");
+  const send = (body) =>
+    servicesApi.POST(new Request("https://test.local/api/student-services", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }));
+  const submit = (services) => send({ action: "submit_services", services });
+  const kafiil = (id) => `https://kafiil.com/service/${id}-mix`;
+  const nafezly = (id) => `https://nafezly.com/service/${id}-mix`;
+  const learner = await dbRow("SELECT id,email,group_id FROM students WHERE id NOT IN (SELECT student_id FROM service_links) AND lifecycle='Active' ORDER BY id DESC LIMIT 1");
+  const home = learner.group_id;
+  await dbExec("UPDATE students SET group_id=? WHERE id=?", await asServiceGroup(home), learner.id);
+  current = { id: learner.id, email: learner.email };
+  // Three on one marketplace is refused, and nothing is saved.
+  let r = await submit([kafiil(94601), kafiil(94602), kafiil(94603)]);
+  assert.equal(r.status, 400);
+  assert.match((await r.json()).error, /at least one on Kafiil and one on Nafezly/);
+  assert.equal((await dbRow("SELECT count(*) n FROM service_links WHERE student_id=?", learner.id)).n, 0);
+  assert.equal((await (await servicesApi.GET()).json()).student.must_cover_both_marketplaces, true, "the student's page is told both are needed");
+  // Two on one and one on the other is accepted.
+  r = await submit([kafiil(94601), kafiil(94602), nafezly(94603)]);
+  assert.equal(r.status, 200, await r.clone().text());
+  assert.deepEqual((await r.json()).progress.missing, [], "both marketplaces are covered");
+  // Old data: three approved on Kafiil are not complete.
+  await dbExec("UPDATE service_links SET platform='Kafiil' WHERE student_id=? AND slot=3", learner.id);
+  await dbExec("UPDATE service_links SET qc_status='Locked',qc_at=? WHERE student_id=? AND slot IN (1,2)", new Date().toISOString(), learner.id);
+  const third = await dbRow("SELECT id FROM service_links WHERE student_id=? AND slot=3", learner.id);
+  current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
+  r = await send({ action: "qc_review", service_id: third.id, decision: "Lock", comment: "Verified" });
+  assert.equal(r.status, 200, await r.clone().text());
+  assert.notEqual((await dbRow("SELECT status FROM service_submissions WHERE student_id=?", learner.id)).status, "Complete", "three approved on Kafiil only");
+  // The third service moves to Nafezly and is approved again: complete.
+  await dbExec("UPDATE service_links SET platform='Nafezly',qc_status='Pending',revision=2 WHERE id=?", third.id);
+  r = await send({ action: "qc_review", service_id: third.id, decision: "Lock", comment: "Verified" });
+  assert.equal(r.status, 200, await r.clone().text());
+  assert.equal((await dbRow("SELECT status FROM service_submissions WHERE student_id=?", learner.id)).status, "Complete");
+  await dbExec("UPDATE students SET group_id=? WHERE id=?", home, learner.id);
+  // Locking a service can link a client account to it: free those before the links go.
+  await dbExec("UPDATE accounts SET student_id=NULL,service_link_id=NULL,linked_at=NULL,linked_by=NULL WHERE student_id=? OR service_link_id IN (SELECT id FROM service_links WHERE student_id=?)", learner.id, learner.id);
+  await dbExec("UPDATE service_links SET account_id=NULL WHERE student_id=?", learner.id);
+  await dbExec("DELETE FROM service_link_reviews WHERE service_link_id IN (SELECT id FROM service_links WHERE student_id=?)", learner.id);
+  await dbExec("DELETE FROM service_links WHERE student_id=?", learner.id);
+  await dbExec("DELETE FROM service_submissions WHERE student_id=?", learner.id);
+  current = { id: "owner", email: "owner@example.com" };
+});
+

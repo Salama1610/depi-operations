@@ -142,6 +142,7 @@ import { whatsappInvite } from "@/lib/domain/whatsapp";
 import { sessionEnded } from "@/lib/domain/session-time";
 import { sumPortalFigures } from "@/lib/domain/portal-figures";
 import { groupsHeldBy, studentTotals, studentsOfGroups } from "@/lib/domain/assigned-students";
+import { submissionComplete } from "@/lib/domain/service-links";
 
 /** Runs a job now, or once more after the run in progress: many asks while one runs become a single further run. */
 function coalesced() {
@@ -1934,8 +1935,8 @@ See you there!`,
     const contacted = active.filter((s) => !s.contact_due).length;
     const submissions = serviceSubmissionStatus.filter((r) => r.lifecycle === "Active" || !r.lifecycle);
     const linksIn = submissions.filter((r) => Number(r.links_submitted) > 0).length;
-    // Complete as everywhere else: three approved Kafiil or Nafezly links, none waiting.
-    const linksDone = submissions.filter((r) => Number(r.links_done) >= 3 && !Number(r.links_pending)).length;
+    // Complete as everywhere else: three approved Kafiil or Nafezly links, none waiting (and both marketplaces in a service group).
+    const linksDone = submissions.filter((r) => submissionComplete(r)).length;
     const openCases = (d.cases || []).filter((c: Row) => !["Closed", "Resolved"].includes(c.status));
     const urgentCases = openCases.filter((c: Row) => /S1|S2/.test(String(c.severity)));
     // The figures of a set of groups: this week's sessions, the active
@@ -1952,7 +1953,7 @@ See you there!`,
         sub,
         contacted: st.filter((s) => !s.contact_due).length,
         linksIn: sub.filter((r) => Number(r.links_submitted) > 0).length,
-        linksDone: sub.filter((r) => Number(r.links_done) >= 3 && !Number(r.links_pending)).length,
+        linksDone: sub.filter((r) => submissionComplete(r)).length,
         portal: sumPortalFigures(st.map((s) => s.portal)),
       };
     };
@@ -2263,7 +2264,7 @@ See you there!`,
       // The students whose services or gigs are this reviewer's to check;
       // everyone, for the Quality Lead.
       const total = (key: string) => submissions.reduce((n, r) => n + Number(r[key] || 0), 0);
-      const done = submissions.filter((r) => Number(r.links_done) >= 3 && !Number(r.links_pending)).length;
+      const done = submissions.filter((r) => submissionComplete(r)).length;
       const portal = sumPortalFigures(active.map((s) => s.portal));
       return (
         <>

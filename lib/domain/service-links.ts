@@ -149,10 +149,36 @@ export function verifyServiceLink(raw: unknown, options: { open?: boolean } = {}
 }
 
 /**
+ * The groups whose students' services are bought through client accounts
+ * (10 November 2026). Their services must cover both marketplaces (12 November
+ * 2026): of the three, two on one marketplace and one on the other, because
+ * their three client accounts are the same two and one. Everyone else keeps
+ * "in any mix".
+ */
+export const serviceGroups = [
+  "ALX5_DRT1_S1",
+  "DKH5_DRT2_S1",
+  "ONL5_DRT2_S2",
+  "ALX5_DRT1_G1",
+  "CAI5_DRT1_G2",
+  "CAI5_DRT1_S1",
+  "CAI5_DRT1_S2",
+  "ALX5_DRT7_S1",
+  "CAI5_DRT3_S1",
+  "ONL5_DRT2_G1",
+  "ONL5_DRT2_G2",
+];
+export const buysServices = (groupId: unknown) => serviceGroups.includes(String(groupId ?? "").trim().toUpperCase());
+/** Whether a student of this group must have a link on Kafiil and a link on Nafezly among their three or more. */
+export const mustCoverBothMarketplaces = buysServices;
+
+/**
  * A student's services come in three sections. Kafiil and Nafezly are the
  * required ones: at least three links between them, in any mix (three on one,
- * or two and one). "Other" holds links on any other site, Khamsat included;
- * it is optional and does not count toward the three.
+ * or two and one), except in the service groups, where the three must cover
+ * both marketplaces: two on one and one on the other. "Other" holds links on
+ * any other site, Khamsat included; it is optional and does not count toward
+ * the three.
  */
 export const requiredServicePlatforms = ["Kafiil", "Nafezly"] as const;
 export const serviceCategories = ["Nafezly", "Kafiil", "Other"] as const;
@@ -167,16 +193,38 @@ export const maxServiceLinks = serviceCategories.length * maxLinksPerPlatform;
 export const openLinkPlatform = "External service";
 
 /**
- * A student's services are complete when at least three Kafiil or Nafezly
- * links are approved and none is still waiting for review. The one rule for
- * the stored submission status, the Overview, the Dashboard and Reports
- * (2 November 2026; they had three different ones).
+ * Whether approved counts make a student's services complete: at least three
+ * Kafiil or Nafezly links approved and none waiting for review, and, for a
+ * student of a service group, at least one approved on each marketplace.
  */
-export function servicesComplete(links: { platform?: string | null; qc_status?: string | null }[]) {
-  return (
-    !links.some((l) => l.qc_status === "Pending") &&
-    links.filter((l) => (l.platform === "Kafiil" || l.platform === "Nafezly") && l.qc_status === "Locked").length >= minServiceLinks
+export function servicesCompleteFrom(approved: { kafiil: number; nafezly: number }, waiting: number, groupId?: unknown) {
+  if (waiting > 0 || approved.kafiil + approved.nafezly < minServiceLinks) return false;
+  return !mustCoverBothMarketplaces(groupId) || (approved.kafiil >= 1 && approved.nafezly >= 1);
+}
+
+/**
+ * A student's services are complete when at least three Kafiil or Nafezly
+ * links are approved and none is still waiting for review (and, in a service
+ * group, both marketplaces are among them). The one rule for the stored
+ * submission status, the Overview, the Dashboard and Reports (2 November 2026;
+ * they had three different ones). Pass the student's group.
+ */
+export function servicesComplete(links: { platform?: string | null; qc_status?: string | null }[], groupId?: unknown) {
+  const locked = links.filter((l) => l.qc_status === "Locked");
+  return servicesCompleteFrom(
+    { kafiil: locked.filter((l) => l.platform === "Kafiil").length, nafezly: locked.filter((l) => l.platform === "Nafezly").length },
+    links.filter((l) => l.qc_status === "Pending").length,
+    groupId,
   );
+}
+
+/** The same rule from the per-student counts the workspace carries (links_done, links_pending and the approved count on each marketplace). */
+export function submissionComplete(row: { links_done?: unknown; links_pending?: unknown; links_kafiil_done?: unknown; links_nafezly_done?: unknown; group_id?: unknown }) {
+  const split = row.links_kafiil_done !== undefined || row.links_nafezly_done !== undefined;
+  const approved = split
+    ? { kafiil: Number(row.links_kafiil_done) || 0, nafezly: Number(row.links_nafezly_done) || 0 }
+    : { kafiil: Number(row.links_done) || 0, nafezly: 0 }; // no split carried: every approved link counts, in any mix
+  return servicesCompleteFrom(approved, Number(row.links_pending) || 0, split ? row.group_id : null);
 }
 
 /** The section a link belongs to, from the platform its address is on. */
@@ -203,18 +251,26 @@ export function linksPerCategory(values: string[]) {
 
 /**
  * Where a student stands: Kafiil and Nafezly links against the three needed,
- * and how many are in each section. `platforms` is one entry per link.
+ * and how many are in each section. `platforms` is one entry per link. For a
+ * student of a service group, `missing` names the marketplace with no link yet
+ * and `met` also needs a link on each.
  */
-export function serviceProgress(platforms: string[]) {
+export function serviceProgress(platforms: string[], groupId?: unknown) {
+  // `true` stands for a student already known to need both (what the student's page is told).
+  const needBoth = groupId === true || mustCoverBothMarketplaces(groupId);
   const perCategory = Object.fromEntries(serviceCategories.map((c) => [c, 0])) as Record<ServiceCategory, number>;
   for (const platform of platforms) perCategory[serviceCategory(platform)] += 1;
   const required = perCategory.Kafiil + perCategory.Nafezly;
+  const both = needBoth;
+  const missing: string[] = both ? (["Kafiil", "Nafezly"] as const).filter((p) => perCategory[p] === 0) : [];
   return {
     count: platforms.length,
     required,
     minimum: minServiceLinks,
     perCategory,
-    met: required >= minServiceLinks,
+    both,
+    missing,
+    met: required >= minServiceLinks && missing.length === 0,
   };
 }
 
@@ -223,7 +279,7 @@ export function serviceProgress(platforms: string[]) {
  * checked as a set: at least three on Kafiil and Nafezly between them, at most
  * three in each section, and no service twice.
  */
-export function normalizeServiceSlots(input: unknown) {
+export function normalizeServiceSlots(input: unknown, groupId?: unknown) {
   if (!Array.isArray(input) || input.length === 0) throw new Error("Add your service links.");
   if (input.length > maxServiceLinks) throw new Error(`Submit at most ${maxServiceLinks} service links.`);
   const values = input.map((value) => (typeof value === "string" ? value.trim() : ""));
@@ -234,6 +290,8 @@ export function normalizeServiceSlots(input: unknown) {
       throw new Error(`At most ${maxLinksPerPlatform} ${category} links can be submitted; this has ${counts[category]}.`);
   if (counts.Kafiil + counts.Nafezly < minServiceLinks)
     throw new Error(`Add at least ${minServiceLinks} Kafiil or Nafezly links, in any mix. Links on other sites do not count toward them.`);
+  if (mustCoverBothMarketplaces(groupId) && (counts.Kafiil === 0 || counts.Nafezly === 0))
+    throw new Error(`Add at least ${minServiceLinks} links with at least one on Kafiil and one on Nafezly: two on one marketplace and one on the other. Links on other sites do not count toward them.`);
   const identity = values.map((value) => {
     const check = verifyServiceLink(value, { open: true });
     return serviceKey(check) || value.toLowerCase();

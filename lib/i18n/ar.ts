@@ -3098,4 +3098,11 @@ export const ar: Record<string, string> = {
   // Shared client accounts: each coordinator sees their own half (12 Nov 2026)
   "In use for the other coordinator's student": "مستخدم لطالب المنسق الآخر",
   "This student is the other coordinator's on this account.": "هذا الطالب تابع للمنسق الآخر على هذا الحساب.",
+  "This student's two accounts are both on Kafeel, so the third has to be on Nafezly.": "حسابا هذا الطالب كلاهما على كفيل، لذا يجب أن يكون الثالث على نفذلي.",
+  "This student's two accounts are both on Nafezly, so the third has to be on Kafeel.": "حسابا هذا الطالب كلاهما على نفذلي، لذا يجب أن يكون الثالث على كفيل.",
+  "Add at least {v0} links with at least one on Kafiil and one on Nafezly: two on one marketplace and one on the other. Links on other sites do not count toward them.": "أضف {v0} روابط على الأقل، رابط واحد على الأقل على كفيل ورابط على نفذلي: اثنان على سوق واحد وواحد على الآخر. الروابط على المواقع الأخرى لا تُحتسب ضمنها.",
+  "Add at least three links on Kafiil and Nafezly: two on one marketplace and one on the other. Links on other sites are optional. Each link is checked automatically, then reviewed by the quality team.": "أضف ثلاثة روابط على الأقل على كفيل ونفذلي: اثنان على سوق واحد وواحد على الآخر. الروابط على المواقع الأخرى اختيارية. يُفحص كل رابط تلقائيًا ثم يراجعه فريق الجودة.",
+  "All your links are on one marketplace. Add one on {v0}: two on one marketplace and one on the other.": "كل روابطك على سوق واحد. أضف رابطًا على {v0}: اثنان على سوق واحد وواحد على الآخر.",
+  "Add 1 more link, on {v0}, to submit.": "أضف رابطًا آخر على {v0} للإرسال.",
+  "Add {v0} more links, at least one on {v1}, to submit.": "أضف {v0} روابط أخرى، رابط واحد منها على الأقل على {v1}، للإرسال.",
 };

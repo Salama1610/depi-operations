@@ -116,6 +116,8 @@ function say(t: Translate, message: string) {
   if (m) return t("At most {v0} {v1} links can be submitted; this has {v2}.", { v0: m[1], v1: t(m[2]), v2: m[3] });
   m = message.match(/^Add at least (\d+) Kafiil or Nafezly links, in any mix\. Links on other sites do not count toward them\.$/);
   if (m) return t("Add at least {v0} Kafiil or Nafezly links, in any mix. Links on other sites do not count toward them.", { v0: m[1] });
+  m = message.match(/^Add at least (\d+) links with at least one on Kafiil and one on Nafezly: two on one marketplace and one on the other\. Links on other sites do not count toward them\.$/);
+  if (m) return t("Add at least {v0} links with at least one on Kafiil and one on Nafezly: two on one marketplace and one on the other. Links on other sites do not count toward them.", { v0: m[1] });
   m = message.match(/^Only (.+) service links are accepted$/);
   if (m) return t("Only {v0} service links are accepted", { v0: m[1] });
   return t(message);
@@ -288,7 +290,7 @@ function SessionFeedback({ sessions, onSent }: { sessions: FeedbackSession[]; on
 export default function StudentServicesPage() {
   const t = useT();
   const dates = useDates();
-  const [student, setStudent] = useState<{ id: string; name: string; email?: string } | null>(null);
+  const [student, setStudent] = useState<{ id: string; name: string; email?: string; must_cover_both_marketplaces?: boolean } | null>(null);
   const [services, setServices] = useState<Service[]>(empty());
   const [submission, setSubmission] = useState<any>(null);
   // A failed load replaces the page; a failed submit is shown under the form,
@@ -356,10 +358,17 @@ export default function StudentServicesPage() {
   const fixedSlots = services
     .filter((service) => service.qc_status === "Needs Correction" && (fixedSame[service.slot] || sameAddress(service)))
     .map((service) => service.slot);
-  const progress = serviceProgress([...corrected, ...newLinks].map(platformOf));
-  const savedProgress = serviceProgress(services.map((service) => service.platform || ""));
+  // In a service group the three services cover both marketplaces: two on one and one on the other (12 November 2026).
+  const bothNeeded = Boolean(student?.must_cover_both_marketplaces);
+  const progress = serviceProgress([...corrected, ...newLinks].map(platformOf), bothNeeded);
+  const savedProgress = serviceProgress(services.map((service) => service.platform || ""), bothNeeded);
   const lockedRequired = services.filter((service) => service.qc_status === "Locked" && serviceCategory(service.platform || "") !== "Other").length;
-  const complete = submission?.status === "Complete" || lockedRequired >= minServiceLinks;
+  const lockedOn = (platform: string) => services.filter((service) => service.qc_status === "Locked" && service.platform === platform).length;
+  // Counted toward the three: the links on Kafiil and Nafezly, but not the third on one marketplace while the other has none.
+  const counted = Math.min(progress.required, progress.met ? minServiceLinks : minServiceLinks - (progress.missing.length ? 1 : 0));
+  const complete = bothNeeded
+    ? lockedRequired >= minServiceLinks && lockedOn("Kafiil") > 0 && lockedOn("Nafezly") > 0
+    : submission?.status === "Complete" || lockedRequired >= minServiceLinks;
   // An approved student can still have an extra link sent back; its fix must
   // stay sendable even though nothing more is required.
   const awaitingFix = services.some((service) => service.qc_status === "Needs Correction");
@@ -462,9 +471,11 @@ export default function StudentServicesPage() {
             <div>
               <span className="student-kicker">{t("SERVICE LINKS / ROUND 5")}</span>
               <h1>{student?.name ? t("Hi {v0}, submit your services.", { v0: student.name.split(" ")[0] }) : t("Submit your services.")}</h1>
-              <p>{t("Add at least three links on Kafiil and Nafezly, in any mix: three on one, or two and one. Links on other sites are optional. Each link is checked automatically, then reviewed by the quality team.")}</p>
+              <p>{bothNeeded
+                ? t("Add at least three links on Kafiil and Nafezly: two on one marketplace and one on the other. Links on other sites are optional. Each link is checked automatically, then reviewed by the quality team.")
+                : t("Add at least three links on Kafiil and Nafezly, in any mix: three on one, or two and one. Links on other sites are optional. Each link is checked automatically, then reviewed by the quality team.")}</p>
             </div>
-            <div className="student-progress"><strong>{Math.min(progress.required, minServiceLinks)}/{minServiceLinks}</strong><span>{t("Kafiil + Nafezly")}</span></div>
+            <div className="student-progress"><strong>{counted}/{minServiceLinks}</strong><span>{t("Kafiil + Nafezly")}</span></div>
           </section>
 
           {feedbackDue > 0 && (
@@ -565,9 +576,15 @@ export default function StudentServicesPage() {
                 <div className="student-form-footer">
                   <span>
                     {!progress.met
-                      ? minServiceLinks - progress.required === 1
-                        ? t("Add 1 more Kafiil or Nafezly link to submit.")
-                        : t("Add {v0} more Kafiil or Nafezly links to submit.", { v0: minServiceLinks - progress.required })
+                      ? progress.missing.length === 1 && progress.required >= minServiceLinks
+                        ? t("All your links are on one marketplace. Add one on {v0}: two on one marketplace and one on the other.", { v0: t(progress.missing[0]) })
+                        : progress.missing.length === 1 && progress.required > 0
+                          ? minServiceLinks - progress.required === 1
+                            ? t("Add 1 more link, on {v0}, to submit.", { v0: t(progress.missing[0]) })
+                            : t("Add {v0} more links, at least one on {v1}, to submit.", { v0: minServiceLinks - progress.required, v1: t(progress.missing[0]) })
+                          : minServiceLinks - progress.required === 1
+                            ? t("Add 1 more Kafiil or Nafezly link to submit.")
+                            : t("Add {v0} more Kafiil or Nafezly links to submit.", { v0: minServiceLinks - progress.required })
                       : problems.length
                         ? t("Fix the link marked above to submit.")
                         : changed

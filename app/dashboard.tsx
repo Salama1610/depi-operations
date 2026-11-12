@@ -262,7 +262,8 @@ export function Dashboard() {
   const activeIds = new Set(active.map((s) => s.id));
   const linksOf = new Map<string, Row[]>();
   for (const l of links) if (activeIds.has(l.student_id)) linksOf.set(l.student_id, [...(linksOf.get(l.student_id) || []), l]);
-  const completeStudents = [...linksOf.values()].filter((mine) => servicesComplete(mine)).length;
+  const groupOfActive = new Map<string, any>(active.map((s) => [s.id, s.group_id]));
+  const completeStudents = [...linksOf.entries()].filter(([id, mine]) => servicesComplete(mine, groupOfActive.get(id))).length;
   const submittedStudents = linksOf.size;
   // Graduation and gigs from the portal sheets in use (lib/domain/portal-figures),
   // for the active students in view: they change with each upload.
@@ -292,7 +293,7 @@ export function Dashboard() {
         contacted: st.filter((s) => contactedIds.has(s.id)).length,
         present: marks.filter((a) => a.status === "Present").length,
         marks: marks.length,
-        services: st.filter((s) => servicesComplete(linksOf.get(s.id) || [])).length,
+        services: st.filter((s) => servicesComplete(linksOf.get(s.id) || [], s.group_id)).length,
         gigs: portal.approved,
         graduated: portal.graduated,
       };

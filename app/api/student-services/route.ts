@@ -13,7 +13,7 @@ import {
   permit,
   student,
 } from "@/lib/server";
-import { normalizeServiceSlots, serviceKey, serviceProgress, verifyServiceLink } from "@/lib/domain/service-links";
+import { mustCoverBothMarketplaces, normalizeServiceSlots, serviceKey, serviceProgress, verifyServiceLink } from "@/lib/domain/service-links";
 import { distributeEvenly } from "@/lib/domain/qc-assignment";
 export const dynamic = "force-dynamic";
 
@@ -40,7 +40,7 @@ function parseLink(row: any) {
   };
 }
 
-async function studentView(studentId: string) {
+async function studentView(studentId: string, groupId?: unknown) {
   const [submission, rows, reviews]: [any, any[], any[]] = await Promise.all([
     stmt("SELECT * FROM service_submissions WHERE student_id=?", studentId).first(),
     all("SELECT * FROM service_links WHERE student_id=? ORDER BY slot", studentId),
@@ -68,7 +68,7 @@ async function studentView(studentId: string) {
     // The links in the order they were added, and where the student stands:
     // three at least, with a Kafiil and a Nafezly service among them.
     services: rows.map((row) => bySlot.get(row.slot)),
-    progress: serviceProgress(rows.map((row) => row.platform)),
+    progress: serviceProgress(rows.map((row) => row.platform), groupId),
     reviews,
     last_reviewed_at: reviews[0]?.reviewed_at || null,
   };
@@ -180,10 +180,11 @@ async function sessionFeedback(x: any) {
 export async function GET() {
   try {
     const s = await currentStudent();
-    const [view, feedback_sessions, client_orders] = await Promise.all([studentView(s.id), sessionsForFeedback(s.id), clientOrders(s.id)]);
+    const [view, feedback_sessions, client_orders] = await Promise.all([studentView(s.id, s.group_id), sessionsForFeedback(s.id), clientOrders(s.id)]);
     return Response.json({
       ok: true,
-      student: { id: s.id, name: s.name, email: s.email },
+      // In a service group the three services must cover both marketplaces (12 November 2026).
+      student: { id: s.id, name: s.name, email: s.email, must_cover_both_marketplaces: mustCoverBothMarketplaces(s.group_id) },
       ...view,
       feedback_sessions,
       client_orders,
@@ -232,7 +233,7 @@ export async function POST(req: Request) {
     let values: string[] = Array.isArray(x.services) ? x.services : [];
     if (values.length < existing.length)
       throw new Error("Keep every link you already submitted. Replace a link that needs correction instead of removing it.");
-    values = normalizeServiceSlots(values);
+    values = normalizeServiceSlots(values, s.group_id);
     // A service is the student's own listing. It is never tied to one of the
     // programme's client accounts, which only order gigs, so account_id stays
     // empty.
