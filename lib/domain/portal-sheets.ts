@@ -9,6 +9,7 @@
 // the cohort's official one.
 
 import { isNationalId, normalizeDigits, normalizeHeader, normalizeNationalId, normalizePhone } from "./sheet-mapping.ts";
+import { proofKey } from "./portal-review.ts";
 
 export type PortalSheet = "students" | "gigs";
 
@@ -213,6 +214,8 @@ export function portalGigRow(row: Record<string, unknown>) {
     comment: text(row.comment, 1000),
     action_by: text(row.action_by, 200),
     proof_url: text(row.proof_url, 1000),
+    // The key of the gig's quality review (lib/domain/portal-review).
+    proof_key: proofKey({ proof_url: text(row.proof_url, 1000), portal_gig_id: text(row.portal_gig_id, 120) }),
   };
 }
 

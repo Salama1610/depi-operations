@@ -1401,6 +1401,8 @@ export const portalGigs = sqliteTable(
     proofUrl: text("proof_url"),
     // The coach's decision; Provider Status is the portal's own QC (7 Nov 2026).
     trainerStatus: text("trainer_status"),
+    // The proof link without its host: the key of its quality review (12 Nov 2026).
+    proofKey: text("proof_key"),
   },
   (t) => [index("portal_gigs_batch_idx").on(t.batchId, t.portalStudentId)],
 );

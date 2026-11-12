@@ -754,7 +754,8 @@
     "comment": "text",
     "action_by": "text",
     "proof_url": "text",
-    "trainer_status": "text"
+    "trainer_status": "text",
+    "proof_key": "text"
   },
   "feedback_flags": {
     "session_id": "text",

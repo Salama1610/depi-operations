@@ -177,7 +177,8 @@ async function syncQueue(u: any, pool: Member[], settled: Set<string>, gigsBatch
       continue;
     }
     // The gig carries a new proof: a new thing to check, by the student's member.
-    if (rows.has(old.proof_key)) continue;
+    // The same file on another host is not a new proof (12 November 2026).
+    if (rows.has(old.proof_key) || proofKey({ proof_url: old.proof_key }) === key) continue;
     writes.push(
       stmt(
         "UPDATE portal_gig_reviews SET proof_key=?,title=?,url=?,status='Pending',comment=NULL,reviewed_by=NULL,reviewed_at=NULL,assigned_at=? WHERE portal_gig_id=?",
@@ -268,15 +269,10 @@ export async function GET() {
     const loads = synced ? await members(u, settled) : pool;
     const mine = leads ? "" : " AND r.reviewer=?";
     const hidden = revokesStudents(u) ? "" : " AND COALESCE(s.lifecycle,'')<>'Revoked'";
-    // A gig gone from the latest sheet keeps its proof (12 November 2026): the
-    // review holds the link lower-cased, which the portal does not open, so it
-    // is read with its own capitals from the proof fingerprints.
     const reviews = await all(
       `SELECT r.*,p.name reviewer_name,d.name reviewed_by_name,s.group_id,g.track,g.provider,
               z.status portal_status,z.trainer_status,z.provider_status,z.auditor_status,z.price,z.created_on,z.category,z.comment portal_comment,
-              CASE WHEN z.portal_gig_id IS NULL THEN 0 ELSE 1 END in_sheet,
-              COALESCE(z.proof_url, CASE WHEN z.portal_gig_id IS NULL AND r.proof_key NOT LIKE 'gig:%'
-                THEN (SELECT i.proof_url FROM proof_images i WHERE lower(trim(i.proof_url))=r.proof_key LIMIT 1) END) proof_url
+              CASE WHEN z.portal_gig_id IS NULL THEN 0 ELSE 1 END in_sheet,z.proof_url
        FROM portal_gig_reviews r
        LEFT JOIN users p ON p.id=r.reviewer LEFT JOIN users d ON d.id=r.reviewed_by
        LEFT JOIN students s ON s.id=r.student_id LEFT JOIN groups g ON g.id=s.group_id
@@ -318,6 +314,15 @@ export async function GET() {
               .filter((id: string) => id !== r.portal_gig_id && !r.same_proof.includes(id))
           : [];
       }
+    }
+    // A gig gone from the latest sheet keeps its proof (12 November 2026): the
+    // review holds only its key, lower-cased and without its host, which the
+    // portal does not open, so the link is read with its own capitals from the
+    // proof fingerprints.
+    if (reviews.some((r: any) => !r.proof_url && !String(r.proof_key || "").startsWith("gig:"))) {
+      const shots = new Map<string, string>();
+      for (const i of await all("SELECT proof_url FROM proof_images")) shots.set(proofKey({ proof_url: i.proof_url }), String(i.proof_url).trim());
+      for (const r of reviews as any[]) if (!r.proof_url) r.proof_url = shots.get(r.proof_key) || null;
     }
     // Every comment so far, the earlier ones next to the new.
     const notes = await reviewNotes(reviews.map((r: any) => r.proof_key));

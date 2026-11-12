@@ -3899,7 +3899,7 @@ test("portal gigs waiting for the coach go to the quality team, whose verdict th
   assert.deepEqual(lead.reviews.find((r) => r.portal_gig_id === "QG-1").same_proof, ["QG-50"], "a proof used on another gig is flagged");
   assert.deepEqual(lead.reviews.find((r) => r.portal_gig_id === "QG-4").same_proof, []);
   const rows = await dbRows("SELECT * FROM portal_gig_reviews ORDER BY portal_gig_id");
-  assert.deepEqual(rows.map((r) => r.proof_key), ["https://proof.example.org/one", "https://proof.example.org/two", "gig:QG-4"]);
+  assert.deepEqual(rows.map((r) => r.proof_key), ["/one", "/two", "gig:QG-4"], "kept by the link without its host");
   assert.equal(rows[0].reviewer, rows[1].reviewer, "one student's gigs stay together");
   assert.equal(rows[0].student_id, ours.id);
   // The load is counted in students: PQ-1's two gigs are one student waiting.
@@ -3930,15 +3930,16 @@ test("portal gigs waiting for the coach go to the quality team, whose verdict th
   assert.deepEqual([coachRow.qc_approved, coachRow.qc_rejected, coachRow.with_qc, coachRow.waiting], [1, 2, 0, 3], "the one proof on two gigs carries its verdict to both");
   assert.equal(byCoach.find((c) => c.coach_id === null)?.waiting, 1, "a gig of a student we do not know yet");
   // A new upload finds each review by its proof link, even when the row's ID
-  // changed, and a later gig of the student goes to the same member though
-  // nothing of theirs is waiting any more.
+  // changed or the portal moved the file to another host (12 November 2026),
+  // and a later gig of the student goes to the same member though nothing of
+  // theirs is waiting any more.
   current = { id: "owner", email: "owner@example.com" };
-  const renamed = { ...gig[1], portal_gig_id: "QG-11" };
+  const renamed = { ...gig[1], portal_gig_id: "QG-11", proof_url: gig[1].proof_url.replace("proof.example.org", "files.example.net") };
   const later = { portal_gig_id: "QG-6", portal_student_id: "PQ-1", title: "Flyer", url: "https://example.org/6", status: "Pending", provider_status: "Pending", proof_url: "https://proof.example.org/six" };
   await upload("gigs", gigMapping, [renamed, gig[2], gig[3], gig[4], gig[5], later]);
   current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
   assert.deepEqual((await get()).reviews.map((r) => r.portal_gig_id).sort(), ["QG-11", "QG-2", "QG-4", "QG-6"]);
-  const kept = await dbRow("SELECT * FROM portal_gig_reviews WHERE proof_key='https://proof.example.org/one'");
+  const kept = await dbRow("SELECT * FROM portal_gig_reviews WHERE proof_key='/one'");
   assert.deepEqual([kept.portal_gig_id, kept.status, kept.reviewer], ["QG-11", "Rejected", owner], "the verdict and the member stay with the proof");
   assert.equal((await dbRow("SELECT reviewer FROM portal_gig_reviews WHERE portal_gig_id='QG-6'")).reviewer, owner, "the student keeps their member");
 
@@ -3966,7 +3967,7 @@ test("portal gigs waiting for the coach go to the quality team, whose verdict th
   current = { id: "staff-quality-lead", email: "staff-quality-lead@example.invalid" };
   assert.equal((await get()).error, undefined);
   const again = await dbRow("SELECT * FROM portal_gig_reviews WHERE portal_gig_id='QG-2'");
-  assert.deepEqual([again.proof_key, again.status, again.reviewer, again.comment], ["https://proof.example.org/two-new", "Pending", owner, null]);
+  assert.deepEqual([again.proof_key, again.status, again.reviewer, again.comment], ["/two-new", "Pending", owner, null]);
 
   // Every comment is kept: the earlier ones are read with the new ones.
   const notesOf = async (id) => (await get()).reviews.find((r) => r.portal_gig_id === id).notes;
@@ -5382,7 +5383,7 @@ test("a coach's Gigs tab lists the portal gigs our QC decided, with links and th
   ]);
   const at = new Date().toISOString();
   // Each review is kept under its proof link, or the gig's ID when it has none.
-  for (const [id, key, status, comment] of [["CG-1", "https://example.org/proof-1", "Approved", "Matches the order"], ["CG-2", "gig:CG-2", "Rejected", "Proof is from another account"]])
+  for (const [id, key, status, comment] of [["CG-1", "/proof-1", "Approved", "Matches the order"], ["CG-2", "gig:CG-2", "Rejected", "Proof is from another account"]])
     await dbExec(
       "INSERT INTO portal_gig_reviews(portal_gig_id,proof_key,portal_student_id,student_id,reviewer,assigned_at,status,comment,reviewed_by,reviewed_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
       id, key, "GUID-CG-1", pupil.id, "staff-quality", at, status, comment, "staff-quality", at,

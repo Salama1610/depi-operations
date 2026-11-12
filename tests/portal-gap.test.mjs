@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { portalCoachGap } from "../lib/domain/portal-gap.ts";
-import { settledProofs, waitsForCoach } from "../lib/domain/portal-review.ts";
+import { proofKey, settledProofs, waitsForCoach } from "../lib/domain/portal-review.ts";
 
 const ours = { student_id: "S1", lifecycle: "Active", delivery_model: "Regular", group_id: "G1", coach_id: "C1", coach_name: "Coach One", coach_active: 1 };
 const gig = (id, fields = {}) => ({
@@ -75,7 +75,7 @@ test("a checked gig reaches the coach under the same conditions as the coach's G
 });
 
 test("a review still open is in the gap only when its proof no longer waits on the portal", () => {
-  const open = (id, fields = {}) => ({ ...gig(id), proof_key: "https://proof.example.org/" + id, qc: "Pending", in_sheet: id, ...fields });
+  const open = (id, fields = {}) => ({ ...gig(id), proof_key: "/" + id, qc: "Pending", in_sheet: id, ...fields });
   const gap = portalCoachGap(
     [gig("still", { qc: "Pending" }), gig("gone", { status: "Approved", provider_status: "Approved", qc: "Pending" })],
     [open("still"), open("gone", { status: "Approved", provider_status: "Approved" }), open("left", { in_sheet: null, status: null, provider_status: null })],
@@ -130,7 +130,12 @@ test("a proof is settled only when the sheet has it and no row of it still waits
     { portal_gig_id: "4", proof_url: "https://p/shared", status: "Pending", provider_status: "Pending" },
     { portal_gig_id: "5", proof_url: "", status: "Rejected", provider_status: "Pending" },
   ]);
-  assert.deepEqual([...settled].sort(), ["gig:5", "https://p/one"], "the shared proof still waits on one of its rows");
+  assert.deepEqual([...settled].sort(), ["/one", "gig:5"], "the shared proof still waits on one of its rows");
+  // The portal moved its files to another host on 12 November 2026, with the same paths: the same review.
+  assert.equal(
+    proofKey({ proof_url: "https://depiback.eyouthlearning.com/media/status_proof_screenshot/Gig_1.PDF" }),
+    proofKey({ proof_url: "https://depi-green.s3.eu-west-2.amazonaws.com/media/status_proof_screenshot/Gig_1.pdf" }),
+  );
   assert.equal(settled.has("https://p/not-in-the-sheet"), false);
 });
 
