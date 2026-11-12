@@ -3123,4 +3123,11 @@ export const ar: Record<string, string> = {
   "Reload the page": "أعد تحميل الصفحة",
   "Reference: {v0}": "المرجع: {v0}",
   "Something went wrong on our side. Please try again; if it keeps happening, report it from the Support page.": "حدث خطأ من جهتنا. حاول مرة أخرى؛ وإذا تكرر، أبلغ عنه من صفحة الدعم.",
+  "PNG or JPEG · up to 4 MB · paste with Ctrl+V or drop it here": "PNG أو JPEG · حتى 4 ميجابايت · الصق بـ Ctrl+V أو اسحبها هنا",
+  "Maximum screenshot size is 4 MB.": "الحد الأقصى لحجم لقطة الشاشة 4 ميجابايت.",
+  "Choose a PNG or JPEG, or press Ctrl+V to paste one. Up to 4 MB.": "اختر صورة PNG أو JPEG، أو اضغط Ctrl+V للصق صورة. حتى 4 ميجابايت.",
+  "Maximum file size is 4 MB.": "الحد الأقصى لحجم الملف 4 ميجابايت.",
+  "Choose a PNG or JPEG screenshot, maximum 4 MB.": "اختر لقطة شاشة PNG أو JPEG، بحد أقصى 4 ميجابايت.",
+  "This screenshot is over 4 MB. Crop it or save it as a JPEG, then upload it again.": "لقطة الشاشة أكبر من 4 ميجابايت. قصّها أو احفظها بصيغة JPEG ثم ارفعها مرة أخرى.",
+  "The upload did not go through. Try again.": "لم يكتمل الرفع. حاول مرة أخرى.",
 };

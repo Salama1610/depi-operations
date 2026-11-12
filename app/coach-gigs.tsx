@@ -13,6 +13,7 @@ import { useLocale, useT } from "@/lib/i18n/context";
 import { SearchableSelect } from "@/components/searchable-select";
 import { QcThread } from "@/components/qc-thread";
 import { coachStatusOf } from "@/lib/domain/portal-figures";
+import { safeHref } from "@/lib/safe-href";
 
 type Row = Record<string, any>;
 
@@ -190,14 +191,14 @@ export function CoachGigs() {
                 </small>
                 <span className="coach-gigs-links">
                   {g.url ? (
-                    <a className="small-btn" href={g.url} target="_blank" rel="noreferrer">
+                    <a className="small-btn" href={safeHref(g.url)} target="_blank" rel="noreferrer">
                       {t("Open the gig")} <ExternalLink size={12} />
                     </a>
                   ) : (
                     <small>{t("No gig link")}</small>
                   )}
                   {g.proof_url ? (
-                    <a className="small-btn" href={g.proof_url} target="_blank" rel="noreferrer">
+                    <a className="small-btn" href={safeHref(g.proof_url)} target="_blank" rel="noreferrer">
                       {t("Open the proof")} <ExternalLink size={12} />
                     </a>
                   ) : (

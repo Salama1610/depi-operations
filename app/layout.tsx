@@ -12,9 +12,6 @@ export const metadata: Metadata = {
     shortcut: "/brand/favicon.png",
     apple: "/brand/apple-touch-icon.png",
   },
-  other: {
-    "codex-preview": "development",
-  },
 };
 
 export default async function RootLayout({

@@ -137,3 +137,23 @@ test("batches send every statement in one call and skip SQLite trigger DDL", asy
   assert.deepEqual(results[0], { results: [], success: true, meta: { changes: 0 } });
   assert.equal(results[1].meta.changes, 1);
 });
+
+test("reads that travel together still fail one by one: a bad read fails only itself (12 Nov 2026)", async () => {
+  const calls = [];
+  const caller = async (statements) => {
+    calls.push(statements.length);
+    if (statements.some((s) => s.sql.includes("broken"))) throw new Error("relation broken does not exist");
+    return statements.map(() => ({ rows: [{ ok: 1 }], changes: 0 }));
+  };
+  const db = createRpcDatabase(caller, { columnTypes: columnTypes() });
+  const [good, bad, other] = await Promise.allSettled([
+    db.prepare("SELECT 1 ok FROM users").all(),
+    db.prepare("SELECT 1 ok FROM broken").all(),
+    db.prepare("SELECT 1 ok FROM groups").all(),
+  ]);
+  assert.equal(good.status, "fulfilled");
+  assert.equal(other.status, "fulfilled");
+  assert.equal(bad.status, "rejected");
+  assert.match(String(bad.reason?.message), /broken/);
+  assert.equal(calls[0], 3, "they first travelled in one call");
+});

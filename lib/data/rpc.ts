@@ -230,7 +230,22 @@ export function createRpcDatabase(caller: StatementCaller, options: { columnType
       const results = await caller(batch.map((entry) => entry.statement));
       batch.forEach((entry, index) => entry.resolve(results[index]));
     } catch (error) {
-      for (const entry of batch) entry.reject(error);
+      if (batch.length === 1) {
+        batch[0].reject(error);
+        return;
+      }
+      // One read failing fails the whole call, and the reads in it may be
+      // other people's (12 November 2026): each is tried again on its own, so
+      // only the read at fault fails, with its own error.
+      await Promise.all(
+        batch.map(async (entry) => {
+          try {
+            entry.resolve((await caller([entry.statement]))[0]);
+          } catch (own) {
+            entry.reject(own);
+          }
+        }),
+      );
     }
   };
   const pool = (statement: RpcStatement) =>

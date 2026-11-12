@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ExternalLink, Plus, RefreshCw } from "lucide-react";
 import { useLocale, useT } from "@/lib/i18n/context";
 import { SearchableSelect } from "@/components/searchable-select";
+import { safeHref } from "@/lib/safe-href";
 
 type Row = Record<string, any>;
 
@@ -179,7 +180,7 @@ export function Opportunities() {
             {shown.map((r) => (
               <li key={r.id}>
                 <div className="opportunity-main">
-                  <a href={r.url} target="_blank" rel="noopener noreferrer"><bdi>{r.title}</bdi> <ExternalLink size={14} aria-hidden="true" /></a>
+                  <a href={safeHref(r.url)} target="_blank" rel="noopener noreferrer"><bdi>{r.title}</bdi> <ExternalLink size={14} aria-hidden="true" /></a>
                   <small>
                     <bdi>{t(r.platform)}</bdi> · <bdi>{t(r.track)}</bdi> · {t("Posted {v0}", { v0: day(r.posted_on) })} · <bdi>{r.created_by_name || r.created_by}</bdi>
                   </small>
@@ -216,7 +217,7 @@ export function StudentOpportunities() {
         {rows.map((r) => (
           <li key={r.id}>
             <div className="opportunity-main">
-              <a href={r.url} target="_blank" rel="noopener noreferrer"><bdi>{r.title}</bdi> <ExternalLink size={14} aria-hidden="true" /></a>
+              <a href={safeHref(r.url)} target="_blank" rel="noopener noreferrer"><bdi>{r.title}</bdi> <ExternalLink size={14} aria-hidden="true" /></a>
               <small><bdi>{t(r.platform)}</bdi> · {t("Posted {v0}", { v0: day(r.posted_on) })}</small>
             </div>
           </li>

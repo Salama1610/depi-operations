@@ -6,6 +6,7 @@ import { StudentOpportunities } from "../opportunities";
 import { useEffect, useState } from "react";
 import { Check, ExternalLink, LockKeyhole, Plus, RefreshCw, Send, ShieldCheck, X } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { safeHref } from "@/lib/safe-href";
 import {
   maxLinksPerPlatform,
   minServiceLinks,
@@ -523,7 +524,7 @@ export default function StudentServicesPage() {
                       return (
                         <article className={`student-service-row ${locked ? "is-locked" : correction ? "is-correction" : ""}`} key={service.slot}>
                           <div className="student-url-field">
-                            <a className="student-url-text" href={service.url} target="_blank" rel="noreferrer">{service.url} <ExternalLink size={14} /></a>
+                            <a className="student-url-text" href={safeHref(service.url)} target="_blank" rel="noreferrer">{service.url} <ExternalLink size={14} /></a>
                             <div className="student-meta">
                               {service.qc_status && <span className={statusTone(service.qc_status)}>{t(label(service.qc_status))}</span>}
                             </div>

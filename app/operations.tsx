@@ -32,6 +32,7 @@ import { scoreOf } from "@/lib/domain/feedback";
 import { coachPayout, coachRates } from "@/lib/domain/payouts";
 import { checklistState, confirmOpensAt, confirmWindowOpen, sessionChecklist, type ChecklistItem } from "@/lib/domain/session-checklist";
 import { Suspense, lazy, startTransition, useMemo, useRef, useState, useEffect } from "react";
+import { safeHref } from "@/lib/safe-href";
 import {
   Home,
   CheckCheck,
@@ -1137,6 +1138,9 @@ export default function Operations({ module: initialModule }: { module: string }
     try {
       if (!form.student_id)
         throw Error(t("Choose the student before uploading proof."));
+      // The hosting refuses a request over 4.5 MB before the app sees it, so
+      // the size is checked here, with a message, rather than failing oddly.
+      if (file.size > 4 * 1024 * 1024) throw Error(t("This screenshot is over 4 MB. Crop it or save it as a JPEG, then upload it again."));
       const f = new FormData();
       f.append("file", file);
       f.append("purpose", "poh");
@@ -1168,7 +1172,7 @@ export default function Operations({ module: initialModule }: { module: string }
         if (modal.platform) f.append("platform", modal.platform);
       } else if (form.gig_id) f.append("gig_id", form.gig_id);
       const r = await fetch("/api/files", { method: "POST", body: f });
-      const x = await r.json();
+      const x = await r.json().catch(() => ({ error: r.status === 413 ? t("This screenshot is over 4 MB. Crop it or save it as a JPEG, then upload it again.") : t("The upload did not go through. Try again.") }));
       if (x.error) throw Error(x.error);
       setForm((v) => ({
         ...v,
@@ -1264,7 +1268,7 @@ export default function Operations({ module: initialModule }: { module: string }
         <strong>
           {form[`${key}_name`] || t("Upload {v0}", { v0: t(label) })}
         </strong>
-        <span>{t("PNG or JPEG · up to 8 MB · paste with Ctrl+V or drop it here")}</span>
+        <span>{t("PNG or JPEG · up to 4 MB · paste with Ctrl+V or drop it here")}</span>
         <input
           type="file"
           accept="image/png,image/jpeg"
@@ -2832,12 +2836,12 @@ See you there!`,
                   </button>
                 )}
                 {g.session_link && (
-                  <a className="small-btn" href={g.session_link} target="_blank" rel="noreferrer">
+                  <a className="small-btn" href={safeHref(g.session_link)} target="_blank" rel="noreferrer">
                     <ExternalLink size={14} /> {t("Session link")}
                   </a>
                 )}
                 {g.whatsapp_link && (
-                  <a className="small-btn wa-btn" href={g.whatsapp_link} target="_blank" rel="noreferrer">
+                  <a className="small-btn wa-btn" href={safeHref(g.whatsapp_link)} target="_blank" rel="noreferrer">
                     <MessageCircle size={14} /> {t("WhatsApp group")}
                   </a>
                 )}
@@ -3304,7 +3308,7 @@ See you there!`,
               return (
                 <span className="join-cell session-access">
                   {link ? (
-                    <a className="access-btn is-join" href={link} target="_blank" rel="noreferrer">
+                    <a className="access-btn is-join" href={safeHref(link)} target="_blank" rel="noreferrer">
                       <ExternalLink size={14} /> {t("Join")}
                     </a>
                   ) : (
@@ -3685,7 +3689,7 @@ See you there!`,
           <small className="table-subline"><bdi>{r.student_id}{r.student_group ? " · " + r.student_group : ""}</bdi> · {t("Second student")}</small>
           {r.student_coordinator_name && <small className="table-subline">{t("Student's coordinator: {v0}", { v0: r.student_coordinator_name })}</small>}
           {r.service_url && (
-            <a className="table-subline text-link service-open" href={r.service_url} target="_blank" rel="noreferrer" title={r.service_url}>
+            <a className="table-subline text-link service-open" href={safeHref(r.service_url)} target="_blank" rel="noreferrer" title={r.service_url}>
               <span>{t("For their {v0} service {v1}", { v0: r.service_platform, v1: r.service_slot })} <ExternalLink size={11} /></span>
               <small className="service-url" dir="ltr">{r.service_url}</small>
             </a>
@@ -3800,7 +3804,7 @@ See you there!`,
         <span className="svc-cell">
           {rows.map((r) =>
             r.service_url ? (
-              <a key={r.id} className="text-link svc-link" href={r.service_url} target="_blank" rel="noreferrer" title={r.service_url}>
+              <a key={r.id} className="text-link svc-link" href={safeHref(r.service_url)} target="_blank" rel="noreferrer" title={r.service_url}>
                 {t("Service {v0}", { v0: r.service_slot })} <ExternalLink size={11} />
               </a>
             ) : (
@@ -4082,7 +4086,7 @@ See you there!`,
                           label: t("Service"),
                           render: (o) =>
                             o.service_url ? (
-                              <a className="text-link" href={o.service_url} target="_blank" rel="noreferrer">
+                              <a className="text-link" href={safeHref(o.service_url)} target="_blank" rel="noreferrer">
                                 {t("Service {v0}", { v0: o.service_slot || 1 })} <ExternalLink size={11} />
                               </a>
                             ) : (
@@ -4337,7 +4341,7 @@ See you there!`,
                               )}
                               {/* The service this account orders for, so the coordinator opens the right one. */}
                               {r.service_url ? (
-                                <a className="table-subline text-link service-open" href={r.service_url} target="_blank" rel="noreferrer" title={r.service_url}>
+                                <a className="table-subline text-link service-open" href={safeHref(r.service_url)} target="_blank" rel="noreferrer" title={r.service_url}>
                                   <span>{t("For their {v0} service {v1}", { v0: r.service_platform, v1: r.service_slot })} <ExternalLink size={11} /></span>
                                   <small className="service-url" dir="ltr">{r.service_url}</small>
                                 </a>
@@ -5196,7 +5200,7 @@ See you there!`,
                 [
                   { key: "student_name", label: t("Student"), render: (r) => { const own = serviceLinks.filter((l) => l.student_id === r.student_id); const decided = own.filter((l) => l.qc_status !== "Pending").length; const pupil = students.find((x) => x.id === r.student_id); return <span>{pupil ? <button type="button" className="text-link" title={t("Open the student's details")} onClick={() => setSelected(pupil)}><strong>{r.student_name}</strong></button> : <strong>{r.student_name}</strong>}<small className="table-subline">{r.student_id} · <bdi>{r.group_id}</bdi> · {decided}/{own.length} {t("reviewed")}</small></span>; } },
                   { key: "slot", label: t("Service"), render: (r) => (
-                      <a className="text-link service-open" href={r.url} target="_blank" rel="noreferrer" title={t("Open the student's service")}>
+                      <a className="text-link service-open" href={safeHref(r.url)} target="_blank" rel="noreferrer" title={t("Open the student's service")}>
                         <strong className="service-open-name">{serviceLabel(r.platform)} <ExternalLink size={14} /></strong>
                         <small className="table-subline service-url" title={r.url}>{r.url}</small>
                         {r.submitted_at && <small className="table-subline">{t("Uploaded {v0}", { v0: new Date(r.submitted_at).toLocaleString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { day: "numeric", month: "short", hour: "numeric", hour12: true, minute: "2-digit" }) })}</small>}
@@ -6439,7 +6443,7 @@ See you there!`,
                         ) : sheetLinks.filter((link) => link.student_id === selectedStudent.id).map((link) => (
                           <article key={link.id}>
                             <div className="detail-actions"><Badge value={serviceLabel(link.platform)} /><Badge value={qcState(link.qc_status)} /><Badge value={link.auto_status} /></div>
-                            <h3><a className="text-link" href={link.url} target="_blank" rel="noreferrer">{serviceLabel(link.platform)} <ExternalLink size={14} /></a></h3>
+                            <h3><a className="text-link" href={safeHref(link.url)} target="_blank" rel="noreferrer">{serviceLabel(link.platform)} <ExternalLink size={14} /></a></h3>
                             <small className="service-link-url" dir="ltr">{link.url}</small>
                             <p>{(() => { try { return checkText(JSON.parse(link.auto_result || "{}").message); } catch { return t("Automatic details unavailable."); } })()}</p>
                             <small>{t("Revision")}{" "}{link.revision} {t("· submitted")}{" "}{moment(link.submitted_at)}{link.qc_at ? t(" · reviewed {v0} by {v1}", { v0: moment(link.qc_at), v1: link.reviewer_name || owner(link.qc_actor) }) : ""}</small>
@@ -6609,7 +6613,7 @@ See you there!`,
               <div className="join-footer">
                 <Cue tone={joinLeft > 15 ? "info" : "warn"}>{t("Hides in {v0}s", { v0: joinLeft })}</Cue>
                 {joinLogin.link ? (
-                  <a className="primary" href={joinLogin.link} target="_blank" rel="noreferrer">
+                  <a className="primary" href={safeHref(joinLogin.link)} target="_blank" rel="noreferrer">
                     <ExternalLink size={16} /> {t("Open the session")}
                   </a>
                 ) : (
@@ -6653,7 +6657,7 @@ See you there!`,
                   <Copy size={15} /> {t("Copy message")}
                 </button>
                 {groupMessage.link ? (
-                  <a className="small-btn wa-btn" href={groupMessage.link} target="_blank" rel="noreferrer">
+                  <a className="small-btn wa-btn" href={safeHref(groupMessage.link)} target="_blank" rel="noreferrer">
                     <MessageCircle size={15} /> {t("Open the WhatsApp group")}
                   </a>
                 ) : (

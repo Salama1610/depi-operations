@@ -77,7 +77,7 @@ export async function POST(req: Request) {
 
     // Anyone on the staff reports a problem.
     await rateLimit("support-report:" + u.id, 10, 3600);
-    ensure(Number(req.headers.get("content-length") || 0) <= 9 * 1024 * 1024, "Maximum screenshot size is 8 MB.");
+    ensure(Number(req.headers.get("content-length") || 0) <= 4.5 * 1024 * 1024, "Maximum screenshot size is 4 MB.");
     const form = await req.formData();
     const category = String(form.get("category") || "");
     const severity = String(form.get("severity") || "");
@@ -97,7 +97,7 @@ export async function POST(req: Request) {
     let type: string | null = null;
     const file = form.get("screenshot");
     if (file && typeof file !== "string" && file.size > 0) {
-      ensure(file.size <= 8 * 1024 * 1024, "Maximum screenshot size is 8 MB.");
+      ensure(file.size <= 4 * 1024 * 1024, "Maximum screenshot size is 4 MB.");
       const bytes = new Uint8Array(await file.arrayBuffer());
       const png = bytes[0] === 137 && bytes[1] === 80 && bytes[2] === 78 && bytes[3] === 71;
       const jpg = bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;

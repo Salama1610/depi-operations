@@ -13,6 +13,7 @@ import { portalGigStage } from "@/lib/domain/portal-figures";
 import { SearchableSelect } from "@/components/searchable-select";
 import { QcThread } from "@/components/qc-thread";
 import { GraduationDots } from "./today";
+import { safeHref } from "@/lib/safe-href";
 
 type Row = Record<string, any>;
 
@@ -240,7 +241,7 @@ export function CoachProgress() {
                             <span className={"cue " + (g.qc_status ? portalTone(g.qc_status) : "is-info")} title={t("Our QC")}>
                               {t("Our QC")}: {g.qc_status ? t(g.qc_status) : t("Not checked")}
                             </span>
-                            {g.url && <a className="text-link" href={g.url} target="_blank" rel="noreferrer">{t("Gig")}</a>}
+                            {g.url && <a className="text-link" href={safeHref(g.url)} target="_blank" rel="noreferrer">{t("Gig")}</a>}
                           </span>
                           {(g.qc_notes || []).length ? (
                             <QcThread notes={g.qc_notes} className="coach-progress-qc" />

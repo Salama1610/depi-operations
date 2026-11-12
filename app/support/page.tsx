@@ -98,7 +98,7 @@ export default function SupportPage() {
   function takeScreenshot(file: File | null | undefined) {
     if (!file) return;
     if (!["image/png", "image/jpeg"].includes(file.type)) return setError(t("The screenshot must be a PNG or JPEG image."));
-    if (file.size > 8 * 1024 * 1024) return setError(t("Maximum screenshot size is 8 MB."));
+    if (file.size > 4 * 1024 * 1024) return setError(t("Maximum screenshot size is 4 MB."));
     setError("");
     setShot(file);
   }
@@ -226,7 +226,7 @@ export default function SupportPage() {
               ) : (
                 <label className="support-drop">
                   <ImagePlus size={18} aria-hidden="true" />
-                  <span>{t("Choose a PNG or JPEG, or press Ctrl+V to paste one. Up to 8 MB.")}</span>
+                  <span>{t("Choose a PNG or JPEG, or press Ctrl+V to paste one. Up to 4 MB.")}</span>
                   <input type="file" accept="image/png,image/jpeg" hidden onChange={(e) => { takeScreenshot(e.target.files?.[0]); e.target.value = ""; }} />
                 </label>
               )}

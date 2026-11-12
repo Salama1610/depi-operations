@@ -18,6 +18,7 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { QcThread } from "@/components/qc-thread";
 import { PortalGap } from "./portal-gap";
 import { coachStatusOf } from "@/lib/domain/portal-figures";
+import { safeHref } from "@/lib/safe-href";
 
 type Row = Record<string, any>;
 const pageSize = 25;
@@ -75,14 +76,14 @@ function GigCheck({ g, canDecide, busy, send }: { g: Row; canDecide: boolean; bu
         </div>
         <div className="pqc-links">
           {g.url && (
-            <a className="text-link" href={g.url} target="_blank" rel="noreferrer">
+            <a className="text-link" href={safeHref(g.url)} target="_blank" rel="noreferrer">
               {t("Gig")} <ExternalLink size={12} />
             </a>
           )}
           {g.proof_url && (
             <a
               className={"text-link" + (needsProof && editing && canDecide ? " pqc-proof-due" : "")}
-              href={g.proof_url}
+              href={safeHref(g.proof_url)}
               target="_blank"
               rel="noreferrer"
               onClick={() => setProofOpened(true)}

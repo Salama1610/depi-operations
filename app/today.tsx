@@ -7,6 +7,7 @@
 // Operations this week's sessions and coverage; a coach their own sessions.
 
 import { sessionEnded } from "@/lib/domain/session-time";
+import { safeHref } from "@/lib/safe-href";
 import { AlertTriangle, CalendarDays, Check, Clock3, ExternalLink, MessageCircle, UserCog } from "lucide-react";
 import { useT } from "@/lib/i18n/context";
 
@@ -150,7 +151,7 @@ function CoordinatorToday({ ctx }: { ctx: TodayContext }) {
                     <small>{s.title} · {ctx.owner(s.coach_id)} · {t("Week {v0}", { v0: s.week })}</small>
                   </div>
                   <div className="today-actions">
-                    {link && <a className="small-btn" href={link} target="_blank" rel="noreferrer"><ExternalLink size={14} /> {t("Join")}</a>}
+                    {link && <a className="small-btn" href={safeHref(link)} target="_blank" rel="noreferrer"><ExternalLink size={14} /> {t("Join")}</a>}
                     {ctx.takesAttendance(s) ? (
                       <button className={marked ? "small-btn" : "primary small"} onClick={() => ctx.openAttendance(s)}>
                         {marked ? t("Attendance taken") : t("Take attendance")}
@@ -460,7 +461,7 @@ function CoachToday({ ctx }: { ctx: TodayContext }) {
               </div>
               <small>{s.group_id} · {s.title} · {t("Week {v0}", { v0: s.week })}</small>
               <div className="coach-card-actions">
-                {link && <a className="small-btn" href={link} target="_blank" rel="noreferrer"><ExternalLink size={15} /> {t("Join")}</a>}
+                {link && <a className="small-btn" href={safeHref(link)} target="_blank" rel="noreferrer"><ExternalLink size={15} /> {t("Join")}</a>}
                 {ctx.canAttend(s) && <button className="primary small" onClick={() => ctx.confirm(s)}><Check size={15} /> {t("Confirm")}</button>}
                 {ctx.canDecline(s) && <button className="small-btn" onClick={() => ctx.open("session_unavailable", s)}>{t("Unavailable")}</button>}
                 {ctx.takesAttendance(s) && <button className="primary small" onClick={() => ctx.openAttendance(s)}>{t("Take attendance")}</button>}
