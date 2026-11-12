@@ -4877,7 +4877,6 @@ test("coordinators follow each order on a student's client account, and the lead
   assert.equal(order.student_id, pupil.id);
   assert.match((await post("account_order_status", { id: "ORD-1", status: "Proof Uploaded" })).error, /cannot become/, "proof comes after Done");
   await check("account_order_status", { id: "ORD-1", status: "Done" });
-  assert.match((await post("account_order_status", { id: "ORD-1", status: "Proof Uploaded" })).error, /Upload the proof first/);
   await dbExec(
     "INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)",
     "FILE-ORD-1", pupil.id, "evidence/ord-1", "proof.png", "image/png", 10, "hash-ord-1", pupil.coordinator, new Date().toISOString(),
@@ -5073,13 +5072,18 @@ test("each service row's status picker sets where its order stands, in one step"
   assert.deepEqual(await state(), ["Done"], "choosing a status with no order starts one there");
   assert.match((await post("account_service_status", { account_id: "ACC-PICK-1", status: "Cancelled" })).error, /Say why/);
   await check("account_service_status", { account_id: "ACC-PICK-1", status: "In Progress" });
-  assert.match((await post("account_service_status", { account_id: "ACC-PICK-1", status: "Proof Uploaded" })).error, /Upload the proof first/);
-  await dbExec("INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)", "FILE-PICK-1", pupil.id, "evidence/pick-1", "p.png", "image/png", 10, "hash-pick-1", pupil.coordinator, new Date().toISOString());
-  await check("account_service_status", { account_id: "ACC-PICK-1", status: "Proof Uploaded", proof_id: "FILE-PICK-1" });
+  // The POH is a status: no screenshot is needed (12 November 2026).
+  await check("account_service_status", { account_id: "ACC-PICK-1", status: "Proof Uploaded" });
   assert.deepEqual(await state(), ["Proof Uploaded"]);
+  assert.equal((await dbRow("SELECT proof_id FROM account_orders WHERE account_id='ACC-PICK-1'")).proof_id, null);
   // After a finished order, the next pick starts a new one.
   await check("account_service_status", { account_id: "ACC-PICK-1", status: "In Progress" });
   assert.deepEqual(await state(), ["Proof Uploaded", "In Progress"]);
+  // A screenshot can still go with it, and is kept; one of another student's is refused.
+  await dbExec("INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)", "FILE-PICK-1", pupil.id, "evidence/pick-1", "p.png", "image/png", 10, "hash-pick-1", pupil.coordinator, new Date().toISOString());
+  await check("account_service_status", { account_id: "ACC-PICK-1", status: "Proof Uploaded", proof_id: "FILE-PICK-1" });
+  assert.deepEqual(await state(), ["Proof Uploaded", "Proof Uploaded"]);
+  assert.ok((await dbRows("SELECT proof_id FROM account_orders WHERE account_id='ACC-PICK-1'")).some((r) => r.proof_id === "FILE-PICK-1"));
   current = { id: "owner", email: "owner@example.com" };
   await dbExec("DELETE FROM account_orders WHERE account_id='ACC-PICK-1'");
   await dbExec("UPDATE accounts SET student_id=NULL WHERE id='ACC-PICK-1'");

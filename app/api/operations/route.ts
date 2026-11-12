@@ -3363,10 +3363,9 @@ export async function POST(req: Request) {
           ensure(["Buy", "In Progress", "Done", "Proof Uploaded", "Cancelled"].includes(to), "Choose the order's status.");
           const note = String(x.note || "").trim().slice(0, 1000);
           if (to === "Cancelled") ensure(note.length >= 3, "Say why the order was cancelled.");
-          if (to === "Proof Uploaded") {
-            ensure(x.proof_id, "Upload the proof first.");
-            await proof(u, String(x.proof_id), pupil.student_id);
-          }
+          // The POH is a status; a screenshot is optional (12 November 2026).
+          // One that is attached must be this student's.
+          if (to === "Proof Uploaded" && x.proof_id) await proof(u, String(x.proof_id), pupil.student_id);
           const current: any = await stmt(
             "SELECT * FROM account_orders WHERE account_id=? AND student_id=? AND status<>'Proof Uploaded' ORDER BY created_at DESC LIMIT 1",
             a.id,
@@ -3382,7 +3381,7 @@ export async function POST(req: Request) {
             jobs.push(
               stmt(
                 "INSERT INTO account_orders(id,account_id,student_id,service_link_id,coordinator,order_ref,amount,note,status,proof_id,created_at,updated_at,done_at,proof_at,cancelled_at) VALUES(?,?,?,?,?,NULL,NULL,?,?,?,?,?,?,?,?)",
-                id, a.id, pupil.student_id, pupil.service_link_id, u.id, note || null, to, to === "Proof Uploaded" ? String(x.proof_id) : null, t, t, at.done, at.proof, at.cancelled,
+                id, a.id, pupil.student_id, pupil.service_link_id, u.id, note || null, to, to === "Proof Uploaded" && x.proof_id ? String(x.proof_id) : null, t, t, at.done, at.proof, at.cancelled,
               ),
             );
           } else {
@@ -3393,7 +3392,7 @@ export async function POST(req: Request) {
             jobs.push(
               stmt(
                 "UPDATE account_orders SET status=?,proof_id=?,note=COALESCE(?,note),updated_at=?,done_at=?,proof_at=?,cancelled_at=? WHERE id=?",
-                to, to === "Proof Uploaded" ? String(x.proof_id) : current.proof_id, note || null, t, at.done, at.proof, at.cancelled, current.id,
+                to, to === "Proof Uploaded" && x.proof_id ? String(x.proof_id) : current.proof_id, note || null, t, at.done, at.proof, at.cancelled, current.id,
               ),
             );
           }
@@ -3436,8 +3435,8 @@ export async function POST(req: Request) {
         const note = String(x.note || "").trim().slice(0, 1000);
         if (to === "Cancelled") ensure(note.length >= 3, "Say why the order was cancelled.");
         let proofId: string | null = order.proof_id;
-        if (to === "Proof Uploaded") {
-          ensure(x.proof_id, "Upload the proof first.");
+        // The POH is a status; a screenshot is optional (12 November 2026).
+        if (to === "Proof Uploaded" && x.proof_id) {
           await proof(u, String(x.proof_id), order.student_id);
           proofId = String(x.proof_id);
         }

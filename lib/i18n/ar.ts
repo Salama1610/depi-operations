@@ -3130,4 +3130,5 @@ export const ar: Record<string, string> = {
   "Choose a PNG or JPEG screenshot, maximum 4 MB.": "اختر لقطة شاشة PNG أو JPEG، بحد أقصى 4 ميجابايت.",
   "This screenshot is over 4 MB. Crop it or save it as a JPEG, then upload it again.": "لقطة الشاشة أكبر من 4 ميجابايت. قصّها أو احفظها بصيغة JPEG ثم ارفعها مرة أخرى.",
   "The upload did not go through. Try again.": "لم يكتمل الرفع. حاول مرة أخرى.",
+  "The order is finished. A screenshot of the proof is optional.": "اكتمل الطلب. لقطة شاشة الإثبات اختيارية.",
 };

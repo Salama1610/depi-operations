@@ -3654,7 +3654,8 @@ See you there!`,
       const latest = latestOrderOf(r);
       const choose = (status: string) => {
         if (!status || status === latest?.status) return;
-        if (status === "Proof Uploaded" || status === "Cancelled")
+        // Cancelling needs a reason; every other status, the POH included, is set at once (12 November 2026).
+        if (status === "Cancelled")
           open("account_service_status", { account_id: r.id, status, student_id: r.student_id, student_name: r.student_name || name(r.student_id), account_label: r.label, note: "", proof_id: "" });
         else quick("account_service_status", { account_id: r.id, student_id: r.student_id, status });
       };
@@ -7698,7 +7699,7 @@ See you there!`,
                       {form.status === "Done"
                         ? t("The work is delivered. Upload the proof next.")
                         : form.status === "Proof Uploaded"
-                          ? t("Upload the proof that the order was completed.")
+                          ? t("The order is finished. A screenshot of the proof is optional.")
                           : form.status === "Cancelled"
                             ? t("The order is cancelled. Say why.")
                             : t("The order goes back to In progress.")}
