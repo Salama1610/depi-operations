@@ -266,10 +266,15 @@ export async function GET() {
     const loads = synced ? await members(u, settled) : pool;
     const mine = leads ? "" : " AND r.reviewer=?";
     const hidden = revokesStudents(u) ? "" : " AND COALESCE(s.lifecycle,'')<>'Revoked'";
+    // A gig gone from the latest sheet keeps its proof (12 November 2026): the
+    // review holds the link lower-cased, which the portal does not open, so it
+    // is read with its own capitals from the proof fingerprints.
     const reviews = await all(
       `SELECT r.*,p.name reviewer_name,d.name reviewed_by_name,s.group_id,g.track,g.provider,
-              z.status portal_status,z.trainer_status,z.provider_status,z.auditor_status,z.price,z.created_on,z.category,z.proof_url,z.comment portal_comment,
-              CASE WHEN z.portal_gig_id IS NULL THEN 0 ELSE 1 END in_sheet
+              z.status portal_status,z.trainer_status,z.provider_status,z.auditor_status,z.price,z.created_on,z.category,z.comment portal_comment,
+              CASE WHEN z.portal_gig_id IS NULL THEN 0 ELSE 1 END in_sheet,
+              COALESCE(z.proof_url, CASE WHEN z.portal_gig_id IS NULL AND r.proof_key NOT LIKE 'gig:%'
+                THEN (SELECT i.proof_url FROM proof_images i WHERE lower(trim(i.proof_url))=r.proof_key LIMIT 1) END) proof_url
        FROM portal_gig_reviews r
        LEFT JOIN users p ON p.id=r.reviewer LEFT JOIN users d ON d.id=r.reviewed_by
        LEFT JOIN students s ON s.id=r.student_id LEFT JOIN groups g ON g.id=s.group_id

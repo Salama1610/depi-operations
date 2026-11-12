@@ -88,7 +88,7 @@ function GigCheck({ g, canDecide, busy, send }: { g: Row; canDecide: boolean; bu
               onClick={() => setProofOpened(true)}
               onAuxClick={() => setProofOpened(true)}
             >
-              {proofOpened ? <Check size={12} /> : null} {t("Proof")} <ExternalLink size={12} />
+              {proofOpened ? <Check size={12} /> : null} {Number(g.in_sheet) ? t("Proof") : t("Proof (from an earlier sheet)")} <ExternalLink size={12} />
             </a>
           )}
         </div>

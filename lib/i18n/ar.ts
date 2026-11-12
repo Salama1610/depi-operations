@@ -3108,4 +3108,6 @@ export const ar: Record<string, string> = {
   // Uploads: an order's POH only (12 Nov 2026)
   "Only the POH of a client-account order can be uploaded.": "يُرفع فقط إثبات الطلب (POH) لطلب على حساب عميل.",
   "Gigs now come from the portal sheets; they are not recorded here.": "الجيجز تأتي الآن من شيتات البوابة، ولا تُسجَّل هنا.",
+  // Portal gigs QC: a gig gone from the latest sheet keeps its proof (12 Nov 2026)
+  "Proof (from an earlier sheet)": "الإثبات (من شيت سابق)",
 };
