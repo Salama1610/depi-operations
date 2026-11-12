@@ -4340,6 +4340,7 @@ See you there!`,
                             </span>
                           );
                         if (r.second) return <span className="account-key">{secondStudent(r)}</span>;
+                        if (r.other_half) return <small className="table-subline">{t("In use for the other coordinator's student")}</small>;
                         const request = r.active_assignment ? requests.find((q) => q.status === "Assigned" && (d.reservations || []).some((z: Row) => z.account_id === r.id && z.request_id === q.id)) : null;
                         return request ? <span>{name(request.student_id)}<small className="table-subline">{request.task}</small></span> : "—";
                       },

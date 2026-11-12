@@ -128,9 +128,15 @@ const demoActions = new Set([
  * account's first student, or `wanted`, a second student whose service the
  * account buys (service_links.account_id, 10 November 2026).
  */
-async function orderStudent(a: any, wanted?: unknown) {
+async function orderStudent(a: any, wanted?: unknown, u?: any) {
   const id = wanted ? String(wanted) : a.student_id;
   ensure(id, "Link the account to a student before recording an order.");
+  // On an account two coordinators share, each works on their own student only (12 November 2026).
+  if (u && !can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin", "Team Supervisor"]) && !keepsAccounts(u)) {
+    const group: any = await stmt("SELECT g.coordinator FROM students s JOIN groups g ON g.id=s.group_id WHERE s.id=?", id).first();
+    const other = group?.coordinator && group.coordinator !== u.id && [a.coordinator_id, a.coordinator_2_id].includes(group.coordinator);
+    ensure(!other, "This student is the other coordinator's on this account.");
+  }
   if (id === a.student_id) return { student_id: a.student_id as string, service_link_id: (a.service_link_id || null) as string | null };
   const link: any = await stmt("SELECT id FROM service_links WHERE account_id=? AND student_id=? ORDER BY qc_at LIMIT 1", a.id, id).first();
   ensure(link, "This account does not buy from that student.");
@@ -3289,7 +3295,7 @@ export async function POST(req: Request) {
           const a: any = await stmt("SELECT * FROM accounts WHERE id=?", String(x.account_id || "")).first();
           ensure(a, "Account not found.");
           ensure(mayOrder(a), "Only this account's coordinator, its keepers or the leaders update its orders.");
-          const pupil = await orderStudent(a, x.student_id);
+          const pupil = await orderStudent(a, x.student_id, u);
           const to = String(x.status || "");
           // Buy (bought through the account) comes first, as on the team's sheet (23 October 2026).
           ensure(["Buy", "In Progress", "Done", "Proof Uploaded", "Cancelled"].includes(to), "Choose the order's status.");
@@ -3335,7 +3341,7 @@ export async function POST(req: Request) {
           const a: any = await stmt("SELECT * FROM accounts WHERE id=?", String(x.account_id || "")).first();
           ensure(a, "Account not found.");
           ensure(mayOrder(a), "Only this account's coordinator, its keepers or the leaders record its orders.");
-          const which = await orderStudent(a, x.student_id);
+          const which = await orderStudent(a, x.student_id, u);
           const pupil = await student(u, which.student_id);
           const orderRef = String(x.order_ref || "").trim();
           ensure(orderRef.length <= 120, "Keep the order number under 120 characters.");
@@ -3396,7 +3402,7 @@ export async function POST(req: Request) {
           can(u.roles, ["Project Operations", "Operations Systems / Admin"]) || keepsAccounts(u) || a.coordinator_id === u.id || a.coordinator_2_id === u.id,
           "Only this account's coordinator, its keepers or the leaders update its orders.",
         );
-        const pupil = await orderStudent(a, x.student_id);
+        const pupil = await orderStudent(a, x.student_id, u);
         const sets: string[] = [];
         const values: any[] = [];
         if ("amount" in x) {

@@ -292,12 +292,13 @@ export function scopeSql(u: any, alias = "g", studentAlias: string | null = "s")
   ];
   const args: string[] = [u.id, u.id, u.id, u.id, u.id];
   // A coordinator also sees the students whose client accounts they hold,
-  // to record orders on them and upload their proof.
+  // to record orders on them and upload their proof; on an account two
+  // coordinators share, only their own half (12 November 2026).
   if (studentAlias && can(u.roles, ["Operations Coordinator"])) {
     clauses.push(
-      `EXISTS (SELECT 1 FROM accounts ac WHERE (ac.student_id=${studentAlias}.id OR ac.id IN (SELECT sl.account_id FROM service_links sl WHERE sl.student_id=${studentAlias}.id)) AND (ac.coordinator_id=? OR ac.coordinator_2_id=?))`,
+      `EXISTS (SELECT 1 FROM accounts ac WHERE (ac.student_id=${studentAlias}.id OR ac.id IN (SELECT sl.account_id FROM service_links sl WHERE sl.student_id=${studentAlias}.id)) AND (ac.coordinator_id=? OR ac.coordinator_2_id=?) AND NOT (${alias}.coordinator<>? AND ${alias}.coordinator IN (coalesce(ac.coordinator_id,''),coalesce(ac.coordinator_2_id,''))))`,
     );
-    args.push(u.id, u.id);
+    args.push(u.id, u.id, u.id);
   }
   // A quality reviewer sees the students whose work is assigned to them —
   // their services or their gig evidence, handed out automatically or by the
@@ -330,7 +331,8 @@ export async function accountOrdersFor(u: any) {
   if (can(u.roles, ["Team Supervisor"]))
     return all(`${select} WHERE ${side} AND g.supervisor=? ORDER BY o.updated_at DESC LIMIT 3000`, u.id);
   if (can(u.roles, ["Operations Coordinator"]))
-    return all(`${select} WHERE ${side} AND (a.coordinator_id=? OR a.coordinator_2_id=? OR o.coordinator=?) ORDER BY o.updated_at DESC LIMIT 3000`, u.id, u.id, u.id);
+    // On an account two coordinators share, not the other coordinator's student's orders.
+    return all(`${select} WHERE ${side} AND (a.coordinator_id=? OR a.coordinator_2_id=? OR o.coordinator=?) AND NOT (g.coordinator<>? AND g.coordinator IN (coalesce(a.coordinator_id,''),coalesce(a.coordinator_2_id,''))) ORDER BY o.updated_at DESC LIMIT 3000`, u.id, u.id, u.id, u.id);
   return [];
 }
 export async function student(u: any, id: string) {
@@ -807,7 +809,7 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
       // The student the account is linked to, their group's coordinator and the
       // service it is for, joined here so the account's coordinator sees them
       // even when the student is in another coordinator's group.
-      const linked = `SELECT ${columns},s.name student_name,s.group_id student_group,c.name student_coordinator_name,l.url service_url,l.platform service_platform,l.slot service_slot
+      const linked = `SELECT ${columns},s.name student_name,s.group_id student_group,g.coordinator student_coordinator_id,c.name student_coordinator_name,l.url service_url,l.platform service_platform,l.slot service_slot
         FROM accounts a
         LEFT JOIN students s ON s.id=a.student_id AND ${revokesStudents(u) ? "1=1" : "s.lifecycle<>'Revoked'"}
         LEFT JOIN groups g ON g.id=s.group_id
@@ -815,7 +817,7 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
         LEFT JOIN service_links l ON l.id=a.service_link_id AND l.student_id=s.id`;
       // An account's second student (10 November 2026): the one whose service it
       // buys, other than the student on the account itself, with the same details.
-      const second = `SELECT l.account_id,l.student_id,l.id service_link_id,s.name student_name,s.group_id student_group,c.name student_coordinator_name,
+      const second = `SELECT l.account_id,l.student_id,l.id service_link_id,s.name student_name,s.group_id student_group,g.coordinator student_coordinator_id,c.name student_coordinator_name,
           l.url service_url,l.platform service_platform,l.slot service_slot
         FROM service_links l JOIN accounts a ON a.id=l.account_id
         JOIN students s ON s.id=l.student_id AND ${revokesStudents(u) ? "1=1" : "s.lifecycle<>'Revoked'"}
@@ -830,11 +832,27 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
       };
       if (can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin", "Team Supervisor"]) || keepsAccounts(u))
         return withSecond(all(`${linked} WHERE ${sameSide(u, "a.id")}`), all(`${second} AND ${sameSide(u, "a.id")}`));
+      // A coordinator: the accounts they hold. Two coordinators share many
+      // accounts, one student each (12 November 2026): each sees only their
+      // own half, never the other coordinator's student, service or orders.
+      const ownHalf = (rows: any[]) =>
+        rows.map((a) => {
+          const others = new Set([a.coordinator_id, a.coordinator_2_id].filter((id) => id && id !== u.id));
+          const theirs = (coordinator: unknown) => Boolean(coordinator) && others.has(coordinator);
+          const view = { ...a };
+          if (view.second && theirs(view.second.student_coordinator_id)) view.second = null;
+          if (view.student_id && theirs(view.student_coordinator_id)) {
+            for (const k of ["student_id", "student_name", "student_group", "student_coordinator_id", "student_coordinator_name", "service_link_id", "service_url", "service_platform", "service_slot", "linked_at", "linked_by"])
+              view[k] = null;
+            view.other_half = true;
+          }
+          return view;
+        });
       if (can(u.roles, ["Operations Coordinator"]))
         return withSecond(
           all(`${linked} WHERE (a.coordinator_id=? OR a.coordinator_2_id=?) AND ${sameSide(u, "a.id")}`, u.id, u.id),
           all(`${second} AND (a.coordinator_id=? OR a.coordinator_2_id=?) AND ${sameSide(u, "a.id")}`, u.id, u.id),
-        );
+        ).then(ownHalf);
       return none;
     })(),
     // Everyone sees who their colleagues are and how to reach them; the

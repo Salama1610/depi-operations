@@ -4568,6 +4568,48 @@ test("an account buys from two students at most, never two of the same job profi
   assert.deepEqual(orders.map((o) => [o.id, o.student_id, o.service_link_id]), [["ORD-PAIR-1", first, "SLK-PAIR-1"], ["ORD-PAIR-2", second, "SLK-PAIR-2"]]);
   assert.match((await post("account_service_status", { account_id: "ACC-PAIR-1", student_id: same, status: "Buy" })).error, /does not buy from that student/);
 
+  // Two coordinators share the account, one student each: each sees only their own half.
+  const otherGroup = await dbRow(
+    `SELECT g.id,g.coordinator,u.email FROM groups g JOIN users u ON u.id=g.coordinator
+     WHERE g.coordinator<>? AND g.id NOT LIKE 'DEMO-%' AND coalesce(g.delivery_model,'Regular')<>'Industry' ORDER BY g.id LIMIT 1`,
+    group.coordinator,
+  );
+  const [ownerOfFirst, ownerOfSecond] = [{ id: group.coordinator, email: group.email }, { id: otherGroup.coordinator, email: otherGroup.email }];
+  await dbExec("UPDATE students SET group_id=? WHERE id=?", otherGroup.id, second);
+  const keptCoordinators = await dbRow("SELECT coordinator_id,coordinator_2_id FROM accounts WHERE id='ACC-PAIR-1'");
+  await dbExec("UPDATE accounts SET coordinator_id=?,coordinator_2_id=? WHERE id='ACC-PAIR-1'", ownerOfFirst.id, ownerOfSecond.id);
+  const halfOf = async () => {
+    const d = await (await api.GET()).json();
+    return {
+      account: d.accounts.find((a) => a.id === "ACC-PAIR-1"),
+      orders: d.accountOrders.filter((o) => o.account_id === "ACC-PAIR-1").map((o) => o.student_id).sort(),
+      students: new Set(d.students.map((x) => x.id)),
+    };
+  };
+  current = ownerOfFirst;
+  let half = await halfOf();
+  assert.equal(half.account.student_id, first);
+  assert.equal(half.account.second, null, "not the other coordinator's student");
+  assert.deepEqual(half.orders, [first]);
+  assert.ok(!half.students.has(second), "nor among their students");
+  assert.match((await post("account_service_status", { account_id: "ACC-PAIR-1", student_id: second, status: "In Progress" })).error, /other coordinator's|not found within your assigned scope/);
+  current = ownerOfSecond;
+  half = await halfOf();
+  assert.equal(half.account.student_id, null, "the first student is the other coordinator's");
+  assert.equal(half.account.student_name, null);
+  assert.equal(half.account.other_half, true);
+  assert.equal(half.account.second?.student_id, second, "their own student is there");
+  assert.deepEqual(half.orders, [second]);
+  assert.ok(!half.students.has(first));
+  assert.match((await post("account_service_status", { account_id: "ACC-PAIR-1", status: "In Progress" })).error, /other coordinator's|not found within your assigned scope/);
+  await check("account_service_status", { account_id: "ACC-PAIR-1", student_id: second, status: "In Progress" });
+  current = { id: "owner", email: "owner@example.com" };
+  half = await halfOf();
+  assert.equal(half.account.student_id, first, "the leaders still see both");
+  assert.equal(half.account.second?.student_id, second);
+  await dbExec("UPDATE accounts SET coordinator_id=?,coordinator_2_id=? WHERE id='ACC-PAIR-1'", keptCoordinators.coordinator_id, keptCoordinators.coordinator_2_id);
+  await dbExec("UPDATE students SET group_id=? WHERE id=?", serviceGroup, second);
+
   // Releasing the second student leaves the first where they are.
   current = { id: "owner", email: "owner@example.com" };
   const scopes = (await dbRow("SELECT scopes FROM users WHERE email='owner@example.com'")).scopes;

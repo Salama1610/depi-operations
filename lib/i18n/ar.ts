@@ -3095,4 +3095,7 @@ export const ar: Record<string, string> = {
   "Total assigned": "إجمالي المسندين",
   "{v0} groups · {v1} not active": "{v0} مجموعة · {v1} غير نشط",
   "{v0} students of other groups are listed too, reached through your client accounts or coach roles. They are not counted as your students.": "تظهر أيضًا {v0} طالبًا من مجموعات أخرى، يصلون إليهم عبر حسابات العملاء أو أدوار التدريب لديك. لا يُحتسبون ضمن طلابك.",
+  // Shared client accounts: each coordinator sees their own half (12 Nov 2026)
+  "In use for the other coordinator's student": "مستخدم لطالب المنسق الآخر",
+  "This student is the other coordinator's on this account.": "هذا الطالب تابع للمنسق الآخر على هذا الحساب.",
 };
