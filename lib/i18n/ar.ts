@@ -3091,4 +3091,8 @@ export const ar: Record<string, string> = {
   "This account does not buy from that student.": "هذا الحساب لا يشتري من هذا الطالب.",
   "Client accounts are for the students of the service groups only.": "حسابات العملاء لطلاب جروبات الخدمات فقط.",
   "This student already has three accounts. Remove one of them first.": "لدى هذا الطالب ثلاثة حسابات بالفعل. أزل أحدها أولًا.",
+  "Not active": "غير نشط",
+  "Total assigned": "إجمالي المسندين",
+  "{v0} groups · {v1} not active": "{v0} مجموعة · {v1} غير نشط",
+  "{v0} students of other groups are listed too, reached through your client accounts or coach roles. They are not counted as your students.": "تظهر أيضًا {v0} طالبًا من مجموعات أخرى، يصلون إليهم عبر حسابات العملاء أو أدوار التدريب لديك. لا يُحتسبون ضمن طلابك.",
 };

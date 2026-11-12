@@ -13,6 +13,7 @@ import { useLocale, useT } from "@/lib/i18n/context";
 import { useLiveReload } from "@/lib/use-live-reload";
 import { servicesComplete } from "@/lib/domain/service-links";
 import { sumPortalFigures } from "@/lib/domain/portal-figures";
+import { assignedStudents } from "@/lib/domain/assigned-students";
 import { sessionEnded } from "@/lib/domain/session-time";
 import { rememberDates } from "@/lib/workspace-index";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -267,21 +268,27 @@ export function Dashboard() {
   // for the active students in view: they change with each upload.
   const portalOf = new Map<string, Row>((data?.portal || []).map((p: Row) => [p.student_id, p]));
   const portalNow = sumPortalFigures(active.map((s) => portalOf.get(s.id) as any));
-  // Each member over the groups they are assigned to (as coordinator,
-  // supervisor or coach) and those groups' active students: what they track.
+  // Each member's students by the one rule every screen uses (lib/domain/
+  // assigned-students): the students of the groups they coordinate, supervise or
+  // coach, each group and each student counted once. The students who are
+  // revoked or not active are shown apart, so that active + not active + revoked
+  // is the roster's total for the member.
   const members = staff
     .filter((p) => p.active !== false && p.active !== 0)
     .map((p) => {
-      const theirs = groups.filter((g) => g.coordinator === p.id || g.supervisor === p.id || g.coach === p.id);
-      const st = [...new Set(theirs.map((g) => g.id))].flatMap((id) => activeInGroup.get(id) || []);
+      const mine = assignedStudents(groups, students, p.id);
+      const st = mine.active;
       const marks = st.flatMap((s) => marksOfStudent.get(s.id) || []);
       const portal = sumPortalFigures(st.map((s) => portalOf.get(s.id) as any));
       return {
         id: p.id,
         name: p.name,
         role: roleOf(p),
-        groups: theirs.length,
+        groups: mine.groupIds.size,
         students: st.length,
+        inactive: mine.totals.inactive,
+        revoked: mine.totals.revoked,
+        assigned: mine.totals.total,
         contacted: st.filter((s) => contactedIds.has(s.id)).length,
         present: marks.filter((a) => a.status === "Present").length,
         marks: marks.length,
@@ -605,7 +612,7 @@ export function Dashboard() {
                 <table className="dash-table">
                   <thead>
                     <tr>
-                      <th>{t("Name")}</th><th>{t("Role")}</th><th>{t("Groups")}</th><th>{t("Active students")}</th><th>{t("Contacted in the period")}</th>
+                      <th>{t("Name")}</th><th>{t("Role")}</th><th>{t("Groups")}</th><th>{t("Active students")}</th><th>{t("Not active")}</th><th>{t("Revoked")}</th><th>{t("Total assigned")}</th><th>{t("Contacted in the period")}</th>
                       <th>{t("Attendance rate")}</th><th>{t("Students with 3 approved links")}</th><th>{t("Gigs approved on the portal")}</th><th>{t("Graduated")}</th>
                     </tr>
                   </thead>
@@ -616,6 +623,9 @@ export function Dashboard() {
                         <td>{t(m.role)}</td>
                         <td>{num(m.groups)}</td>
                         <td>{num(m.students)}</td>
+                        <td className={m.inactive ? "" : "is-zero"}>{num(m.inactive)}</td>
+                        <td className={m.revoked ? "" : "is-zero"}>{num(m.revoked)}</td>
+                        <td><strong>{num(m.assigned)}</strong></td>
                         <td>{rate(m.contacted, m.students)}</td>
                         <td>{rate(m.present, m.marks)}</td>
                         <td className={m.services ? "" : "is-zero"}>{num(m.services)}</td>

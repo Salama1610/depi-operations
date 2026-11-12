@@ -141,6 +141,7 @@ import { guessKeyColumn, guessMapping, normalizePhone } from "@/lib/domain/sheet
 import { whatsappInvite } from "@/lib/domain/whatsapp";
 import { sessionEnded } from "@/lib/domain/session-time";
 import { sumPortalFigures } from "@/lib/domain/portal-figures";
+import { groupsHeldBy, studentTotals, studentsOfGroups } from "@/lib/domain/assigned-students";
 
 /** Runs a job now, or once more after the run in progress: many asks while one runs become a single further run. */
 function coalesced() {
@@ -1940,10 +1941,12 @@ See you there!`,
     // The figures of a set of groups: this week's sessions, the active
     // students, their contact, services and portal figures.
     const figuresOf = (gids: Set<string>) => {
-      const st = active.filter((s) => gids.has(s.group_id));
+      const st = studentsOfGroups(active, gids);
       const sub = submissions.filter((r) => gids.has(r.group_id));
       return {
         st,
+        // Every student of these groups by status, so the total matches the roster (lib/domain/assigned-students).
+        totals: studentTotals(studentsOfGroups(students, gids)),
         wk: week.filter((s) => gids.has(s.group_id)),
         hd: held.filter((s) => gids.has(s.group_id)),
         sub,
@@ -1953,6 +1956,9 @@ See you there!`,
         portal: sumPortalFigures(st.map((s) => s.portal)),
       };
     };
+    // "N groups", and how many of those groups' students are not active (withdrawn, removed, closed), so the figures add up to the roster.
+    const groupsDetail = (n: number, totals: { inactive: number }) =>
+      totals.inactive ? t("{v0} groups · {v1} not active", { v0: n, v1: totals.inactive }) : t("{v0} groups", { v0: n });
     // One row per group, for a coordinator's own groups.
     const perGroup = (ids: string[]) =>
       generic(
@@ -2192,7 +2198,7 @@ See you there!`,
         <>
           {heading}
           <div className="stats">
-            {tile("Your students", f.st.length, t("{v0} groups", { v0: gids.size }))}
+            {tile("Your students", f.st.length, groupsDetail(gids.size, f.totals))}
             {tile("Contacted this week", share(f.contacted, f.st.length), t("{v0} of {v1} students", { v0: f.contacted, v1: f.st.length }))}
             {tile("Attendance this week", pct(attendanceOf(f.hd)), withUnmarked(f.hd, t("{v0} sessions held", { v0: f.hd.length })))}
             {readsFeedback ? tile("Feedback this week", score(feedbackIn(f.hd)), t("Average of the three ratings")) : null}
@@ -2227,7 +2233,7 @@ See you there!`,
         <>
           {heading}
           <div className="stats">
-            {tile("Your students", f.st.length, t("{v0} groups", { v0: gids.size }))}
+            {tile("Your students", f.st.length, groupsDetail(gids.size, f.totals))}
             {tile("Contacted this week", share(f.contacted, f.st.length), t("{v0} of {v1} students", { v0: f.contacted, v1: f.st.length }))}
             {tile("Attendance this week", pct(attendanceOf(f.hd)), withUnmarked(f.hd, t("{v0} of {v1} sessions held", { v0: f.hd.length, v1: f.wk.length })))}
             {readsFeedback ? tile("Feedback this week", score(feedbackIn(f.hd)), t("Average of the three ratings")) : null}
@@ -2616,6 +2622,10 @@ See you there!`,
           (filter === "Graduated" && s.graduation.includes("Graduate")) ||
           s.risk.status === filter,
       );
+    // A coordinator's or supervisor's number is their own groups' students, counted once, as on the Overview. Students of other
+    // groups that they can reach through a client account or a coach role stay in the list for the work but are shown apart.
+    const ownGroupIds = dashboardRole === "coordinator" ? groupsHeldBy(groups, user.id, ["coordinator"]) : dashboardRole === "supervisor" ? groupsHeldBy(groups, user.id, ["supervisor"]) : new Set<string>();
+    const ownRows = ownGroupIds.size ? rows.filter((s) => ownGroupIds.has(s.group_id)) : rows;
     content = (
       <>
         <div className="filter-row">
@@ -2628,10 +2638,13 @@ See you there!`,
             </>
           )}
         </div>
+        {ownRows.length < rows.length && (
+          <p className="table-subline">{t("{v0} students of other groups are listed too, reached through your client accounts or coach roles. They are not counted as your students.", { v0: rows.length - ownRows.length })}</p>
+        )}
         {panel(
           t("Student directory"),
           paginate(rows, studentRows),
-          <span className="count">{rows.length}</span>,
+          <span className="count">{ownRows.length}</span>,
         )}
       </>
     );
