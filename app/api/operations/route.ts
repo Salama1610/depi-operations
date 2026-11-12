@@ -42,6 +42,8 @@ import {
   can,
   validatePolicy,
   controlledPlatforms,
+  isRecordId,
+  likeText,
 } from "@/lib/domain/rules";
 import { sessionEnded } from "@/lib/domain/session-time";
 import { isNationalId, nationalIdProblem, normalizeNationalId, normalizePhone } from "@/lib/domain/sheet-mapping";
@@ -147,19 +149,30 @@ async function orderStudent(a: any, wanted?: unknown, u?: any) {
 async function orderCreditJobs(accountId: string, orderId: string, wanted: number, actorId: string, t: string) {
   const tag = `[order ${orderId}]`;
   const account: any = await stmt("SELECT credits FROM accounts WHERE id=?", accountId).first();
-  const row: any = await stmt("SELECT COALESCE(sum(delta),0) n FROM account_credit_ledger WHERE account_id=? AND reason LIKE ?", accountId, "%" + tag).first();
+  const row: any = await stmt(
+    "SELECT COALESCE(sum(delta),0) n FROM account_credit_ledger WHERE account_id=? AND reason LIKE ? ESCAPE '\\'",
+    accountId,
+    "%" + likeText(tag),
+  ).first();
   const cents = (v: number) => Math.round(v * 100) / 100;
   const charged = cents(-Number(row?.n || 0));
   const credits = Number(account?.credits || 0);
   const target = cents(Math.min(Math.max(0, Number(wanted) || 0), credits + charged));
   const change = cents(target - charged);
   if (!change) return [];
-  const balance = cents(credits - change);
+  // The balance moves by the change, never to a number worked out from an
+  // earlier read: two movements in one action, or two people at once, both
+  // count (12 November 2026). The ledger row takes the balance the update left.
+  return creditMovement(accountId, -change, (change > 0 ? "Service bought " : "Refund: price lowered or order cancelled ") + tag, actorId, t);
+}
+
+/** Moves an account's credit by `delta` and records it, with the balance after, in one step of the batch. */
+function creditMovement(accountId: string, delta: number, reason: string, actorId: string, t: string, gigId: string | null = null) {
   return [
-    stmt("UPDATE accounts SET credits=? WHERE id=?", balance, accountId),
+    stmt("UPDATE accounts SET credits=credits+? WHERE id=?", delta, accountId),
     stmt(
-      "INSERT INTO account_credit_ledger(id,account_id,delta,balance_after,reason,actor,created_at) VALUES(?,?,?,?,?,?,?)",
-      uid("CR"), accountId, -change, balance, (change > 0 ? "Service bought " : "Refund: price lowered or order cancelled ") + tag, actorId, t,
+      "INSERT INTO account_credit_ledger(id,account_id,gig_id,delta,balance_after,reason,actor,created_at) SELECT ?,id,?,?,credits,?,?,? FROM accounts WHERE id=?",
+      uid("CR"), gigId, delta, reason, actorId, t, accountId,
     ),
   ];
 }
@@ -174,7 +187,21 @@ async function demoGuard(x: any) {
   if (Array.isArray(x.account_ids))
     ensure(x.account_ids.length > 0 && x.account_ids.every((a: any) => String(a).startsWith("DEMO-")), elsewhere);
   const touched: string[] = Array.isArray(x.account_ids) ? x.account_ids.map(String) : [];
-  if (x.group_id) touched.push(String(x.group_id));
+  if (x.account_id) touched.push(String(x.account_id));
+  // A group must exist: naming a demo group must not carry a request that
+  // acts on something else (12 November 2026).
+  if (x.group_id) {
+    const row: any = await stmt("SELECT id FROM groups WHERE id=?", x.group_id).first();
+    touched.push(String(row?.id || ""));
+  }
+  if (x.item_id) {
+    const row: any = await stmt(
+      `SELECT s.group_id FROM service_links l JOIN students s ON s.id=l.student_id WHERE l.id=?
+       UNION ALL SELECT s.group_id FROM evidence e JOIN students s ON s.id=e.student_id WHERE e.id=?`,
+      x.item_id, x.item_id,
+    ).first();
+    touched.push(String(row?.group_id || ""));
+  }
   if (x.student_id) {
     const row: any = await stmt("SELECT group_id FROM students WHERE id=?", x.student_id).first();
     touched.push(String(row?.group_id || ""));
@@ -188,17 +215,23 @@ async function demoGuard(x: any) {
     touched.push(String(row?.group_id || ""));
   }
   if (x.id) {
-    const row: any = await stmt(
+    // Every record the ID names, wherever it is. A record with no student or
+    // group (a programme-wide task or case) counts as outside the demo.
+    const rows: any[] = await all(
       `SELECT group_id FROM sessions WHERE id=?
-       UNION ALL SELECT COALESCE(s.group_id,c.group_id) FROM cases c LEFT JOIN students s ON s.id=c.student_id WHERE c.id=?
-       UNION ALL SELECT s.group_id FROM tasks k JOIN students s ON s.id=k.student_id WHERE k.id=?
+       UNION ALL SELECT COALESCE(s.group_id,c.group_id,'') FROM cases c LEFT JOIN students s ON s.id=c.student_id WHERE c.id=?
+       UNION ALL SELECT COALESCE(s.group_id,'') FROM tasks k LEFT JOIN students s ON s.id=k.student_id WHERE k.id=?
        UNION ALL SELECT id FROM accounts WHERE id=?
+       UNION ALL SELECT account_id FROM account_orders WHERE id=?
        UNION ALL SELECT s.group_id FROM gigs z JOIN students s ON s.id=z.student_id WHERE z.id=?
-       UNION ALL SELECT s.group_id FROM evidence e JOIN students s ON s.id=e.student_id WHERE e.id=?`,
-      x.id, x.id, x.id, x.id, x.id, x.id,
-    ).first();
-    if (row) touched.push(String(row.group_id || ""));
+       UNION ALL SELECT s.group_id FROM evidence e JOIN students s ON s.id=e.student_id WHERE e.id=?
+       UNION ALL SELECT s.group_id FROM service_links l JOIN students s ON s.id=l.student_id WHERE l.id=?`,
+      x.id, x.id, x.id, x.id, x.id, x.id, x.id, x.id,
+    );
+    for (const row of rows) touched.push(String(row.group_id || ""));
   }
+  // What a demo sign-in creates is made-up: a demo student's email is an example address.
+  if (x.action === "student") ensure(/@example\.com$/i.test(String(x.email || "").trim()), "A demo student's email ends in @example.com.");
   ensure(x.action === "saved_view" || touched.length > 0, elsewhere);
   ensure(touched.every((g) => g.startsWith("DEMO-")), elsewhere);
 }
@@ -538,6 +571,8 @@ export async function POST(req: Request) {
     ensure(typeof x.action === "string", "Choose an operation.");
     if (x.action === "demo_refresh") {
       ensure(isDemo(u) || can(u.roles, ["Operations Systems / Admin"]), "Only a demo account or an administrator can refresh the demo.");
+      // About 150 statements and ten sign-in updates each time: twice an hour is plenty.
+      if (isDemo(u)) await rateLimit("demo-refresh", 2, 3600);
       return Response.json({ ok: true, ...(await refreshDemo()) });
     }
     if (isDemo(u)) await demoGuard(x);
@@ -563,6 +598,7 @@ export async function POST(req: Request) {
       s = studentRead.row;
       ensure(s.group_status !== "Archived", "Archived groups are read-only.");
     }
+    ensure(x.id === undefined || x.id === null || x.id === "" || isRecordId(x.id), "Invalid record ID.");
     const id = x.id || uid();
     const t = now();
     const jobs: any[] = [];
@@ -1053,8 +1089,9 @@ export async function POST(req: Request) {
           s && x.group_id && x.reason?.trim(),
           "New group and transfer reason are required.",
         );
+        // A real student never moves into a demo group, nor a demo one out of it.
         const g: any = await stmt(
-          "SELECT * FROM groups WHERE id=? AND status='Active'",
+          `SELECT * FROM groups WHERE id=? AND status='Active' AND ${sameSide(u, "id")}`,
           x.group_id,
         ).first();
         ensure(g, "Choose an active destination group.");
@@ -1998,7 +2035,6 @@ export async function POST(req: Request) {
         );
         const assignment = uid("ASN");
         const gig = uid("GIG");
-        const balance = Number(a.credits) - Number(r.value);
         jobs.push(
           stmt(
             "INSERT INTO account_assignments VALUES(?,?,?,?,?,?)",
@@ -2038,16 +2074,15 @@ export async function POST(req: Request) {
             t,
           ),
           stmt(
-            "INSERT INTO account_credit_ledger(id,account_id,assignment_id,gig_id,delta,balance_after,reason,actor,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO account_credit_ledger(id,account_id,assignment_id,gig_id,delta,balance_after,reason,actor,created_at) SELECT ?,id,?,?,?,credits,?,?,? FROM accounts WHERE id=?",
             uid("CR"),
-            a.account_id,
             assignment,
             gig,
             -Number(r.value),
-            balance,
             `Service charged · ${r.task}`,
             u.id,
             t,
+            a.account_id,
           ),
         );
         // What happens next: the group's coordinator places the order from
@@ -2110,6 +2145,15 @@ export async function POST(req: Request) {
         const marks = accountIds.map(() => "?").join(",");
         const found = await all(`SELECT id,coordinator_id,coordinator_2_id,student_id FROM accounts WHERE id IN (${marks})`, ...accountIds);
         ensure(found.length === accountIds.length, "One or more accounts were not found.");
+        // A supervisor who does not keep the accounts works only on accounts
+        // that are free or already with their own team (12 November 2026).
+        if (!keepsAccounts(u)) {
+          const own = new Set(await teamCoordinators(u));
+          ensure(
+            found.every((a: any) => [a.coordinator_id, a.coordinator_2_id].every((c: any) => !c || own.has(c))),
+            "One or more of these accounts are with another team's coordinator.",
+          );
+        }
         // An account linked to a student is locked with its coordinator until it is released.
         ensure(
           x.slot === "second" || unlocksAccounts(u) || found.every((a: any) => !a.student_id),
@@ -2156,19 +2200,18 @@ export async function POST(req: Request) {
         const reference = String(x.reference || "").trim();
         ensure(reference.length >= 3, "Record the receipt or transfer reference.");
         const note = String(x.note || "").trim().slice(0, 300);
-        const balance = Math.round((Number(a.credits) + amount) * 100) / 100;
         auditPrevious = a;
         jobs.push(
           stmt("UPDATE accounts SET credits=credits+? WHERE id=?", amount, id),
+          // The balance the update left, not one worked out from an earlier read.
           stmt(
-            "INSERT INTO account_credit_ledger(id,account_id,delta,balance_after,reason,actor,created_at) VALUES(?,?,?,?,?,?,?)",
+            "INSERT INTO account_credit_ledger(id,account_id,delta,balance_after,reason,actor,created_at) SELECT ?,id,?,credits,?,?,? FROM accounts WHERE id=?",
             uid("CR"),
-            id,
             amount,
-            balance,
             `Top-up · ${reference}${note ? " · " + note : ""}`,
             u.id,
             t,
+            id,
           ),
         );
         break;
@@ -2449,33 +2492,33 @@ export async function POST(req: Request) {
           ).first()),
           "This gig credit has already been refunded.",
         );
-        const account: any = await stmt(
-          "SELECT credits FROM accounts WHERE id=?",
-          gig.account_id,
-        ).first();
         const amount = Math.abs(Number(debit.delta));
-        const balance = Number(account.credits) + amount;
+        // Relative, and only while no refund is recorded: a second submission
+        // in flight moves nothing (12 November 2026).
+        const unrefunded = "NOT EXISTS (SELECT 1 FROM account_credit_ledger WHERE gig_id=? AND delta>0)";
         jobs.push(
           stmt(
-            "UPDATE accounts SET credits=?,status=CASE WHEN status='Assigned' THEN 'Cooldown' ELSE status END WHERE id=?",
-            balance,
+            `UPDATE accounts SET credits=credits+?,status=CASE WHEN status='Assigned' THEN 'Cooldown' ELSE status END WHERE id=? AND ${unrefunded}`,
+            amount,
             gig.account_id,
+            gig.id,
           ),
           stmt(
-            "INSERT INTO account_credit_ledger(id,account_id,assignment_id,gig_id,delta,balance_after,reason,actor,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            `INSERT INTO account_credit_ledger(id,account_id,assignment_id,gig_id,delta,balance_after,reason,actor,created_at)
+             SELECT ?,id,?,?,?,credits,?,?,? FROM accounts WHERE id=? AND ${unrefunded}`,
             uid("CR"),
-            gig.account_id,
             debit.assignment_id,
             gig.id,
             amount,
-            balance,
             x.reason.trim(),
             u.id,
             t,
+            gig.account_id,
+            gig.id,
           ),
         );
         sid = gig.student_id;
-        auditValue = { ...auditValue, amount, balance_after: balance };
+        auditValue = { ...auditValue, amount };
         break;
       }
       case "evidence": {
@@ -2759,8 +2802,8 @@ export async function POST(req: Request) {
         if (["Accepted", "Closed L3"].includes(next))
           jobs.push(
             stmt(
-              "UPDATE tasks SET status='Completed' WHERE category='Correction' AND source LIKE ?",
-              "correction-" + id + "-%",
+              "UPDATE tasks SET status='Completed' WHERE category='Correction' AND source LIKE ? ESCAPE '\\'",
+              "correction-" + likeText(id) + "-%",
             ),
           );
         sid = e.student_id;
@@ -3362,6 +3405,8 @@ export async function POST(req: Request) {
               id, a.id, pupil.id, which.service_link_id, u.id, orderRef || null, amount, note, t, t,
             ),
           );
+          // An order recorded with its price comes off the account's credit now, as a price entered later does.
+          if (amount) jobs.push(...(await orderCreditJobs(a.id, id, amount, u.id, t)));
           break;
         }
         const order: any = await stmt("SELECT * FROM account_orders WHERE id=?", id).first();
@@ -3550,7 +3595,12 @@ export async function POST(req: Request) {
         const services = x.action === "service_qc_assign";
         const table = services ? "service_links" : "evidence";
         // Revoked students are nobody's work until they are restored.
-        const openFilter = (services ? "qc_status<>'Locked'" : "status='Quality Review'") + " AND student_id NOT IN (SELECT id FROM students WHERE lifecycle='Revoked')";
+        // A demo lead hands out demo students only, and a real lead real ones (12 November 2026).
+        const openFilter =
+          (services ? "qc_status<>'Locked'" : "status='Quality Review'") +
+          ` AND student_id NOT IN (SELECT id FROM students WHERE lifecycle='Revoked') AND student_id IN (SELECT id FROM students WHERE ${sameSide(u, "group_id")})`;
+        const onSide = async (studentId: unknown) =>
+          ensure(await stmt(`SELECT id FROM students WHERE id=? AND ${sameSide(u, "group_id")}`, studentId).first(), "That review item was not found.");
         // The team leader does not carry a share of the reviewing, so the pool
         // for service work is the members. Gig evidence keeps its wider pool.
         const reviewers = (await (await stmt(
@@ -3562,6 +3612,7 @@ export async function POST(req: Request) {
           // Moving a student moves everything of theirs that is still open, so
           // their three services never end up split between two reviewers.
           if (services && x.student_id) {
+            await onSide(x.student_id);
             const student: any = await stmt(
               "SELECT student_id, count(*) n FROM service_links WHERE student_id=? AND qc_status<>'Locked' GROUP BY student_id",
               x.student_id,
@@ -3580,6 +3631,7 @@ export async function POST(req: Request) {
           }
           const item: any = await stmt(`SELECT * FROM ${table} WHERE id=?`, x.item_id || id).first();
           ensure(item, "That review item was not found.");
+          await onSide(item.student_id);
           auditPrevious = item;
           auditValue = { item_id: item.id, assigned_to: x.reviewer_id, mode: "manual" };
           if (services) {

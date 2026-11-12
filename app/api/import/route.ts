@@ -283,7 +283,9 @@ const updatable: Record<string, UpdateSpec> = {
   accounts: {
     table: "accounts",
     keys: ["id"],
-    editable: ["label", "platform", "credits"],
+    // Credit moves only through top-ups and orders, each a ledger row; an
+    // older sheet re-imported must never roll a balance back (12 November 2026).
+    editable: ["label", "platform"],
     protectedHints: {
       status: "Use the account status action; blocking and retiring are audited decisions",
       secret_ref: "Credentials are managed from the credential panel",
@@ -344,6 +346,17 @@ async function fetchIn(table: string, columns: string, field: string, values: st
     rows.push(...(result.results || []));
   }
   return rows;
+}
+
+const identityFields = ["email", "national_id"];
+const changesIdentity = (u: any) => can(u.roles, ["Project Operations", "Operations Systems / Admin"]);
+
+/**
+ * What an import keeps in its logs and the audit trail, with every 14-digit
+ * number (a national ID, so a first password) cut to its last three digits.
+ */
+function withoutNationalIds<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value, (_key, v) => (typeof v === "string" ? v.replace(/\d{14}/g, (id) => maskNationalId(id)) : v)));
 }
 
 /** A stored national ID as a reviewer outside administration sees it: its last three digits. */
@@ -424,7 +437,8 @@ async function reviewUpdates(u: any, module: string, rawRows: any[], options: { 
     module === "students" && scope.sql !== "1=1"
       ? new Set(((await stmt(`SELECT g.id FROM groups g WHERE ${scope.sql}`, ...scope.args).all()).results || []).map((g: any) => g.id))
       : null;
-  const staff = ((await stmt("SELECT id, name, email FROM users WHERE active=1").all()).results || []) as any[];
+  // A demo sign-in is never made a real group's coordinator, supervisor or coach.
+  const staff = ((await stmt("SELECT id, name, email FROM users WHERE active=1 AND id NOT LIKE 'DEMO-%'").all()).results || []) as any[];
   // id, email and name all point at the same person; a name shared by two
   // active people points at nobody, and says so rather than guessing.
   const staffByRef = new Map<string, string | null>();
@@ -488,9 +502,17 @@ async function reviewUpdates(u: any, module: string, rawRows: any[], options: { 
     for (const [field, hint] of Object.entries(spec.protectedHints))
       if (clean[field] && !same(clean[field], record[field]))
         errors.push({ row: line, field, value: clean[field], error: hint, expected: String(record[field] ?? "") });
+    if (module === "students" && record.lifecycle === "Revoked")
+      errors.push({ row: line, field: keyField, error: "This student's access is revoked; restore them before updating their record", expected: "An active student" });
     for (const field of spec.editable) {
       const value = clean[field];
       if (value === undefined || value === "" || field === keyField) continue;
+      // The email and national ID are how a student signs in: changing them
+      // moves the sign-in, so only Project Operations and administrators do it (12 November 2026).
+      if (module === "students" && identityFields.includes(field) && !same(value, record[field]) && !changesIdentity(u)) {
+        errors.push({ row: line, field, error: "Only Project Operations or an administrator changes a student's " + field.replace(/_/g, " "), expected: "Leave it as it is" });
+        continue;
+      }
       const normalized = field === "credits" && Number.isFinite(Number(value)) ? String(Number(value)) : value;
       if (same(normalized, record[field])) continue;
       if (module === "groups" && staffFields.includes(field) && same(lookups.staffByRef.get(normalized.toLowerCase()), record[field])) continue;
@@ -804,9 +826,11 @@ export async function POST(req: Request) {
           status,
           status === "Rejected"
             ? JSON.stringify(
-                c.errors.length
-                  ? c.errors
-                  : result.errors.filter((e: any) => e.row === c.row),
+                withoutNationalIds(
+                  c.errors.length
+                    ? c.errors
+                    : result.errors.filter((e: any) => e.row === c.row),
+                ),
               )
             : null,
           recordId,
@@ -819,11 +843,11 @@ export async function POST(req: Request) {
         x.batch_id,
         u.id,
         x.module,
-        JSON.stringify(result),
+        JSON.stringify(withoutNationalIds(result)),
         now(),
       ),
       ...rowRecords,
-      auditStmt(u, "Spreadsheet import", x.module, result),
+      auditStmt(u, "Spreadsheet import", x.module, withoutNationalIds(result)),
     ]);
     return Response.json(result);
   } catch (e: any) {
@@ -888,15 +912,15 @@ async function updateRecords(u: any, x: any) {
         x.batch_id,
         c.row,
         status,
-        status === "Rejected" ? JSON.stringify(c.errors) : null,
+        status === "Rejected" ? JSON.stringify(withoutNationalIds(c.errors)) : null,
         c.id || null,
       ),
     );
   }
   await db().batch([
-    stmt("INSERT INTO imports VALUES(?,?,?,?,?)", x.batch_id, u.id, x.module, JSON.stringify(result), now()),
+    stmt("INSERT INTO imports VALUES(?,?,?,?,?)", x.batch_id, u.id, x.module, JSON.stringify(withoutNationalIds(result)), now()),
     ...jobs,
-    auditStmt(u, "Spreadsheet import", x.module, result),
+    auditStmt(u, "Spreadsheet import", x.module, withoutNationalIds(result)),
   ]);
   return Response.json(result);
 }

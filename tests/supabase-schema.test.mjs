@@ -108,6 +108,20 @@ test("every application table is included in the RLS activation set", () => {
   assert.match(activationBlock, /grant select on table public\.%I to authenticated/i);
 });
 
+test("no signed-in or anonymous client reads the database directly (12 Nov 2026)", async () => {
+  const revoke = await readFile(new URL("../supabase/migrations/202611120056_no_direct_client_reads.sql", import.meta.url), "utf8");
+  assert.match(revoke, /revoke all on all tables in schema public from anon, authenticated/i);
+  assert.match(revoke, /alter default privileges in schema public revoke all on tables from anon, authenticated/i);
+  assert.match(revoke, /drop policy if exists evidence_objects_scoped_read on storage\.objects/i);
+  // No later migration grants a client role anything again.
+  const { readdir } = await import("node:fs/promises");
+  const later = (await readdir(new URL("../supabase/migrations/", import.meta.url))).filter((f) => f > "202611120056");
+  for (const file of later) {
+    const text = await readFile(new URL("../supabase/migrations/" + file, import.meta.url), "utf8");
+    assert.doesNotMatch(text, /grant\s[^;]*\sto\s[^;]*\b(anon|authenticated)\b/i, file + " grants a client role");
+  }
+});
+
 test("evidence storage is private and has no browser write policy", () => {
   assert.match(storageMigration, /'depi-evidence'[\s\S]*false/);
   assert.match(storageMigration, /for select to authenticated/i);

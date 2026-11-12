@@ -830,7 +830,9 @@ test("update-mode spreadsheets merge partial columns into existing records under
   assert.equal(g.account_manager, "staff-nour");
   assert.equal(String(g.start_date).slice(0, 10), "2026-10-01");
 
-  // Accounts: credits become numbers; status is an audited decision elsewhere.
+  // Accounts: a label changes; credit moves only through the ledger (12 Nov
+  // 2026), and status is an audited decision elsewhere.
+  const creditBefore = Number((await dbRow("SELECT credits FROM accounts WHERE id='ACC-101'")).credits);
   const accounts = await importPost({
     module: "accounts",
     mode: "update",
@@ -844,7 +846,7 @@ test("update-mode spreadsheets merge partial columns into existing records under
   });
   assert.equal(accounts.updated, 1);
   assert.equal(accounts.rejected, 2);
-  assert.equal(Number((await dbRow("SELECT credits FROM accounts WHERE id='ACC-101'")).credits), 75);
+  assert.equal(Number((await dbRow("SELECT credits FROM accounts WHERE id='ACC-101'")).credits), creditBefore, "a sheet never sets a balance");
   assert.equal((await dbRow("SELECT label FROM accounts WHERE id='ACC-101'")).label, "Renamed workspace");
 
   // Modules without update support and roles without the right are refused.
@@ -5438,3 +5440,106 @@ test("in a service group the three services must cover both marketplaces, and on
   current = { id: "owner", email: "owner@example.com" };
 });
 
+
+// The fixes of the 12 November 2026 audit, step 1.
+
+test("a demo Quality Lead hands out demo services only, never a real student's", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  await check("demo_refresh");
+  const real = await dbRow("SELECT s.id FROM students s JOIN groups g ON g.id=s.group_id WHERE g.id NOT LIKE 'DEMO-%' AND s.lifecycle='Active' AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=s.id) ORDER BY s.id LIMIT 1");
+  const at = new Date().toISOString();
+  await dbExec(
+    "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,account_id,submitted_at,updated_at) VALUES(?,?,3,?,?,'Khamsat','Needs Review','{}',?,'Pending',NULL,NULL,NULL,1,NULL,?,?)",
+    "SLK-AUDIT-REAL", real.id, "https://khamsat.com/x/audit-real", "https://khamsat.com/x/audit-real", at, at, at,
+  );
+  current = { id: "demo-auth-qcl", email: "demo.qclead@example.com" };
+  await post("service_qc_assign", { group_id: "DEMO-G1" });
+  assert.equal((await dbRow("SELECT qc_actor FROM service_links WHERE id='SLK-AUDIT-REAL'")).qc_actor, null, "even hand-out leaves real services alone");
+  assert.ok((await post("service_qc_assign", { group_id: "DEMO-G1", reviewer_id: "DEMO-QC", item_id: "SLK-AUDIT-REAL" })).error, "a real item by its ID is refused");
+  assert.ok((await post("service_qc_assign", { group_id: "DEMO-NOPE", reviewer_id: "DEMO-QC" })).error, "a group that does not exist is refused");
+  assert.equal((await dbRow("SELECT qc_actor FROM service_links WHERE id='SLK-AUDIT-REAL'")).qc_actor, null);
+  current = { id: "owner", email: "owner@example.com" };
+  await dbExec("DELETE FROM service_links WHERE id='SLK-AUDIT-REAL'");
+});
+
+test("a demo sign-in cannot complete a real task that has no student", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  await check("demo_refresh");
+  await dbExec(
+    "INSERT INTO tasks(id,student_id,title,owner,due,category,priority,status,source,created_at) VALUES('TSK-AUDIT-PROG',NULL,'Programme task','owner',?,'Follow-up','Normal','Open','audit-test',?)",
+    new Date(Date.now() + 86400000).toISOString(), new Date().toISOString(),
+  );
+  current = { id: "demo-auth-po", email: "demo.projectops@example.com" };
+  assert.match((await post("complete_task", { id: "TSK-AUDIT-PROG", group_id: "DEMO-G1" })).error, /demo/i);
+  assert.equal((await dbRow("SELECT status FROM tasks WHERE id='TSK-AUDIT-PROG'")).status, "Open");
+  current = { id: "owner", email: "owner@example.com" };
+  await dbExec("DELETE FROM tasks WHERE id='TSK-AUDIT-PROG'");
+});
+
+test("a record ID from the browser cannot be a wildcard", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  for (const id of ["%", "ORD 1", "a\\b", "x'y"]) assert.match((await post("case", { id, title: "Wildcard" })).error, /Invalid record ID/, id);
+});
+
+test("account credit moves by each change: two open orders released together are both refunded", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const pupil = await dbRow(
+    "SELECT s.id FROM students s JOIN groups g ON g.id=s.group_id WHERE g.id NOT LIKE 'DEMO-%' AND s.lifecycle='Active' AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.student_id=s.id) ORDER BY s.id LIMIT 1",
+  );
+  const at = new Date().toISOString();
+  await dbExec("INSERT INTO accounts(id,platform,label,status,credits,student_id) VALUES('ACC-AUDIT-CR','Kafeel','audit-credit@example.com','Available',50,?)", pupil.id);
+  await dbExec("INSERT INTO account_credit_ledger(id,account_id,delta,balance_after,reason,actor,created_at) VALUES('CR-AUDIT-OPEN','ACC-AUDIT-CR',50,50,'Opening','owner',?)", at);
+  const balance = async () => Number((await dbRow("SELECT credits FROM accounts WHERE id='ACC-AUDIT-CR'")).credits);
+  const ledger = async () => Number((await dbRow("SELECT COALESCE(sum(delta),0) n FROM account_credit_ledger WHERE account_id='ACC-AUDIT-CR'")).n);
+  // An order recorded with its price is charged at once.
+  await check("account_order", { id: "ORD-AUDIT-1", account_id: "ACC-AUDIT-CR", amount: 20 });
+  await check("account_order", { id: "ORD-AUDIT-2", account_id: "ACC-AUDIT-CR", amount: 10 });
+  assert.equal(await balance(), 20, "both orders charged");
+  // Releasing the account refunds both open orders in one action.
+  const scopes = (await dbRow("SELECT scopes FROM users WHERE email='owner@example.com'")).scopes;
+  await dbExec("UPDATE users SET scopes=? WHERE email='owner@example.com'", JSON.stringify([...new Set([...JSON.parse(scopes || "[]"), "account-unlock"])]));
+  await check("account_unlock", { id: "ACC-AUDIT-CR", reason: "Audit test" });
+  await dbExec("UPDATE users SET scopes=? WHERE email='owner@example.com'", scopes);
+  assert.equal(await balance(), 50, "both refunds count, not just the last");
+  assert.equal(await ledger(), 50, "the balance matches the ledger");
+  const rows = await dbRows("SELECT balance_after FROM account_credit_ledger WHERE account_id='ACC-AUDIT-CR'");
+  assert.ok(rows.some((r) => Number(r.balance_after) === 50) && rows.every((r) => Number(r.balance_after) >= 20), "each ledger row carries the balance the update left");
+});
+
+test("a supervisor outside the Service Team cannot reassign another team's account", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  const supervisor = await dbRow(
+    "SELECT u.id,u.email FROM users u WHERE u.active=1 AND u.roles LIKE '%Team Supervisor%' AND COALESCE(u.team,'')<>'Service Team' AND u.id NOT LIKE 'DEMO-%' AND u.roles NOT LIKE '%Project Operations%' AND u.roles NOT LIKE '%Admin%' AND u.roles NOT LIKE '%Higher Board%' LIMIT 1",
+  );
+  assert.ok(supervisor, "the fixtures have a supervisor outside the Service Team");
+  const outsider = await dbRow(
+    "SELECT u.id FROM users u WHERE u.active=1 AND u.roles LIKE '%Operations Coordinator%' AND u.id NOT LIKE 'DEMO-%' AND EXISTS (SELECT 1 FROM groups g WHERE g.coordinator=u.id AND g.status<>'Archived' AND COALESCE(g.supervisor,'')<>?) LIMIT 1",
+    supervisor.id,
+  );
+  assert.ok(outsider, "and a coordinator on another team");
+  await dbExec("INSERT INTO accounts(id,platform,label,status,credits,coordinator_id) VALUES('ACC-AUDIT-TEAM','Kafeel','audit-team@example.com','Available',0,?)", outsider.id);
+  current = { id: supervisor.id, email: supervisor.email };
+  assert.match((await post("account_coordinator", { id: "ACC-AUDIT-TEAM", account_ids: ["ACC-AUDIT-TEAM"], coordinator_id: null })).error, /another team/);
+  assert.equal((await dbRow("SELECT coordinator_id FROM accounts WHERE id='ACC-AUDIT-TEAM'")).coordinator_id, outsider.id);
+  current = { id: "owner", email: "owner@example.com" };
+});
+
+test("only Project Operations or an administrator changes a student's email or national ID by spreadsheet", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  const supervisor = await dbRow(
+    "SELECT u.id,u.email,g.id group_id FROM users u JOIN groups g ON g.supervisor=u.id WHERE u.active=1 AND u.id NOT LIKE 'DEMO-%' AND u.roles LIKE '%Team Supervisor%' AND u.roles NOT LIKE '%Project Operations%' AND u.roles NOT LIKE '%Admin%' AND g.status='Active' AND EXISTS (SELECT 1 FROM students s WHERE s.group_id=g.id AND s.lifecycle='Active') LIMIT 1",
+  );
+  assert.ok(supervisor, "the fixtures have a supervisor with an active student");
+  const pupil = await dbRow("SELECT id,email FROM students WHERE group_id=? AND lifecycle='Active' ORDER BY id LIMIT 1", supervisor.group_id);
+  current = { id: supervisor.id, email: supervisor.email };
+  const preview = await importPost({ module: "students", mode: "update", rows: [{ id: pupil.id, email: "taken-over@example.org" }] });
+  const rows = preview.rows || preview.checked || preview.review || [];
+  const row = rows.find((r) => r.id === pupil.id) || rows[0];
+  assert.ok(row, JSON.stringify(preview).slice(0, 400));
+  assert.equal(row.status, "Rejected");
+  assert.ok(row.errors.some((e) => /Project Operations or an administrator/.test(e.error)));
+  assert.equal((await dbRow("SELECT email FROM students WHERE id=?", pupil.id)).email, pupil.email);
+  current = { id: "owner", email: "owner@example.com" };
+});

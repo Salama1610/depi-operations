@@ -42,6 +42,14 @@ export const policy = {
 export function ensure(ok: unknown, message: string): asserts ok {
   if (!ok) throw new Error(message);
 }
+/**
+ * A value matched literally inside a LIKE pattern: its %, _ and \ lose their
+ * meaning. Use with `LIKE ? ESCAPE '\'`. A record ID sent by a browser must
+ * never widen a match to other records (12 November 2026).
+ */
+export const likeText = (value: unknown) => String(value).replace(/[\\%_]/g, (c) => "\\" + c);
+/** A record ID a browser may send: no spaces, no wildcards, at most 150 characters. */
+export const isRecordId = (value: unknown) => typeof value === "string" && /^[^\s%\\'"`<>]{1,150}$/.test(value);
 export function graduation(gigs: any[], p = policy) {
   const q = gigs
     .filter((g) => g.status === "Accepted" && g.gig_status === "Paid")

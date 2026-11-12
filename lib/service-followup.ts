@@ -1,6 +1,7 @@
 import { all, auditStmt, db, now, stmt, uid } from "./server";
 import { accountMixProblem, otherMarketplace } from "./domain/student-accounts";
 import { buysServices, serviceGroups } from "./domain/service-links";
+import { likeText } from "./domain/rules";
 
 // The groups that buy services through client accounts live with the rest of the service rules (lib/domain/service-links).
 export { buysServices, serviceGroups };
@@ -70,9 +71,9 @@ const fixSource = (linkId: string) => `service-fix:${linkId}:`;
 export async function serviceFixStatements(link: any, decision: "Locked" | "Needs Correction", comment: string, at: string) {
   const close = (keep?: string) =>
     stmt(
-      `UPDATE tasks SET status='Closed' WHERE category=? AND status='Open' AND source LIKE ?${keep ? " AND source<>?" : ""}`,
+      `UPDATE tasks SET status='Closed' WHERE category=? AND status='Open' AND source LIKE ? ESCAPE '\\'${keep ? " AND source<>?" : ""}`,
       serviceFixCategory,
-      fixSource(link.id) + "%",
+      likeText(fixSource(link.id)) + "%",
       ...(keep ? [keep] : []),
     );
   if (decision === "Locked") return [close()];
