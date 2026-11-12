@@ -58,8 +58,13 @@ export async function POST(request: Request) {
     // The national ID is the password; changing it is up to the person.
     if (error || !data.user) {
       await countFailure(email, address);
+      // A failed sign-in is in the logs, so a run of them can be seen (12 November 2026).
+      console.warn(JSON.stringify({ level: "warn", route: "auth/login", event: "sign-in failed", email, address }));
       return Response.json({ error: "Email or password is incorrect." }, { status: 401 });
     }
+    // In the logs too, kept out of the audit trail so it does not crowd
+    // each person's own history.
+    console.info(JSON.stringify({ level: "info", route: "auth/login", event: "signed in", email, address }));
     return Response.json({ ok: true, redirect: "/" });
   } catch (error: any) {
     console.error(JSON.stringify({ level: "error", route: "auth/login", message: String(error?.message ?? error).slice(0, 500) }));

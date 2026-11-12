@@ -146,6 +146,22 @@ export function sheetDate(v: unknown) {
     const serial = Number(s);
     if (serial > 20000 && serial < 80000) return new Date(Math.round((serial - 25569) * 86400000)).toISOString();
   }
+  // A written day/month/year, as Egypt writes it, with an optional time: the
+  // browser's own reading takes 03/11/2026 for 11 March and refuses 13/11/2026
+  // (12 November 2026). Read as Cairo time.
+  const dmy = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?$/i);
+  if (dmy) {
+    const [, d, m, y, hh = "0", mm = "0", ss = "0", ampm] = dmy;
+    let hour = Number(hh) % 24;
+    if (ampm) hour = (Number(hh) % 12) + (/pm/i.test(ampm) ? 12 : 0);
+    const day = Number(d), month = Number(m);
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    // Cairo's offset on that day (two hours, three in summer time).
+    const guess = Date.UTC(Number(y), month - 1, day, hour, Number(mm), Number(ss));
+    const cairo = new Date(new Date(guess).toLocaleString("en-US", { timeZone: "Africa/Cairo" })).getTime();
+    const utc = new Date(new Date(guess).toLocaleString("en-US", { timeZone: "UTC" })).getTime();
+    return new Date(guess - (cairo - utc)).toISOString();
+  }
   const parsed = Date.parse(s);
   return Number.isNaN(parsed) ? null : new Date(parsed).toISOString();
 }
@@ -229,16 +245,18 @@ export function linkStudent(
   byNationalId: Map<string, string> = new Map(),
   more: { cells?: unknown[]; byNameInGroup?: Map<string, string> } = {},
 ) {
+  // A value two of our students share maps to "" (see ownersOf): it names
+  // nobody, so the row is left for someone to link by hand (12 November 2026).
   const nid = normalizeNationalId(row.national_id);
-  if (isNationalId(nid) && byNationalId.has(nid)) return byNationalId.get(nid)!;
+  if (isNationalId(nid) && byNationalId.get(nid)) return byNationalId.get(nid)!;
   const direct = linkByContact(row, byEmail, byPhone);
   if (direct) return direct;
-  // Any other cell of the row: a national ID, an email or a mobile wherever it is.
+  // Any other cell of the row: a national ID or an email wherever it is. Not a
+  // phone: a number in a free-text column is too often someone else's.
   for (const cell of more.cells || []) {
     const text = normalizeDigits(cell);
-    for (const n of text.match(/\d{14}/g) || []) if (byNationalId.has(n)) return byNationalId.get(n)!;
-    for (const e of text.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g) || []) if (byEmail.has(e.toLowerCase())) return byEmail.get(e.toLowerCase())!;
-    for (const p of String(normalizePhone(text)).split(" / ")) if (p && byPhone.has(p)) return byPhone.get(p)!;
+    for (const n of text.match(/\d{14}/g) || []) if (byNationalId.get(n)) return byNationalId.get(n)!;
+    for (const e of text.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g) || []) if (byEmail.get(e.toLowerCase())) return byEmail.get(e.toLowerCase())!;
   }
   if (more.byNameInGroup && row.full_name && row.round_code) {
     const id = more.byNameInGroup.get(nameInGroup(row.round_code, row.full_name));
@@ -248,8 +266,18 @@ export function linkStudent(
 }
 
 function linkByContact(row: { email?: string | null; phone?: string | null }, byEmail: Map<string, string>, byPhone: Map<string, string>) {
-  if (row.email && byEmail.has(row.email)) return byEmail.get(row.email)!;
+  if (row.email && byEmail.get(row.email)) return byEmail.get(row.email)!;
   for (const phone of String(row.phone || "").split(" / "))
-    if (phone && byPhone.has(phone)) return byPhone.get(phone)!;
+    if (phone && byPhone.get(phone)) return byPhone.get(phone)!;
   return null;
+}
+
+/**
+ * Adds a student under a key, or marks the key as shared by two students
+ * (an empty owner), so a value like a family phone links nobody.
+ */
+export function claimKey(map: Map<string, string>, key: string, studentId: string) {
+  if (!key) return;
+  const held = map.get(key);
+  map.set(key, held === undefined || held === studentId ? studentId : "");
 }

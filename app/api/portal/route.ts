@@ -8,6 +8,7 @@ import { portalGapRoles } from "@/lib/domain/portal-gap";
 import { coachStudentRoles } from "@/lib/domain/portal-coach-students";
 import { reviewNotes } from "@/lib/portal-review-notes";
 import {
+  claimKey,
   linkStudent,
   nameInGroup,
   mappingProblems,
@@ -371,9 +372,10 @@ export async function POST(req: Request) {
         const byNationalId = new Map<string, string>();
         for (const p of people) {
           const nid = normalizeNationalId(p.national_id);
-          if (isNationalId(nid)) byNationalId.set(nid, p.id);
-          if (p.email) byEmail.set(String(p.email).trim().toLowerCase(), p.id);
-          for (const phone of String(p.phone || "").split(" / ")) if (phone) byPhone.set(phone.trim(), p.id);
+          // A value two students share (a family phone) links neither of them.
+          if (isNationalId(nid)) claimKey(byNationalId, nid, p.id);
+          if (p.email) claimKey(byEmail, String(p.email).trim().toLowerCase(), p.id);
+          for (const phone of String(p.phone || "").split(" / ")) if (phone) claimKey(byPhone, phone.trim(), p.id);
         }
         // The national ID only finds the student; the stored row does not keep it.
         const clean = rows
