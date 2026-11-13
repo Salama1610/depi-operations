@@ -3684,6 +3684,34 @@ See you there!`,
       );
     };
     // An account's second student, under its first (10 November 2026).
+    // The student's gigs on the portal, next to them on the account (13 November
+    // 2026): approved, pending (with the coach or the auditor) and rejected, and
+    // whether another service is worth buying. Three approved, or graduated, is
+    // the goal: the account can then go to someone else.
+    const gigGoal = 3;
+    const gigsDone = (p: Row | null | undefined) => Boolean(p && (p.graduated || Number(p.approved) >= gigGoal));
+    const gigTracker = (p: Row | null | undefined) => {
+      if (!p) return <small className="table-subline gig-tracker">{t("No gigs on the portal yet")}</small>;
+      const approved = Number(p.approved) || 0;
+      const pending = Number(p.pending) || 0;
+      const verdict = p.graduated
+        ? { tone: "ok", text: t("Graduated: no more buying needed") }
+        : approved >= gigGoal
+          ? { tone: "ok", text: t("3 gigs approved: no more buying needed") }
+          : approved + pending >= gigGoal
+            ? { tone: "warn", text: t("3 gigs on the portal: wait for the pending ones before buying") }
+            : { tone: "info", text: t("{v0} more approved gigs needed", { v0: gigGoal - approved - pending }) };
+      return (
+        <span className={"gig-tracker is-" + verdict.tone}>
+          <span className="gig-tracker-counts">
+            <span title={t("Approved on the portal")}>✓ <bdi dir="ltr">{approved}</bdi></span>
+            <span title={t("Pending on the portal")}>⏳ <bdi dir="ltr">{pending}</bdi></span>
+            {Number(p.rejected) > 0 && <span title={t("Rejected on the portal")}>✗ <bdi dir="ltr">{p.rejected}</bdi></span>}
+          </span>
+          <small>{verdict.text}</small>
+        </span>
+      );
+    };
     const secondStudent = (a: Row) => {
       const r = secondRow(a);
       if (!r) return null;
@@ -3691,6 +3719,7 @@ See you there!`,
         <span className="account-key account-key-second">
           <strong><Lock size={13} /> {r.student_name || name(r.student_id)}</strong>
           <small className="table-subline"><bdi>{r.student_id}{r.student_group ? " · " + r.student_group : ""}</bdi> · {t("Second student")}</small>
+          {gigTracker(r.portal)}
           {r.student_coordinator_name && <small className="table-subline">{t("Student's coordinator: {v0}", { v0: r.student_coordinator_name })}</small>}
           {r.service_url && (
             <a className="table-subline text-link service-open" href={safeHref(r.service_url)} target="_blank" rel="noreferrer" title={r.service_url}>
@@ -4340,6 +4369,7 @@ See you there!`,
                             <span className="account-key">
                               <strong><Lock size={13} /> {r.student_name || name(r.student_id)}</strong>
                               {r.student_group && <small className="table-subline"><bdi>{r.student_id} · {r.student_group}</bdi></small>}
+                              {gigTracker(r.portal)}
                               {r.student_coordinator_name && (
                                 <small className="table-subline">{t("Student's coordinator: {v0}", { v0: r.student_coordinator_name })}</small>
                               )}
@@ -4397,6 +4427,16 @@ See you there!`,
                         {unlocks && (
                           <button className="small-btn" onClick={() => open("account_assign", { id: r.id, label: r.label, platform: r.platform, key_student: r.student_id || "", service_link_id: r.service_link_id || "", coordinator_id: r.coordinator_id || "", student_id: "" })}>
                             {t("Change assignment")}
+                          </button>
+                        )}
+                        {unlocks && r.student_id && gigsDone(r.portal) && (
+                          <button className="small-btn release-done" onClick={() => open("account_unlock", { id: r.id, label: r.label, platform: r.platform, key_student: r.student_id, reason: r.portal?.graduated ? "Graduated on the portal" : "3 gigs approved on the portal", student_id: "" })}>
+                            <Unlock size={14} /> {t("Gigs done: give the account to someone else")}
+                          </button>
+                        )}
+                        {unlocks && r.second && gigsDone(r.second.portal) && (
+                          <button className="small-btn release-done" onClick={() => open("account_unlock", { id: r.id, label: r.label, platform: r.platform, key_student: r.second.student_id, reason: r.second.portal?.graduated ? "Graduated on the portal" : "3 gigs approved on the portal", student_id: r.second.student_id })}>
+                            <Unlock size={14} /> {t("Second student's gigs done: free their place")}
                           </button>
                         )}
                         {unlocks && r.student_id && (

@@ -1591,3 +1591,5 @@ td .searchable-select,td .pick-inline{max-width:240px;min-width:0}
 @media(max-width:860px){.coach-gigs-list>li{grid-template-columns:1fr}}
 /* Graduates per group: the share as a thin bar beside its number (app/portal-coach-students). */
 .grad-share{display:inline-flex;align-items:center;gap:8px}.grad-share-bar{inline-size:72px;block-size:6px;border-radius:3px;background:#e6ebf4;overflow:hidden;display:inline-block}.grad-share-bar>span{display:block;block-size:100%;background:#2f9c84}
+/* The student's gigs on the portal, next to them on an account (app/operations Accounts tab). */
+.gig-tracker{display:flex;flex-direction:column;gap:2px;margin-block:4px;padding:4px 8px;border-radius:6px;background:#f1f4fa;inline-size:fit-content;max-inline-size:100%}.gig-tracker-counts{display:flex;gap:10px;font-size:12px;font-weight:600;color:#3d4f6e}.gig-tracker small{font-size:11px;color:#62708a}.gig-tracker.is-ok{background:#e8f6f1}.gig-tracker.is-ok small{color:#2f7d6a}.gig-tracker.is-warn{background:#fff5dd}.gig-tracker.is-warn small{color:#94691f}.small-btn.release-done{border-color:#2f9c84;color:#20735f;background:#eaf7f2}

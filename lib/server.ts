@@ -973,6 +973,18 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
   );
   const studentsByGroup = bucket(students, "group_id");
   const portalFigures = portalFiguresByStudent(portalStudentRows, portalGigRows);
+  // Each account's students with their gigs on the portal (13 November 2026):
+  // the coordinator sees how far the student is before buying another
+  // service, and the account keepers see when three are approved and the
+  // account can go to someone else.
+  const gigTracker = (studentId: unknown) => {
+    const f = studentId ? portalFigures.get(String(studentId)) : null;
+    return f ? { approved: f.approved, pending: f.coach + f.auditor, rejected: f.rejected, graduated: f.graduated } : null;
+  };
+  for (const a of accounts as any[]) {
+    a.portal = gigTracker(a.student_id);
+    if (a.second) a.second.portal = gigTracker(a.second.student_id);
+  }
   // The programme week (Friday to Thursday, Cairo) that is running now.
   const thisWeek = programmeWeekStart(cairoDay(new Date().toISOString()));
   // History written before the cleaning existed is cleaned on the way out.

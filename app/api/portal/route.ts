@@ -1,3 +1,4 @@
+import { releaseGraduatedAccounts } from "@/lib/service-followup";
 import { failure } from "@/lib/errors";
 import { Refusal } from "@/lib/domain/rules";
 import { actor, all, auditStmt, db, now, rateLimit, refuseDemo, scopeSql, stmt, uid } from "@/lib/server";
@@ -446,7 +447,18 @@ export async function POST(req: Request) {
         ),
         auditStmt(u, "Portal sheet uploaded", upload.batch_id, { sheet, rows: Number(count.n), linked: Number(linked.n), file: upload.file_name }),
       ]);
-      return Response.json({ ok: true, rows: Number(count.n), linked: Number(linked.n) });
+      // A student the new sheet shows as graduated no longer needs client
+      // accounts: they go back to the pool (13 November 2026). The upload has
+      // succeeded whatever happens here; a failure is logged, and the next upload tries again.
+      let released = 0;
+      if (sheet === "students") {
+        try {
+          released = await releaseGraduatedAccounts(u);
+        } catch (e: any) {
+          console.error(JSON.stringify({ level: "error", route: "portal", step: "release graduated accounts", message: String(e?.message ?? e).slice(0, 500) }));
+        }
+      }
+      return Response.json({ ok: true, rows: Number(count.n), linked: Number(linked.n), released });
     }
 
     // An upload given up on: its staged rows and its entry go.

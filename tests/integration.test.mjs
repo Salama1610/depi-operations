@@ -5735,3 +5735,38 @@ test("a student who has graduated on the portal is given no client account (13 N
     if (made) await dbExec("DELETE FROM portal_uploads WHERE id='PU-AUDIT-GRAD'");
   }
 });
+
+test("an account shows its student's gigs on the portal, and a students sheet that says Graduated frees the account (13 Nov 2026)", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const portal = await route("portal");
+  const send = async (body) =>
+    (await portal.POST(new Request("https://test.local/api/portal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }))).json();
+  const upload = async (sheet, mapping, rows) => {
+    const begun = await send({ action: "begin", sheet, mapping, total: rows.length, file_name: sheet + ".xlsx" });
+    assert.ok(begun.batch, JSON.stringify(begun));
+    assert.equal((await send({ action: "chunk", batch: begun.batch, rows })).error, undefined);
+    const done = await send({ action: "commit", batch: begun.batch });
+    assert.equal(done.error, undefined, done.error);
+    return done;
+  };
+  // The student linked to the account by the previous test.
+  const pupil = await dbRow("SELECT s.id,s.email FROM service_links l JOIN students s ON s.id=l.student_id WHERE l.id='SLK-AUDIT-GRAD'");
+  assert.ok(pupil?.email, "the previous test linked a student with an email");
+  const studentsMap = { ID: "portal_id", Email: "email", "Full Name": "full_name", "Final Status": "final_status" };
+  const gigsMap = { ID: "portal_gig_id", "Student ID": "portal_student_id", Title: "title", Proof: "proof_url", Status: "status", "Trainer Status": "trainer_status", "Provider Status": "provider_status", "Auditor Status": "auditor_status" };
+  const gig = (id, status, trainer) => ({ portal_gig_id: id, portal_student_id: "PT-1", title: id, proof_url: "https://proof.example.org/" + id, status, trainer_status: trainer, provider_status: "", auditor_status: "" });
+  await upload("students", studentsMap, [{ portal_id: "PT-1", email: pupil.email, full_name: "Tracker", final_status: "Started" }]);
+  await upload("gigs", gigsMap, [gig("PT-G1", "Approved", "Approved"), gig("PT-G2", "Pending", "Pending")]);
+  const view = await (await api.GET()).json();
+  const row = view.accounts.find((a) => a.student_id === pupil.id) || view.accounts.find((a) => a.second?.student_id === pupil.id);
+  assert.ok(row, "the account is in the workspace");
+  const tracker = row.student_id === pupil.id ? row.portal : row.second.portal;
+  assert.deepEqual([tracker.approved, tracker.pending, tracker.graduated], [1, 1, false], "one approved, one waiting for the coach");
+  // The next students sheet says Graduated: the account goes back to the pool.
+  const done = await upload("students", studentsMap, [{ portal_id: "PT-1", email: pupil.email, full_name: "Tracker", final_status: "Graduated" }]);
+  assert.ok(done.released >= 1, JSON.stringify(done));
+  assert.equal((await dbRow("SELECT account_id FROM service_links WHERE id='SLK-AUDIT-GRAD'")).account_id, null);
+  assert.equal(await dbRow("SELECT id FROM accounts WHERE student_id=?", pupil.id), null);
+  assert.ok(await dbRow("SELECT id FROM audit_events WHERE action='account_freed_graduated' AND previous LIKE ?", "%" + pupil.id + "%"), "audited");
+});

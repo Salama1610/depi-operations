@@ -54,6 +54,76 @@ export const studentAccountsSql = `SELECT id account_id FROM accounts WHERE stud
 
 /** How many students an account buys from, as SQL on an accounts alias. */
 /**
+ * Frees the account places of students who have graduated on the portal
+ * (13 November 2026): the accounts are there to get a student to three gigs,
+ * so once the latest students sheet says Graduated they go back to the pool for
+ * someone still working towards them. Runs after each students-sheet upload.
+ * Each place is one save: its open orders are cancelled (with the credit they
+ * took back on the account), the services and the account are unlinked, the
+ * coordinator is told, and it is audited.
+ */
+export async function releaseGraduatedAccounts(actor: any) {
+  const graduates = `SELECT p.student_id FROM portal_students p
+    JOIN portal_uploads b ON b.batch_id=p.batch_id AND b.sheet='students' AND b.status='Active'
+    JOIN students s ON s.id=p.student_id
+    WHERE lower(trim(coalesce(p.final_status,'')))='graduated' AND s.lifecycle='Active' AND s.group_id NOT LIKE 'DEMO-%'`;
+  const places = await all(
+    `SELECT a.id account_id,a.label,a.student_id FROM accounts a WHERE a.status<>'Retired' AND a.student_id IN (${graduates})
+     UNION ALL
+     SELECT a.id,a.label,l.student_id FROM service_links l JOIN accounts a ON a.id=l.account_id
+     WHERE a.status<>'Retired' AND l.student_id IN (${graduates}) AND l.student_id<>coalesce(a.student_id,'')`,
+  );
+  const t = now();
+  let released = 0;
+  for (const place of places as any[]) {
+    const pupil: any = await stmt("SELECT s.name,g.coordinator FROM students s JOIN groups g ON g.id=s.group_id WHERE s.id=?", place.student_id).first();
+    const open = await all(
+      "SELECT id FROM account_orders WHERE account_id=? AND student_id=? AND status NOT IN ('Proof Uploaded','Cancelled')",
+      place.account_id,
+      place.student_id,
+    );
+    const jobs: any[] = [];
+    for (const order of open as any[]) {
+      const tag = `[order ${order.id}]`;
+      const row: any = await stmt(
+        "SELECT COALESCE(sum(delta),0) n FROM account_credit_ledger WHERE account_id=? AND reason LIKE ? ESCAPE '\\'",
+        place.account_id,
+        "%" + likeText(tag),
+      ).first();
+      const refund = Math.round(-Number(row?.n || 0) * 100) / 100;
+      if (refund)
+        jobs.push(
+          stmt("UPDATE accounts SET credits=credits+? WHERE id=?", refund, place.account_id),
+          stmt(
+            "INSERT INTO account_credit_ledger(id,account_id,delta,balance_after,reason,actor,created_at) SELECT ?,id,?,credits,?,?,? FROM accounts WHERE id=?",
+            uid("CR"), refund, "Refund: order cancelled, the student graduated " + tag, actor?.id || "system", t, place.account_id,
+          ),
+        );
+    }
+    jobs.push(
+      stmt(
+        "UPDATE account_orders SET status='Cancelled',note=COALESCE(note||' · ','')||?,cancelled_at=?,updated_at=? WHERE account_id=? AND student_id=? AND status NOT IN ('Proof Uploaded','Cancelled')",
+        "Closed: the student graduated on the portal, so the account went to another student.", t, t, place.account_id, place.student_id,
+      ),
+      stmt("UPDATE service_links SET account_id=NULL WHERE account_id=? AND student_id=?", place.account_id, place.student_id),
+      stmt("UPDATE accounts SET student_id=NULL,service_link_id=NULL,linked_at=NULL,linked_by=NULL WHERE id=? AND student_id=?", place.account_id, place.student_id),
+      stmt(
+        "UPDATE accounts SET coordinator_id=NULL,coordinator_2_id=NULL WHERE id=? AND student_id IS NULL AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.account_id=accounts.id)",
+        place.account_id,
+      ),
+      auditStmt(actor || { id: "system" }, "account_freed_graduated", place.account_id, { student_id: null }, { student_id: place.student_id }),
+    );
+    if (pupil?.coordinator)
+      jobs.push(
+        notify(pupil.coordinator, `${pupil.name} has graduated on the portal: client account ${place.label} went back to the pool`, "student", place.student_id, "Information", `account-graduated:${place.account_id}:${place.student_id}`),
+      );
+    await db().batch(jobs);
+    released++;
+  }
+  return released;
+}
+
+/**
  * Whether a marketplace has an account a new student can still take, on the
  * caller's side of the demo line. While the other marketplace has none, a
  * student may take a third account on the same one (13 November 2026, the
