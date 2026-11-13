@@ -53,6 +53,23 @@ export const studentsPerAccount = 2;
 export const studentAccountsSql = `SELECT id account_id FROM accounts WHERE student_id=? UNION SELECT account_id FROM service_links WHERE student_id=? AND account_id IS NOT NULL`;
 
 /** How many students an account buys from, as SQL on an accounts alias. */
+/**
+ * Whether a marketplace has an account a new student can still take, on the
+ * caller's side of the demo line. While the other marketplace has none, a
+ * student may take a third account on the same one (13 November 2026, the
+ * owner's decision): the two-and-one rule comes back by itself once accounts
+ * on the other marketplace are added.
+ */
+export async function hasFreePlace(platform: string, demo: boolean) {
+  const row: any = await stmt(
+    `SELECT a.id FROM accounts a WHERE a.platform=? AND a.status='Available' AND a.active_assignment IS NULL
+       AND a.id ${demo ? "LIKE" : "NOT LIKE"} 'DEMO-%' AND ${accountUsesSql("a")}<? LIMIT 1`,
+    platform,
+    studentsPerAccount,
+  ).first();
+  return Boolean(row);
+}
+
 export const accountUsesSql = (a = "a") =>
   `((CASE WHEN ${a}.student_id IS NULL THEN 0 ELSE 1 END) + (SELECT count(DISTINCT l.student_id) FROM service_links l WHERE l.account_id=${a}.id AND l.student_id<>coalesce(${a}.student_id,'')))`;
 
@@ -136,8 +153,9 @@ export async function linkAccountKey(studentId: string, actor: any | null) {
     if (mine.size >= accountsPerStudent) break;
     const platform = marketplace[link.platform];
     if (!platform) continue;
-    // Two accounts on this marketplace already: a third here would make three on one.
-    if (accountMixProblem(heldPlatforms, platform) === "same") {
+    // Two accounts on this marketplace already: a third here would make three
+    // on one, which waits for the other marketplace while it has a free place.
+    if (accountMixProblem(heldPlatforms, platform) === "same" && (await hasFreePlace(otherMarketplace(platform), demo))) {
       sameMarketplace.push({ platform, linkId: String(link.id) });
       continue;
     }

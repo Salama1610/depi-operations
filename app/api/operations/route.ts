@@ -31,8 +31,8 @@ import {
   revokesStudents,
   unlocksAccounts,
 } from "@/lib/server";
-import { accountStates, accountsPerStudent, buysServices, linkAccountKey, serviceFixCategory, studentAccountsSql, serviceFixStatements, serviceFollowUpSweep, submissionStatus, taskProgressStates } from "@/lib/service-followup";
-import { accountMixMessage, accountMixProblem } from "@/lib/domain/student-accounts";
+import { accountStates, accountsPerStudent, buysServices, hasFreePlace, linkAccountKey, serviceFixCategory, studentAccountsSql, serviceFixStatements, serviceFollowUpSweep, submissionStatus, taskProgressStates } from "@/lib/service-followup";
+import { accountMixMessage, accountMixProblem, otherMarketplace } from "@/lib/domain/student-accounts";
 import { demoPeople, demoPlan, demoStudentEmail, isDemo, sameSide } from "@/lib/demo";
 import {
   ensure,
@@ -3533,7 +3533,11 @@ export async function POST(req: Request) {
           ensure(others < accountsPerStudent, "This student already has three accounts. Remove one of them first.");
           // Three accounts are two on one marketplace and one on the other, never all on the same one (12 November 2026).
           const heldPlatforms = (await all(`SELECT platform FROM accounts WHERE id IN (SELECT account_id FROM (${studentAccountsSql}) y) AND id<>?`, studentId, studentId, id)).map((r: any) => String(r.platform));
-          ensure(accountMixProblem(heldPlatforms, a.platform) !== "same", accountMixMessage(a.platform));
+          // Unless the other marketplace has no free place (13 November 2026).
+          ensure(
+            accountMixProblem(heldPlatforms, a.platform) !== "same" || !(await hasFreePlace(otherMarketplace(String(a.platform)), String(id).startsWith("DEMO-"))),
+            accountMixMessage(a.platform),
+          );
           if (x.service_link_id) {
             const link: any = await stmt("SELECT id,student_id,qc_status FROM service_links WHERE id=?", String(x.service_link_id)).first();
             ensure(link && link.student_id === studentId, "Choose one of this student's services.");

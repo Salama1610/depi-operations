@@ -4359,6 +4359,16 @@ test("by hand, a third account on the marketplace of two identical ones is refus
   await check("account_assign", { id: "ACC-MIX-2", key_student: learner.id });
   assert.match((await post("account_assign", { id: "ACC-MIX-3", key_student: learner.id })).error, /both on Kafeel, so the third has to be on Nafezly/);
   assert.equal((await dbRows("SELECT id FROM accounts WHERE student_id=?", learner.id)).length, 2, "the refused account was not given");
+  // While Nafezly has no free place, a third Kafeel is allowed (13 Nov 2026).
+  const freeNafezly = (await dbRows("SELECT id FROM accounts WHERE platform='Nafezly' AND status='Available' AND id NOT LIKE 'DEMO-%'")).map((r) => r.id);
+  await dbExec(`UPDATE accounts SET status='Under Review' WHERE id IN (${freeNafezly.map(() => "?").join(",")})`, ...freeNafezly);
+  try {
+    await check("account_assign", { id: "ACC-MIX-3", key_student: learner.id });
+    assert.deepEqual((await dbRows("SELECT platform FROM accounts WHERE student_id=?", learner.id)).map((a) => a.platform), ["Kafeel", "Kafeel", "Kafeel"]);
+    await check("account_assign", { id: "ACC-MIX-3", key_student: null });
+  } finally {
+    await dbExec(`UPDATE accounts SET status='Available' WHERE id IN (${freeNafezly.map(() => "?").join(",")})`, ...freeNafezly);
+  }
   await check("account_assign", { id: "ACC-MIX-4", key_student: learner.id });
   assert.deepEqual((await dbRows("SELECT platform FROM accounts WHERE student_id=?", learner.id)).map((a) => a.platform).sort(), ["Kafeel", "Kafeel", "Nafezly"]);
 
