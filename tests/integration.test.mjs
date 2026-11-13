@@ -2942,12 +2942,12 @@ test("the portal flags a gig as a possible duplicate by its proof, or by its lin
   ]);
   const gig = (id, student, link, day, proof) => ({ portal_gig_id: id, portal_student_id: student, title: "Gig " + id, url: link, created_on: day, proof_url: proof, status: "Pending" });
   await send("gigs", { ID: "portal_gig_id", "Student ID": "portal_student_id", Title: "title", Link: "url", "Created On": "created_on", Proof: "proof_url", Status: "status" }, [
-    gig("DG-1", "D-1", "https://nafezly.com/service/1", "2026-05-01", "https://proof/a"),
+    gig("DG-1", "D-1", "https://nafezly.com/service/1", "2026-05-01", "https://proof/Proof_A.PNG"),
     gig("DG-2", "D-1", "https://nafezly.com/service/1", "2026-05-01", "https://proof/b"),
     // The same service sold again another day is a repeat sale, not a duplicate.
     gig("DG-3", "D-1", "https://nafezly.com/service/1", "2026-05-09", "https://proof/c"),
     // One proof on two rows, whatever the links.
-    gig("DG-4", "D-2", "https://kafiil.com/service/9", "2026-05-02", "https://proof/a"),
+    gig("DG-4", "D-2", "https://kafiil.com/service/9", "2026-05-02", "https://proof/Proof_A.PNG"),
     // One general site address for two students on one day, and again another day.
     gig("DG-5", "D-2", "https://outlier.ai", "2026-05-03", "https://proof/e"),
     gig("DG-6", "D-3", "https://outlier.ai", "2026-05-03", "https://proof/f"),
@@ -2960,6 +2960,7 @@ test("the portal flags a gig as a possible duplicate by its proof, or by its lin
   assert.deepEqual(found.repeats[0].gig_ids.sort(), ["DG-1", "DG-2"]);
   assert.equal(found.proofs.length, 1);
   assert.deepEqual(found.proofs[0].gig_ids.sort(), ["DG-1", "DG-4"]);
+  assert.equal(found.proofs[0].link, "https://proof/Proof_A.PNG", "shown with its own capitals: the portal opens no other");
   assert.equal(found.shared.length, 1);
   assert.deepEqual([found.shared[0].day, found.shared[0].students.map((x) => x.name).sort()], ["2026-05-03", ["Dup Three", "Dup Two"]]);
 });

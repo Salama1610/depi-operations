@@ -117,31 +117,33 @@ export async function GET(req: Request) {
         students: [...new Set(String(r.people).split(","))].map(who),
       });
       const visible = (r: any) => r.students.some((x: any) => inScope(x.portal_id));
-      // One proof on more than one row, whoever entered it.
+      // One proof on more than one row, whoever entered it. Rows are matched
+      // whatever the case of their links, but each is shown as the sheet has it:
+      // the portal's files open only with their own capitals (13 November 2026).
       const proofs = (
         await all(
-          `SELECT lower(trim(proof_url)) link, group_concat(portal_student_id) people, group_concat(portal_gig_id) ids, count(*) n
+          `SELECT lower(trim(proof_url)) k, min(trim(proof_url)) link, group_concat(portal_student_id) people, group_concat(portal_gig_id) ids, count(*) n
            FROM portal_gigs WHERE batch_id=? AND coalesce(trim(proof_url),'')<>''
-           GROUP BY 1 HAVING count(*)>1 ORDER BY 4 DESC LIMIT 300`,
+           GROUP BY 1 HAVING count(*)>1 ORDER BY 5 DESC LIMIT 300`,
           gigs.batch_id,
         )
       ).map(group).filter(visible);
       // One link on the same day for several students.
       const shared = (
         await all(
-          `SELECT lower(trim(url)) link, ${day} AS gig_day, group_concat(portal_student_id) people, group_concat(portal_gig_id) ids, count(*) n
+          `SELECT lower(trim(url)) k, min(trim(url)) link, ${day} AS gig_day, group_concat(portal_student_id) people, group_concat(portal_gig_id) ids, count(*) n
            FROM portal_gigs WHERE batch_id=? AND coalesce(trim(url),'')<>''
-           GROUP BY 1,2 HAVING count(DISTINCT portal_student_id)>1 ORDER BY 5 DESC LIMIT 300`,
+           GROUP BY 1,3 HAVING count(DISTINCT portal_student_id)>1 ORDER BY 6 DESC LIMIT 300`,
           gigs.batch_id,
         )
       ).map(group).filter(visible);
       // One student entering the same link more than once on the same day.
       const repeats = (
         await all(
-          `SELECT portal_student_id, lower(trim(url)) link, ${day} AS gig_day, group_concat(portal_gig_id) ids,
+          `SELECT portal_student_id, lower(trim(url)) k, min(trim(url)) link, ${day} AS gig_day, group_concat(portal_gig_id) ids,
                   group_concat(status) statuses, count(*) n
            FROM portal_gigs WHERE batch_id=? AND coalesce(trim(url),'')<>''
-           GROUP BY 1,2,3 HAVING count(*)>1 ORDER BY 6 DESC LIMIT 500`,
+           GROUP BY 1,2,4 HAVING count(*)>1 ORDER BY 7 DESC LIMIT 500`,
           gigs.batch_id,
         )
       )
