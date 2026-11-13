@@ -161,14 +161,12 @@ export const serviceGroups = [
   "ALX5_DRT1_S1",
   "DKH5_DRT2_S1",
   "ONL5_DRT2_S2",
-  "ALX5_DRT1_G1",
-  "CAI5_DRT1_G2",
-  "CAI5_DRT1_S1",
+  // Paused on 13 November 2026, their accounts unassigned: ALX5_DRT1_G1,
+  // CAI5_DRT1_G2, CAI5_DRT1_S1, ONL5_DRT2_G1 and ONL5_DRT2_G2. Add one back here
+  // to give its students accounts again.
   "CAI5_DRT1_S2",
   "ALX5_DRT7_S1",
   "CAI5_DRT3_S1",
-  "ONL5_DRT2_G1",
-  "ONL5_DRT2_G2",
 ];
 export const buysServices = (groupId: unknown) => serviceGroups.includes(String(groupId ?? "").trim().toUpperCase());
 /** Whether a student of this group must have a link on Kafiil and a link on Nafezly among their three or more. */

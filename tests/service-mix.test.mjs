@@ -12,7 +12,7 @@ import {
   submissionComplete,
 } from "../lib/domain/service-links.ts";
 
-const SERVICE = "CAI5_DRT1_S1";
+const SERVICE = "CAI5_DRT1_S2";
 const OTHER = "CAI5_DRT9_G9";
 const link = (platform, qc_status = "Locked") => ({ platform, qc_status });
 const k = (i) => `https://kafiil.com/service/${i}-a`;
@@ -21,7 +21,8 @@ const n = (i) => `https://nafezly.com/service/${i}-a`;
 test("the service groups are the ones that buy services", () => {
   assert.equal(buysServices(SERVICE), true);
   assert.equal(buysServices(OTHER), false);
-  assert.equal(buysServices(" cai5_drt1_s1 "), true);
+  assert.equal(buysServices(" cai5_drt1_s2 "), true);
+  assert.equal(buysServices("CAI5_DRT1_S1"), false, "paused on 13 Nov 2026");
 });
 
 test("a service-group student's services are complete only with both marketplaces among the three", () => {

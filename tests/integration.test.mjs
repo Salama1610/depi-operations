@@ -1951,7 +1951,7 @@ test("controlled platforms and separately approved FX applications are enforced"
   );
 });
 /** A copy of a group under a service group's ID (lib/service-followup), so the students moved into it get client accounts. */
-async function asServiceGroup(groupId, serviceId = "CAI5_DRT1_S1") {
+async function asServiceGroup(groupId, serviceId = "CAI5_DRT1_S2") {
   if (!(await dbRow("SELECT id FROM groups WHERE id=?", serviceId))) {
     const g = await dbRow("SELECT * FROM groups WHERE id=?", groupId);
     const cols = Object.keys(g);
