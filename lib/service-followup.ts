@@ -129,6 +129,15 @@ export async function linkAccountKey(studentId: string, actor: any | null) {
   const demo = String(s?.group_id || "").startsWith("DEMO-");
   if (!s || s.lifecycle !== "Active" || (!demo && !buysServices(s.group_id)) || s.model === "Industry" || !s.coordinator)
     return { linked: 0, reason: "not eligible" } as const;
+  // The accounts are there to get a student to three gigs and graduation: one
+  // who has graduated on the portal (the latest students sheet) gets none
+  // (13 November 2026).
+  const graduated: any = await stmt(
+    `SELECT 1 x FROM portal_students p WHERE p.student_id=? AND lower(trim(coalesce(p.final_status,'')))='graduated'
+       AND p.batch_id=(SELECT batch_id FROM portal_uploads WHERE sheet='students' AND status='Active' ORDER BY committed_at DESC LIMIT 1)`,
+    studentId,
+  ).first();
+  if (graduated) return { linked: 0, reason: "graduated" } as const;
   const accountsOf = async () => new Set((await all(studentAccountsSql, studentId, studentId)).map((r: any) => String(r.account_id)));
   // The marketplaces of the accounts the student holds, for the two-and-one rule.
   const platformsOf = async (ids: Set<string>) =>

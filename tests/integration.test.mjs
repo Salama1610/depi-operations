@@ -5700,3 +5700,38 @@ test("the whole workbook also holds orders, session feedback and the portal shee
   assert.equal(lines - 1, rows.filter((r) => ids.has(r.student_id)).length, "exactly the supervisor's students on the sheet");
   current = { id: "owner", email: "owner@example.com" };
 });
+
+test("a student who has graduated on the portal is given no client account (13 Nov 2026)", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const pupil = await dbRow(
+    `SELECT s.id,s.group_id FROM students s WHERE s.lifecycle='Active' AND s.group_id NOT LIKE 'DEMO-%'
+       AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=s.id) AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.student_id=s.id) ORDER BY s.id DESC LIMIT 1 OFFSET 3`,
+  );
+  await dbExec("UPDATE students SET group_id=? WHERE id=?", await asServiceGroup(pupil.group_id, "DKH5_DRT1_S1"), pupil.id);
+  const at = new Date().toISOString();
+  await dbExec(
+    "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,account_id,submitted_at,updated_at) VALUES('SLK-AUDIT-GRAD',?,1,?,?,'Kafiil','Needs Review','{}',?,'Locked',NULL,NULL,?,1,NULL,?,?)",
+    pupil.id, "https://kafiil.com/x/audit-grad", "https://kafiil.com/x/audit-grad", at, at, at, at,
+  );
+  await dbExec("INSERT INTO accounts(id,platform,label,status,credits) VALUES('ACC-AUDIT-GRAD','Kafeel','audit-grad@example.com','Available',0)");
+  // The latest students sheet says the student has graduated.
+  let batch = (await dbRow("SELECT batch_id FROM portal_uploads WHERE sheet='students' AND status='Active' ORDER BY committed_at DESC LIMIT 1"))?.batch_id;
+  const made = !batch;
+  if (made) {
+    batch = "PB-AUDIT-GRAD";
+    await dbExec("INSERT INTO portal_uploads(id,sheet,batch_id,status,file_name,rows_total,rows_linked,mapping,uploaded_by,created_at,committed_at) VALUES('PU-AUDIT-GRAD','students',?,'Active','s.xlsx',1,1,'{}','owner',?,?)", batch, at, at);
+  }
+  await dbExec("INSERT INTO portal_students(id,batch_id,student_id,portal_id,full_name,final_status,proof_links) VALUES('PS-AUDIT-GRAD',?,?,'P-AUDIT-GRAD','Graduate','Graduated','[]')", batch, pupil.id);
+  try {
+    await check("account_link_sweep", {});
+    assert.equal((await dbRow("SELECT account_id FROM service_links WHERE id='SLK-AUDIT-GRAD'")).account_id, null, "a graduate gets no account");
+    // Not graduated, the same student is given one.
+    await dbExec("UPDATE portal_students SET final_status='Started' WHERE id='PS-AUDIT-GRAD'");
+    await check("account_link_sweep", {});
+    assert.ok((await dbRow("SELECT account_id FROM service_links WHERE id='SLK-AUDIT-GRAD'")).account_id, "a student still working towards three gigs gets one");
+  } finally {
+    await dbExec("DELETE FROM portal_students WHERE id='PS-AUDIT-GRAD'");
+    if (made) await dbExec("DELETE FROM portal_uploads WHERE id='PU-AUDIT-GRAD'");
+  }
+});
