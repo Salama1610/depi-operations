@@ -167,6 +167,17 @@ export const serviceGroups = [
   "CAI5_DRT1_S2",
   "ALX5_DRT7_S1",
   "CAI5_DRT3_S1",
+  // Added on 13 November 2026 in place of the five paused groups: Abdullah
+  // Waheed's groups with the fewest students without services, as many as
+  // the free Kafeel and Nafezly places cover.
+  "DKH5_DRT1_S1",
+  "ONL5_DRT6_G1",
+  "CAI5_DRT2_S2",
+  "ALX5_DRT2_S1",
+  "GHR5_DRT1_S1",
+  "ONL5_DRT3_G2",
+  "CAI5_DRT7_S1",
+  "CAI5_DRT1_G1",
 ];
 export const buysServices = (groupId: unknown) => serviceGroups.includes(String(groupId ?? "").trim().toUpperCase());
 /** Whether a student of this group must have a link on Kafiil and a link on Nafezly among their three or more. */
