@@ -5666,3 +5666,27 @@ test("a portal proof opens wherever the portal holds the file, and only portal l
     globalThis.fetch = realFetch;
   }
 });
+
+test("the whole workbook also holds orders, session feedback and the portal sheets with our QC, each in the scope the app shows", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  const { unzipSync, strFromU8 } = await import("fflate");
+  const exporter = await route("export");
+  current = { id: "owner", email: "owner@example.com" };
+  const book = await exporter.GET(new Request("https://test.local/api/export?module=workbook"));
+  assert.equal(book.status, 200, await book.clone().text());
+  const files = unzipSync(new Uint8Array(await book.arrayBuffer()));
+  const tabs = [...strFromU8(files["xl/workbook.xml"]).matchAll(/<sheet name="([^"]+)"/g)].map((m) => m[1]);
+  for (const tab of ["students", "account_orders", "session_feedback", "coordinator_feedback", "portal_students", "portal_gigs", "portal_qc_reviews"])
+    assert.ok(tabs.includes(tab), tab + " in " + tabs.join(","));
+  // A supervisor's portal tab: their own students only.
+  const all = await (await exporter.GET(new Request("https://test.local/api/export?module=portal_students"))).text();
+  current = { id: "supervisor-login", email: "staff-nour@example.invalid" };
+  const theirs = await exporter.GET(new Request("https://test.local/api/export?module=portal_students"));
+  assert.equal(theirs.status, 200, await theirs.clone().text());
+  const lines = (await theirs.text()).trim().split("\n").length;
+  assert.ok(lines <= all.trim().split("\n").length, "never more than the leaders'");
+  const ids = new Set(((await (await api.GET()).json()).students || []).map((x) => x.id)); // the students the app shows them
+  const rows = await dbRows("SELECT student_id FROM portal_students WHERE batch_id=(SELECT batch_id FROM portal_uploads WHERE sheet='students' AND status='Active' ORDER BY committed_at DESC LIMIT 1) AND student_id IS NOT NULL");
+  assert.equal(lines - 1, rows.filter((r) => ids.has(r.student_id)).length, "exactly the supervisor's students on the sheet");
+  current = { id: "owner", email: "owner@example.com" };
+});
