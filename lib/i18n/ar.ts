@@ -3132,4 +3132,9 @@ export const ar: Record<string, string> = {
   "The upload did not go through. Try again.": "لم يكتمل الرفع. حاول مرة أخرى.",
   "The order is finished. A screenshot of the proof is optional.": "اكتمل الطلب. لقطة شاشة الإثبات اختيارية.",
   "This student is another coordinator's: their group's coordinator manages their account orders.": "هذا الطالب تابع لمنسق آخر: منسق مجموعته هو من يدير طلبات حسابه.",
+  "Download the ranking and graduates per group (Excel)": "تنزيل الترتيب والخريجين لكل مجموعة (Excel)",
+  "Each group's students who have graduated on the portal, as a share of the group's students, the highest first.": "طلاب كل مجموعة الذين تخرجوا على البوابة، كنسبة من طلاب المجموعة، الأعلى أولًا.",
+  "Graduated (%)": "نسبة الخريجين (%)",
+  "Graduates per group": "الخريجون لكل مجموعة",
+  "Search by coach or group": "ابحث بالمدرب أو المجموعة",
 };

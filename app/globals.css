@@ -1589,3 +1589,5 @@ td .searchable-select,td .pick-inline{max-width:240px;min-width:0}
 .coach-gigs-guid code{font-size:11px;background:#f1f4fa;border-radius:4px;padding:2px 6px;overflow-wrap:anywhere}
 .coach-gigs-links{display:flex;gap:8px;flex-wrap:wrap;margin-top:2px}
 @media(max-width:860px){.coach-gigs-list>li{grid-template-columns:1fr}}
+/* Graduates per group: the share as a thin bar beside its number (app/portal-coach-students). */
+.grad-share{display:inline-flex;align-items:center;gap:8px}.grad-share-bar{inline-size:72px;block-size:6px;border-radius:3px;background:#e6ebf4;overflow:hidden;display:inline-block}.grad-share-bar>span{display:block;block-size:100%;background:#2f9c84}

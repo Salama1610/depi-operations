@@ -35,6 +35,8 @@ export function PortalCoachStudents() {
   const q = query.trim().toLowerCase();
   const coaches: Row[] = (data?.coaches || []).filter((c: Row) => !q || String(coachName(c)).toLowerCase().includes(q));
   const ranking: Row[] = (data?.ranking || []).filter((c: Row) => !q || String(coachName(c)).toLowerCase().includes(q));
+  // Each group's share of graduates (13 November 2026); the search finds a group or its coach.
+  const groups: Row[] = (data?.groups || []).filter((g: Row) => !q || String(g.group_id).toLowerCase().includes(q) || String(coachName(g)).toLowerCase().includes(q));
   // Every coach in the workbook, whatever the search.
   function download() {
     const file = toWorkbook([
@@ -54,6 +56,19 @@ export function PortalCoachStudents() {
           "Gigs waiting for the coach": c.waiting,
           [`Waiting over ${slowAfterDays} days`]: c.slow,
           "Longest wait (days)": c.oldest_days ?? "",
+        })),
+      },
+      {
+        name: "Graduates per group",
+        rows: (data?.groups || []).map((g: Row) => ({
+          Group: g.group_id,
+          Coach: coachName(g),
+          Students: g.assigned,
+          Graduated: g.graduated,
+          "Graduated (%)": g.graduated_pct,
+          Started: g.started,
+          "Not started": g.not_started,
+          "Not on the portal": g.no_status,
         })),
       },
     ]);
@@ -84,7 +99,7 @@ export function PortalCoachStudents() {
           <div className="portal-gap-tools">
             <label className="field">
               {t("Coach")}
-              <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("Search by coach")} />
+              <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("Search by coach or group")} />
             </label>
           </div>
           <div className="table-wrap">
@@ -125,9 +140,66 @@ export function PortalCoachStudents() {
           </div>
 
           <div className="portal-gap-tools">
+            <h3>{t("Graduates per group")}</h3>
+          </div>
+          <small className="footnote">{t("Each group's students who have graduated on the portal, as a share of the group's students, the highest first.")}</small>
+          <div className="table-wrap">
+            <table className="portal-table">
+              <thead>
+                <tr>
+                  <th>{t("Group")}</th>
+                  <th>{t("Coach")}</th>
+                  <th>{t("Students")}</th>
+                  <th>{t("Graduated")}</th>
+                  <th>{t("Graduated (%)")}</th>
+                  <th>{t("Started")}</th>
+                  <th>{t("Not started")}</th>
+                  <th>{t("No portal status")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {groups.map((g) => (
+                  <tr key={g.group_id}>
+                    <td><strong><bdi dir="ltr">{g.group_id}</bdi></strong></td>
+                    <td>{coachName(g)}</td>
+                    <td><bdi dir="ltr">{g.assigned}</bdi></td>
+                    <td><bdi dir="ltr">{g.graduated}</bdi></td>
+                    <td>
+                      <span className="grad-share">
+                        <span className="grad-share-bar" aria-hidden="true"><span style={{ inlineSize: g.graduated_pct + "%" }} /></span>
+                        <strong><bdi dir="ltr">{g.graduated_pct}%</bdi></strong>
+                      </span>
+                    </td>
+                    <td><bdi dir="ltr">{g.started}</bdi></td>
+                    <td><bdi dir="ltr">{g.not_started}</bdi></td>
+                    <td><bdi dir="ltr">{g.no_status}</bdi></td>
+                  </tr>
+                ))}
+                {!groups.length && (
+                  <tr>
+                    <td colSpan={8}>{t("Nothing in this list.")}</td>
+                  </tr>
+                )}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <th>{t("Total")}</th>
+                  <td />
+                  <td><bdi dir="ltr">{data.total.assigned}</bdi></td>
+                  <td><bdi dir="ltr">{data.total.graduated}</bdi></td>
+                  <td><strong><bdi dir="ltr">{data.total.assigned ? Math.round((data.total.graduated / data.total.assigned) * 100) : 0}%</bdi></strong></td>
+                  <td><bdi dir="ltr">{data.total.started}</bdi></td>
+                  <td><bdi dir="ltr">{data.total.not_started}</bdi></td>
+                  <td><bdi dir="ltr">{data.total.no_status}</bdi></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          <div className="portal-gap-tools">
             <h3>{t("Coaches ranked, furthest behind first")}</h3>
             <button type="button" className="small-btn" onClick={download} disabled={!(data.ranking || []).length}>
-              <Download size={14} /> {t("Download the ranking (Excel)")}
+              <Download size={14} /> {t("Download the ranking and graduates per group (Excel)")}
             </button>
           </div>
           <small className="footnote">

@@ -70,3 +70,28 @@ test("the coaches are ranked from the furthest behind: students not moving, as a
   );
   assert.deepEqual(rankCoaches([row("D", 0, 0, 0)], [], today)[0], { ...row("D", 0, 0, 0), not_moving: 0, not_moving_pct: 0, waiting: 0, slow: 0, oldest_days: null, rank: 1 });
 });
+
+test("each group's share of graduates, the highest first (13 Nov 2026)", () => {
+  const { groups } = coachStudentCounts(
+    [
+      { id: "S1", group_id: "G1", coach_id: "C1", coach_name: "Amal" },
+      { id: "S2", group_id: "G1", coach_id: "C1", coach_name: "Amal" },
+      { id: "S3", group_id: "G1", coach_id: "C1", coach_name: "Amal" },
+      { id: "S4", group_id: "G2", coach_id: "C2", coach_name: "Zeina" },
+      { id: "S5", group_id: "G2", coach_id: "C2", coach_name: "Zeina" },
+    ],
+    [
+      { student_id: "S1", final_status: "Graduated" },
+      { student_id: "S4", final_status: "Graduated" },
+      { student_id: "S5", final_status: "Graduated" },
+      { student_id: "S2", final_status: "Started" },
+    ],
+  );
+  assert.deepEqual(
+    groups.map((g) => [g.group_id, g.coach_name, g.assigned, g.graduated, g.graduated_pct]),
+    [
+      ["G2", "Zeina", 2, 2, 100],
+      ["G1", "Amal", 3, 1, 33],
+    ],
+  );
+});

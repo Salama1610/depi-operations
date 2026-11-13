@@ -22,6 +22,8 @@ export function portalStanding(finalStatus: unknown): PortalStanding {
 
 type Counts = { assigned: number; started: number; not_started: number; graduated: number; no_status: number };
 export type CoachStudentsRow = Counts & { coach_id: string | null; coach_name: string | null; groups: number };
+/** One group: its students by where they stand, and the share graduated (13 November 2026). */
+export type GroupStudentsRow = Counts & { group_id: string; coach_id: string | null; coach_name: string | null; graduated_pct: number };
 
 const emptyCounts = (): Counts => ({ assigned: 0, started: 0, not_started: 0, graduated: 0, no_status: 0 });
 
@@ -40,6 +42,7 @@ export function coachStudentCounts(
     if (!seen || standings.indexOf(standing) > standings.indexOf(seen)) standingOf.set(id, standing);
   }
   const rows = new Map<string, Counts & { coach_id: string | null; coach_name: string | null; groupIds: Set<string> }>();
+  const byGroup = new Map<string, Counts & { group_id: string; coach_id: string | null; coach_name: string | null }>();
   const total = emptyCounts();
   for (const s of students) {
     const coachId = s.coach_id ? String(s.coach_id) : null;
@@ -50,13 +53,22 @@ export function coachStudentCounts(
     row.groupIds.add(String(s.group_id));
     row.assigned++;
     row[standing]++;
+    const groupId = String(s.group_id);
+    const group = byGroup.get(groupId) || { ...emptyCounts(), group_id: groupId, coach_id: coachId, coach_name: s.coach_name ? String(s.coach_name) : null };
+    byGroup.set(groupId, group);
+    group.assigned++;
+    group[standing]++;
     total.assigned++;
     total[standing]++;
   }
   const coaches: CoachStudentsRow[] = [...rows.values()]
     .map(({ groupIds, ...row }) => ({ ...row, groups: groupIds.size }))
     .sort((a, b) => Number(!a.coach_id) - Number(!b.coach_id) || String(a.coach_name ?? a.coach_id).localeCompare(String(b.coach_name ?? b.coach_id)));
-  return { coaches, total };
+  // Each group's share of graduates, the highest first.
+  const groups: GroupStudentsRow[] = [...byGroup.values()]
+    .map((g) => ({ ...g, graduated_pct: g.assigned ? Math.round((g.graduated / g.assigned) * 100) : 0 }))
+    .sort((a, b) => b.graduated_pct - a.graduated_pct || b.graduated - a.graduated || a.group_id.localeCompare(b.group_id));
+  return { coaches, groups, total };
 }
 
 /** A gig waits too long for the coach's decision after this many days. */

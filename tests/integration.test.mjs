@@ -4784,14 +4784,14 @@ test("an account's coordinator sees the service it is for, with the student and 
     "SELECT s.id,s.name,s.group_id,g.coordinator,c.name coordinator_name FROM students s JOIN groups g ON g.id=s.group_id JOIN users c ON c.id=g.coordinator WHERE s.lifecycle='Active' AND g.status='Active' AND g.id NOT LIKE 'DEMO-%' AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=s.id) ORDER BY s.id LIMIT 1",
   );
   // The account's coordinator is someone else: the student is outside their groups.
-  const other = await dbRow("SELECT id,email FROM users WHERE roles LIKE '%Operations Coordinator%' AND active=1 AND id<>? AND id NOT LIKE 'DEMO-%' ORDER BY id LIMIT 1", pupil.coordinator);
+  const other = await dbRow("SELECT id,email FROM users WHERE roles='[\"Operations Coordinator\"]' AND active=1 AND id<>? AND id NOT LIKE 'DEMO-%' ORDER BY id LIMIT 1", pupil.coordinator);
   const created = new Date().toISOString();
   const url = "https://kafiil.com/service/770001-" + encodeURIComponent("تصميم-شعار");
   await dbExec(
     "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,account_id,submitted_at,updated_at) VALUES(?,?,1,?,?,'Kafiil','Needs Review','{}',?,'Locked',NULL,NULL,?,1,NULL,?,?)",
     "SLK-ACCT-VIEW", pupil.id, url, url, created, created, created, created,
   );
-  const account = await dbRow("SELECT id FROM accounts WHERE id NOT LIKE 'DEMO-%' AND student_id IS NULL ORDER BY id LIMIT 1");
+  const account = await dbRow("SELECT id FROM accounts WHERE id NOT LIKE 'DEMO-%' AND student_id IS NULL AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.account_id=accounts.id) ORDER BY id LIMIT 1");
   const before = await dbRow("SELECT coordinator_id,student_id,service_link_id FROM accounts WHERE id=?", account.id);
   await dbExec("UPDATE accounts SET coordinator_id=?,student_id=?,service_link_id=? WHERE id=?", other.id, pupil.id, "SLK-ACCT-VIEW", account.id);
   // The account is written to coordinator A, but its student is in coordinator
@@ -4885,7 +4885,7 @@ test("coordinators follow each order on a student's client account, and the lead
   await dbExec("UPDATE accounts SET student_id=?,coordinator_id=? WHERE id='ACC-ORDER-1'", pupil.id, pupil.coordinator);
 
   // Someone else's coordinator cannot record on it.
-  const other = await dbRow("SELECT id,email FROM users WHERE roles LIKE '%Operations Coordinator%' AND active=1 AND id<>? AND id NOT LIKE 'DEMO-%' ORDER BY id LIMIT 1", pupil.coordinator);
+  const other = await dbRow("SELECT id,email FROM users WHERE roles='[\"Operations Coordinator\"]' AND active=1 AND id<>? AND id NOT LIKE 'DEMO-%' ORDER BY id LIMIT 1", pupil.coordinator);
   current = { id: other.id, email: other.email };
   assert.match((await post("account_order", { account_id: "ACC-ORDER-1", order_ref: "K-1" })).error, /another coordinator's/);
 
@@ -5314,6 +5314,10 @@ test("the Overview and the Dashboard take graduation and gigs from the portal sh
     await dbExec("INSERT INTO portal_coaches(group_id,coach_name,coach_email,coach_user_id,uploaded_by,uploaded_at) VALUES(?,?,?,?,?,?)", r.group_id, r.coach_name, r.coach_email, r.coach_user_id, r.uploaded_by, r.uploaded_at);
   assert.equal(standing.total.assigned, standing.total.started + standing.total.not_started + standing.total.graduated + standing.total.no_status);
   assert.equal(standing.coaches.reduce((n, c) => n + c.assigned, 0), standing.total.assigned);
+  // And each group's share of graduates: the uploaded student's group counts them.
+  const pupilGroup = standing.groups.find((g) => g.group_id === pupil.group_id);
+  assert.ok(pupilGroup && pupilGroup.graduated >= 1 && pupilGroup.graduated_pct === Math.round((pupilGroup.graduated / pupilGroup.assigned) * 100));
+  assert.equal(standing.groups.reduce((n, g) => n + g.assigned, 0), standing.total.assigned);
   // The ranking holds every coach with a coach, from 1, the furthest behind.
   assert.deepEqual(standing.ranking.map((r) => r.rank), standing.ranking.map((_, i) => i + 1));
   assert.equal(standing.ranking.length, standing.coaches.filter((c) => c.coach_id && c.coach_id !== "system-unassigned-coach").length);
