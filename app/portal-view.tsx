@@ -16,6 +16,7 @@ import { PortalCoachStudents } from "./portal-coach-students";
 import { readSheet, toWorkbook } from "@/lib/spreadsheet";
 import { mappingProblems, portalMappingFor, nationalIdColumn, type PortalSheet } from "@/lib/domain/portal-sheets";
 import { safeHref } from "@/lib/safe-href";
+import { proofHref } from "@/lib/portal-proof-link";
 
 type Row = Record<string, any>;
 type Draft = { sheet: PortalSheet; fileName: string; headers: string[]; rows: Row[]; mapping: Record<string, string>; nidColumn: string | null };
@@ -65,7 +66,7 @@ function PortalDuplicates() {
         <tbody>
           {rows.map((r) => (
             <tr key={r.link + (r.day || "")}>
-              <td><a className="text-link" href={safeHref(r.link)} target="_blank" rel="noreferrer" dir="ltr">{r.link.length > 70 ? r.link.slice(0, 70) + "…" : r.link}</a></td>
+              <td><a className="text-link" href={proofHref(r.link)} target="_blank" rel="noreferrer" dir="ltr">{r.link.length > 70 ? r.link.slice(0, 70) + "…" : r.link}</a></td>
               <td>{r.day || "—"}</td>
               <td><bdi>{people(r.students)}</bdi></td>
               <td dir="ltr">{(r.gig_ids || []).join(", ")}</td>
@@ -107,7 +108,7 @@ function PortalDuplicates() {
                 {data.repeats.slice(0, 200).map((r: Row) => (
                   <tr key={r.portal_id + r.link + r.day}>
                     <td><bdi>{r.name}</bdi></td>
-                    <td><a className="text-link" href={safeHref(r.link)} target="_blank" rel="noreferrer" dir="ltr">{r.link.length > 70 ? r.link.slice(0, 70) + "…" : r.link}</a></td>
+                    <td><a className="text-link" href={proofHref(r.link)} target="_blank" rel="noreferrer" dir="ltr">{r.link.length > 70 ? r.link.slice(0, 70) + "…" : r.link}</a></td>
                     <td>{r.day}</td>
                     <td dir="ltr">{(r.gig_ids || []).join(", ")}</td>
                     <td>{(r.statuses || []).map((x: string) => t(x)).join(" · ")}</td>
@@ -731,7 +732,7 @@ function PortalRow({
                       <td><small>{g.comment}</small></td>
                       <td>
                         {g.url && <a className="text-link" href={safeHref(g.url)} target="_blank" rel="noreferrer">{t("Gig")} <ExternalLink size={12} /></a>}
-                        {g.proof_url && <a className="text-link" href={safeHref(g.proof_url)} target="_blank" rel="noreferrer"> {t("Proof")} <ExternalLink size={12} /></a>}
+                        {g.proof_url && <a className="text-link" href={proofHref(g.proof_url)} target="_blank" rel="noreferrer"> {t("Proof")} <ExternalLink size={12} /></a>}
                       </td>
                     </tr>
                   ))}

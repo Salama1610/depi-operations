@@ -14,6 +14,7 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { QcThread } from "@/components/qc-thread";
 import { coachStatusOf } from "@/lib/domain/portal-figures";
 import { safeHref } from "@/lib/safe-href";
+import { proofHref } from "@/lib/portal-proof-link";
 
 type Row = Record<string, any>;
 
@@ -198,7 +199,7 @@ export function CoachGigs() {
                     <small>{t("No gig link")}</small>
                   )}
                   {g.proof_url ? (
-                    <a className="small-btn" href={safeHref(g.proof_url)} target="_blank" rel="noreferrer">
+                    <a className="small-btn" href={proofHref(g.proof_url)} target="_blank" rel="noreferrer">
                       {t("Open the proof")} <ExternalLink size={12} />
                     </a>
                   ) : (

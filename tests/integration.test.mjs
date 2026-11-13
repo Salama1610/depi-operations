@@ -5638,3 +5638,31 @@ test("a transfer is on the student's status history, and a shared account follow
   const history = await dbRow("SELECT previous,value,reason FROM student_status_events WHERE student_id=? AND dimension='Group' ORDER BY created_at DESC LIMIT 1", mover.id);
   assert.deepEqual([history.previous, history.value, history.reason], [from.id, to.id, "Audit test move"]);
 });
+
+test("a portal proof opens wherever the portal holds the file, and only portal links open there", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const proofs = await route("portal-proof");
+  const open = (link) => proofs.GET(new Request("https://test.local/api/portal-proof?link=" + encodeURIComponent(link)));
+  const asked = [];
+  const realFetch = globalThis.fetch;
+  // The new S3 address lacks this file; the old server still has it.
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    asked.push(new URL(url).hostname);
+    return new Response("x", { status: url.includes("depiback.eyouthlearning.com") ? 206 : 403 });
+  };
+  try {
+    const moved = await open("https://depi-green.s3.eu-west-2.amazonaws.com/media/status_proof_screenshot/Gig_1.pdf");
+    assert.equal(moved.status, 302);
+    assert.equal(moved.headers.get("location"), "https://depiback.eyouthlearning.com/media/status_proof_screenshot/Gig_1.pdf", "the capitals and path kept");
+    assert.deepEqual(asked, ["depi-green.s3.eu-west-2.amazonaws.com", "depiback.eyouthlearning.com"], "the address the sheet gives is tried first");
+    asked.length = 0;
+    const other = await open("https://example.org/anything.pdf");
+    assert.equal(other.status, 400);
+    assert.match((await other.json()).error, /ministry portal/);
+    assert.equal(asked.length, 0, "nothing else is ever fetched");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

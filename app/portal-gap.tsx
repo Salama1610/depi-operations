@@ -11,6 +11,7 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { toWorkbook } from "@/lib/spreadsheet";
 import { coachStatusOf } from "@/lib/domain/portal-figures";
 import { safeHref } from "@/lib/safe-href";
+import { proofHref } from "@/lib/portal-proof-link";
 
 type Row = Record<string, any>;
 type Place = "not_in_queue" | "no_coach" | "with_qc" | "coach_tab" | "moved_on" | "disagree";
@@ -251,7 +252,7 @@ export function PortalGap({ open = false }: { open?: boolean }) {
                       <td>{g.why ? t(whyLabels[g.why]) : "—"}</td>
                       <td>
                         {g.url && <a className="text-link" href={safeHref(g.url)} target="_blank" rel="noreferrer">{t("Gig")} <ExternalLink size={12} /></a>}
-                        {g.proof_url && <a className="text-link" href={safeHref(g.proof_url)} target="_blank" rel="noreferrer"> {t("Proof")} <ExternalLink size={12} /></a>}
+                        {g.proof_url && <a className="text-link" href={proofHref(g.proof_url)} target="_blank" rel="noreferrer"> {t("Proof")} <ExternalLink size={12} /></a>}
                       </td>
                     </tr>
                   ))}
