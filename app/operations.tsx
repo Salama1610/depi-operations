@@ -10,8 +10,8 @@ import {
 } from "./control-center";
 import { ProgramFlow } from "./program-flow";
 import { WeeklyProgress } from "./weekly-progress";
-import { acceptedServicePlatforms } from "@/lib/domain/service-links";
-import { accountReviewRows, reviewColumns, reviewDropdowns, reviewHowTo, reviewInputColumns } from "@/lib/domain/account-review";
+import { acceptedServicePlatforms, buysServices } from "@/lib/domain/service-links";
+import { accountReviewRows, reviewColumns, reviewDropdowns, reviewHowTo, reviewInputColumns, studentColumns, studentServiceRows } from "@/lib/domain/account-review";
 import { PortalView } from "./portal-view";
 // The dashboard and its charts load only when someone opens it.
 const Dashboard = lazy(() => import("./dashboard").then((m) => ({ default: m.Dashboard })));
@@ -3791,9 +3791,19 @@ See you there!`,
     // student, with drop-downs for Project Operations and Abdullah Waheed to say
     // whether the account buys that service or should be cancelled.
     const downloadReview = () => {
-      const rows = accountReviewRows(svcShown, { owner: (id) => owner(id as string), provider: (g) => groupOfRow(g as string)?.provider || "" });
+      const lookups = {
+        owner: (id: unknown) => owner(id as string),
+        provider: (g: unknown) => groupOfRow(g as string)?.provider || "",
+        inService: (g: unknown) => buysServices(g),
+        contact: (id: unknown) => {
+          const s = index.studentsById.get(id as string) || {};
+          return { phone: s.phone, email: s.email };
+        },
+      };
+      const rows = accountReviewRows(svcShown, lookups);
       const data = toWorkbook([
         { name: "Account review", rows, columns: Object.values(reviewColumns), dropdowns: reviewDropdowns, inputColumns: reviewInputColumns, filter: true },
+        { name: "Student per row", rows: studentServiceRows(svcShown, lookups), columns: studentColumns, filter: true },
         { name: "How to fill in", rows: reviewHowTo },
       ]);
       const link = document.createElement("a");

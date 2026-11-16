@@ -8,7 +8,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { unzipSync, strFromU8 } from "fflate";
 import { toWorkbook, toXLSX, parseCSV, toCSV } from "../lib/spreadsheet.ts";
-import { accountReviewRows, reviewColumns, reviewDropdowns, reviewHowTo, reviewInputColumns, reviewOrderWord } from "../lib/domain/account-review.ts";
+import { accountReviewRows, currentStudent, oldStudent, reviewColumns, reviewDropdowns, reviewHowTo, reviewInputColumns, reviewOrderWord, studentColumns, studentServiceRows, teamOrderWord } from "../lib/domain/account-review.ts";
 
 const parts = (bytes) => Object.fromEntries(Object.entries(unzipSync(bytes)).map(([k, v]) => [k, strFromU8(v)]));
 
@@ -105,7 +105,7 @@ test("the account review sheet has one row per account and student, the reviewer
         state: "No order yet", latest: null,
       },
     ],
-    { owner: (id) => ({ "sup-1": "Abdullah Waheed", "coord-a": "Coordinator A" })[id] || id, provider: (g) => (g === "ALX5_DRT1_S1" ? "YAT" : "") },
+    { owner: (id) => ({ "sup-1": "Abdullah Waheed", "coord-a": "Coordinator A" })[id] || id, provider: (g) => (g === "ALX5_DRT1_S1" ? "YAT" : ""), inService: (g) => g === "ALX5_DRT1_S1" },
   );
   assert.deepEqual(Object.keys(rows[0]), Object.values(reviewColumns), "the columns are the declared ones, in order");
   assert.deepEqual(rows.map((r) => r.Student), ["Amr Student", "Zed Student"], "ordered by coordinator, then student");
@@ -129,6 +129,58 @@ test("the account review sheet has one row per account and student, the reviewer
     ]),
   );
   assert.match(files["xl/workbook.xml"], /<sheet name="Account review" sheetId="1"/);
-  assert.match(files["xl/worksheets/sheet1.xml"], /sqref="R2:R3"><formula1>"Buys this service,Cancel"<\/formula1>/, "Project Operations' column");
-  assert.match(files["xl/worksheets/sheet1.xml"], /sqref="S2:S3"><formula1>"Buys this service,Cancel"<\/formula1>/, "Abdullah Waheed's column");
+  assert.match(files["xl/worksheets/sheet1.xml"], /sqref="S2:S3"><formula1>"Buys this service,Cancel"<\/formula1>/, "Project Operations' column");
+  assert.match(files["xl/worksheets/sheet1.xml"], /sqref="T2:T3"><formula1>"Buys this service,Cancel"<\/formula1>/, "Abdullah Waheed's column");
+});
+
+test("the review sheet labels old students, leaves out retired accounts, and has a tab with one row per student", () => {
+  const service = (over) => ({
+    label: "x@example.org", platform: "Kafeel", status: "Available", credits: 5, student_name: "S", student_id: "S1", student_group: "ALX5_DRT1_S1",
+    student_coordinator_name: "Coordinator A", supervisor: "sup-1", service_url: "https://kafiil.com/s/1", service_platform: "Kafiil", service_slot: 1,
+    state: "No order yet", latest: null, ...over,
+  });
+  const rows = [
+    service({ label: "k1@example.org", student_name: "Beta", student_id: "S2", service_slot: 2, state: "Proof Uploaded", latest: { amount: 5, bought_on: "Kafiil", updated_at: "2026-11-10T00:00:00Z" } }),
+    service({ label: "k2@example.org", student_name: "Beta", student_id: "S2", service_slot: 1, platform: "Nafezly", service_platform: "Nafezly", service_url: "https://nafezly.com/s/2", state: "Buy", latest: { amount: null, bought_on: null, updated_at: "2026-11-11T00:00:00Z" } }),
+    service({ label: "k3@example.org", student_name: "Beta", student_id: "S2", service_slot: 3, state: "Cancelled" }),
+    service({ label: "old@example.org", student_name: "Alef", student_id: "S1", student_group: "DKH5_DRT2_G1", state: "Done", latest: { amount: 1, bought_on: "Nafezly", updated_at: "2026-11-09T00:00:00Z" } }),
+    service({ label: "gone@example.org", student_name: "Gamma", student_id: "S3", status: "Retired" }),
+  ];
+  const lookups = {
+    owner: (id) => id,
+    provider: (g) => (g === "ALX5_DRT1_S1" ? "YAT" : "HRV"),
+    inService: (g) => g === "ALX5_DRT1_S1",
+    contact: (id) => ({ phone: "010-" + id, email: id + "@example.invalid" }),
+  };
+  // A retired account is not on the sheet, and a student outside the service groups is an old student.
+  const review = accountReviewRows(rows, lookups);
+  assert.equal(review.length, 4, "the retired account's row is left out");
+  assert.ok(!review.some((r) => r.Account === "gone@example.org"));
+  assert.deepEqual(review.map((r) => [r.Student, r["Student type"]]), [["Alef", oldStudent], ["Beta", currentStudent], ["Beta", currentStudent], ["Beta", currentStudent]]);
+  // One row per student, like the team's sheet; the retired account's student is not there at all.
+  const students = studentServiceRows(rows, lookups);
+  assert.deepEqual(Object.keys(students[0]), studentColumns);
+  assert.deepEqual(students.map((r) => [r.NameEn, r["Student type"]]), [["Alef", oldStudent], ["Beta", currentStudent]]);
+  const beta = students[1];
+  assert.deepEqual(
+    [beta["Service 1 Platform"], beta["Service 1 Status"], beta["Service 2 Platform"], beta["Service 2 Status"], beta["Service 3 Platform"], beta["Service 3 Status"]],
+    ["Nafezly", "Buy", "Kafiil", "Upload POH", "Kafiil", "Canceled"],
+    "the services in their order, with the team's status words",
+  );
+  assert.deepEqual([beta["Kafeel Account"], beta["Nafezly Account"], beta["Nafezly Services URL"]], ["k1@example.org | k3@example.org", "k2@example.org", "https://nafezly.com/s/2"]);
+  assert.deepEqual([beta["Price Paid"], beta["Bought On"], beta.Phone, beta.Email, beta["Training Provider"], beta["Current Group Code"]], ["5", "Kafiil", "010-S2", "S2@example.invalid", "YAT", "ALX5_DRT1_S1"]);
+  assert.equal(students[0]["Service 2 Status"], "", "a student with one service has nothing in the others");
+  assert.equal(teamOrderWord("No order yet"), "");
+  // Three tabs build into one workbook; only the first has drop-downs.
+  const files = parts(
+    toWorkbook([
+      { name: "Account review", rows: review, columns: Object.values(reviewColumns), dropdowns: reviewDropdowns, inputColumns: reviewInputColumns, filter: true },
+      { name: "Student per row", rows: students, columns: studentColumns, filter: true },
+      { name: "How to fill in", rows: reviewHowTo },
+    ]),
+  );
+  assert.match(files["xl/workbook.xml"], /<sheet name="Student per row" sheetId="2"/);
+  assert.match(files["xl/worksheets/sheet1.xml"], /<dataValidations count="2">/);
+  assert.doesNotMatch(files["xl/worksheets/sheet2.xml"], /dataValidation/);
+  assert.match(files["xl/worksheets/sheet2.xml"], /<autoFilter ref="A1:T3"\/>/);
 });
