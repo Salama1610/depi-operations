@@ -3150,4 +3150,15 @@ export const ar: Record<string, string> = {
   // Account review sheet (16 Nov 2026)
   "Download the review sheet": "تنزيل شيت المراجعة",
   "One row per account and student, with drop-downs for Project Operations and Abdullah Waheed: the account buys this service, or cancel it. Follows the filters above.": "صف لكل حساب وطالب، مع قوائم منسدلة لعمليات المشروع وعبدالله وحيد: الحساب يشتري هذه الخدمة أو يُلغى. يتبع الفلاتر أعلاه.",
+  // Portal vs our system: action on the portal before our QC (16 Nov 2026).
+  "Action on the portal before our QC": "إجراء على البوابة قبل جودتنا",
+  "Gone from the latest sheet, still open with our QC": "اختفت من آخر شيت وما زالت مفتوحة عند جودتنا",
+  "The portal acted before our QC's verdict": "البوابة اتخذت إجراءً قبل قرار جودتنا",
+  "The portal acted before it reached our QC": "البوابة اتخذت إجراءً قبل أن تصل إلى جودتنا",
+  "Still open with our QC": "ما زالت مفتوحة عند جودتنا",
+  "Our verdict came after": "قرارنا جاء بعدها",
+  "Never reached our QC": "لم تصل إلى جودتنا",
+  "{v0} still open with our QC · {v1} our verdict came after · {v2} never reached our QC": "{v0} مفتوحة عند جودتنا · {v1} قرارنا جاء بعدها · {v2} لم تصل إلى جودتنا",
+  "Which": "أيها",
+  "All of them": "الكل",
 };

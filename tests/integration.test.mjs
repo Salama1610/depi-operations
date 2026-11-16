@@ -4108,11 +4108,12 @@ test("the Quality Lead and Coach Operations read the gap between the portal's gi
   assert.deepEqual(place(gap, "GAP-3"), ["with_qc", null]);
   assert.deepEqual(place(gap, "GAP-7"), ["no_coach", "not_linked"], "checked, but the student is not linked");
   assert.deepEqual(place(gap, "GAP-10"), ["with_qc", "not_linked"]);
-  assert.equal(place(gap, "GAP-4"), undefined, "the portal has rejected it");
-  assert.equal(place(gap, "GAP-5"), undefined);
-  assert.equal(place(gap, "GAP-6"), undefined, "the coach has approved it: it waits for the auditor");
+  // Not waiting for the coach: the portal acted on them before they reached our QC.
+  assert.deepEqual(place(gap, "GAP-4"), ["portal_first", "never_queued"], "the portal has rejected it");
+  assert.deepEqual(place(gap, "GAP-5"), ["portal_first", "never_queued"]);
+  assert.deepEqual(place(gap, "GAP-6"), ["portal_first", "never_queued"], "the coach has approved it: it waits for the auditor");
   const counts = (v) => Object.fromEntries(Object.entries(v.places).map(([k, n]) => [k, n.gigs]));
-  assert.deepEqual(counts(gap), { not_in_queue: 0, no_coach: 1, with_qc: 3, coach_tab: 3, moved_on: 0, disagree: 0 });
+  assert.deepEqual(counts(gap), { not_in_queue: 0, no_coach: 1, with_qc: 3, coach_tab: 3, portal_first: 3, moved_on: 0, disagree: 0 });
   const coachOf = (v) => v.coaches.find((c) => c.coach_id === "staff-coach");
   assert.deepEqual([coachOf(gap).waiting, coachOf(gap).qc_approved, coachOf(gap).qc_rejected, coachOf(gap).with_qc, coachOf(gap).not_in_queue], [5, 2, 1, 2, 0]);
   assert.ok(!/reviewer|reviewed_by|Checked it/.test(JSON.stringify(gap)), "no reviewer named and no comment sent");
@@ -4150,6 +4151,14 @@ test("the Quality Lead and Coach Operations read the gap between the portal's gi
   assert.equal(card(moved, "GAP-3").settled, false, "still waits for the coach");
   assert.equal(card(moved, "GAP-2").settled, false, "our verdict stands");
   assert.equal(moved.reviewers.reduce((n, p) => n + p.pending, 0), 1, "only the student with GAP-3 still waits");
+  // The member who holds GAP-1 is not shown it: only the lead (and Coach Operations, in the gap) see what the portal decided first.
+  const holder = await dbRow("SELECT reviewer FROM portal_gig_reviews WHERE portal_gig_id='GAP-1'");
+  current = { id: holder.reviewer, email: holder.reviewer + "@example.invalid" };
+  const memberView = await (await qc.GET()).json();
+  assert.equal(memberView.lead, false);
+  assert.equal(card(memberView, "GAP-1"), undefined);
+  assert.ok(!memberView.reviews.some((r) => r.settled), "no settled card for a member");
+  current = lead;
   const sharedOut = await (
     await qc.POST(new Request("https://test.local/api/portal-qc", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "redistribute" }) }))
   ).json();
@@ -4157,11 +4166,18 @@ test("the Quality Lead and Coach Operations read the gap between the portal's gi
 
   const later = await readGap();
   assert.equal(later.waiting.gigs, 1);
-  assert.deepEqual(place(later, "GAP-1"), ["moved_on", "decided_on_portal"]);
-  assert.deepEqual(place(later, "GAP-10"), ["moved_on", "decided_on_portal"]);
+  assert.deepEqual(place(later, "GAP-1"), ["portal_first", "decided_on_portal"]);
+  assert.deepEqual(place(later, "GAP-10"), ["portal_first", "decided_on_portal"]);
+  const firstOf = (v, id) => v.gigs.filter((g) => g.id === id && g.place === "portal_first").map((g) => g.why);
+  assert.deepEqual(firstOf(later, "GAP-2"), ["before_verdict"], "the portal rejected it before our verdict");
+  assert.deepEqual(firstOf(later, "GAP-9"), [], "it changed after our verdict");
+  assert.deepEqual(
+    [later.places.portal_first.gigs, later.portal_first.open_with_qc.gigs, later.portal_first.before_verdict.gigs, later.portal_first.never_queued.gigs],
+    [3, 2, 1, 0],
+  );
   assert.equal(place(later, "GAP-7"), undefined, "decided by our QC and gone from the sheet");
   assert.equal(place(later, "GAP-8"), undefined, "the portal rejected it with no decision from the coach");
-  assert.deepEqual(place(later, "GAP-2"), ["disagree", "coach_first"]);
+  assert.deepEqual(later.gigs.filter((g) => g.id === "GAP-2" && g.place === "disagree").map((g) => g.why), ["coach_first"]);
   assert.deepEqual(place(later, "GAP-9"), ["disagree", "unclear"]);
   assert.equal(later.places.disagree.gigs, 2);
   assert.equal(coachOf(later).against_qc, 1, "not the gig the coach decided before our verdict");

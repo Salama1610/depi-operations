@@ -14,14 +14,16 @@ import { safeHref } from "@/lib/safe-href";
 import { proofHref } from "@/lib/portal-proof-link";
 
 type Row = Record<string, any>;
-type Place = "not_in_queue" | "no_coach" | "with_qc" | "coach_tab" | "moved_on" | "disagree";
+type Place = "not_in_queue" | "no_coach" | "with_qc" | "coach_tab" | "portal_first" | "moved_on" | "disagree";
+type FirstWhy = "decided_on_portal" | "before_verdict" | "never_queued";
 
 const placeLabels: Record<Place, string> = {
   not_in_queue: "Not in our system",
   no_coach: "Checked, but no coach sees it",
   with_qc: "With our QC, no verdict yet",
   coach_tab: "In the coach's Gigs tab",
-  moved_on: "Decided on the portal before our QC",
+  portal_first: "Action on the portal before our QC",
+  moved_on: "Gone from the latest sheet, still open with our QC",
   disagree: "Our QC and the coach disagree",
 };
 const whyLabels: Record<string, string> = {
@@ -32,13 +34,21 @@ const whyLabels: Record<string, string> = {
   industry: "Depi Industry group",
   no_coach: "No coach with an account for this group",
   decided_on_portal: "The portal moved on before our QC gave a verdict",
+  before_verdict: "The portal acted before our QC's verdict",
+  never_queued: "The portal acted before it reached our QC",
   not_in_sheet: "No longer in the latest sheet",
   coach_first: "The coach decided first, before our QC's verdict",
   unclear: "The sheet cannot show who came first: it only has the day the gig last changed",
 };
 const noCoach = "none";
 /** The list opens on the first of these with gigs in it: what most needs someone to act comes first. */
-const firstShown: Place[] = ["not_in_queue", "no_coach", "disagree", "moved_on", "with_qc", "coach_tab"];
+const firstShown: Place[] = ["not_in_queue", "no_coach", "disagree", "portal_first", "moved_on", "with_qc", "coach_tab"];
+const firstWhys: FirstWhy[] = ["decided_on_portal", "before_verdict", "never_queued"];
+const firstWhyLabels: Record<FirstWhy, string> = {
+  decided_on_portal: "Still open with our QC",
+  before_verdict: "Our verdict came after",
+  never_queued: "Never reached our QC",
+};
 
 export function PortalGap({ open = false }: { open?: boolean }) {
   const t = useT();
@@ -48,6 +58,7 @@ export function PortalGap({ open = false }: { open?: boolean }) {
   const [error, setError] = useState("");
   const [picked, setPicked] = useState<Place | null>(null);
   const [coach, setCoach] = useState("All");
+  const [firstWhy, setFirstWhy] = useState<"All" | FirstWhy>("All");
   const [shown, setShown] = useState(50);
 
   useEffect(() => {
@@ -84,7 +95,9 @@ export function PortalGap({ open = false }: { open?: boolean }) {
   );
 
   const gigs: Row[] = data?.gigs || [];
-  const list = gigs.filter((g) => g.place === place && (coach === "All" || (g.coach_id || noCoach) === coach));
+  const list = gigs.filter(
+    (g) => g.place === place && (coach === "All" || (g.coach_id || noCoach) === coach) && (place !== "portal_first" || firstWhy === "All" || g.why === firstWhy),
+  );
   const checked = gigs.filter((g) => g.place === "coach_tab");
 
   function download() {
@@ -99,6 +112,7 @@ export function PortalGap({ open = false }: { open?: boolean }) {
           "With our QC": c.with_qc,
           "Not in our system": c.not_in_queue,
           "Against our QC": c.against_qc,
+          "Action on the portal before our QC": c.portal_first,
           "Oldest since": c.oldest ? String(c.oldest).slice(0, 10) : "",
         })),
       },
@@ -160,6 +174,14 @@ export function PortalGap({ open = false }: { open?: boolean }) {
             {tile("coach_tab", t("{v0} approved · {v1} rejected", { v0: checked.filter((g) => g.qc === "Approved").length, v1: checked.filter((g) => g.qc === "Rejected").length }))}
             {tile("with_qc")}
             {tile("no_coach")}
+            {tile(
+              "portal_first",
+              t("{v0} still open with our QC · {v1} our verdict came after · {v2} never reached our QC", {
+                v0: data.portal_first.open_with_qc.gigs,
+                v1: data.portal_first.before_verdict.gigs,
+                v2: data.portal_first.never_queued.gigs,
+              }),
+            )}
             {tile("moved_on")}
             {tile("disagree", t("{v0} where the coach decided first", { v0: gigs.filter((g) => g.why === "coach_first").length }))}
           </div>
@@ -175,6 +197,7 @@ export function PortalGap({ open = false }: { open?: boolean }) {
                   <th>{t("With our QC")}</th>
                   <th>{t("Not in our system")}</th>
                   <th>{t("Against our QC")}</th>
+                  <th>{t("Action on the portal before our QC")}</th>
                   <th>{t("Oldest since")}</th>
                 </tr>
               </thead>
@@ -188,6 +211,7 @@ export function PortalGap({ open = false }: { open?: boolean }) {
                     <td><bdi dir="ltr">{c.with_qc}</bdi></td>
                     <td><bdi dir="ltr">{c.not_in_queue}</bdi></td>
                     <td><bdi dir="ltr">{c.against_qc}</bdi></td>
+                    <td><bdi dir="ltr">{c.portal_first}</bdi></td>
                     <td>{day(c.oldest)}</td>
                   </tr>
                 ))}
@@ -212,6 +236,23 @@ export function PortalGap({ open = false }: { open?: boolean }) {
                 ]}
               />
             </label>
+            {place === "portal_first" && (
+              <label className="field">
+                {t("Which")}
+                <SearchableSelect
+                  label={t("Which")}
+                  value={firstWhy}
+                  onChange={(value) => {
+                    setFirstWhy(value as "All" | FirstWhy);
+                    setShown(50);
+                  }}
+                  options={[
+                    { value: "All", label: t("All of them") },
+                    ...firstWhys.map((w) => ({ value: w, label: t(firstWhyLabels[w]) + " (" + (data.portal_first[w === "decided_on_portal" ? "open_with_qc" : w].gigs) + ")" })),
+                  ]}
+                />
+              </label>
+            )}
             <button type="button" className="small-btn" onClick={download}>
               <Download size={14} /> {t("Download every gig (Excel)")}
             </button>

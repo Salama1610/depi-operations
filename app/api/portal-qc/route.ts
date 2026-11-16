@@ -332,7 +332,10 @@ export async function GET() {
     }
     return Response.json(
       {
-        reviews,
+        // Gigs the portal acted on before our QC are for the Quality Lead (and
+        // Coach Operations, in the gap panel) to see and count (16 November
+        // 2026): a member has nothing to do on them, so they are not sent.
+        reviews: leads ? reviews : reviews.filter((r: any) => !r.settled),
         reviewers: leads ? loads.map(({ id, name, pending }) => ({ id, name, pending })) : [],
         lead: leads,
         me: u.id,

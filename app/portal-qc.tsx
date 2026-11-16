@@ -368,7 +368,7 @@ export function PortalQc() {
             { value: "Pending", label: t("Waiting for review") },
             { value: "Approved", label: t("Approved") },
             { value: "Rejected", label: t("Rejected") },
-            { value: "Settled", label: t("Decided on the portal before our QC") },
+            ...(data.lead ? [{ value: "Settled", label: t("Decided on the portal before our QC") }] : []),
             { value: "All", label: t("All") },
           ]}
         />

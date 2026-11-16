@@ -81,9 +81,10 @@ test("a review still open is in the gap only when its proof no longer waits on t
     [open("still"), open("gone", { status: "Approved", provider_status: "Approved" }), open("left", { in_sheet: null, status: null, provider_status: null })],
   );
   assert.deepEqual(placeOf(gap, "still"), ["with_qc", null]);
-  assert.deepEqual(placeOf(gap, "gone"), ["moved_on", "decided_on_portal"]);
+  assert.deepEqual(placeOf(gap, "gone"), ["portal_first", "decided_on_portal"]);
   assert.deepEqual(placeOf(gap, "left"), ["moved_on", "not_in_sheet"]);
-  assert.equal(gap.places.moved_on.gigs, 2);
+  assert.equal(gap.places.moved_on.gigs, 1);
+  assert.equal(gap.places.portal_first.gigs, 1);
   assert.equal(gap.waiting.gigs, 1, "the other direction does not change the portal's count");
 });
 
@@ -161,4 +162,33 @@ test("a coach's decision against our verdict is counted only when the sheet does
   assert.equal(gap.places.disagree.gigs, 4);
   assert.equal(gap.waiting.gigs, 0, "decided gigs do not change the portal's count");
   assert.equal(gap.coaches.find((c) => c.coach_id === "C1").against_qc, 3, "not the one the coach decided first");
+});
+
+test("action on the portal before our QC: still open with us, our verdict after, or never reached us", () => {
+  const acted = { status: "Approved", provider_status: "Approved" };
+  const gap = portalCoachGap(
+    [],
+    [{ ...gig("open", acted), proof_key: "/open", qc: "Pending", in_sheet: "open" }],
+    [],
+    [
+      gig("verdict-after", { ...acted, qc: "Approved", qc_at: "2026-11-05T09:00:00Z", updated_on: "2026-11-03" }),
+      gig("verdict-same-day", { ...acted, qc: "Approved", qc_at: "2026-11-05T09:00:00Z", updated_on: "2026-11-05" }),
+      gig("verdict-first", { ...acted, qc: "Rejected", qc_at: "2026-11-02T09:00:00Z", updated_on: "2026-11-04" }),
+      gig("still-waiting", { qc: "Approved", qc_at: "2026-11-05T09:00:00Z", updated_on: "2026-11-01" }),
+    ],
+    [gig("never", { status: "Rejected", provider_status: "Pending", coach_id: "C2", coach_name: "Coach Two" }), gig("never-waiting")],
+  );
+  assert.deepEqual(placeOf(gap, "open"), ["portal_first", "decided_on_portal"]);
+  assert.deepEqual(placeOf(gap, "verdict-after"), ["portal_first", "before_verdict"]);
+  assert.equal(placeOf(gap, "verdict-same-day"), undefined, "the same day cannot show who came first");
+  assert.equal(placeOf(gap, "verdict-first"), undefined, "our QC decided before the portal changed it");
+  assert.equal(placeOf(gap, "still-waiting"), undefined, "the portal has not acted on it");
+  assert.deepEqual(placeOf(gap, "never"), ["portal_first", "never_queued"]);
+  assert.equal(placeOf(gap, "never-waiting"), undefined);
+  assert.deepEqual(
+    [gap.places.portal_first.gigs, gap.portal_first.open_with_qc.gigs, gap.portal_first.before_verdict.gigs, gap.portal_first.never_queued.gigs],
+    [3, 1, 1, 1],
+  );
+  assert.deepEqual(gap.coaches.map((c) => [c.coach_id, c.portal_first]).sort(), [["C1", 2], ["C2", 1]]);
+  assert.equal(gap.waiting.gigs, 0, "none of them counts as waiting for the coach");
 });

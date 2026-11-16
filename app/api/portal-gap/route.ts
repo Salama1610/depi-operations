@@ -32,7 +32,7 @@ export async function GET() {
     if (!gigsBatch) return Response.json({ sheet: false }, { headers: { "Cache-Control": "no-store" } });
     // Whoever does not see revoked students does not see them here either, as in Portal gigs QC.
     const hidden = revokesStudents(u) ? "" : " AND COALESCE(s.lifecycle,'')<>'Revoked'";
-    const [sheet, openReviews, decided] = await Promise.all([
+    const [sheet, openReviews, decided, reviewed, unreviewed] = await Promise.all([
       all(
         `SELECT z.portal_gig_id,z.portal_student_id,z.student_name,z.title,z.url,z.proof_url,z.created_on,z.status,z.trainer_status,z.provider_status,r.status qc,${ourColumns("p.student_id")}
          FROM portal_gigs z
@@ -64,8 +64,30 @@ export async function GET() {
         studentsBatch,
         gigsBatch,
       ),
+      // Action on the portal before our QC (16 November 2026): gigs the portal
+      // no longer has waiting for the coach, with our verdict, or with no review of ours at all.
+      all(
+        `SELECT z.portal_gig_id,z.portal_student_id,z.student_name,z.title,z.url,z.proof_url,z.created_on,z.updated_on,z.status,z.trainer_status,z.provider_status,r.status qc,r.reviewed_at qc_at,${ourColumns("p.student_id")}
+         FROM portal_gigs z
+         JOIN portal_gig_reviews r ON r.proof_key=${proofKeySql("z")} AND r.status IN ('Approved','Rejected')
+         LEFT JOIN portal_students p ON p.batch_id=? AND p.portal_id=z.portal_student_id
+         ${ours("p.student_id")}
+         WHERE z.batch_id=? AND NOT (${portalWaitsForCoachSql("z")})${hidden}`,
+        studentsBatch,
+        gigsBatch,
+      ),
+      all(
+        `SELECT z.portal_gig_id,z.portal_student_id,z.student_name,z.title,z.url,z.proof_url,z.created_on,z.updated_on,z.status,z.trainer_status,z.provider_status,${ourColumns("p.student_id")}
+         FROM portal_gigs z
+         LEFT JOIN portal_students p ON p.batch_id=? AND p.portal_id=z.portal_student_id
+         ${ours("p.student_id")}
+         WHERE z.batch_id=? AND NOT (${portalWaitsForCoachSql("z")})
+           AND NOT EXISTS (SELECT 1 FROM portal_gig_reviews r WHERE r.proof_key=${proofKeySql("z")})${hidden}`,
+        studentsBatch,
+        gigsBatch,
+      ),
     ]);
-    return Response.json({ sheet: true, ...portalCoachGap(sheet, openReviews, decided) }, { headers: { "Cache-Control": "no-store" } });
+    return Response.json({ sheet: true, ...portalCoachGap(sheet, openReviews, decided, reviewed, unreviewed) }, { headers: { "Cache-Control": "no-store" } });
   } catch (e: any) {
     return failure(e, "portal-gap");
   }

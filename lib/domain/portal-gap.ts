@@ -14,7 +14,7 @@ import { proofKey } from "./portal-review.ts";
 
 export const portalGapRoles = ["Quality Lead", "Coach Operations", "Operations Systems / Admin"];
 
-export type GapPlace = "not_in_queue" | "no_coach" | "with_qc" | "coach_tab" | "moved_on" | "disagree";
+export type GapPlace = "not_in_queue" | "no_coach" | "with_qc" | "coach_tab" | "portal_first" | "moved_on" | "disagree";
 export type GapWhy =
   | "new"
   | "not_linked"
@@ -23,6 +23,8 @@ export type GapWhy =
   | "industry"
   | "no_coach"
   | "decided_on_portal"
+  | "before_verdict"
+  | "never_queued"
   | "not_in_sheet"
   | "coach_first"
   | "unclear";
@@ -118,8 +120,17 @@ export type GapLine = ReturnType<typeof line>;
 
 const tally = (list: GapLine[]) => ({ gigs: list.length, students: new Set(list.map((g) => g.portal_student_id)).size });
 
-/** The gap, from the gigs sheet's rows, the reviews our quality team has open, and the gigs both it and the coach decided. */
-export function portalCoachGap(sheet: SheetGig[], openReviews: OpenReview[], decided: SheetGig[] = []) {
+/** The portal acted on the gig (16 November 2026): it no longer waits for the coach. */
+const portalActed = (g: SheetGig) => portalGigStage(g) !== "coach";
+
+/**
+ * The gap, from the gigs sheet's rows, the reviews our quality team has open,
+ * the gigs both it and the coach decided, and, for "action on the portal
+ * before our QC" (16 November 2026): the gigs our QC gave a verdict on that
+ * the portal has acted on (`reviewed`, with qc_at and updated_on), and the
+ * gigs the portal acted on that never had a review of ours (`unreviewed`).
+ */
+export function portalCoachGap(sheet: SheetGig[], openReviews: OpenReview[], decided: SheetGig[] = [], reviewed: SheetGig[] = [], unreviewed: SheetGig[] = []) {
   const waiting = sheet.filter((g) => portalGigStage(g) === "coach");
   const stillWaiting = new Set(waiting.map((g) => proofKey(g)));
   const onPortal = waiting.map((g) => {
@@ -128,13 +139,18 @@ export function portalCoachGap(sheet: SheetGig[], openReviews: OpenReview[], dec
   });
   const movedOn = openReviews
     .filter((r) => !stillWaiting.has(String(r.proof_key ?? "")))
-    .map((r) => line(r, "moved_on", r.in_sheet ? "decided_on_portal" : "not_in_sheet"));
+    .map((r) => (r.in_sheet ? line(r, "portal_first", "decided_on_portal") : line(r, "moved_on", "not_in_sheet")));
+  // Our verdict came on a later day than the portal's last change, so the portal acted first.
+  const beforeVerdict = reviewed.filter((g) => portalActed(g) && coachWentFirst(g)).map((g) => line(g, "portal_first", "before_verdict"));
+  const neverQueued = unreviewed.filter(portalActed).map((g) => line(g, "portal_first", "never_queued"));
+  const portalFirst = [...movedOn.filter((g) => g.place === "portal_first"), ...beforeVerdict, ...neverQueued];
+  const leftSheet = movedOn.filter((g) => g.place === "moved_on");
   const against = decided.filter(disagrees).map((g) => line(g, "disagree", coachWentFirst(g) ? "coach_first" : "unclear"));
 
-  const coaches = new Map<string, { coach_id: string | null; coach_name: string | null; waiting: number; qc_approved: number; qc_rejected: number; with_qc: number; not_in_queue: number; against_qc: number; oldest: string | null }>();
+  const coaches = new Map<string, { coach_id: string | null; coach_name: string | null; waiting: number; qc_approved: number; qc_rejected: number; with_qc: number; not_in_queue: number; against_qc: number; portal_first: number; oldest: string | null }>();
   const rowOf = (g: GapLine) => {
     const key = g.coach_id ?? "";
-    const c = coaches.get(key) ?? { coach_id: g.coach_id, coach_name: g.coach_name, waiting: 0, qc_approved: 0, qc_rejected: 0, with_qc: 0, not_in_queue: 0, against_qc: 0, oldest: null };
+    const c = coaches.get(key) ?? { coach_id: g.coach_id, coach_name: g.coach_name, waiting: 0, qc_approved: 0, qc_rejected: 0, with_qc: 0, not_in_queue: 0, against_qc: 0, portal_first: 0, oldest: null };
     coaches.set(key, c);
     return c;
   };
@@ -149,14 +165,20 @@ export function portalCoachGap(sheet: SheetGig[], openReviews: OpenReview[], dec
   }
   // A coach who decided before our verdict did not go against it.
   for (const g of against) if (g.why === "unclear") rowOf(g).against_qc++;
+  for (const g of portalFirst) rowOf(g).portal_first++;
   const oldestFirst = (a: GapLine, b: GapLine) => String(a.date ?? "").localeCompare(String(b.date ?? ""));
   const of = (place: GapPlace) => tally(onPortal.filter((g) => g.place === place));
   return {
     waiting: tally(onPortal),
     in_our_system: tally(onPortal.filter((g) => g.qc)),
-    places: { not_in_queue: of("not_in_queue"), no_coach: of("no_coach"), with_qc: of("with_qc"), coach_tab: of("coach_tab"), moved_on: tally(movedOn), disagree: tally(against) },
+    places: { not_in_queue: of("not_in_queue"), no_coach: of("no_coach"), with_qc: of("with_qc"), coach_tab: of("coach_tab"), portal_first: tally(portalFirst), moved_on: tally(leftSheet), disagree: tally(against) },
+    portal_first: {
+      open_with_qc: tally(portalFirst.filter((g) => g.why === "decided_on_portal")),
+      before_verdict: tally(beforeVerdict),
+      never_queued: tally(neverQueued),
+    },
     // The coaches with the most our quality team has already checked come first: those wait only for the coach.
     coaches: [...coaches.values()].sort((a, b) => b.qc_approved + b.qc_rejected - (a.qc_approved + a.qc_rejected) || b.waiting - a.waiting),
-    gigs: [...onPortal, ...movedOn, ...against].sort(oldestFirst),
+    gigs: [...onPortal, ...portalFirst, ...leftSheet, ...against].sort(oldestFirst),
   };
 }
