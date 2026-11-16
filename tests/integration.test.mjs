@@ -4566,12 +4566,14 @@ test("a retired account no longer counts among a student's three, so the catch-u
   await link("SLK-RET-3", 3, "Kafiil", "ACC-RET-K2");
   await dbExec("UPDATE accounts SET status='Retired' WHERE id='ACC-RET-K2'");
   await link("SLK-RET-4", 4, "Kafiil", null);
+  // Two of the three free accounts do not work, says their coordinator: the third is the one given.
+  await dbExec("UPDATE accounts SET coordinator_state='Does not work' WHERE id IN ('ACC-RET-F1','ACC-RET-F2')");
   const swept = await check("account_link_sweep", {});
   assert.ok(swept.linked >= 1, JSON.stringify(swept));
   const fourth = await dbRow("SELECT l.account_id,a.status,a.platform FROM service_links l JOIN accounts a ON a.id=l.account_id WHERE l.id='SLK-RET-4'");
   assert.ok(fourth, "the waiting service has an account now");
   assert.deepEqual([fourth.status, fourth.platform], ["Available", "Kafeel"]);
-  assert.ok(["ACC-RET-F1", "ACC-RET-F2", "ACC-RET-F3"].includes(fourth.account_id), "a free account, never the retired one");
+  assert.equal(fourth.account_id, "ACC-RET-F3", "a free account that works, never the retired one");
   // The student now has three live accounts and no more: nothing further is linked.
   const live = await dbRows("SELECT DISTINCT account_id FROM service_links l JOIN accounts a ON a.id=l.account_id WHERE l.student_id=? AND a.status<>'Retired'", pupil.id);
   assert.equal(live.length, 3);
@@ -4639,6 +4641,11 @@ test("an account's place is taken from a service nothing was bought through, and
   assert.equal((await dbRow("SELECT account_id FROM service_links WHERE id='SLK-REL-3'")).account_id, "ACC-REL-2");
   // A cancelled order does not.
   await dbExec("UPDATE account_orders SET status='Cancelled' WHERE id='ORD-REL-1'");
+  // An account its coordinator marked "In use" keeps its place: the order may not be recorded yet.
+  await dbExec("UPDATE accounts SET coordinator_state='In use' WHERE id='ACC-REL-2'");
+  assert.deepEqual(await mod.releaseUnusedPlace("ACC-REL-2", first, null, "test"), { released: false, reason: "marked in use" });
+  assert.equal((await dbRow("SELECT account_id FROM service_links WHERE id='SLK-REL-3'")).account_id, "ACC-REL-2");
+  await dbExec("UPDATE accounts SET coordinator_state=NULL WHERE id='ACC-REL-2'");
   const alone = await mod.releaseUnusedPlace("ACC-REL-2", first, null, "Nothing bought, given to a student who will");
   assert.deepEqual(alone, { released: true, platform: "Nafezly" });
   assert.equal((await dbRow("SELECT account_id FROM service_links WHERE id='SLK-REL-3'")).account_id, null, "the service is free for another account");

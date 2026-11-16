@@ -134,12 +134,14 @@ export async function releaseGraduatedAccounts(actor: any) {
  * decision to use every account that is not buying. The service stays approved
  * and free for another account, the student's coordinator is told, and it is
  * audited. A place with an order that is not cancelled is refused: a purchase
- * in progress or made keeps its account. Like releasing a graduate's place, an
+ * in progress or made keeps its account. So is a place on an account its
+ * coordinator has marked "In use": the order may simply not be recorded yet. Like releasing a graduate's place, an
  * account left with nobody gives up its coordinators.
  */
 export async function releaseUnusedPlace(accountId: string, studentId: string, actor: any | null, reason: string) {
-  const account: any = await stmt("SELECT id,label,platform,student_id FROM accounts WHERE id=?", accountId).first();
+  const account: any = await stmt("SELECT id,label,platform,student_id,coordinator_state FROM accounts WHERE id=?", accountId).first();
   if (!account) return { released: false, reason: "no account" } as const;
+  if (account.coordinator_state === "In use") return { released: false, reason: "marked in use" } as const;
   const links = await all("SELECT id FROM service_links WHERE account_id=? AND student_id=?", accountId, studentId);
   if (!links.length && account.student_id !== studentId) return { released: false, reason: "not on this account" } as const;
   const bought: any = await stmt("SELECT id FROM account_orders WHERE account_id=? AND student_id=? AND status<>'Cancelled' LIMIT 1", accountId, studentId).first();
@@ -288,7 +290,7 @@ export async function linkAccountKey(studentId: string, actor: any | null) {
       ? `EXISTS (SELECT 1 FROM students x WHERE lower(trim(coalesce(x.job_profile,'')))=? AND (x.id=a.student_id OR x.id IN (SELECT l.student_id FROM service_links l WHERE l.account_id=a.id)))`
       : "0=1";
     const account: any = await stmt(
-      `SELECT a.id,a.label,a.student_id FROM accounts a WHERE a.platform=? AND a.status='Available' AND a.active_assignment IS NULL AND a.${side}
+      `SELECT a.id,a.label,a.student_id FROM accounts a WHERE a.platform=? AND a.status='Available' AND a.active_assignment IS NULL AND coalesce(a.coordinator_state,'')<>'Does not work' AND a.${side}
          AND ${accountUsesSql("a")}<? AND coalesce(a.student_id,'')<>? AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.account_id=a.id AND l.student_id=?)
          AND NOT ${sameProfile}
        ORDER BY CASE WHEN a.student_id IS NULL THEN 0 ELSE 1 END,a.credits DESC,a.id LIMIT 1`,
