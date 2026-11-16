@@ -3431,6 +3431,9 @@ export async function POST(req: Request) {
             a.id,
             pupil.student_id,
           ).first();
+          // Done and the POH come after the price paid is written (16 November 2026).
+          const priced = (o: any) => o && o.amount !== null && o.amount !== undefined && o.amount !== "";
+          if (to === "Done" || to === "Proof Uploaded") ensure(priced(current), "Choose the price paid before marking the order Done or uploading the POH.");
           const stamps = (from: any) => ({
             done: to === "Done" || to === "Proof Uploaded" ? from?.done_at || t : from?.done_at || null,
             proof: to === "Proof Uploaded" ? t : null,
@@ -3493,6 +3496,7 @@ export async function POST(req: Request) {
           "Proof Uploaded": [],
         };
         ensure((allowed[order.status] || []).includes(to), `An order that is ${order.status} cannot become ${to}.`);
+        if (to === "Done" || to === "Proof Uploaded") ensure(order.amount !== null && order.amount !== undefined && order.amount !== "", "Choose the price paid before marking the order Done or uploading the POH.");
         const note = String(x.note || "").trim().slice(0, 1000);
         if (to === "Cancelled") ensure(note.length >= 3, "Say why the order was cancelled.");
         let proofId: string | null = order.proof_id;

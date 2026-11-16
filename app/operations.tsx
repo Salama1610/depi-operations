@@ -3683,6 +3683,11 @@ See you there!`,
       const latest = latestOrderOf(r);
       const choose = (status: string) => {
         if (!status || status === latest?.status) return;
+        // Done and the POH need the price paid first (16 November 2026).
+        if ((status === "Done" || status === "Proof Uploaded") && (latest?.amount === null || latest?.amount === undefined || latest?.amount === "")) {
+          toast.error(t("Choose the price paid before marking the order Done or uploading the POH."));
+          return;
+        }
         // Cancelling needs a reason; every other status, the POH included, is set at once (12 November 2026).
         if (status === "Cancelled")
           open("account_service_status", { account_id: r.id, status, student_id: r.student_id, student_name: r.student_name || name(r.student_id), account_label: r.label, note: "", proof_id: "" });
@@ -3877,6 +3882,7 @@ See you there!`,
         provider: groupOfRow(s.group_id || first.student_group)?.provider || "",
         coordinator: s.coordinator_name || first.student_coordinator_name || (first.coordinator_id ? owner(first.coordinator_id) : ""),
         rows,
+        portal: rows.find((r) => r.portal)?.portal || null,
         kafeel: rows.filter((r) => r.platform === "Kafeel"),
         nafezly: rows.filter((r) => r.platform === "Nafezly"),
       };
@@ -4170,6 +4176,7 @@ See you there!`,
                                   <strong>{r.student_name || name(r.student_id)}</strong>
                                 </button>
                                 <small className="table-subline"><bdi>{r.student_id}</bdi> · <bdi>{r.student_group}</bdi></small>
+                                {gigTracker(r.portal)}
                               </span>
                             ),
                           },
@@ -4336,6 +4343,7 @@ See you there!`,
                                 <strong>{s.name}</strong>
                               </button>
                               <small className="table-subline"><bdi>{s.id}</bdi></small>
+                              {gigTracker(s.portal)}
                             </td>
                             <td><bdi dir="ltr">{s.phone || "—"}</bdi></td>
                             <td><bdi dir="ltr">{s.email || "—"}</bdi></td>

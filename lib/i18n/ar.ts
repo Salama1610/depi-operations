@@ -3225,4 +3225,5 @@ export const ar: Record<string, string> = {
   "Choose two different students.": "اختر طالبين مختلفين.",
   "Choose the service this account buys from each student.": "اختر الخدمة التي يشتريها هذا الحساب من كل طالب.",
   "The two students have the same job profile. Choose students of different job profiles.": "الطالبان من نفس المسار الوظيفي. اختر طالبين من مسارين مختلفين.",
+  "Choose the price paid before marking the order Done or uploading the POH.": "اختر السعر المدفوع قبل تحديد الطلب كمكتمل أو رفع إثبات الشراء.",
 };

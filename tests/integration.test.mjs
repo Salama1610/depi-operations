@@ -5547,8 +5547,14 @@ test("each service row's status picker sets where its order stands, in one step"
   await dbExec("UPDATE accounts SET student_id=?,coordinator_id=? WHERE id='ACC-PICK-1'", pupil.id, pupil.coordinator);
   current = { id: pupil.coordinator, email: pupil.email };
   const state = async () => (await dbRows("SELECT status FROM account_orders WHERE account_id='ACC-PICK-1' ORDER BY created_at")).map((r) => r.status);
+  // Done and the POH need the price paid first (16 Nov 2026).
+  assert.match((await post("account_service_status", { account_id: "ACC-PICK-1", status: "Done" })).error, /price paid/);
+  await check("account_service_status", { account_id: "ACC-PICK-1", status: "Buy" });
+  assert.deepEqual(await state(), ["Buy"], "choosing a status with no order starts one there");
+  assert.match((await post("account_service_status", { account_id: "ACC-PICK-1", status: "Done" })).error, /price paid/);
+  await check("account_order_cost", { account_id: "ACC-PICK-1", amount: "5" });
   await check("account_service_status", { account_id: "ACC-PICK-1", status: "Done" });
-  assert.deepEqual(await state(), ["Done"], "choosing a status with no order starts one there");
+  assert.deepEqual(await state(), ["Done"]);
   assert.match((await post("account_service_status", { account_id: "ACC-PICK-1", status: "Cancelled" })).error, /Say why/);
   await check("account_service_status", { account_id: "ACC-PICK-1", status: "In Progress" });
   // The POH is a status: no screenshot is needed (12 November 2026).
@@ -5558,6 +5564,8 @@ test("each service row's status picker sets where its order stands, in one step"
   // After a finished order, the next pick starts a new one.
   await check("account_service_status", { account_id: "ACC-PICK-1", status: "In Progress" });
   assert.deepEqual(await state(), ["Proof Uploaded", "In Progress"]);
+  assert.match((await post("account_service_status", { account_id: "ACC-PICK-1", status: "Proof Uploaded" })).error, /price paid/, "a new order needs its own price");
+  await check("account_order_cost", { account_id: "ACC-PICK-1", amount: "3" });
   // A screenshot can still go with it, and is kept; one of another student's is refused.
   await dbExec("INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)", "FILE-PICK-1", pupil.id, "evidence/pick-1", "p.png", "image/png", 10, "hash-pick-1", pupil.coordinator, new Date().toISOString());
   await check("account_service_status", { account_id: "ACC-PICK-1", status: "Proof Uploaded", proof_id: "FILE-PICK-1" });
