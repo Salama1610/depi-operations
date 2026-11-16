@@ -4705,6 +4705,83 @@ test("an account's place is taken from a service nothing was bought through, and
   if (parked.length) await dbExec(`UPDATE accounts SET status='Available' WHERE id IN (${parked.map(() => "?").join(",")})`, ...parked);
 });
 
+test("a named account can be given to a named approved service, under the same rules as the catch-up", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const group = await dbRow(
+    `SELECT g.id FROM groups g WHERE g.status='Active' AND g.id NOT LIKE 'DEMO-%' AND coalesce(g.delivery_model,'Regular')<>'Industry'
+       AND (SELECT count(*) FROM students s WHERE s.group_id=g.id AND s.lifecycle='Active' AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=s.id))>=1
+     ORDER BY g.id LIMIT 1`,
+  );
+  const pupil = await dbRow(
+    "SELECT s.id FROM students s WHERE s.group_id=? AND s.lifecycle='Active' AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=s.id) ORDER BY s.id LIMIT 1",
+    group.id,
+  );
+  const serviceGroup = await asServiceGroup(group.id, "DKH5_DRT2_S1");
+  await dbExec("UPDATE students SET group_id=?,job_profile=? WHERE id=?", serviceGroup, "Placed Profile", pupil.id);
+  const parked = (await dbRows("SELECT id FROM accounts WHERE status='Available'")).map((a) => a.id);
+  if (parked.length) await dbExec(`UPDATE accounts SET status='Under Review' WHERE id IN (${parked.map(() => "?").join(",")})`, ...parked);
+  for (const [id, platform] of [["ACC-PLC-K1", "Kafeel"], ["ACC-PLC-N1", "Nafezly"], ["ACC-PLC-N2", "Nafezly"], ["ACC-PLC-D", "Nafezly"]])
+    await check("account", { id, label: id.toLowerCase() + "@example.org", platform, credits: 10 });
+  await dbExec("UPDATE accounts SET coordinator_state='Does not work' WHERE id='ACC-PLC-D'");
+  const at = new Date().toISOString();
+  const link = async (id, slot, platform, status = "Locked") => {
+    const host = platform === "Kafiil" ? "kafiil.com" : "nafezly.com";
+    await dbExec(
+      "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,account_id,submitted_at,updated_at) VALUES(?,?,?,?,?,?,'Valid','{}',?,?,NULL,'staff-quality',?,1,NULL,?,?)",
+      id, pupil.id, slot, `https://${host}/services/${id}`, `${host}/services/${id}`, platform, at, status, at, at, at,
+    );
+  };
+  await link("SLK-PLC-1", 1, "Kafiil");
+  await link("SLK-PLC-2", 2, "Nafezly");
+  await link("SLK-PLC-3", 3, "Nafezly", "Pending");
+  await build({
+    entryPoints: ["lib/service-followup.ts"],
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    outfile: join(testDirectory, "followup.mjs"),
+    plugins: [
+      supabaseAuthMock,
+      {
+        name: "test-bindings",
+        setup(b) {
+          b.onResolve({ filter: /^(cloudflare:workers|next\/headers)$/ }, (a) => ({ path: a.path, namespace: "mock" }));
+          b.onLoad({ filter: /.*/, namespace: "mock" }, (a) => ({
+            contents: a.path === "cloudflare:workers" ? "export const env=globalThis.__testEnv" : "export const headers=async()=>globalThis.__testHeaders()",
+            loader: "js",
+          }));
+        },
+      },
+    ],
+  });
+  const mod = await import(pathToFileURL(join(testDirectory, "followup.mjs")).href);
+
+  // Wrong marketplace, an account that does not work, a service not yet approved: nothing is linked.
+  assert.deepEqual(await mod.assignAccountPlace("ACC-PLC-N1", pupil.id, "SLK-PLC-1", null), { linked: false, reason: "account cannot take this student" });
+  assert.deepEqual(await mod.assignAccountPlace("ACC-PLC-D", pupil.id, "SLK-PLC-2", null), { linked: false, reason: "account cannot take this student" });
+  assert.deepEqual(await mod.assignAccountPlace("ACC-PLC-N1", pupil.id, "SLK-PLC-3", null), { linked: false, reason: "service has an account or is not approved" });
+  assert.equal((await dbRows("SELECT id FROM service_links WHERE student_id=? AND account_id IS NOT NULL", pupil.id)).length, 0);
+
+  // The right account for the right service: linked, the coordinator told, audited.
+  assert.deepEqual(await mod.assignAccountPlace("ACC-PLC-K1", pupil.id, "SLK-PLC-1", null), { linked: true });
+  assert.equal((await dbRow("SELECT account_id FROM service_links WHERE id='SLK-PLC-1'")).account_id, "ACC-PLC-K1");
+  assert.equal((await dbRow("SELECT student_id FROM accounts WHERE id='ACC-PLC-K1'")).student_id, pupil.id);
+  assert.ok(await dbRow("SELECT id FROM notifications WHERE source='account-key:ACC-PLC-K1:SLK-PLC-1'"), "the coordinator is told");
+  assert.ok(await dbRow("SELECT id FROM audit_events WHERE action='account_link' AND entity_id='ACC-PLC-K1'"));
+  // The service has its account now.
+  assert.deepEqual(await mod.assignAccountPlace("ACC-PLC-K1", pupil.id, "SLK-PLC-1", null), { linked: false, reason: "service has an account or is not approved" });
+  // And the student's next one is the named account on the other marketplace.
+  assert.deepEqual(await mod.assignAccountPlace("ACC-PLC-N1", pupil.id, "SLK-PLC-2", null), { linked: true });
+  assert.equal((await dbRow("SELECT account_id FROM service_links WHERE id='SLK-PLC-2'")).account_id, "ACC-PLC-N1");
+
+  await dbExec("UPDATE service_links SET account_id=NULL WHERE id LIKE 'SLK-PLC-%'");
+  await dbExec("UPDATE accounts SET student_id=NULL,service_link_id=NULL,coordinator_id=NULL,coordinator_2_id=NULL,status='Retired' WHERE id LIKE 'ACC-PLC-%'");
+  await dbExec("DELETE FROM service_links WHERE id LIKE 'SLK-PLC-%'");
+  if (parked.length) await dbExec(`UPDATE accounts SET status='Available' WHERE id IN (${parked.map(() => "?").join(",")})`, ...parked);
+  await dbExec("UPDATE students SET group_id=?,job_profile=NULL WHERE id=?", group.id, pupil.id);
+});
+
 test("the quality team checks each held session's attendance register, which Coach and Project Operations read", async () => {
   await dbExec("DELETE FROM rate_limits");
   current = { id: "owner", email: "owner@example.com" };

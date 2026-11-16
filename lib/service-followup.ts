@@ -229,6 +229,88 @@ export async function serviceFixStatements(link: any, decision: "Locked" | "Need
 }
 
 /**
+ * Links one account to one approved service of a student. Guarded: the service
+ * still has no account, the account is still under two students and the
+ * student still under three accounts. One save (12 November 2026): the link and
+ * the account change together or not at all, and whether this student is the
+ * account's first or its second is decided by the database at that moment, not
+ * by a read before it, so two students approved at once both end up on the
+ * account. Returns whether the link was made; then the coordinator is told and
+ * it is audited.
+ */
+async function linkPlace(account: any, link: any, s: any, studentId: string, platform: string, actor: any | null) {
+  const t = now();
+  const guard = `(SELECT count(*) FROM (${studentAccountsSql}) y)<?`;
+  const linkedHere = "EXISTS (SELECT 1 FROM service_links k WHERE k.id=? AND k.account_id=?)";
+  await db().batch([
+    stmt(
+      `UPDATE service_links SET account_id=? WHERE id=? AND account_id IS NULL AND ${guard}
+         AND (SELECT ${accountUsesSql("a")} FROM accounts a WHERE a.id=?)<?`,
+      account.id, link.id, studentId, studentId, accountsPerStudent, account.id, studentsPerAccount,
+    ),
+    // A second student: their coordinator shares the account.
+    stmt(
+      `UPDATE accounts SET coordinator_2_id=COALESCE(coordinator_2_id,CASE WHEN coordinator_id=? THEN NULL ELSE ? END)
+       WHERE id=? AND student_id IS NOT NULL AND student_id<>? AND ${linkedHere}`,
+      s.coordinator, s.coordinator, account.id, studentId, link.id, account.id,
+    ),
+    // The first student is kept on the account itself.
+    stmt(
+      `UPDATE accounts SET student_id=?,service_link_id=?,linked_at=?,linked_by=?,coordinator_id=?,
+         coordinator_2_id=CASE WHEN coordinator_2_id=? THEN NULL ELSE coordinator_2_id END
+       WHERE id=? AND student_id IS NULL AND ${linkedHere}`,
+      studentId, link.id, t, null, s.coordinator, s.coordinator, account.id, link.id, account.id,
+    ),
+  ]);
+  const linkedNow: any = await stmt("SELECT account_id FROM service_links WHERE id=?", link.id).first();
+  if (linkedNow?.account_id !== account.id) return false;
+  await db().batch([
+    notify(s.coordinator, `Client account linked to ${s.name}'s ${link.platform} service ${link.slot}: use ${account.label}`, "student", studentId, "Information", `account-key:${account.id}:${link.id}`),
+    auditStmt(actor || { id: "system" }, "account_link", account.id, { student_id: studentId, service_link_id: link.id, coordinator_id: s.coordinator, platform, automatic: true }, null),
+  ]);
+  return true;
+}
+
+/**
+ * Gives one named account to one approved service of a student (17 November
+ * 2026), for a plan worked out beforehand rather than the catch-up's own pick.
+ * The same rules hold as for the catch-up: the account is Available, not marked
+ * "Does not work", on the service's marketplace, with a place left, never one
+ * the student already has, nor one buying from a student of the same job
+ * profile; the service is approved and has no account.
+ */
+export async function assignAccountPlace(accountId: string, studentId: string, linkId: string, actor: any | null) {
+  const s: any = await stmt(
+    `SELECT s.id,s.name,s.lifecycle,s.job_profile,g.id group_id,g.coordinator FROM students s JOIN groups g ON g.id=s.group_id WHERE s.id=?`,
+    studentId,
+  ).first();
+  if (!s || s.lifecycle !== "Active" || !s.coordinator) return { linked: false, reason: "student not eligible" } as const;
+  const demo = String(s.group_id).startsWith("DEMO-");
+  if (!demo && !buysServices(s.group_id)) return { linked: false, reason: "not a service group" } as const;
+  const link: any = await stmt(
+    `SELECT l.id,l.platform,l.slot FROM service_links l WHERE l.id=? AND l.student_id=? AND l.qc_status='Locked' AND l.account_id IS NULL
+       AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.service_link_id=l.id)`,
+    linkId, studentId,
+  ).first();
+  if (!link) return { linked: false, reason: "service has an account or is not approved" } as const;
+  const platform = marketplace[link.platform];
+  if (!platform) return { linked: false, reason: "no account for this marketplace" } as const;
+  if ((await all(studentAccountsSql, studentId, studentId)).length >= accountsPerStudent) return { linked: false, reason: "has three" } as const;
+  const profile = String(s.job_profile || "").trim().toLowerCase();
+  const sameProfile = profile
+    ? `EXISTS (SELECT 1 FROM students x WHERE lower(trim(coalesce(x.job_profile,'')))=? AND (x.id=a.student_id OR x.id IN (SELECT l.student_id FROM service_links l WHERE l.account_id=a.id)))`
+    : "0=1";
+  const account: any = await stmt(
+    `SELECT a.id,a.label FROM accounts a WHERE a.id=? AND a.platform=? AND a.status='Available' AND a.active_assignment IS NULL AND coalesce(a.coordinator_state,'')<>'Does not work'
+       AND a.id ${demo ? "LIKE" : "NOT LIKE"} 'DEMO-%' AND ${accountUsesSql("a")}<? AND coalesce(a.student_id,'')<>? AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.account_id=a.id AND l.student_id=?)
+       AND NOT ${sameProfile}`,
+    accountId, platform, studentsPerAccount, studentId, studentId, ...(profile ? [profile] : []),
+  ).first();
+  if (!account) return { linked: false, reason: "account cannot take this student" } as const;
+  return (await linkPlace(account, link, s, studentId, platform, actor)) ? ({ linked: true } as const) : ({ linked: false, reason: "taken meanwhile" } as const);
+}
+
+/**
  * Links client accounts to the student's approved services, oldest approval
  * first, until they hold three. Safe to call any number of times: services that
  * have an account, or a student who has three, are left as they are. `actor` is
@@ -273,7 +355,6 @@ export async function linkAccountKey(studentId: string, actor: any | null) {
   let linked = 0;
   const missing: string[] = [];
   const sameMarketplace: { platform: string; linkId: string }[] = [];
-  const t = now();
   for (const link of waiting) {
     if (mine.size >= accountsPerStudent) break;
     const platform = marketplace[link.platform];
@@ -300,43 +381,10 @@ export async function linkAccountKey(studentId: string, actor: any | null) {
       missing.push(platform);
       continue;
     }
-    // Guarded: the service still has no account, the account is still under
-    // two students and the student still under three accounts.
-    const guard = `(SELECT count(*) FROM (${studentAccountsSql}) y)<?`;
-    // One save (12 November 2026): the link and the account change together
-    // or not at all, and whether this student is the account's first or its
-    // second is decided by the database at that moment, not by the read
-    // above, so two students approved at once both end up on the account.
-    const linkedHere = "EXISTS (SELECT 1 FROM service_links k WHERE k.id=? AND k.account_id=?)";
-    await db().batch([
-      stmt(
-        `UPDATE service_links SET account_id=? WHERE id=? AND account_id IS NULL AND ${guard}
-           AND (SELECT ${accountUsesSql("a")} FROM accounts a WHERE a.id=?)<?`,
-        account.id, link.id, studentId, studentId, accountsPerStudent, account.id, studentsPerAccount,
-      ),
-      // A second student: their coordinator shares the account.
-      stmt(
-        `UPDATE accounts SET coordinator_2_id=COALESCE(coordinator_2_id,CASE WHEN coordinator_id=? THEN NULL ELSE ? END)
-         WHERE id=? AND student_id IS NOT NULL AND student_id<>? AND ${linkedHere}`,
-        s.coordinator, s.coordinator, account.id, studentId, link.id, account.id,
-      ),
-      // The first student is kept on the account itself.
-      stmt(
-        `UPDATE accounts SET student_id=?,service_link_id=?,linked_at=?,linked_by=?,coordinator_id=?,
-           coordinator_2_id=CASE WHEN coordinator_2_id=? THEN NULL ELSE coordinator_2_id END
-         WHERE id=? AND student_id IS NULL AND ${linkedHere}`,
-        studentId, link.id, t, null, s.coordinator, s.coordinator, account.id, link.id, account.id,
-      ),
-    ]);
-    const now_linked: any = await stmt("SELECT account_id FROM service_links WHERE id=?", link.id).first();
-    if (now_linked?.account_id !== account.id) continue;
+    if (!(await linkPlace(account, link, s, studentId, platform, actor))) continue;
     linked++;
     mine = await accountsOf();
     heldPlatforms = await platformsOf(mine);
-    await db().batch([
-      notify(s.coordinator, `Client account linked to ${s.name}'s ${link.platform} service ${link.slot}: use ${account.label}`, "student", studentId, "Information", `account-key:${account.id}:${link.id}`),
-      auditStmt(actor || { id: "system" }, "account_link", account.id, { student_id: studentId, service_link_id: link.id, coordinator_id: s.coordinator, platform, automatic: true }, null),
-    ]);
   }
   if (sameMarketplace.length) {
     // The coordinator hears once per service: the third service has to be on the other marketplace.
