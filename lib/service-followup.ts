@@ -273,6 +273,33 @@ async function linkPlace(account: any, link: any, s: any, studentId: string, pla
 }
 
 /**
+ * An account Project Operations linked to the student by hand before they had
+ * an approved service (17 November 2026) takes the student's first one: it is
+ * the account for it, in place of another account being taken for the same
+ * student. Guarded like a link: the service still has no account and the
+ * account is still the student's with no service. Returns whether it was made.
+ */
+async function bindBareAccount(account: any, link: any, s: any, studentId: string, platform: string, actor: any | null) {
+  await db().batch([
+    stmt(
+      "UPDATE service_links SET account_id=? WHERE id=? AND account_id IS NULL AND EXISTS (SELECT 1 FROM accounts a WHERE a.id=? AND a.student_id=? AND a.service_link_id IS NULL AND a.status='Available')",
+      account.id, link.id, account.id, studentId,
+    ),
+    stmt(
+      "UPDATE accounts SET service_link_id=? WHERE id=? AND student_id=? AND service_link_id IS NULL AND EXISTS (SELECT 1 FROM service_links k WHERE k.id=? AND k.account_id=?)",
+      link.id, account.id, studentId, link.id, account.id,
+    ),
+  ]);
+  const bound: any = await stmt("SELECT service_link_id FROM accounts WHERE id=?", account.id).first();
+  if (bound?.service_link_id !== link.id) return false;
+  await db().batch([
+    notify(s.coordinator, `Client account ${account.label} is for ${s.name}'s ${link.platform} service ${link.slot}: use it`, "student", studentId, "Information", `account-key:${account.id}:${link.id}`),
+    auditStmt(actor || { id: "system" }, "account_link", account.id, { student_id: studentId, service_link_id: link.id, coordinator_id: s.coordinator, platform, automatic: true, kept_by_hand: true }, null),
+  ]);
+  return true;
+}
+
+/**
  * Gives one named account to one approved service of a student (17 November
  * 2026), for a plan worked out beforehand rather than the catch-up's own pick.
  * The same rules hold as for the catch-up: the account is Available, not marked
@@ -527,15 +554,27 @@ export async function linkAccountKey(studentId: string, actor: any | null) {
   // The marketplaces of the accounts the student holds, for the two-and-one rule.
   const platformsOf = async (ids: Set<string>) =>
     ids.size ? (await all(`SELECT platform FROM accounts WHERE id IN (${[...ids].map(() => "?").join(",")})`, ...ids)).map((r: any) => String(r.platform)) : [];
+  const waitingSql = `SELECT l.id,l.platform,l.slot FROM service_links l
+     WHERE l.student_id=? AND l.qc_status='Locked' AND l.account_id IS NULL AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.service_link_id=l.id)
+     ORDER BY l.qc_at,l.updated_at,l.slot`;
+  // An account linked to the student by hand before they had a service takes
+  // their first approved one on its marketplace (17 November 2026); it is
+  // already one of the student's accounts, so it counts apart from the three.
+  let bound = 0;
+  for (const link of await all(waitingSql, studentId)) {
+    const platform = marketplace[link.platform];
+    if (!platform) continue;
+    const bare: any = await stmt(
+      `SELECT a.id,a.label FROM accounts a WHERE a.student_id=? AND a.service_link_id IS NULL AND a.platform=? AND a.status='Available' AND a.active_assignment IS NULL
+         AND coalesce(a.coordinator_state,'')<>'Does not work' AND a.id ${demo ? "LIKE" : "NOT LIKE"} 'DEMO-%' ORDER BY a.linked_at,a.id LIMIT 1`,
+      studentId, platform,
+    ).first();
+    if (bare && (await bindBareAccount(bare, link, s, studentId, platform, actor))) bound++;
+  }
   let mine = await accountsOf();
   let heldPlatforms = await platformsOf(mine);
-  if (mine.size >= accountsPerStudent) return { linked: 0, reason: "has three" } as const;
-  const waiting = await all(
-    `SELECT l.id,l.platform,l.slot FROM service_links l
-     WHERE l.student_id=? AND l.qc_status='Locked' AND l.account_id IS NULL AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.service_link_id=l.id)
-     ORDER BY l.qc_at,l.updated_at,l.slot`,
-    studentId,
-  );
+  if (mine.size >= accountsPerStudent) return { linked: bound, reason: bound ? "done" : "has three" } as const;
+  const waiting = await all(waitingSql, studentId);
   const profile = String(s.job_profile || "").trim().toLowerCase();
   // Demo students try things out on demo accounts only; real students never get one (22 Oct).
   const side = String(s.group_id).startsWith("DEMO-") ? "id LIKE 'DEMO-%'" : "id NOT LIKE 'DEMO-%'";
@@ -599,7 +638,7 @@ export async function linkAccountKey(studentId: string, actor: any | null) {
     );
   }
   return {
-    linked,
+    linked: linked + bound,
     reason: missing.length ? "no account" : sameMarketplace.length ? "same marketplace" : "done",
     platforms: [...new Set(missing)],
     sameMarketplace: sameMarketplace.length,

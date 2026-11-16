@@ -3644,6 +3644,21 @@ export async function POST(req: Request) {
             accountMixProblem(heldPlatforms, a.platform) !== "same" || !(await hasFreePlace(otherMarketplace(String(a.platform)), String(id).startsWith("DEMO-"))),
             accountMixMessage(a.platform),
           );
+          // A student who is not on gigs yet, with no approved service on this
+          // marketplace, is linked as the account's first student without one
+          // (17 November 2026, the owner's decision: Project Operations link
+          // them by hand). The account is kept for them and takes their first
+          // approved service (linkAccountKey). A second student needs a service:
+          // it is the service that records them on the account.
+          if (!pick.service && pick === picks[0]) {
+            const approvedHere: any = await stmt(
+              "SELECT l.id FROM service_links l WHERE l.student_id=? AND l.qc_status='Locked' AND l.platform=? LIMIT 1",
+              pupil.id, ({ Kafeel: "Kafiil", Nafezly: "Nafezly" } as Record<string, string>)[String(a.platform)] || "",
+            ).first();
+            ensure(!approvedHere, "Choose the service this account buys from each student.");
+            chosen.push({ ...pupil, service: null });
+            continue;
+          }
           ensure(pick.service, "Choose the service this account buys from each student.");
           const link: any = await stmt("SELECT id,student_id FROM service_links WHERE id=?", pick.service).first();
           ensure(link && link.student_id === pupil.id, "Choose one of this student's services.");
@@ -3691,7 +3706,7 @@ export async function POST(req: Request) {
             coordinatorTwo,
             id,
           ),
-          ...chosen.map((c) => stmt("UPDATE service_links SET account_id=? WHERE id=?", id, c.service)),
+          ...chosen.filter((c) => c.service).map((c) => stmt("UPDATE service_links SET account_id=? WHERE id=?", id, c.service)),
         );
         for (const c of chosen)
           if (c.coordinator)

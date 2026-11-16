@@ -2665,6 +2665,10 @@ export const ar: Record<string, string> = {
   "Latest coordinator status first": "أحدث حالة من المنسق أولًا",
   "Gives each approved service of the service groups’ students an account: three accounts per student at most, two students per account, never two of the same job profile": "يعطي كل خدمة معتمدة لطلاب جروبات الخدمات حسابًا: ثلاثة حسابات للطالب على الأكثر، وطالبان للحساب، ولا يكونان من نفس المسار الوظيفي",
   "Link accounts to eligible students": "ربط الحسابات بالطلاب المستحقين",
+  // A student not on gigs, linked by hand (17 Nov 2026).
+  "no approved service yet": "لا توجد خدمة معتمدة بعد",
+  "No service yet: the account is kept for the student": "لا توجد خدمة بعد: يُحفظ الحساب للطالب",
+  "A student who is not on gigs yet can be the first student without a service: the account is kept for them and takes their first approved service. A second student needs one.": "يمكن ربط طالب لم يبدأ الجيجات بعد كطالب أول دون خدمة: يُحفظ الحساب له ويأخذ أول خدمة معتمدة له. أما الطالب الثاني فيحتاج إلى خدمة.",
   // Repeat purchases (17 Nov 2026).
   "Preview repeat purchases": "معاينة الشراء المتكرر",
   "Use the places left for repeat purchases": "استخدام الأماكن المتبقية للشراء المتكرر",

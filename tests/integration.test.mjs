@@ -4975,6 +4975,82 @@ test("a service is bought again by other accounts until the student holds three,
   for (const p of people) await dbExec("UPDATE students SET group_id=?,job_profile=? WHERE id=?", p.group_id, p.job_profile, p.id);
 });
 
+test("a student who is not on gigs is linked to an account by hand without a service, and the account takes their first approved service", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const { scopes } = await dbRow("SELECT scopes FROM users WHERE email='owner@example.com'");
+  await dbExec("UPDATE users SET scopes=? WHERE email='owner@example.com'", JSON.stringify([...new Set([...JSON.parse(scopes || "[]"), "account-unlock"])]));
+  const people = await dbRows(
+    `SELECT s.id,s.group_id,s.job_profile,g.coordinator FROM students s JOIN groups g ON g.id=s.group_id
+       WHERE s.lifecycle='Active' AND s.group_id NOT LIKE 'DEMO-%' AND g.coordinator IS NOT NULL AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=s.id)
+         AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.student_id=s.id)
+       ORDER BY s.id LIMIT 3`,
+  );
+  const [bare, other, second] = people;
+  const serviceGroup = await asServiceGroup(bare.group_id, "DKH5_DRT2_S1");
+  for (const [p, profile] of [[bare, "Bare A Profile"], [other, "Bare B Profile"], [second, "Bare C Profile"]])
+    await dbExec("UPDATE students SET group_id=?,job_profile=? WHERE id=?", serviceGroup, profile, p.id);
+  const parked = (await dbRows("SELECT id FROM accounts WHERE status='Available'")).map((a) => a.id);
+  if (parked.length) await dbExec(`UPDATE accounts SET status='Under Review' WHERE id IN (${parked.map(() => "?").join(",")})`, ...parked);
+  for (const id of ["ACC-BARE-1", "ACC-BARE-2", "ACC-BARE-3"]) await check("account", { id, label: id.toLowerCase() + "@example.org", platform: "Kafeel", credits: 10 });
+  const at = new Date().toISOString();
+  const link = async (id, student, slot) =>
+    dbExec(
+      "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,account_id,submitted_at,updated_at) VALUES(?,?,?,?,?,'Kafiil','Valid','{}',?,'Locked',NULL,'staff-quality',?,1,NULL,?,?)",
+      id, student, slot, `https://kafiil.com/services/${id}`, `kafiil.com/services/${id}`, at, at, at, at,
+    );
+  try {
+    // Linked by hand with no service: the account is kept for the student.
+    await check("account_students", { id: "ACC-BARE-1", student_id: bare.id });
+    const kept = await dbRow("SELECT student_id,service_link_id,coordinator_id FROM accounts WHERE id='ACC-BARE-1'");
+    assert.deepEqual([kept.student_id, kept.service_link_id, kept.coordinator_id], [bare.id, null, bare.coordinator]);
+    // A second student needs a service: it is what records them on the account.
+    assert.match((await post("account_students", { id: "ACC-BARE-1", student_id: bare.id, student_2_id: second.id })).error, /Choose the service/);
+    // A student who has an approved service on this marketplace chooses it.
+    await link("SLK-BARE-9", other.id, 1);
+    assert.match((await post("account_students", { id: "ACC-BARE-2", student_id: other.id })).error, /Choose the service/);
+    assert.equal((await dbRow("SELECT student_id FROM accounts WHERE id='ACC-BARE-2'")).student_id, null);
+
+    await build({
+      entryPoints: ["lib/service-followup.ts"],
+      bundle: true,
+      platform: "node",
+      format: "esm",
+      outfile: join(testDirectory, "followup.mjs"),
+      plugins: [
+        supabaseAuthMock,
+        {
+          name: "test-bindings",
+          setup(b) {
+            b.onResolve({ filter: /^(cloudflare:workers|next\/headers)$/ }, (a) => ({ path: a.path, namespace: "mock" }));
+            b.onLoad({ filter: /.*/, namespace: "mock" }, (a) => ({
+              contents: a.path === "cloudflare:workers" ? "export const env=globalThis.__testEnv" : "export const headers=async()=>globalThis.__testHeaders()",
+              loader: "js",
+            }));
+          },
+        },
+      ],
+    });
+    const mod = await import(pathToFileURL(join(testDirectory, "followup.mjs")).href);
+    // Their first service is approved: the account kept for them takes it, no other account is taken for it.
+    await link("SLK-BARE-1", bare.id, 1);
+    const done = await mod.linkAccountKey(bare.id, null);
+    assert.ok(done.linked >= 1, JSON.stringify(done));
+    assert.equal((await dbRow("SELECT service_link_id FROM accounts WHERE id='ACC-BARE-1'")).service_link_id, "SLK-BARE-1");
+    assert.equal((await dbRow("SELECT account_id FROM service_links WHERE id='SLK-BARE-1'")).account_id, "ACC-BARE-1");
+    assert.deepEqual((await dbRows(mod.studentAccountsSql, bare.id, bare.id)).map((r) => r.account_id), ["ACC-BARE-1"], "one account, not two");
+    assert.equal((await dbRow("SELECT count(*) n FROM accounts WHERE id IN ('ACC-BARE-2','ACC-BARE-3') AND student_id IS NOT NULL")).n, 0);
+    assert.ok(await dbRow("SELECT id FROM notifications WHERE source='account-key:ACC-BARE-1:SLK-BARE-1'"), "the coordinator is told");
+  } finally {
+    await dbExec("UPDATE service_links SET account_id=NULL WHERE id LIKE 'SLK-BARE-%'");
+    await dbExec("UPDATE accounts SET student_id=NULL,service_link_id=NULL,coordinator_id=NULL,coordinator_2_id=NULL,status='Retired' WHERE id LIKE 'ACC-BARE-%'");
+    await dbExec("DELETE FROM service_links WHERE id LIKE 'SLK-BARE-%'");
+    if (parked.length) await dbExec(`UPDATE accounts SET status='Available' WHERE id IN (${parked.map(() => "?").join(",")})`, ...parked);
+    for (const p of people) await dbExec("UPDATE students SET group_id=?,job_profile=? WHERE id=?", p.group_id, p.job_profile, p.id);
+    await dbExec("UPDATE users SET scopes=? WHERE email='owner@example.com'", scopes);
+  }
+});
+
 test("the quality team checks each held session's attendance register, which Coach and Project Operations read", async () => {
   await dbExec("DELETE FROM rate_limits");
   current = { id: "owner", email: "owner@example.com" };

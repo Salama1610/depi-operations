@@ -8304,7 +8304,8 @@ See you there!`,
                 const pool = students.filter((s) => s.lifecycle === "Active" && buysServices(s.group_id));
                 const servicesOf = (id: string) => serviceLinks.filter((l) => l.student_id === id && l.qc_status === "Locked");
                 if (!serviceListsReady) return <p className="footnote">{t("Loading the service links…")}</p>;
-                const studentPick = (key: string, serviceKey: string, label: string) => (
+                // A student not on gigs yet has no approved service; Project Operations link them as the first student all the same (17 November 2026).
+                const studentPick = (key: string, serviceKey: string, label: string, first = false) => (
                   <>
                     <label className="field">
                       {label}
@@ -8313,7 +8314,7 @@ See you there!`,
                         value={form[key] || ""}
                         placeholder={t("No student")}
                         onChange={(v) => setForm({ ...form, [key]: v || "", [serviceKey]: "" })}
-                        options={[{ value: "", label: t("No student") }, ...pool.map((s) => ({ value: s.id, label: `${s.name} · ${s.id} · ${s.group_id}` }))]}
+                        options={[{ value: "", label: t("No student") }, ...pool.map((s) => ({ value: s.id, label: `${s.name} · ${s.id} · ${s.group_id}${servicesOf(s.id).length ? "" : " · " + t("no approved service yet")}` }))]}
                       />
                     </label>
                     {form[key] && (
@@ -8324,7 +8325,7 @@ See you there!`,
                           label={t("Service")}
                           value={form[serviceKey] || ""}
                           onChange={(v) => setForm({ ...form, [serviceKey]: v })}
-                          options={[{ value: "", label: t("Choose the service") }, ...servicesOf(form[key]).map((l) => ({ value: l.id, label: `${l.platform} · ${t("service {v0}", { v0: l.slot })}` }))]}
+                          options={[{ value: "", label: first && !servicesOf(form[key]).length ? t("No service yet: the account is kept for the student") : t("Choose the service") }, ...servicesOf(form[key]).map((l) => ({ value: l.id, label: `${l.platform} · ${t("service {v0}", { v0: l.slot })}` }))]}
                         />
                       </label>
                     )}
@@ -8338,8 +8339,9 @@ See you there!`,
                         <small>{modal!.platform}</small>
                       </div>
                     </div>
-                    {studentPick("student_id", "service_link_id", t("First student"))}
+                    {studentPick("student_id", "service_link_id", t("First student"), true)}
                     {studentPick("student_2_id", "service_2_id", t("Second student"))}
+                    <p className="footnote">{t("A student who is not on gigs yet can be the first student without a service: the account is kept for them and takes their first approved service. A second student needs one.")}</p>
                     <p className="footnote">{t("Both students are saved together, each with the service the account buys, and each student's group coordinator works them on the account. Two students of the same job profile never share an account. Leave the second empty to take the second student off, or both empty to free the account.")}</p>
                   </>
                 );
