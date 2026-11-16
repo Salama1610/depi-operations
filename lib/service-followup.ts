@@ -129,6 +129,45 @@ export async function releaseGraduatedAccounts(actor: any) {
 }
 
 /**
+ * Takes an account's place away from a student who has bought nothing through
+ * it (17 November 2026), so a student who will can have it: the owner's
+ * decision to use every account that is not buying. The service stays approved
+ * and free for another account, the student's coordinator is told, and it is
+ * audited. A place with an order that is not cancelled is refused: a purchase
+ * in progress or made keeps its account. Like releasing a graduate's place, an
+ * account left with nobody gives up its coordinators.
+ */
+export async function releaseUnusedPlace(accountId: string, studentId: string, actor: any | null, reason: string) {
+  const account: any = await stmt("SELECT id,label,platform,student_id FROM accounts WHERE id=?", accountId).first();
+  if (!account) return { released: false, reason: "no account" } as const;
+  const links = await all("SELECT id FROM service_links WHERE account_id=? AND student_id=?", accountId, studentId);
+  if (!links.length && account.student_id !== studentId) return { released: false, reason: "not on this account" } as const;
+  const bought: any = await stmt("SELECT id FROM account_orders WHERE account_id=? AND student_id=? AND status<>'Cancelled' LIMIT 1", accountId, studentId).first();
+  if (bought) return { released: false, reason: "has an order" } as const;
+  const pupil: any = await stmt("SELECT s.name,g.coordinator FROM students s JOIN groups g ON g.id=s.group_id WHERE s.id=?", studentId).first();
+  const t = now();
+  const jobs: any[] = [
+    stmt("UPDATE service_links SET account_id=NULL WHERE account_id=? AND student_id=?", accountId, studentId),
+    stmt("UPDATE accounts SET student_id=NULL,service_link_id=NULL,linked_at=NULL,linked_by=NULL WHERE id=? AND student_id=?", accountId, studentId),
+    stmt(
+      "UPDATE accounts SET coordinator_id=NULL,coordinator_2_id=NULL WHERE id=? AND student_id IS NULL AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.account_id=accounts.id)",
+      accountId,
+    ),
+    auditStmt(actor || { id: "system" }, "account_place_released_unused", accountId, { student_id: null }, { student_id: studentId }, uid("REQ"), reason),
+  ];
+  if (pupil?.coordinator)
+    jobs.push(
+      notify(
+        pupil.coordinator,
+        `Client account ${account.label} was taken from ${pupil.name}'s service: nothing had been bought with it, and it goes to a student who will`,
+        "student", studentId, "Information", `account-released:${accountId}:${studentId}:${t}`,
+      ),
+    );
+  await db().batch(jobs);
+  return { released: true, platform: String(account.platform) } as const;
+}
+
+/**
  * Whether a marketplace has an account a new student can still take, on the
  * caller's side of the demo line. While the other marketplace has none, a
  * student may take a third account on the same one (13 November 2026, the

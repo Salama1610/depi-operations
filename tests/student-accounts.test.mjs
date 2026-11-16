@@ -1,5 +1,5 @@
-// A student's three client accounts are two on one marketplace and one on the
-// other, never all three on the same one (12 November 2026).
+// A student holds at most three client accounts, and since 17 November 2026
+// the three may all be on one marketplace.
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -8,6 +8,7 @@ import {
   accountsFollowTheRule,
   nextAccountMustBeOn,
   otherMarketplace,
+  sameMarketplaceAllowed,
 } from "../lib/domain/student-accounts.ts";
 
 test("two on Kafeel and one on Nafezly, or the opposite, are allowed", () => {
@@ -17,9 +18,10 @@ test("two on Kafeel and one on Nafezly, or the opposite, are allowed", () => {
   assert.equal(accountMixProblem(["Kafeel", "Nafezly"], "Nafezly"), null);
 });
 
-test("a third account on the marketplace of two identical ones is refused", () => {
-  assert.equal(accountMixProblem(["Kafeel", "Kafeel"], "Kafeel"), "same");
-  assert.equal(accountMixProblem(["Nafezly", "Nafezly"], "Nafezly"), "same");
+test("a third account on the marketplace of two identical ones is allowed", () => {
+  assert.equal(accountMixProblem(["Kafeel", "Kafeel"], "Kafeel"), null);
+  assert.equal(accountMixProblem(["Nafezly", "Nafezly"], "Nafezly"), null);
+  assert.equal(sameMarketplaceAllowed, true);
 });
 
 test("fewer than two accounts can be on either marketplace", () => {
@@ -40,19 +42,18 @@ test("the message names the marketplace the student needs", () => {
   assert.equal(otherMarketplace("Khamsat"), "");
 });
 
-test("a set of accounts follows the rule unless it is three of one marketplace or more than three", () => {
+test("a set of accounts follows the rule unless it is more than three", () => {
   assert.equal(accountsFollowTheRule(["Kafeel", "Kafeel", "Nafezly"]), true);
   assert.equal(accountsFollowTheRule(["Nafezly", "Nafezly", "Kafeel"]), true);
   assert.equal(accountsFollowTheRule(["Kafeel", "Kafeel"]), true);
-  assert.equal(accountsFollowTheRule(["Kafeel", "Kafeel", "Kafeel"]), false);
-  assert.equal(accountsFollowTheRule(["Nafezly", "Nafezly", "Nafezly"]), false);
+  assert.equal(accountsFollowTheRule(["Kafeel", "Kafeel", "Kafeel"]), true);
+  assert.equal(accountsFollowTheRule(["Nafezly", "Nafezly", "Nafezly"]), true);
   assert.equal(accountsFollowTheRule(["Kafeel", "Nafezly", "Kafeel", "Nafezly"]), false);
 });
 
-test("a student with two on one marketplace is told which one the next must be on", () => {
-  assert.equal(nextAccountMustBeOn(["Kafeel", "Kafeel"]), "Nafezly");
-  assert.equal(nextAccountMustBeOn(["Nafezly", "Nafezly"]), "Kafeel");
+test("no marketplace is forced on a student's next account", () => {
+  assert.equal(nextAccountMustBeOn(["Kafeel", "Kafeel"]), null);
+  assert.equal(nextAccountMustBeOn(["Nafezly", "Nafezly"]), null);
   assert.equal(nextAccountMustBeOn(["Kafeel", "Nafezly"]), null);
-  assert.equal(nextAccountMustBeOn(["Kafeel"]), null);
   assert.equal(nextAccountMustBeOn([]), null);
 });
