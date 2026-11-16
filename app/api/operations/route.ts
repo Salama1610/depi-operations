@@ -137,11 +137,15 @@ async function orderStudent(a: any, wanted?: unknown, u?: any) {
   const id = wanted ? String(wanted) : a.student_id;
   ensure(id, "Link the account to a student before recording an order.");
   // On an account two coordinators share, each works on their own student only (12 November 2026).
-  if (u && !can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin", "Team Supervisor"]) && !keepsAccounts(u)) {
+  if (u && !can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin"]) && !keepsAccounts(u)) {
     // The coordinator of the student's group manages them, whoever is written
-    // on the account (13 November 2026).
-    const group: any = await stmt("SELECT g.coordinator FROM students s JOIN groups g ON g.id=s.group_id WHERE s.id=?", id).first();
-    ensure(group?.coordinator === u.id, "This student is another coordinator's: their group's coordinator manages their account orders.");
+    // on the account (13 November 2026); a supervisor of another team, their
+    // own groups' students only (16 November 2026).
+    const group: any = await stmt("SELECT g.coordinator,g.supervisor FROM students s JOIN groups g ON g.id=s.group_id WHERE s.id=?", id).first();
+    ensure(
+      group?.coordinator === u.id || (can(u.roles, ["Team Supervisor"]) && group?.supervisor === u.id),
+      "This student is another coordinator's: their group's coordinator manages their account orders.",
+    );
   }
   if (id === a.student_id) return { student_id: a.student_id as string, service_link_id: (a.service_link_id || null) as string | null };
   const link: any = await stmt("SELECT id FROM service_links WHERE account_id=? AND student_id=? ORDER BY qc_at LIMIT 1", a.id, id).first();
@@ -3403,7 +3407,7 @@ export async function POST(req: Request) {
         // A coordinator acts for their own groups' students on any account
         // (orderStudent checks the student is theirs), whoever is written on it.
         const mayOrder = (a: any) =>
-          can(u.roles, ["Project Operations", "Operations Systems / Admin", "Operations Coordinator"]) || keepsAccounts(u) || a.coordinator_id === u.id || a.coordinator_2_id === u.id;
+          can(u.roles, ["Project Operations", "Operations Systems / Admin", "Operations Coordinator", "Team Supervisor"]) || keepsAccounts(u) || a.coordinator_id === u.id || a.coordinator_2_id === u.id;
         if (x.action === "account_service_status") {
           // The status picker on a service row: it sets where the service's
           // current order stands, any of the four, and starts a new order when

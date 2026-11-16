@@ -2811,6 +2811,43 @@ test("the account pool records a payment into an account and a problem with it (
   await dbExec("UPDATE accounts SET coordinator_id=NULL WHERE id='ACC-POOL-1'");
 });
 
+test("a supervisor of another team sees and orders only their own groups' account students (16 Nov 2026)", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  await dbExec("DELETE FROM rate_limits");
+  const [mine, other] = await dbRows(
+    "SELECT s.id,s.group_id,g.supervisor FROM students s JOIN groups g ON g.id=s.group_id WHERE s.lifecycle='Active' AND g.status='Active' AND g.id NOT LIKE 'DEMO-%' ORDER BY g.id, s.id LIMIT 400",
+  ).then((rows) => [rows[0], rows.find((r) => r.group_id !== rows[0].group_id)]);
+  const before = await dbRow("SELECT team FROM users WHERE id='staff-nour'");
+  const homeSupervisor = mine.supervisor;
+  await dbExec("UPDATE users SET team='Target Team' WHERE id='staff-nour'");
+  await dbExec("UPDATE groups SET supervisor='staff-nour' WHERE id=?", mine.group_id);
+  await dbExec("UPDATE groups SET supervisor=? WHERE id=? AND supervisor='staff-nour'", "owner", other.group_id);
+  await check("account", { id: "ACC-SUP-1", label: "Kafeel sup 1", platform: "Kafeel", credits: 10 });
+  await check("account", { id: "ACC-SUP-2", label: "Kafeel sup 2", platform: "Kafeel", credits: 10 });
+  await dbExec("UPDATE accounts SET student_id=? WHERE id='ACC-SUP-1'", mine.id);
+  await dbExec("UPDATE accounts SET student_id=? WHERE id='ACC-SUP-2'", other.id);
+  // An account held by a coordinator of another team, with a student of another group: not theirs at all.
+  const outsider = await dbRow("SELECT id FROM users WHERE roles LIKE '%Operations Coordinator%' AND team<>'Target Team' AND active=1 LIMIT 1");
+  await check("account", { id: "ACC-SUP-3", label: "Kafeel sup 3", platform: "Kafeel", credits: 10 });
+  if (outsider) await dbExec("UPDATE accounts SET student_id=?,coordinator_id=? WHERE id='ACC-SUP-3'", other.id, outsider.id);
+  current = { id: "supervisor-login", email: "staff-nour@example.invalid" };
+  try {
+    const seen = (await (await api.GET()).json()).accounts;
+    const of = (id) => seen.find((a) => a.id === id);
+    assert.equal(of("ACC-SUP-1")?.student_id, mine.id, "their own group's student's account, with the student");
+    assert.ok(of("ACC-SUP-2"), "a free account they may hand out");
+    assert.equal(of("ACC-SUP-2").student_id, null, "another group's student stays hidden");
+    if (outsider) assert.equal(of("ACC-SUP-3"), undefined, "another team's account is not theirs");
+    assert.match((await post("account_service_status", { account_id: "ACC-SUP-2", student_id: other.id, status: "Buy" })).error, /another coordinator's|not found within your assigned scope/);
+    await check("account_service_status", { account_id: "ACC-SUP-1", status: "Buy" });
+  } finally {
+    current = { id: "owner", email: "owner@example.com" };
+    await dbExec("UPDATE accounts SET student_id=NULL,coordinator_id=NULL,status='Retired' WHERE id IN ('ACC-SUP-1','ACC-SUP-2','ACC-SUP-3')");
+    await dbExec("UPDATE groups SET supervisor=? WHERE id=?", homeSupervisor, mine.group_id);
+    await dbExec("UPDATE users SET team=? WHERE id='staff-nour'", before.team);
+  }
+});
+
 test("groups keep a WhatsApp link, accounts can have a second coordinator, and the keepers unblock them", async () => {
   current = { id: "owner", email: "owner@example.com" };
   await dbExec("DELETE FROM rate_limits");

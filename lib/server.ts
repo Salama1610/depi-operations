@@ -820,7 +820,7 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
     // The client accounts: the whole pool for the leaders, the people who keep
     // the accounts and the supervisors who assign them; a coordinator sees the
     // accounts assigned to them. The owner column only for its keeper.
-    (() => {
+    (async () => {
       const columns = `id,label,platform,status,credits,pending_credits,comments,coordinator_id,coordinator_2_id,student_id,service_link_id,linked_at,linked_by,coordinator_state,coordinator_note,coordinator_state_at,coordinator_state_by${seesAccountOwner(u) ? ",owner_name" : ""}`
         .split(",")
         .map((c) => "a." + c)
@@ -828,7 +828,7 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
       // The student the account is linked to, their group's coordinator and the
       // service it is for, joined here so the account's coordinator sees them
       // even when the student is in another coordinator's group.
-      const linked = `SELECT ${columns},s.name student_name,s.group_id student_group,g.coordinator student_coordinator_id,c.name student_coordinator_name,l.url service_url,l.platform service_platform,l.slot service_slot
+      const linked = `SELECT ${columns},s.name student_name,s.group_id student_group,g.coordinator student_coordinator_id,c.name student_coordinator_name,l.url service_url,l.platform service_platform,l.slot service_slot,g.supervisor student_supervisor_id
         FROM accounts a
         LEFT JOIN students s ON s.id=a.student_id AND ${revokesStudents(u) ? "1=1" : "s.lifecycle<>'Revoked'"}
         LEFT JOIN groups g ON g.id=s.group_id
@@ -837,7 +837,7 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
       // An account's second student (10 November 2026): the one whose service it
       // buys, other than the student on the account itself, with the same details.
       const second = `SELECT l.account_id,l.student_id,l.id service_link_id,s.name student_name,s.group_id student_group,g.coordinator student_coordinator_id,c.name student_coordinator_name,
-          l.url service_url,l.platform service_platform,l.slot service_slot
+          l.url service_url,l.platform service_platform,l.slot service_slot,g.supervisor student_supervisor_id
         FROM service_links l JOIN accounts a ON a.id=l.account_id
         JOIN students s ON s.id=l.student_id AND ${revokesStudents(u) ? "1=1" : "s.lifecycle<>'Revoked'"}
         LEFT JOIN groups g ON g.id=s.group_id LEFT JOIN users c ON c.id=g.coordinator
@@ -849,25 +849,43 @@ export async function loadData(u: any, { lite = false }: { lite?: boolean } = {}
         for (const a of rows) a.second = byAccount.get(a.id) || null;
         return rows;
       };
-      if (can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin", "Team Supervisor"]) || keepsAccounts(u))
+      if (can(u.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin"]) || keepsAccounts(u))
         return withSecond(all(`${linked} WHERE ${sameSide(u, "a.id")}`), all(`${second} AND ${sameSide(u, "a.id")}`));
       // A coordinator: the accounts they hold. Two coordinators share many
       // accounts, one student each (12 November 2026): each sees only their
       // own half, never the other coordinator's student, service or orders.
+      // A supervisor of another team (16 November 2026) reads the same way,
+      // by the supervisor of the student's group.
+      const by = can(u.roles, ["Operations Coordinator"]) ? "student_coordinator_id" : "student_supervisor_id";
       const ownHalf = (rows: any[]) =>
         rows.map((a) => {
           // A student of another coordinator's group is theirs to manage, not
           // this coordinator's, whoever is written on the account (13 November 2026).
-          const theirs = (coordinator: unknown) => coordinator !== u.id;
+          const theirs = (row: any) => row[by] !== u.id && !(can(u.roles, ["Team Supervisor"]) && row.student_supervisor_id === u.id);
           const view = { ...a };
-          if (view.second && theirs(view.second.student_coordinator_id)) view.second = null;
-          if (view.student_id && theirs(view.student_coordinator_id)) {
-            for (const k of ["student_id", "student_name", "student_group", "student_coordinator_id", "student_coordinator_name", "service_link_id", "service_url", "service_platform", "service_slot", "linked_at", "linked_by"])
+          if (view.second && theirs(view.second)) view.second = null;
+          if (view.student_id && theirs(view)) {
+            for (const k of ["student_id", "student_name", "student_group", "student_coordinator_id", "student_coordinator_name", "student_supervisor_id", "service_link_id", "service_url", "service_platform", "service_slot", "linked_at", "linked_by"])
               view[k] = null;
             view.other_half = true;
           }
           return view;
         });
+      if (can(u.roles, ["Team Supervisor"]) && !can(u.roles, ["Operations Coordinator"])) {
+        // A supervisor of another team (16 November 2026): the accounts of their
+        // own groups' students, and the accounts they may hand out, those free
+        // or with their own team's coordinators (as account_coordinator checks).
+        // Another group's student on any of them stays hidden (ownHalf).
+        const team = (await teamCoordinators(u)) || [];
+        const marks = team.map(() => "?").join(",") || "NULL";
+        const handsOut = `((a.coordinator_id IS NULL OR a.coordinator_id IN (${marks})) AND (a.coordinator_2_id IS NULL OR a.coordinator_2_id IN (${marks})))`;
+        const mine = `(EXISTS (SELECT 1 FROM students ss JOIN groups sg ON sg.id=ss.group_id WHERE sg.supervisor=? AND (ss.id=a.student_id OR ss.id IN (SELECT sl.student_id FROM service_links sl WHERE sl.account_id=a.id))) OR ${handsOut})`;
+        const args = [u.id, ...team, ...team];
+        return withSecond(
+          all(`${linked} WHERE ${mine} AND ${sameSide(u, "a.id")}`, ...args),
+          all(`${second} AND ${mine} AND ${sameSide(u, "a.id")}`, ...args),
+        ).then(ownHalf);
+      }
       if (can(u.roles, ["Operations Coordinator"])) {
         const mine = coordinatorAccountSql(u);
         return withSecond(

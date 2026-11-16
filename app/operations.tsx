@@ -12,6 +12,7 @@ import { ProgramFlow } from "./program-flow";
 import { WeeklyProgress } from "./weekly-progress";
 import { acceptedServicePlatforms, buysServices } from "@/lib/domain/service-links";
 import { accountPlaces } from "@/lib/domain/account-places";
+import { followsServiceRow, seesEveryServiceRow } from "@/lib/domain/service-rows";
 import { accountReviewRows, reviewColumns, reviewDropdowns, reviewHowTo, reviewInputColumns, studentColumns, studentServiceRows } from "@/lib/domain/account-review";
 import { PortalView } from "./portal-view";
 // The dashboard and its charts load only when someone opens it.
@@ -999,8 +1000,9 @@ export default function Operations({ module: initialModule }: { module: string }
             ? // Buying the service groups' gigs through the client accounts (16
               // November 2026): coordinators for their own students, their
               // supervisors, Project Operations and the people who keep the accounts.
-              can(user.roles, ["Project Operations", "Operations Systems / Admin", "Team Supervisor"]) ||
+              can(user.roles, ["Project Operations", "Operations Systems / Admin"]) ||
               keepsAccounts ||
+              (can(user.roles, ["Team Supervisor"]) && (d.accounts || []).length > 0) ||
               (can(user.roles, ["Operations Coordinator"]) &&
                 (groups.some((g) => g.coordinator === user.id && g.supervisor_team === "Service Team") ||
                   (d.accounts || []).some((a: Row) => a.coordinator_id === user.id || a.coordinator_2_id === user.id)))
@@ -1008,8 +1010,9 @@ export default function Operations({ module: initialModule }: { module: string }
             ? // Freelance client accounts only, for the Service Team's coordinators,
               // the people who keep the accounts, and the leaders. A session's
               // sign-in accounts stay on the session.
-              can(user.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin", "Team Supervisor"]) ||
+              can(user.roles, ["Higher Board", "Project Operations", "Operations Systems / Admin"]) ||
               keepsAccounts ||
+              (can(user.roles, ["Team Supervisor"]) && (d.accounts || []).length > 0) ||
               (can(user.roles, ["Operations Coordinator"]) &&
                 (groups.some((g) => g.coordinator === user.id && g.supervisor_team === "Service Team") ||
                   (d.accounts || []).some((a: Row) => a.coordinator_id === user.id || a.coordinator_2_id === user.id)))
@@ -3674,7 +3677,7 @@ See you there!`,
     // A row is one of the account's students: its first, or a second whose service it buys.
     const latestOrderOf = (r: Row) => ordersOf(r).sort((x, y) => String(y.updated_at).localeCompare(String(x.updated_at)))[0] || null;
     const secondRow = (a: Row) => (a.second ? { ...a, ...a.second, linked_at: null, linked_by: null, use: 2 } : null);
-    const setsServiceStatus = (r: Row) => Boolean(r.student_id) && (wordOn(r) || can(user.roles, ["Project Operations", "Operations Systems / Admin"]));
+    const setsServiceStatus = (r: Row) => followsServiceRow(user, r, (id) => groups.find((g) => g.id === id));
     const servicePicker = (r: Row) => {
       const latest = latestOrderOf(r);
       const choose = (status: string) => {
@@ -3759,15 +3762,17 @@ See you there!`,
     // Service status (supervisors and Project Operations): one row per service
     // that has a client account, with where its latest order stands.
     const leadsAll = can(user.roles, ["Project Operations", "Operations Systems / Admin"]);
-    const coordinatesAccount = (a: Row) => a.coordinator_id === user.id || a.coordinator_2_id === user.id;
-    const followsServices =
-      can(user.roles, ["Team Supervisor", "Project Operations", "Operations Systems / Admin"]) ||
-      accounts.some((a) => (a.student_id || a.second) && coordinatesAccount(a));
     const groupOfRow = (id: string) => groups.find((g) => g.id === id);
+    // Each person follows their own students (16 November 2026): a coordinator
+    // their groups' students, whoever is written on the account; a supervisor
+    // their groups'; the keepers and leaders every one. One rule, so the
+    // coordinators' rows add up to Abdullah Waheed's and Taha's (lib/domain/service-rows).
+    const followsRow = (a: Row) => followsServiceRow(user, a, groupOfRow);
+    const followsServices = seesEveryServiceRow(user) || accounts.some((a) => [a.student_id ? a : null, secondRow(a)].some((r) => r && followsRow(r)));
     // One row per student an account buys from: up to two per account (10 November 2026).
     const serviceRows: Row[] = accounts
       .flatMap((a) => [a.student_id ? a : null, secondRow(a)].filter(Boolean) as Row[])
-      .filter((a) => leadsAll || groupOfRow(a.student_group)?.supervisor === user.id || coordinatesAccount(a))
+      .filter(followsRow)
       .map((a) => {
         const orders = ordersOf(a).sort((x, y) => String(y.updated_at).localeCompare(String(x.updated_at)));
         return {
