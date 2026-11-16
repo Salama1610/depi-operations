@@ -151,6 +151,7 @@ export async function releaseUnusedPlace(accountId: string, studentId: string, a
   const jobs: any[] = [
     stmt("UPDATE service_links SET account_id=NULL WHERE account_id=? AND student_id=?", accountId, studentId),
     stmt("UPDATE accounts SET student_id=NULL,service_link_id=NULL,linked_at=NULL,linked_by=NULL WHERE id=? AND student_id=?", accountId, studentId),
+    promoteRepeatStmt(studentId),
     stmt(
       "UPDATE accounts SET coordinator_id=NULL,coordinator_2_id=NULL WHERE id=? AND student_id IS NULL AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.account_id=accounts.id)",
       accountId,
@@ -308,6 +309,192 @@ export async function assignAccountPlace(accountId: string, studentId: string, l
   ).first();
   if (!account) return { linked: false, reason: "account cannot take this student" } as const;
   return (await linkPlace(account, link, s, studentId, platform, actor)) ? ({ linked: true } as const) : ({ linked: false, reason: "taken meanwhile" } as const);
+}
+
+/**
+ * The most accounts that may buy one service (17 November 2026, the owner's
+ * decision: the same service can be bought by two or three different accounts,
+ * each purchase being a gig of its own on the portal).
+ */
+export const accountsPerService = 3;
+
+/**
+ * Hands a service to the account that also buys it, when the account that was
+ * recorded on it goes (17 November 2026). A repeat purchase is an account whose
+ * first student and service are this one while the service's own account is
+ * another; when that account is released the service would otherwise be left
+ * with no account recorded and never be offered one again.
+ */
+export const promoteRepeatStmt = (studentId: string) =>
+  stmt(
+    `UPDATE service_links SET account_id=(SELECT r.id FROM accounts r WHERE r.service_link_id=service_links.id AND r.student_id=service_links.student_id AND r.status<>'Retired' ORDER BY r.linked_at,r.id LIMIT 1)
+     WHERE student_id=? AND account_id IS NULL
+       AND EXISTS (SELECT 1 FROM accounts r WHERE r.service_link_id=service_links.id AND r.student_id=service_links.student_id AND r.status<>'Retired')`,
+    studentId,
+  );
+
+type RepeatStep = { studentId: string; studentName: string; coordinator: string; linkId: string; linkPlatform: string; slot: number; accountId: string; accountLabel: string; marketplace: string };
+
+/**
+ * Plans the repeat purchases (17 November 2026): for students short of three
+ * accounts whose approved services all have an account already, the same
+ * service is bought again by another account until they hold three, at most
+ * three accounts on one service. Nothing is written. Closest to three gigs on
+ * the portal first, then the fewest accounts needed; a student whose three
+ * cannot all be found gets none, so no place is spent on a student who cannot
+ * finish. A repeat takes the first-student slot of an account that has room
+ * (empty, or with one student who is on it through their own service), so the
+ * account's other student keeps their place and the second place stays free.
+ */
+export async function planRepeatPurchases() {
+  const latest = "(SELECT batch_id FROM portal_uploads WHERE sheet='students' AND status='Active' ORDER BY committed_at DESC LIMIT 1)";
+  const held = `(SELECT count(*) FROM (SELECT a.id FROM accounts a WHERE a.student_id=s.id AND a.status<>'Retired' UNION SELECT l.account_id FROM service_links l JOIN accounts a ON a.id=l.account_id WHERE l.student_id=s.id AND a.status<>'Retired') z)`;
+  const students = (
+    (await all(
+      `SELECT s.id,s.name,s.group_id,lower(trim(coalesce(s.job_profile,''))) profile,g.coordinator,${held} held,
+          coalesce(po.a,0) approved, coalesce(po.t,0)-coalesce(po.r,0) live,
+          (SELECT min(coalesce(l.qc_at,l.updated_at)) FROM service_links l WHERE l.student_id=s.id AND l.qc_status='Locked') oldest
+       FROM students s JOIN groups g ON g.id=s.group_id
+       LEFT JOIN (SELECT student_id, max(coalesce(approved_gigs,0)) a, max(coalesce(total_gigs,0)) t, max(coalesce(rejected_gigs,0)) r FROM portal_students WHERE batch_id=${latest} AND student_id IS NOT NULL GROUP BY student_id) po ON po.student_id=s.id
+       WHERE s.lifecycle='Active' AND s.group_id NOT LIKE 'DEMO-%' AND g.coordinator IS NOT NULL AND coalesce(g.delivery_model,'Regular')<>'Industry'
+         AND EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=s.id AND l.qc_status='Locked' AND l.platform IN ('Kafiil','Nafezly'))
+         AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=s.id AND l.qc_status='Locked' AND l.platform IN ('Kafiil','Nafezly') AND l.account_id IS NULL
+                           AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.service_link_id=l.id))
+         AND NOT EXISTS (SELECT 1 FROM portal_students p WHERE p.student_id=s.id AND p.batch_id=${latest} AND lower(trim(coalesce(p.final_status,'')))='graduated')
+         AND ${held}<?`,
+      accountsPerStudent,
+    )) as any[]
+  )
+    .filter((s) => buysServices(String(s.group_id)))
+    .map((s) => ({ ...s, held: Number(s.held), live: Math.max(0, Number(s.live)), approved: Number(s.approved) }))
+    .sort((p, q) => q.live - p.live || q.approved - p.approved || q.held - p.held || String(p.oldest).localeCompare(String(q.oldest)) || String(p.id).localeCompare(String(q.id)));
+  const pool = (await all(
+    `SELECT a.id,a.label,a.platform,a.credits,${accountUsesSql("a")} uses,
+        CASE WHEN a.student_id IS NULL OR EXISTS (SELECT 1 FROM service_links k WHERE k.account_id=a.id AND k.student_id=a.student_id) THEN 1 ELSE 0 END shaped
+     FROM accounts a WHERE a.status='Available' AND a.active_assignment IS NULL AND a.id NOT LIKE 'DEMO-%' AND coalesce(a.coordinator_state,'')<>'Does not work'
+       AND a.platform IN ('Kafeel','Nafezly') AND ${accountUsesSql("a")}<?`,
+    studentsPerAccount,
+  )) as any[];
+  const occupants = new Map<string, string[]>();
+  for (const o of (await all(
+    `SELECT a.id account_id,lower(trim(coalesce(x.job_profile,''))) profile FROM accounts a JOIN students x ON x.id=a.student_id OR x.id IN (SELECT l.student_id FROM service_links l WHERE l.account_id=a.id)
+     WHERE a.id NOT LIKE 'DEMO-%'`,
+  )) as any[]) {
+    if (!occupants.has(o.account_id)) occupants.set(o.account_id, []);
+    occupants.get(o.account_id)!.push(String(o.profile || ""));
+  }
+  const taken = new Set<string>(); // accounts given a repeat in this plan: one each, it uses the first-student slot
+  const steps: RepeatStep[] = [];
+  const skipped: { studentId: string; reason: string }[] = [];
+  for (const s of students) {
+    const mine = new Set((await all(studentAccountsSql, s.id, s.id)).map((r: any) => String(r.account_id)));
+    if (mine.size >= accountsPerStudent) continue;
+    const links = (await all(
+      `SELECT l.id,l.platform,l.slot,
+          (SELECT count(*) FROM (SELECT account_id x FROM service_links WHERE id=l.id AND account_id IS NOT NULL UNION SELECT id FROM accounts r WHERE r.service_link_id=l.id AND r.status<>'Retired') z) buyers
+       FROM service_links l WHERE l.student_id=? AND l.qc_status='Locked' AND l.platform IN ('Kafiil','Nafezly') ORDER BY l.qc_at,l.updated_at,l.slot`,
+      s.id,
+    )) as any[];
+    const added = new Map<string, number>();
+    const here = new Set<string>();
+    const picks: RepeatStep[] = [];
+    const fits = (platform: string) =>
+      pool
+        .filter(
+          (a) =>
+            a.platform === platform && Number(a.shaped) === 1 && !taken.has(a.id) && !here.has(a.id) && !mine.has(a.id) &&
+            (!s.profile || !(occupants.get(a.id) || []).includes(s.profile)),
+        )
+        .sort((p, q) => Number(q.uses) - Number(p.uses) || Number(q.credits) - Number(p.credits) || String(p.id).localeCompare(String(q.id)));
+    while (picks.length < accountsPerStudent - mine.size) {
+      const options = links
+        .map((l) => ({ l, buyers: Number(l.buyers) + (added.get(l.id) || 0), fit: fits(marketplace[l.platform]) }))
+        .filter((o) => o.buyers < accountsPerService && o.fit.length)
+        .sort((p, q) => p.buyers - q.buyers || q.fit.length - p.fit.length);
+      const best = options[0];
+      if (!best) break;
+      const account = best.fit[0];
+      picks.push({
+        studentId: s.id, studentName: s.name, coordinator: s.coordinator, linkId: best.l.id, linkPlatform: best.l.platform, slot: Number(best.l.slot),
+        accountId: account.id, accountLabel: account.label, marketplace: marketplace[best.l.platform],
+      });
+      added.set(best.l.id, (added.get(best.l.id) || 0) + 1);
+      here.add(account.id);
+    }
+    if (picks.length < accountsPerStudent - mine.size) {
+      skipped.push({ studentId: s.id, reason: picks.length ? "not enough places to reach three" : "no place that fits" });
+      continue;
+    }
+    for (const p of picks) taken.add(p.accountId);
+    steps.push(...picks);
+  }
+  return { steps, skipped, students: new Set(steps.map((p) => p.studentId)).size };
+}
+
+/**
+ * One repeat purchase: the account joins the service as the account's first
+ * student, whose coordinator it is written to; a student already on it through
+ * their own service keeps their place and their coordinator moves to the
+ * second. Guarded in one statement: the account still Available with a place,
+ * still empty of a first student or holding one who is on it through a
+ * service, the student still under three accounts, the service still under
+ * three. Returns whether it was made; then the coordinator is told and it is
+ * audited.
+ */
+async function linkRepeat(step: RepeatStep, actor: any | null) {
+  const t = now();
+  await db().batch([
+    stmt(
+      `UPDATE accounts SET student_id=?,service_link_id=?,linked_at=?,linked_by=?,
+         coordinator_2_id=CASE WHEN coordinator_id IS NOT NULL AND coordinator_id<>? THEN coordinator_id WHEN coordinator_2_id=? THEN NULL ELSE coordinator_2_id END,
+         coordinator_id=?
+       WHERE id=? AND status='Available' AND active_assignment IS NULL AND coalesce(coordinator_state,'')<>'Does not work'
+         AND (student_id IS NULL OR EXISTS (SELECT 1 FROM service_links k WHERE k.account_id=accounts.id AND k.student_id=accounts.student_id))
+         AND (SELECT ${accountUsesSql("a")} FROM accounts a WHERE a.id=?)<?
+         AND (SELECT count(*) FROM (${studentAccountsSql}) y)<?
+         AND (SELECT count(*) FROM (SELECT account_id x FROM service_links WHERE id=? AND account_id IS NOT NULL UNION SELECT id FROM accounts r WHERE r.service_link_id=? AND r.status<>'Retired') z)<?
+         AND coalesce(student_id,'')<>? AND NOT EXISTS (SELECT 1 FROM service_links k WHERE k.account_id=accounts.id AND k.student_id=?)`,
+      step.studentId, step.linkId, t, null, step.coordinator, step.coordinator, step.coordinator,
+      step.accountId, step.accountId, studentsPerAccount, step.studentId, step.studentId, accountsPerStudent, step.linkId, step.linkId, accountsPerService, step.studentId, step.studentId,
+    ),
+  ]);
+  const linkedNow: any = await stmt("SELECT student_id,service_link_id FROM accounts WHERE id=?", step.accountId).first();
+  if (linkedNow?.student_id !== step.studentId || linkedNow?.service_link_id !== step.linkId) return false;
+  await db().batch([
+    notify(
+      step.coordinator,
+      `Client account ${step.accountLabel} was added to ${step.studentName}'s ${step.linkPlatform} service ${step.slot}: buy the same service again with it`,
+      "student", step.studentId, "Information", `account-repeat:${step.accountId}:${step.linkId}`,
+    ),
+    auditStmt(actor || { id: "system" }, "account_link", step.accountId, { student_id: step.studentId, service_link_id: step.linkId, coordinator_id: step.coordinator, platform: step.marketplace, repeat: true }, null),
+  ]);
+  return true;
+}
+
+/**
+ * Buys the same service again with the accounts nobody else needs (17
+ * November 2026): plans (planRepeatPurchases) and, unless `apply` is false,
+ * does it. Only the people who keep the accounts run it, on purpose: it spends
+ * places a student approved tomorrow might need.
+ */
+export async function repeatPurchases(actor: any | null, apply = true) {
+  const plan = await planRepeatPurchases();
+  let linked = 0;
+  let refused = 0;
+  if (apply) {
+    for (const step of plan.steps) {
+      if (await linkRepeat(step, actor)) linked++;
+      else refused++;
+    }
+  }
+  return {
+    planned: plan.steps.length,
+    students: plan.students,
+    linked,
+    refused,
+    skipped: plan.skipped.length,
+    on: { Kafeel: plan.steps.filter((p) => p.marketplace === "Kafeel").length, Nafezly: plan.steps.filter((p) => p.marketplace === "Nafezly").length },
+  };
 }
 
 /**

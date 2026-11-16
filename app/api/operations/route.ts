@@ -31,7 +31,7 @@ import {
   revokesStudents,
   unlocksAccounts,
 } from "@/lib/server";
-import { accountStates, accountsPerStudent, buysServices, hasFreePlace, linkAccountKey, serviceFixCategory, studentAccountsSql, serviceFixStatements, serviceFollowUpSweep, submissionStatus, taskProgressStates } from "@/lib/service-followup";
+import { accountStates, accountsPerStudent, buysServices, hasFreePlace, linkAccountKey, promoteRepeatStmt, repeatPurchases, serviceFixCategory, studentAccountsSql, serviceFixStatements, serviceFollowUpSweep, submissionStatus, taskProgressStates } from "@/lib/service-followup";
 import { accountMixMessage, accountMixProblem, otherMarketplace } from "@/lib/domain/student-accounts";
 import { demoPeople, demoPlan, demoStudentEmail, isDemo, sameSide } from "@/lib/demo";
 import {
@@ -3369,6 +3369,7 @@ export async function POST(req: Request) {
             jobs.push(...(await orderCreditJobs(id, String((open as any).id), 0, u.id, t)));
           jobs.push(
             stmt("UPDATE service_links SET account_id=NULL WHERE account_id=? AND student_id=?", id, second.student_id),
+            promoteRepeatStmt(second.student_id),
             stmt(
               "UPDATE account_orders SET status='Cancelled',note=COALESCE(note||' · ','')||?,cancelled_at=?,updated_at=? WHERE account_id=? AND student_id=? AND status NOT IN ('Proof Uploaded','Cancelled')",
               "Closed: the account was released from this student.", t, t, id, second.student_id,
@@ -3384,6 +3385,7 @@ export async function POST(req: Request) {
         jobs.push(
           stmt("UPDATE accounts SET student_id=NULL,service_link_id=NULL,linked_at=NULL,linked_by=NULL WHERE id=?", id),
           stmt("UPDATE service_links SET account_id=NULL WHERE account_id=? AND student_id=?", id, a.student_id),
+          promoteRepeatStmt(a.student_id),
           // An order belongs to the student it was placed for: one still open
           // when the account is released is closed, with why (2 November 2026).
           stmt(
@@ -3664,6 +3666,18 @@ export async function POST(req: Request) {
         const summary = await serviceFollowUpSweep(u);
         await db().batch([auditStmt(u, "account_link_sweep", "accounts", summary, null, key)]);
         return Response.json({ ok: true, ...summary });
+      }
+      case "account_repeat_purchases": {
+        // The same service bought again by other accounts (17 November 2026, the
+        // owner's decision), for the students short of three accounts whose
+        // approved services all have one: with the places nobody else needs.
+        // On purpose not automatic: it spends places a student approved tomorrow
+        // might need. `preview` plans without doing it.
+        ensure(keepsAccounts(u), "Only the people who keep the accounts can run this.");
+        const preview = x.preview === true;
+        const summary = await repeatPurchases(u, !preview);
+        if (!preview) await db().batch([auditStmt(u, "account_repeat_purchases", "accounts", summary, null, key)]);
+        return Response.json({ ok: true, preview, ...summary });
       }
       // A lead hands out the open quality work, evenly. Passing a reviewer
       // assigns just that item; passing none distributes the whole queue.

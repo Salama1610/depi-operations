@@ -1148,6 +1148,10 @@ export default function Operations({ module: initialModule }: { module: string }
             ? t("The demo is back to its starting point, timed around now.")
           : action === "load_demo_data"
             ? t("Synthetic pilot loaded · {v0} students across {v1} groups", { v0: result.summary.students, v1: result.summary.groups })
+          : action === "account_repeat_purchases"
+            ? result.preview
+              ? t("{v0} accounts could be added to {v1} students for repeat purchases", { v0: result.planned, v1: result.students })
+              : t("{v0} accounts added to {v1} students for repeat purchases", { v0: result.linked, v1: result.students })
           : t("Updated"),
       );
       afterAction(action);
@@ -4547,6 +4551,14 @@ See you there!`,
                 { key: "notUsable", label: t("Not usable now"), render: (r) => (r.notUsable ? <Cue tone="warn">{r.notUsable}</Cue> : 0) },
                 { key: "retired", label: t("Retired"), render: (r) => r.retired },
               ])}
+              <div style={{ padding: "12px 16px 0", display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button className="small-btn" disabled={busy} onClick={() => quick("account_repeat_purchases", { preview: true })} title={t("Shows how many students the places left could finish with repeat purchases, without changing anything")}>
+                  {t("Preview repeat purchases")}
+                </button>
+                <button className="small-btn" disabled={busy} onClick={() => quick("account_repeat_purchases", {})} title={t("Buys the same service again with other accounts for students who have fewer than three accounts: up to three accounts on one service, three per student. It uses the places left, so run it when no student is waiting for one")}>
+                  <Link2 size={15} /> {t("Use the places left for repeat purchases")}
+                </button>
+              </div>
               <p className="footnote" style={{ padding: "0 16px 12px" }}>
                 {t("A place is one student on an account: an account takes two students with different job profiles. Only accounts that are Available take a new student; access issues, blocked and under-review accounts are counted apart.")}
               </p>

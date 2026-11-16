@@ -2665,6 +2665,13 @@ export const ar: Record<string, string> = {
   "Latest coordinator status first": "أحدث حالة من المنسق أولًا",
   "Gives each approved service of the service groups’ students an account: three accounts per student at most, two students per account, never two of the same job profile": "يعطي كل خدمة معتمدة لطلاب جروبات الخدمات حسابًا: ثلاثة حسابات للطالب على الأكثر، وطالبان للحساب، ولا يكونان من نفس المسار الوظيفي",
   "Link accounts to eligible students": "ربط الحسابات بالطلاب المستحقين",
+  // Repeat purchases (17 Nov 2026).
+  "Preview repeat purchases": "معاينة الشراء المتكرر",
+  "Use the places left for repeat purchases": "استخدام الأماكن المتبقية للشراء المتكرر",
+  "Shows how many students the places left could finish with repeat purchases, without changing anything": "يعرض كم طالبًا يمكن إتمامه بالشراء المتكرر بالأماكن المتبقية، دون تغيير أي شيء",
+  "Buys the same service again with other accounts for students who have fewer than three accounts: up to three accounts on one service, three per student. It uses the places left, so run it when no student is waiting for one": "يشتري الخدمة نفسها مرة أخرى بحسابات أخرى للطلاب الذين لديهم أقل من ثلاثة حسابات: حتى ثلاثة حسابات للخدمة الواحدة وثلاثة لكل طالب. يستهلك الأماكن المتبقية، فشغّله حين لا ينتظر طالب مكانًا",
+  "{v0} accounts could be added to {v1} students for repeat purchases": "يمكن إضافة {v0} حسابًا إلى {v1} طالبًا للشراء المتكرر",
+  "{v0} accounts added to {v1} students for repeat purchases": "أُضيف {v0} حسابًا إلى {v1} طالبًا للشراء المتكرر",
   "Linked by {v0}": "ربطه {v0}",
   "Linked automatically": "رُبط تلقائيًا",
   "Update status": "تحديث الحالة",

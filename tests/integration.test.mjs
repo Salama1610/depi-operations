@@ -4782,6 +4782,102 @@ test("a named account can be given to a named approved service, under the same r
   await dbExec("UPDATE students SET group_id=?,job_profile=NULL WHERE id=?", group.id, pupil.id);
 });
 
+test("a service is bought again by other accounts until the student holds three, one place each, and the service keeps an account when the first one goes", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const people = await dbRows(
+    `SELECT s.id,s.group_id,s.job_profile FROM students s JOIN groups g ON g.id=s.group_id
+       WHERE s.lifecycle='Active' AND s.group_id NOT LIKE 'DEMO-%' AND g.coordinator IS NOT NULL AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=s.id)
+       ORDER BY s.id LIMIT 3`,
+  );
+  const [x, y1, y2] = people;
+  const serviceGroup = await asServiceGroup(x.group_id, "DKH5_DRT2_S1");
+  await dbExec("UPDATE students SET group_id=?,job_profile=? WHERE id=?", serviceGroup, "Repeat X Profile", x.id);
+  await dbExec("UPDATE students SET job_profile=? WHERE id=?", "Repeat Y1 Profile", y1.id);
+  await dbExec("UPDATE students SET job_profile=? WHERE id=?", "Repeat Y2 Profile", y2.id);
+  const parked = (await dbRows("SELECT id FROM accounts WHERE status='Available'")).map((a) => a.id);
+  if (parked.length) await dbExec(`UPDATE accounts SET status='Under Review' WHERE id IN (${parked.map(() => "?").join(",")})`, ...parked);
+  for (const id of ["ACC-RPT-A", "ACC-RPT-B1", "ACC-RPT-B2"]) await check("account", { id, label: id.toLowerCase() + "@example.org", platform: "Kafeel", credits: 10 });
+  const at = new Date().toISOString();
+  const link = async (id, student, slot, account) => {
+    await dbExec(
+      "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,account_id,submitted_at,updated_at) VALUES(?,?,?,?,?,'Kafiil','Valid','{}',?,'Locked',NULL,'staff-quality',?,1,?,?,?)",
+      id, student, slot, `https://kafiil.com/services/${id}`, `kafiil.com/services/${id}`, at, at, account, at, at,
+    );
+    await dbExec("UPDATE accounts SET student_id=?,service_link_id=?,linked_at=? WHERE id=?", student, id, at, account);
+  };
+  // X buys one service through ACC-RPT-A; two other accounts each hold one student and have a place left.
+  await link("SLK-RPT-1", x.id, 1, "ACC-RPT-A");
+  await link("SLK-RPT-2", y1.id, 1, "ACC-RPT-B1");
+  await link("SLK-RPT-3", y2.id, 1, "ACC-RPT-B2");
+  await build({
+    entryPoints: ["lib/service-followup.ts"],
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    outfile: join(testDirectory, "followup.mjs"),
+    plugins: [
+      supabaseAuthMock,
+      {
+        name: "test-bindings",
+        setup(b) {
+          b.onResolve({ filter: /^(cloudflare:workers|next\/headers)$/ }, (a) => ({ path: a.path, namespace: "mock" }));
+          b.onLoad({ filter: /.*/, namespace: "mock" }, (a) => ({
+            contents: a.path === "cloudflare:workers" ? "export const env=globalThis.__testEnv" : "export const headers=async()=>globalThis.__testHeaders()",
+            loader: "js",
+          }));
+        },
+      },
+    ],
+  });
+  const mod = await import(pathToFileURL(join(testDirectory, "followup.mjs")).href);
+  const heldBy = async (id) => (await dbRows(mod.studentAccountsSql, id, id)).map((r) => r.account_id).sort();
+  const usesOf = async (id) => Number((await dbRow(`SELECT ${mod.accountUsesSql("a")} n FROM accounts a WHERE a.id=?`, id)).n);
+
+  // A preview plans and changes nothing: X is short of two, and two accounts have a place.
+  const preview = await mod.planRepeatPurchases();
+  const mine = preview.steps.filter((s) => s.studentId === x.id);
+  assert.deepEqual(mine.map((s) => s.accountId).sort(), ["ACC-RPT-B1", "ACC-RPT-B2"]);
+  assert.ok(mine.every((s) => s.linkId === "SLK-RPT-1" && s.marketplace === "Kafeel"));
+  assert.deepEqual(await heldBy(x.id), ["ACC-RPT-A"]);
+  assert.equal((await mod.repeatPurchases(null, false)).linked, 0);
+  assert.deepEqual(await heldBy(x.id), ["ACC-RPT-A"]);
+
+  // Done: X holds three, each account still holds its own student too, the service keeps its first account.
+  const done = await mod.repeatPurchases(null);
+  assert.ok(done.linked >= 2, JSON.stringify(done));
+  assert.deepEqual(await heldBy(x.id), ["ACC-RPT-A", "ACC-RPT-B1", "ACC-RPT-B2"]);
+  for (const [account, owner, link2] of [["ACC-RPT-B1", y1.id, "SLK-RPT-2"], ["ACC-RPT-B2", y2.id, "SLK-RPT-3"]]) {
+    const row = await dbRow("SELECT student_id,service_link_id FROM accounts WHERE id=?", account);
+    assert.deepEqual([row.student_id, row.service_link_id], [x.id, "SLK-RPT-1"], "the repeat is the account's first student");
+    assert.equal((await dbRow("SELECT account_id FROM service_links WHERE id=?", link2)).account_id, account, "the account's own student keeps their service");
+    assert.equal(await usesOf(account), 2, "still two students on the account, no more");
+    assert.ok(await dbRow("SELECT id FROM notifications WHERE source=?", `account-repeat:${account}:SLK-RPT-1`), "the coordinator is told");
+  }
+  assert.equal((await dbRow("SELECT account_id FROM service_links WHERE id='SLK-RPT-1'")).account_id, "ACC-RPT-A");
+  assert.ok(await dbRow("SELECT id FROM audit_events WHERE action='account_link' AND entity_id='ACC-RPT-B1' AND value LIKE '%repeat%'"));
+  // Nothing more is planned for a student who holds three.
+  assert.equal((await mod.planRepeatPurchases()).steps.filter((s) => s.studentId === x.id).length, 0);
+
+  // The first account goes: the service is not left without one, the repeat takes over.
+  assert.deepEqual(await mod.releaseUnusedPlace("ACC-RPT-A", x.id, null, "test"), { released: true, platform: "Kafeel" });
+  const promoted = (await dbRow("SELECT account_id FROM service_links WHERE id='SLK-RPT-1'")).account_id;
+  assert.ok(["ACC-RPT-B1", "ACC-RPT-B2"].includes(promoted), "a repeat account is the service's account now: " + promoted);
+  assert.deepEqual(await heldBy(x.id), ["ACC-RPT-B1", "ACC-RPT-B2"]);
+  // The emptied account is free again, and X, short of one, is given it as a repeat.
+  assert.equal(await usesOf("ACC-RPT-A"), 0);
+  const again = await mod.repeatPurchases(null);
+  assert.ok(again.linked >= 1, JSON.stringify(again));
+  assert.deepEqual(await heldBy(x.id), ["ACC-RPT-A", "ACC-RPT-B1", "ACC-RPT-B2"]);
+  assert.equal(await usesOf("ACC-RPT-A"), 1, "an empty account still has its second place free");
+
+  await dbExec("UPDATE service_links SET account_id=NULL WHERE id LIKE 'SLK-RPT-%'");
+  await dbExec("UPDATE accounts SET student_id=NULL,service_link_id=NULL,coordinator_id=NULL,coordinator_2_id=NULL,status='Retired' WHERE id LIKE 'ACC-RPT-%'");
+  await dbExec("DELETE FROM service_links WHERE id LIKE 'SLK-RPT-%'");
+  if (parked.length) await dbExec(`UPDATE accounts SET status='Available' WHERE id IN (${parked.map(() => "?").join(",")})`, ...parked);
+  for (const p of people) await dbExec("UPDATE students SET group_id=?,job_profile=? WHERE id=?", p.group_id, p.job_profile, p.id);
+});
+
 test("the quality team checks each held session's attendance register, which Coach and Project Operations read", async () => {
   await dbExec("DELETE FROM rate_limits");
   current = { id: "owner", email: "owner@example.com" };
