@@ -2212,6 +2212,18 @@ export async function POST(req: Request) {
         const reference = String(x.reference || "").trim();
         ensure(reference.length >= 3, "Record the receipt or transfer reference.");
         const note = String(x.note || "").trim().slice(0, 300);
+        // A payment into the account (16 November 2026) adds credit like a
+        // top-up, and says when and how it was paid.
+        const payment = x.kind === "Payment";
+        const paidOn = String(x.paid_on || "").slice(0, 10);
+        const method = String(x.method || "").trim();
+        if (payment) {
+          ensure(/^\d{4}-\d{2}-\d{2}$/.test(paidOn) && paidOn <= t.slice(0, 10), "Enter the day it was paid, not later than today.");
+          ensure(["Card", "Bank transfer", "InstaPay", "Vodafone Cash", "Other"].includes(method), "Choose how it was paid.");
+        }
+        const reason = payment
+          ? `Payment · ${method} · ${reference} · paid ${paidOn}${note ? " · " + note : ""}`
+          : `Top-up · ${reference}${note ? " · " + note : ""}`;
         auditPrevious = a;
         jobs.push(
           stmt("UPDATE accounts SET credits=credits+? WHERE id=?", amount, id),
@@ -2220,7 +2232,7 @@ export async function POST(req: Request) {
             "INSERT INTO account_credit_ledger(id,account_id,delta,balance_after,reason,actor,created_at) SELECT ?,id,?,credits,?,?,? FROM accounts WHERE id=?",
             uid("CR"),
             amount,
-            `Top-up · ${reference}${note ? " · " + note : ""}`,
+            reason,
             u.id,
             t,
             id,
@@ -3260,6 +3272,45 @@ export async function POST(req: Request) {
             `INSERT INTO task_progress(task_id,status,note,updated_by,updated_at) VALUES(?,?,?,?,?)
              ON CONFLICT(task_id) DO UPDATE SET status=excluded.status,note=excluded.note,updated_by=excluded.updated_by,updated_at=excluded.updated_at`,
             id, x.status, note || null, u.id, t,
+          ),
+        );
+        break;
+      }
+      case "account_problem": {
+        // A problem with a client account (16 November 2026): not working,
+        // revoked by the marketplace, or another problem. The coordinator's
+        // word on it says it does not work, the keepers are told, and when a
+        // keeper reports it the account's status follows. Its students keep
+        // their places: account_unlock is still the one way to release one.
+        const a: any = await stmt("SELECT * FROM accounts WHERE id=?", id).first();
+        ensure(a && a.status !== "Retired", "Choose an active client account.");
+        ensure(
+          a.coordinator_id === u.id || a.coordinator_2_id === u.id || keepsAccounts(u),
+          "Only the account's coordinator or the people who keep the accounts can report a problem with it.",
+        );
+        const problems: Record<string, string> = { "Not working": "Access Issue", "Revoked by the marketplace": "Blocked", "Other problem": "Under Review" };
+        const problem = String(x.problem || "");
+        ensure(problem in problems, "Choose what is wrong with the account.");
+        const note = String(x.note || "").trim();
+        ensure(note.length >= 3 && note.length <= 1000, "Say what happened, in under 1,000 characters.");
+        const word = `${problem}: ${note}`.slice(0, 1000);
+        const status = problems[problem];
+        const moves = keepsAccounts(u) && a.status !== status && ["Available", "Assigned", "Cooldown", "Under Review", "Access Issue", "Blocked", "Funding Block", "Locked"].includes(a.status);
+        auditPrevious = { status: a.status, coordinator_state: a.coordinator_state, coordinator_note: a.coordinator_note };
+        auditValue = { account_id: id, problem, note, status: moves ? status : a.status };
+        jobs.push(
+          stmt(
+            "UPDATE accounts SET coordinator_state='Does not work',coordinator_note=?,coordinator_state_at=?,coordinator_state_by=? WHERE id=?",
+            word, t, u.id, id,
+          ),
+        );
+        if (moves) jobs.push(stmt("UPDATE accounts SET status=? WHERE id=?", status, id));
+        jobs.push(
+          stmt(
+            `INSERT OR IGNORE INTO notifications(id,recipient,title,entity_type,entity_id,severity,source,created_at,read_at)
+             SELECT ?||'-'||id,id,?,'account',?,'Action Required',?||':'||id,?,NULL FROM users
+             WHERE active=1 AND id<>? AND (roles LIKE '%Project Operations%' OR (roles LIKE '%Team Supervisor%' AND team='Service Team'))`,
+            uid("NTF"), `Account ${a.label}: ${word}`.slice(0, 300), id, `account-problem:${id}:${t}`, t, u.id,
           ),
         );
         break;

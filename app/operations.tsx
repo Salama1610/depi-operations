@@ -87,6 +87,8 @@ import {
   Check,
   LayoutDashboard,
   MessageSquareText,
+  ShoppingCart,
+  CreditCard,
 } from "lucide-react";
 import {
   SidebarProvider,
@@ -199,6 +201,7 @@ const nav = [
   ["sessions", "Sessions", CalendarDays],
   ["coaches", "Coach availability", CalendarClock],
   ["accounts", "Accounts", WalletCards],
+  ["service-operations", "Service operations", ShoppingCart],
   ["gigs", "Services", BriefcaseBusiness],
   ["opportunities", "Opportunities", ExternalLink],
   ["portal", "Gigs portal view", Files],
@@ -218,6 +221,10 @@ const gigPlatforms = ["Khamsat", "Mostaql", "Kafeel", "Nafezly", "Upwork", "Five
 // graduation come from the portal sheets, and the only upload left is an
 // order's POH. Gigs already recorded stay readable, and their reviews open.
 const retiredGigActions = new Set(["gig", "evidence", "gig_transition"]);
+/** What can be wrong with a client account (16 November 2026). */
+const accountProblems = ["Not working", "Revoked by the marketplace", "Other problem"];
+/** How money is paid into a client account. */
+const paymentMethods = ["Card", "Bank transfer", "InstaPay", "Vodafone Cash", "Other"];
 const moduleAction: Row = {
   students: "student",
   groups: "group",
@@ -256,7 +263,8 @@ const titles: Row = {
   account_service_status: "Service status",
   student_services_submit: "Submit service links for this student",
   staff: "Manage staff access",
-  account_topup: "Record a top-up",
+  account_topup: "Record a top-up or payment",
+  account_problem: "Report a problem with the account",
   account_coordinator: "Assign to a coordinator",
   session_coach: "Change the coach for one session",
   group_contact: "Log a group message",
@@ -583,6 +591,7 @@ export default function Operations({ module: initialModule }: { module: string }
     [statusPage, setStatusPage] = useState(1),
     [registersPage, setRegistersPage] = useState(1),
     [svcPage, setSvcPage] = useState(1),
+    [svcGigPage, setSvcGigPage] = useState(1),
     [attendancePage, setAttendancePage] = useState(1),
     [selected, setSelected] = useState<Row | null>(null),
     [modal, setModal] = useState<Row | null>(null),
@@ -986,6 +995,15 @@ export default function Operations({ module: initialModule }: { module: string }
             ])
         : m === "quality"
           ? canSeeServiceQueue || can(user.roles, ["Higher Board"])
+          : m === "service-operations"
+            ? // Buying the service groups' gigs through the client accounts (16
+              // November 2026): coordinators for their own students, their
+              // supervisors, Project Operations and the people who keep the accounts.
+              can(user.roles, ["Project Operations", "Operations Systems / Admin", "Team Supervisor"]) ||
+              keepsAccounts ||
+              (can(user.roles, ["Operations Coordinator"]) &&
+                (groups.some((g) => g.coordinator === user.id && g.supervisor_team === "Service Team") ||
+                  (d.accounts || []).some((a: Row) => a.coordinator_id === user.id || a.coordinator_2_id === user.id)))
           : m === "accounts"
             ? // Freelance client accounts only, for the Service Team's coordinators,
               // the people who keep the accounts, and the leaders. A session's
@@ -1011,7 +1029,7 @@ export default function Operations({ module: initialModule }: { module: string }
   // this person may see when the tab opens, and again after a dialog closes
   // (a keeper may just have saved a new password).
   useEffect(() => {
-    if (module !== "accounts" || !data?.user || demoAccount || modal) return;
+    if ((module !== "accounts" && module !== "service-operations") || !data?.user || demoAccount || modal) return;
     let live = true;
     fetch("/api/credentials", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list" }) })
       .then((r) => r.json())
@@ -1681,6 +1699,8 @@ export default function Operations({ module: initialModule }: { module: string }
   const creditKind = (e: Row) =>
     /^Refund/.test(e.reason || "")
       ? "Refund"
+      : /^Payment/.test(e.reason || "")
+      ? "Payment"
       : /^Top-up/.test(e.reason || "")
       ? "Top-up"
       : /^Opening/.test(e.reason || "")
@@ -3618,7 +3638,10 @@ See you there!`,
     content = <CoachProgress />;
   } else if (module === "portal") {
     content = <PortalView staffName={owner} />;
-  } else if (module === "accounts") {
+  } else if (module === "accounts" || module === "service-operations") {
+    // Accounts keeps the pool, the requests and the credit; Service operations
+    // (16 November 2026) is the buying of the gigs, by gig and by student.
+    const serviceOps = module === "service-operations";
     const accounts: Row[] = d.accounts || [];
     const requests: Row[] = d.requests || [];
     const money = (v: any) => "$" + moneyFormat.format(Number(v || 0));
@@ -3968,7 +3991,7 @@ See you there!`,
       .filter((e: Row) => accountFilters.platform === "All" || accounts.find((a) => a.id === e.account_id)?.platform === accountFilters.platform)
       .filter((e: Row) => accountFilters.ledger === "All" || creditKind(e) === accountFilters.ledger);
     const thisMonth = new Date().toISOString().slice(0, 7);
-    const toppedUp = (d.creditLedger || []).filter((e: Row) => creditKind(e) === "Top-up" && String(e.created_at).startsWith(thisMonth));
+    const toppedUp = (d.creditLedger || []).filter((e: Row) => ["Top-up", "Payment"].includes(creditKind(e)) && String(e.created_at).startsWith(thisMonth));
     const spent = (d.creditLedger || []).filter((e: Row) => creditKind(e) === "Service charged" && String(e.created_at).startsWith(thisMonth));
     const pool = accounts
       .filter(qMatch)
@@ -4002,79 +4025,357 @@ See you there!`,
             : requestStage(r) === accountFilters.request,
       );
     const openRequests = requests.filter((r) => r.status === "Submitted");
-    content = (
-      <>
-        <div className="mini-stats account-stats">
-          <span><strong>{accounts.filter((a) => a.status === "Available").length}</strong>{t("Available accounts")}</span>
-          <span><strong>{money(accounts.filter((a) => a.status === "Available").reduce((n, a) => n + Number(a.credits || 0), 0))}</strong>{t("Credit available")}</span>
-          <span><strong>{accounts.filter((a) => a.status === "Assigned").length}</strong>{t("Assigned to students")}</span>
-          <span className={accounts.some((a) => attention.includes(a.status)) ? "is-warning" : ""}><strong>{accounts.filter((a) => attention.includes(a.status)).length}</strong>{t("Need attention")}</span>
-          <span><strong>{openRequests.length}</strong>{t("Requests waiting")}</span>
-        </div>
-        <div className="account-capacity">
-          {controlledPlatforms.map((platform) => {
-            const mine = accounts.filter((a) => a.platform === platform);
-            const ready = mine.filter((a) => a.status === "Available");
-            const credit = ready.reduce((n, a) => n + Number(a.credits || 0), 0);
-            const waiting = openRequests.filter((r) => r.platform === platform);
-            const needed = waiting.reduce((n, r) => n + Number(r.value || 0), 0);
-            return (
-              <button
-                key={platform}
-                className={"capacity-card" + (accountFilters.platform === platform ? " is-selected" : "") + (needed > credit ? " is-short" : "")}
-                onClick={() => setAccountFilters({ ...accountFilters, platform: accountFilters.platform === platform ? "All" : platform })}
-              >
-                <strong>{platform}</strong>
-                <span>{t("{v0} of {v1} accounts ready", { v0: ready.length, v1: mine.length })}</span>
-                <span>{t("{v0} credit · {v1} needed by {v2} requests", { v0: money(credit), v1: money(needed), v2: waiting.length })}</span>
-              </button>
-            );
-          })}
-        </div>
-        {keepsAccounts &&
-          panel(
-            t("Accounts left to use"),
-            <>
-              {generic(accountPlaces(accounts, ["Kafeel", "Nafezly"]) as Row[], [
-                { key: "platform", label: t("Marketplace"), render: (r) => <strong>{r.platform}</strong> },
-                { key: "places", label: t("Places left"), render: (r) => <Cue tone={r.places ? "ok" : "bad"}>{r.places}</Cue> },
-                { key: "withPlace", label: t("Accounts with a free place"), render: (r) => r.withPlace },
-                { key: "empty", label: t("Empty"), render: (r) => r.empty },
-                { key: "oneStudent", label: t("One student"), render: (r) => r.oneStudent },
-                { key: "full", label: t("Full"), render: (r) => r.full },
-                { key: "notUsable", label: t("Not usable now"), render: (r) => (r.notUsable ? <Cue tone="warn">{r.notUsable}</Cue> : 0) },
-                { key: "retired", label: t("Retired"), render: (r) => r.retired },
-              ])}
-              <p className="footnote" style={{ padding: "0 16px 12px" }}>
-                {t("A place is one student on an account: an account takes two students with different job profiles. Only accounts that are Available take a new student; access issues, blocked and under-review accounts are counted apart.")}
-              </p>
-            </>,
-          )}
-        <Tabs defaultValue={openRequests.length ? "requests" : "pool"}>
+    if (serviceOps) {
+      content = !followsServices ? (
+        <Empty title={t("No gigs to buy yet: your students have no client account.")} />
+      ) : (
+        <Tabs defaultValue="by-gig">
           <TabsList>
-            <TabsTrigger value="pool">
-              {t("Account pool")}{" "}<span className="count">{accounts.length}</span>
+            <TabsTrigger value="by-gig">
+              {t("One gig per row")}{" "}<span className="count">{svcShown.length}</span>
             </TabsTrigger>
-            <TabsTrigger value="requests">
-              {t("Requests")}{" "}<span className="count">{openRequests.length}</span>
+            <TabsTrigger value="by-student">
+              {t("One student per row")}{" "}<span className="count">{studentLines.length}</span>
             </TabsTrigger>
-            {followsServices && (
-              <TabsTrigger value="service-status">
-                {t("Service status")}{" "}<span className="count">{serviceRows.length}</span>
-              </TabsTrigger>
-            )}
-            {followsServices && (
-              <TabsTrigger value="bought">
-                {t("Bought services")}{" "}<span className="count">{boughtRows.length}</span>
-              </TabsTrigger>
-            )}
-            {(keepsAccounts || can(user.roles, ["Project Operations"])) && (
-              <TabsTrigger value="credit">
-                {t("Credit tracker")}{" "}<span className="count">{(d.creditLedger || []).length}</span>
-              </TabsTrigger>
-            )}
+            <TabsTrigger value="bought">
+              {t("Bought services")}{" "}<span className="count">{boughtRows.length}</span>
+            </TabsTrigger>
           </TabsList>
-          {followsServices && (
+          <TabsContent value="by-gig">
+              {/* Every service with a client account, and where its coordinator's latest order stands. */}
+              <div className="filter-row">
+                <label className="search-box">
+                  <Search size={15} />
+                  <input value={svcFilters.q} placeholder={t("Student, ID, account or link")} onChange={(e) => setSvcFilters({ ...svcFilters, q: e.target.value })} />
+                </label>
+                <Pick
+                  label={t("Order state")}
+                  value={svcFilters.status}
+                  onChange={(status) => setSvcFilters({ ...svcFilters, status })}
+                  options={[
+                    { value: "All", label: t("Every state") },
+                    { value: "No order yet", label: t("No order yet") },
+                    { value: "Buy", label: t("Buy") },
+                    { value: "In Progress", label: t("In progress") },
+                    { value: "Done", label: t("Done, POH still to upload") },
+                    { value: "Proof Uploaded", label: t("POH uploaded") },
+                    { value: "Cancelled", label: t("Canceled") },
+                  ]}
+                />
+                <Pick
+                  label={t("Coordinator")}
+                  value={svcFilters.coordinator}
+                  onChange={(coordinator) => setSvcFilters({ ...svcFilters, coordinator })}
+                  options={[
+                    { value: "All", label: t("Every coordinator") },
+                    ...[...new Set(serviceRows.flatMap((r) => [r.coordinator_id, r.coordinator_2_id]).filter(Boolean))]
+                      .map((id) => ({ value: String(id), label: owner(String(id)) }))
+                      .sort((a, b) => a.label.localeCompare(b.label)),
+                  ]}
+                />
+                {leadsAll && (
+                  <Pick
+                    label={t("Supervisor")}
+                    value={svcFilters.supervisor}
+                    onChange={(supervisor) => setSvcFilters({ ...svcFilters, supervisor })}
+                    options={[
+                      { value: "All", label: t("All supervisors") },
+                      ...[...new Set(serviceRows.map((r) => r.supervisor).filter(Boolean))].map((id) => ({ value: String(id), label: owner(String(id)) })),
+                    ]}
+                  />
+                )}
+                <Pick
+                  label={t("Group")}
+                  value={svcFilters.group}
+                  onChange={(group) => setSvcFilters({ ...svcFilters, group })}
+                  options={[{ value: "All", label: t("All groups") }, ...[...new Set(serviceRows.map((r) => r.student_group).filter(Boolean))].sort().map((g) => ({ value: String(g), label: String(g) }))]}
+                />
+                <Pick
+                  label={t("Marketplace")}
+                  value={svcFilters.platform}
+                  onChange={(platform) => setSvcFilters({ ...svcFilters, platform })}
+                  options={[{ value: "All", label: t("All") }, ...[...new Set(serviceRows.map((r) => r.platform).filter(Boolean))].map((v) => ({ value: String(v), label: String(v) }))]}
+                />
+                <button
+                  type="button"
+                  className="small-btn"
+                  disabled={!studentLines.length}
+                  onClick={() =>
+                    // The sheet's layout, without the passwords.
+                    downloadSheet(studentLines, "service-status", (s: Row) => ({
+                      Coordinator: s.coordinator,
+                      NameEn: s.name,
+                      "Student ID": s.id,
+                      Phone: s.phone,
+                      Email: s.email,
+                      "Current Group Code": s.group,
+                      "Training Provider": s.provider,
+                      "Kafiil Services URL": s.kafeel.map((r: Row) => r.service_url || "").join(" | "),
+                      "Kafeel Account": s.kafeel.map((r: Row) => r.label).join(" | "),
+                      "Nafezly Services URL": s.nafezly.map((r: Row) => r.service_url || "").join(" | "),
+                      "Nafezly Account": s.nafezly.map((r: Row) => r.label).join(" | "),
+                      "Service 1 Platform": s.rows[0]?.service_platform || s.rows[0]?.platform || "",
+                      "Service 1 Status": s.rows[0] ? orderSheetWord(s.rows[0].state) : "",
+                      "Service 2 Platform": s.rows[1]?.service_platform || s.rows[1]?.platform || "",
+                      "Service 2 Status": s.rows[1] ? orderSheetWord(s.rows[1].state) : "",
+                      "Service 3 Platform": s.rows[2]?.service_platform || s.rows[2]?.platform || "",
+                      "Service 3 Status": s.rows[2] ? orderSheetWord(s.rows[2].state) : "",
+                      "Price Paid": s.rows.map((r: Row) => r.latest?.amount ?? "").filter((v: any) => v !== "").join(" | "),
+                      "Bought On": s.rows.map((r: Row) => r.latest?.bought_on || "").filter(Boolean).join(" | "),
+                    }))
+                  }
+                >
+                  <Download size={14} /> {t("Download as Excel")}
+                </button>
+                {sendsReview && (
+                  <button
+                    type="button"
+                    className="small-btn"
+                    disabled={!svcShown.length}
+                    title={t("One row per account and student, with drop-downs for Project Operations and Abdullah Waheed: the account buys this service, or cancel it. Follows the filters above.")}
+                    onClick={downloadReview}
+                  >
+                    <Download size={14} /> {t("Download the review sheet")}
+                  </button>
+                )}
+                {JSON.stringify(svcFilters) !== JSON.stringify({ q: "", status: "All", coordinator: "All", supervisor: "All", group: "All", platform: "All" }) && (
+                  <button type="button" className="small-btn" onClick={() => setSvcFilters({ q: "", status: "All", coordinator: "All", supervisor: "All", group: "All", platform: "All" })}>
+                    {t("Clear filters")}
+                  </button>
+                )}
+              </div>
+              <div className="mini-stats service-status-stats">
+                {["No order yet", "Buy", "In Progress", "Done", "Proof Uploaded", "Cancelled"].map((state) => (
+                  <button
+                    key={state}
+                    type="button"
+                    className="mini-stat-btn"
+                    aria-pressed={svcFilters.status === state}
+                    onClick={() => setSvcFilters({ ...svcFilters, status: svcFilters.status === state ? "All" : state })}
+                  >
+                    <strong>{svcShown.filter((r) => r.state === state).length}</strong>
+                    {stateWord(state)}
+                  </button>
+                ))}
+              </div>
+              <datalist id="svc-bought-on">
+                {["Kafiil", "Nafezly", "Khamsat", "Mostaql", "Fiverr", "Upwork"].map((v) => <option key={v} value={v} />)}
+              </datalist>
+              {panel(
+                t("Gigs to buy · {v0}", { v0: svcShown.length }),
+                svcShown.length
+                  ? paginate(
+                      svcShown.map((r) => ({ ...r, id: r.id + ":" + r.student_id })),
+                      (pageRows) =>
+                        generic(pageRows, [
+                          {
+                            key: "student",
+                            label: t("Student"),
+                            render: (r) => (
+                              <span>
+                                <button type="button" className="text-link" onClick={() => setSelected(students.find((x) => x.id === r.student_id) || null)}>
+                                  <strong>{r.student_name || name(r.student_id)}</strong>
+                                </button>
+                                <small className="table-subline"><bdi>{r.student_id}</bdi> · <bdi>{r.student_group}</bdi></small>
+                              </span>
+                            ),
+                          },
+                          { key: "coordinator", label: t("Coordinator"), render: (r) => r.student_coordinator_name || (r.coordinator_id ? owner(r.coordinator_id) : "—") },
+                          { key: "service", label: t("Service"), render: (r) => serviceLinksCell([r]) },
+                          { key: "account", label: t("Account"), render: (r) => <span>{accountsCell([r])}<small className="table-subline">{r.platform}</small></span> },
+                          { key: "password", label: t("Password"), render: (r) => passwordsCell([r]) },
+                          { key: "state", label: t("Order state"), render: (r) => serviceStateCell(r) },
+                          { key: "amount", label: t("Price paid"), render: (r) => costCell([r], "amount") },
+                          { key: "bought_on", label: t("Bought on"), render: (r) => costCell([r], "bought_on") },
+                        ]),
+                      [svcGigPage, setSvcGigPage],
+                    )
+                  : <Empty title={serviceRows.length ? t("No service matches these filters") : t("No service has a client account yet.")} />,
+              )}
+          </TabsContent>
+          <TabsContent value="by-student">
+              {/* Every service with a client account, and where its coordinator's latest order stands. */}
+              <div className="filter-row">
+                <label className="search-box">
+                  <Search size={15} />
+                  <input value={svcFilters.q} placeholder={t("Student, ID, account or link")} onChange={(e) => setSvcFilters({ ...svcFilters, q: e.target.value })} />
+                </label>
+                <Pick
+                  label={t("Order state")}
+                  value={svcFilters.status}
+                  onChange={(status) => setSvcFilters({ ...svcFilters, status })}
+                  options={[
+                    { value: "All", label: t("Every state") },
+                    { value: "No order yet", label: t("No order yet") },
+                    { value: "Buy", label: t("Buy") },
+                    { value: "In Progress", label: t("In progress") },
+                    { value: "Done", label: t("Done, POH still to upload") },
+                    { value: "Proof Uploaded", label: t("POH uploaded") },
+                    { value: "Cancelled", label: t("Canceled") },
+                  ]}
+                />
+                <Pick
+                  label={t("Coordinator")}
+                  value={svcFilters.coordinator}
+                  onChange={(coordinator) => setSvcFilters({ ...svcFilters, coordinator })}
+                  options={[
+                    { value: "All", label: t("Every coordinator") },
+                    ...[...new Set(serviceRows.flatMap((r) => [r.coordinator_id, r.coordinator_2_id]).filter(Boolean))]
+                      .map((id) => ({ value: String(id), label: owner(String(id)) }))
+                      .sort((a, b) => a.label.localeCompare(b.label)),
+                  ]}
+                />
+                {leadsAll && (
+                  <Pick
+                    label={t("Supervisor")}
+                    value={svcFilters.supervisor}
+                    onChange={(supervisor) => setSvcFilters({ ...svcFilters, supervisor })}
+                    options={[
+                      { value: "All", label: t("All supervisors") },
+                      ...[...new Set(serviceRows.map((r) => r.supervisor).filter(Boolean))].map((id) => ({ value: String(id), label: owner(String(id)) })),
+                    ]}
+                  />
+                )}
+                <Pick
+                  label={t("Group")}
+                  value={svcFilters.group}
+                  onChange={(group) => setSvcFilters({ ...svcFilters, group })}
+                  options={[{ value: "All", label: t("All groups") }, ...[...new Set(serviceRows.map((r) => r.student_group).filter(Boolean))].sort().map((g) => ({ value: String(g), label: String(g) }))]}
+                />
+                <Pick
+                  label={t("Marketplace")}
+                  value={svcFilters.platform}
+                  onChange={(platform) => setSvcFilters({ ...svcFilters, platform })}
+                  options={[{ value: "All", label: t("All") }, ...[...new Set(serviceRows.map((r) => r.platform).filter(Boolean))].map((v) => ({ value: String(v), label: String(v) }))]}
+                />
+                <button
+                  type="button"
+                  className="small-btn"
+                  disabled={!studentLines.length}
+                  onClick={() =>
+                    // The sheet's layout, without the passwords.
+                    downloadSheet(studentLines, "service-status", (s: Row) => ({
+                      Coordinator: s.coordinator,
+                      NameEn: s.name,
+                      "Student ID": s.id,
+                      Phone: s.phone,
+                      Email: s.email,
+                      "Current Group Code": s.group,
+                      "Training Provider": s.provider,
+                      "Kafiil Services URL": s.kafeel.map((r: Row) => r.service_url || "").join(" | "),
+                      "Kafeel Account": s.kafeel.map((r: Row) => r.label).join(" | "),
+                      "Nafezly Services URL": s.nafezly.map((r: Row) => r.service_url || "").join(" | "),
+                      "Nafezly Account": s.nafezly.map((r: Row) => r.label).join(" | "),
+                      "Service 1 Platform": s.rows[0]?.service_platform || s.rows[0]?.platform || "",
+                      "Service 1 Status": s.rows[0] ? orderSheetWord(s.rows[0].state) : "",
+                      "Service 2 Platform": s.rows[1]?.service_platform || s.rows[1]?.platform || "",
+                      "Service 2 Status": s.rows[1] ? orderSheetWord(s.rows[1].state) : "",
+                      "Service 3 Platform": s.rows[2]?.service_platform || s.rows[2]?.platform || "",
+                      "Service 3 Status": s.rows[2] ? orderSheetWord(s.rows[2].state) : "",
+                      "Price Paid": s.rows.map((r: Row) => r.latest?.amount ?? "").filter((v: any) => v !== "").join(" | "),
+                      "Bought On": s.rows.map((r: Row) => r.latest?.bought_on || "").filter(Boolean).join(" | "),
+                    }))
+                  }
+                >
+                  <Download size={14} /> {t("Download as Excel")}
+                </button>
+                {sendsReview && (
+                  <button
+                    type="button"
+                    className="small-btn"
+                    disabled={!svcShown.length}
+                    title={t("One row per account and student, with drop-downs for Project Operations and Abdullah Waheed: the account buys this service, or cancel it. Follows the filters above.")}
+                    onClick={downloadReview}
+                  >
+                    <Download size={14} /> {t("Download the review sheet")}
+                  </button>
+                )}
+                {JSON.stringify(svcFilters) !== JSON.stringify({ q: "", status: "All", coordinator: "All", supervisor: "All", group: "All", platform: "All" }) && (
+                  <button type="button" className="small-btn" onClick={() => setSvcFilters({ q: "", status: "All", coordinator: "All", supervisor: "All", group: "All", platform: "All" })}>
+                    {t("Clear filters")}
+                  </button>
+                )}
+              </div>
+              <div className="mini-stats service-status-stats">
+                {["No order yet", "Buy", "In Progress", "Done", "Proof Uploaded", "Cancelled"].map((state) => (
+                  <button
+                    key={state}
+                    type="button"
+                    className="mini-stat-btn"
+                    aria-pressed={svcFilters.status === state}
+                    onClick={() => setSvcFilters({ ...svcFilters, status: svcFilters.status === state ? "All" : state })}
+                  >
+                    <strong>{svcShown.filter((r) => r.state === state).length}</strong>
+                    {stateWord(state)}
+                  </button>
+                ))}
+              </div>
+              <datalist id="svc-bought-on">
+                {["Kafiil", "Nafezly", "Khamsat", "Mostaql", "Fiverr", "Upwork"].map((v) => <option key={v} value={v} />)}
+              </datalist>
+              {panel(
+                t("Students with a client account · {v0}", { v0: studentLines.length }),
+                studentLines.length ? (
+                  paginate(studentLines as Row[], (pageRows) => (
+                  <div className="svc-sheet-wrap">
+                    <table className="svc-sheet">
+                      <thead>
+                        <tr>
+                          <th className="svc-fix svc-fix-1">{t("Coordinator")}</th>
+                          <th className="svc-fix svc-fix-2">{t("Student")}</th>
+                          <th>{t("Phone")}</th>
+                          <th>{t("Email")}</th>
+                          <th>{t("Group code")}</th>
+                          <th>{t("Training provider")}</th>
+                          <th className="svc-kafiil">{t("Kafiil service")}</th>
+                          <th className="svc-kafiil">{t("Kafeel account")}</th>
+                          <th className="svc-kafiil">{t("Password")}</th>
+                          <th className="svc-nafezly">{t("Nafezly service")}</th>
+                          <th className="svc-nafezly">{t("Nafezly account")}</th>
+                          <th className="svc-nafezly">{t("Password")}</th>
+                          <th className="svc-state">{t("Service 1")}</th>
+                          <th className="svc-state">{t("Service 2")}</th>
+                          <th className="svc-state">{t("Service 3")}</th>
+                          <th className="svc-cost">{t("Price paid")}</th>
+                          <th className="svc-cost">{t("Bought on")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pageRows.map((s) => (
+                          <tr key={s.id}>
+                            <td className="svc-fix svc-fix-1">{s.coordinator || "—"}</td>
+                            <td className="svc-fix svc-fix-2">
+                              <button type="button" className="text-link" onClick={() => setSelected(students.find((x) => x.id === s.id) || null)}>
+                                <strong>{s.name}</strong>
+                              </button>
+                              <small className="table-subline"><bdi>{s.id}</bdi></small>
+                            </td>
+                            <td><bdi dir="ltr">{s.phone || "—"}</bdi></td>
+                            <td><bdi dir="ltr">{s.email || "—"}</bdi></td>
+                            <td><bdi>{s.group || "—"}</bdi></td>
+                            <td>{s.provider || "—"}</td>
+                            <td>{serviceLinksCell(s.kafeel)}</td>
+                            <td>{accountsCell(s.kafeel)}</td>
+                            <td>{passwordsCell(s.kafeel)}</td>
+                            <td>{serviceLinksCell(s.nafezly)}</td>
+                            <td>{accountsCell(s.nafezly)}</td>
+                            <td>{passwordsCell(s.nafezly)}</td>
+                            <td>{serviceStateCell(s.rows[0])}</td>
+                            <td>{serviceStateCell(s.rows[1])}</td>
+                            <td>{serviceStateCell(s.rows[2])}</td>
+                            <td>{costCell(s.rows, "amount")}</td>
+                            <td>{costCell(s.rows, "bought_on")}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  ), [svcPage, setSvcPage])
+                ) : (
+                  <Empty title={serviceRows.length ? t("No service matches these filters") : t("No service has a client account yet.")} />
+                ),
+              )}
+          </TabsContent>
             <TabsContent value="bought">
               {/* The record of services bought through the client accounts: every
                   order done or with its proof uploaded, what it cost and where
@@ -4194,7 +4495,71 @@ See you there!`,
                   : <Empty title={boughtAll.length ? t("No service matches these filters") : t("No service has been bought through a client account yet.")} />,
               )}
             </TabsContent>
+        </Tabs>
+      );
+    } else
+    content = (
+      <>
+        <div className="mini-stats account-stats">
+          <span><strong>{accounts.filter((a) => a.status === "Available").length}</strong>{t("Available accounts")}</span>
+          <span><strong>{money(accounts.filter((a) => a.status === "Available").reduce((n, a) => n + Number(a.credits || 0), 0))}</strong>{t("Credit available")}</span>
+          <span><strong>{accounts.filter((a) => a.status === "Assigned").length}</strong>{t("Assigned to students")}</span>
+          <span className={accounts.some((a) => attention.includes(a.status)) ? "is-warning" : ""}><strong>{accounts.filter((a) => attention.includes(a.status)).length}</strong>{t("Need attention")}</span>
+          <span><strong>{openRequests.length}</strong>{t("Requests waiting")}</span>
+        </div>
+        <div className="account-capacity">
+          {controlledPlatforms.map((platform) => {
+            const mine = accounts.filter((a) => a.platform === platform);
+            const ready = mine.filter((a) => a.status === "Available");
+            const credit = ready.reduce((n, a) => n + Number(a.credits || 0), 0);
+            const waiting = openRequests.filter((r) => r.platform === platform);
+            const needed = waiting.reduce((n, r) => n + Number(r.value || 0), 0);
+            return (
+              <button
+                key={platform}
+                className={"capacity-card" + (accountFilters.platform === platform ? " is-selected" : "") + (needed > credit ? " is-short" : "")}
+                onClick={() => setAccountFilters({ ...accountFilters, platform: accountFilters.platform === platform ? "All" : platform })}
+              >
+                <strong>{platform}</strong>
+                <span>{t("{v0} of {v1} accounts ready", { v0: ready.length, v1: mine.length })}</span>
+                <span>{t("{v0} credit · {v1} needed by {v2} requests", { v0: money(credit), v1: money(needed), v2: waiting.length })}</span>
+              </button>
+            );
+          })}
+        </div>
+        {keepsAccounts &&
+          panel(
+            t("Accounts left to use"),
+            <>
+              {generic(accountPlaces(accounts, ["Kafeel", "Nafezly"]) as Row[], [
+                { key: "platform", label: t("Marketplace"), render: (r) => <strong>{r.platform}</strong> },
+                { key: "places", label: t("Places left"), render: (r) => <Cue tone={r.places ? "ok" : "bad"}>{r.places}</Cue> },
+                { key: "withPlace", label: t("Accounts with a free place"), render: (r) => r.withPlace },
+                { key: "empty", label: t("Empty"), render: (r) => r.empty },
+                { key: "oneStudent", label: t("One student"), render: (r) => r.oneStudent },
+                { key: "full", label: t("Full"), render: (r) => r.full },
+                { key: "notUsable", label: t("Not usable now"), render: (r) => (r.notUsable ? <Cue tone="warn">{r.notUsable}</Cue> : 0) },
+                { key: "retired", label: t("Retired"), render: (r) => r.retired },
+              ])}
+              <p className="footnote" style={{ padding: "0 16px 12px" }}>
+                {t("A place is one student on an account: an account takes two students with different job profiles. Only accounts that are Available take a new student; access issues, blocked and under-review accounts are counted apart.")}
+              </p>
+            </>,
           )}
+        <Tabs defaultValue={openRequests.length ? "requests" : "pool"}>
+          <TabsList>
+            <TabsTrigger value="pool">
+              {t("Account pool")}{" "}<span className="count">{accounts.length}</span>
+            </TabsTrigger>
+            <TabsTrigger value="requests">
+              {t("Requests")}{" "}<span className="count">{openRequests.length}</span>
+            </TabsTrigger>
+            {(keepsAccounts || can(user.roles, ["Project Operations"])) && (
+              <TabsTrigger value="credit">
+                {t("Credit tracker")}{" "}<span className="count">{(d.creditLedger || []).length}</span>
+              </TabsTrigger>
+            )}
+          </TabsList>
           <TabsContent value="credit">
             <div className="mini-stats">
               <span><strong>{money(toppedUp.reduce((n: number, e: Row) => n + Number(e.delta), 0))}</strong>{t("Topped up this month")}</span>
@@ -4210,6 +4575,7 @@ See you there!`,
                 options={[
                   { value: "All", label: t("Every change") },
                   { value: "Top-up", label: t("Top-ups") },
+                  { value: "Payment", label: t("Payments") },
                   { value: "Service charged", label: t("Services charged") },
                   { value: "Refund", label: t("Refunds") },
                   { value: "Opening balance", label: t("Opening balances") },
@@ -4459,7 +4825,17 @@ See you there!`,
                     r.status === "Retired" ? null : (
                       <div className="detail-actions">
                         {keepsAccounts && (
-                          <button className="small-btn" onClick={() => open("account_topup", { id: r.id })}>{t("Top up")}</button>
+                          <button className="small-btn" onClick={() => open("account_topup", { id: r.id, kind: "Top-up" })}>{t("Top up")}</button>
+                        )}
+                        {keepsAccounts && (
+                          <button className="small-btn" onClick={() => open("account_topup", { id: r.id, kind: "Payment", paid_on: today() })}>
+                            <CreditCard size={14} /> {t("Record a payment")}
+                          </button>
+                        )}
+                        {wordOn(r) && (
+                          <button className="small-btn" onClick={() => open("account_problem", { id: r.id, label: r.label, platform: r.platform, status: r.status, problem: "", note: "" })}>
+                            <TriangleAlert size={14} /> {t("Report a problem")}
+                          </button>
                         )}
                         {wordOn(r) && (
                           <button className="small-btn" onClick={() => open("account_state", { id: r.id, label: r.label, platform: r.platform, state: r.coordinator_state || "", note: r.coordinator_note || "", student_id: "" })}>
@@ -4524,187 +4900,6 @@ See you there!`,
               </div>,
             )}
           </TabsContent>
-          {followsServices && (
-            <TabsContent value="service-status">
-              {/* Every service with a client account, and where its coordinator's latest order stands. */}
-              <div className="filter-row">
-                <label className="search-box">
-                  <Search size={15} />
-                  <input value={svcFilters.q} placeholder={t("Student, ID, account or link")} onChange={(e) => setSvcFilters({ ...svcFilters, q: e.target.value })} />
-                </label>
-                <Pick
-                  label={t("Order state")}
-                  value={svcFilters.status}
-                  onChange={(status) => setSvcFilters({ ...svcFilters, status })}
-                  options={[
-                    { value: "All", label: t("Every state") },
-                    { value: "No order yet", label: t("No order yet") },
-                    { value: "Buy", label: t("Buy") },
-                    { value: "In Progress", label: t("In progress") },
-                    { value: "Done", label: t("Done, POH still to upload") },
-                    { value: "Proof Uploaded", label: t("POH uploaded") },
-                    { value: "Cancelled", label: t("Canceled") },
-                  ]}
-                />
-                <Pick
-                  label={t("Coordinator")}
-                  value={svcFilters.coordinator}
-                  onChange={(coordinator) => setSvcFilters({ ...svcFilters, coordinator })}
-                  options={[
-                    { value: "All", label: t("Every coordinator") },
-                    ...[...new Set(serviceRows.flatMap((r) => [r.coordinator_id, r.coordinator_2_id]).filter(Boolean))]
-                      .map((id) => ({ value: String(id), label: owner(String(id)) }))
-                      .sort((a, b) => a.label.localeCompare(b.label)),
-                  ]}
-                />
-                {leadsAll && (
-                  <Pick
-                    label={t("Supervisor")}
-                    value={svcFilters.supervisor}
-                    onChange={(supervisor) => setSvcFilters({ ...svcFilters, supervisor })}
-                    options={[
-                      { value: "All", label: t("All supervisors") },
-                      ...[...new Set(serviceRows.map((r) => r.supervisor).filter(Boolean))].map((id) => ({ value: String(id), label: owner(String(id)) })),
-                    ]}
-                  />
-                )}
-                <Pick
-                  label={t("Group")}
-                  value={svcFilters.group}
-                  onChange={(group) => setSvcFilters({ ...svcFilters, group })}
-                  options={[{ value: "All", label: t("All groups") }, ...[...new Set(serviceRows.map((r) => r.student_group).filter(Boolean))].sort().map((g) => ({ value: String(g), label: String(g) }))]}
-                />
-                <Pick
-                  label={t("Marketplace")}
-                  value={svcFilters.platform}
-                  onChange={(platform) => setSvcFilters({ ...svcFilters, platform })}
-                  options={[{ value: "All", label: t("All") }, ...[...new Set(serviceRows.map((r) => r.platform).filter(Boolean))].map((v) => ({ value: String(v), label: String(v) }))]}
-                />
-                <button
-                  type="button"
-                  className="small-btn"
-                  disabled={!studentLines.length}
-                  onClick={() =>
-                    // The sheet's layout, without the passwords.
-                    downloadSheet(studentLines, "service-status", (s: Row) => ({
-                      Coordinator: s.coordinator,
-                      NameEn: s.name,
-                      "Student ID": s.id,
-                      Phone: s.phone,
-                      Email: s.email,
-                      "Current Group Code": s.group,
-                      "Training Provider": s.provider,
-                      "Kafiil Services URL": s.kafeel.map((r: Row) => r.service_url || "").join(" | "),
-                      "Kafeel Account": s.kafeel.map((r: Row) => r.label).join(" | "),
-                      "Nafezly Services URL": s.nafezly.map((r: Row) => r.service_url || "").join(" | "),
-                      "Nafezly Account": s.nafezly.map((r: Row) => r.label).join(" | "),
-                      "Service 1 Platform": s.rows[0]?.service_platform || s.rows[0]?.platform || "",
-                      "Service 1 Status": s.rows[0] ? orderSheetWord(s.rows[0].state) : "",
-                      "Service 2 Platform": s.rows[1]?.service_platform || s.rows[1]?.platform || "",
-                      "Service 2 Status": s.rows[1] ? orderSheetWord(s.rows[1].state) : "",
-                      "Price Paid": s.rows.map((r: Row) => r.latest?.amount ?? "").filter((v: any) => v !== "").join(" | "),
-                      "Bought On": s.rows.map((r: Row) => r.latest?.bought_on || "").filter(Boolean).join(" | "),
-                    }))
-                  }
-                >
-                  <Download size={14} /> {t("Download as Excel")}
-                </button>
-                {sendsReview && (
-                  <button
-                    type="button"
-                    className="small-btn"
-                    disabled={!svcShown.length}
-                    title={t("One row per account and student, with drop-downs for Project Operations and Abdullah Waheed: the account buys this service, or cancel it. Follows the filters above.")}
-                    onClick={downloadReview}
-                  >
-                    <Download size={14} /> {t("Download the review sheet")}
-                  </button>
-                )}
-                {JSON.stringify(svcFilters) !== JSON.stringify({ q: "", status: "All", coordinator: "All", supervisor: "All", group: "All", platform: "All" }) && (
-                  <button type="button" className="small-btn" onClick={() => setSvcFilters({ q: "", status: "All", coordinator: "All", supervisor: "All", group: "All", platform: "All" })}>
-                    {t("Clear filters")}
-                  </button>
-                )}
-              </div>
-              <div className="mini-stats service-status-stats">
-                {["No order yet", "Buy", "In Progress", "Done", "Proof Uploaded", "Cancelled"].map((state) => (
-                  <button
-                    key={state}
-                    type="button"
-                    className="mini-stat-btn"
-                    aria-pressed={svcFilters.status === state}
-                    onClick={() => setSvcFilters({ ...svcFilters, status: svcFilters.status === state ? "All" : state })}
-                  >
-                    <strong>{svcShown.filter((r) => r.state === state).length}</strong>
-                    {stateWord(state)}
-                  </button>
-                ))}
-              </div>
-              {panel(
-                t("Students with a client account · {v0}", { v0: studentLines.length }),
-                studentLines.length ? (
-                  paginate(studentLines as Row[], (pageRows) => (
-                  <div className="svc-sheet-wrap">
-                    <table className="svc-sheet">
-                      <thead>
-                        <tr>
-                          <th className="svc-fix svc-fix-1">{t("Coordinator")}</th>
-                          <th className="svc-fix svc-fix-2">{t("Student")}</th>
-                          <th>{t("Phone")}</th>
-                          <th>{t("Email")}</th>
-                          <th>{t("Group code")}</th>
-                          <th>{t("Training provider")}</th>
-                          <th className="svc-kafiil">{t("Kafiil service")}</th>
-                          <th className="svc-kafiil">{t("Kafeel account")}</th>
-                          <th className="svc-kafiil">{t("Password")}</th>
-                          <th className="svc-nafezly">{t("Nafezly service")}</th>
-                          <th className="svc-nafezly">{t("Nafezly account")}</th>
-                          <th className="svc-nafezly">{t("Password")}</th>
-                          <th className="svc-state">{t("Service 1")}</th>
-                          <th className="svc-state">{t("Service 2")}</th>
-                          <th className="svc-cost">{t("Price paid")}</th>
-                          <th className="svc-cost">{t("Bought on")}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {pageRows.map((s) => (
-                          <tr key={s.id}>
-                            <td className="svc-fix svc-fix-1">{s.coordinator || "—"}</td>
-                            <td className="svc-fix svc-fix-2">
-                              <button type="button" className="text-link" onClick={() => setSelected(students.find((x) => x.id === s.id) || null)}>
-                                <strong>{s.name}</strong>
-                              </button>
-                              <small className="table-subline"><bdi>{s.id}</bdi></small>
-                            </td>
-                            <td><bdi dir="ltr">{s.phone || "—"}</bdi></td>
-                            <td><bdi dir="ltr">{s.email || "—"}</bdi></td>
-                            <td><bdi>{s.group || "—"}</bdi></td>
-                            <td>{s.provider || "—"}</td>
-                            <td>{serviceLinksCell(s.kafeel)}</td>
-                            <td>{accountsCell(s.kafeel)}</td>
-                            <td>{passwordsCell(s.kafeel)}</td>
-                            <td>{serviceLinksCell(s.nafezly)}</td>
-                            <td>{accountsCell(s.nafezly)}</td>
-                            <td>{passwordsCell(s.nafezly)}</td>
-                            <td>{serviceStateCell(s.rows[0])}</td>
-                            <td>{serviceStateCell(s.rows[1])}</td>
-                            <td>{costCell(s.rows, "amount")}</td>
-                            <td>{costCell(s.rows, "bought_on")}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    <datalist id="svc-bought-on">
-                      {["Kafiil", "Nafezly", "Khamsat", "Mostaql", "Fiverr", "Upwork"].map((v) => <option key={v} value={v} />)}
-                    </datalist>
-                  </div>
-                  ), [svcPage, setSvcPage])
-                ) : (
-                  <Empty title={serviceRows.length ? t("No service matches these filters") : t("No service has a client account yet.")} />
-                ),
-              )}
-            </TabsContent>
-          )}
           <TabsContent value="requests">
             <div className="filter-row">
               <Pick label={t("Marketplace")} value={accountFilters.platform} onChange={(platform) => setAccountFilters({ ...accountFilters, platform })} options={["All", ...controlledPlatforms]} />
@@ -5780,7 +5975,7 @@ See you there!`,
     );
   return content;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locale, module, data, error, loading, searchQuery, filter, page, statusPage, registersPage, attendancePage, svcPage, sessionNotesPage, selected, busy, notifications, importOpen, importModule, importMode, sheetHeaders, importMapping, importKey, mappingFields, mappingKeys, savedMappings, mappingName, importRows, preview, importId, serviceFilters, submissionFilters, studentServices, moreFilters, saved, checklistFor, accountSecrets, groupMessage, feedbackFor, sessionTab, svcFilters, boughtFilters, accountFilters, insightFilters, sessionFilters, providerFilter, sessionWeek, joinLogin, joinLeft, joinShowPassword, joinEdit, serviceParts, studentParts, weeklyParts]);
+  }, [locale, module, data, error, loading, searchQuery, filter, page, statusPage, registersPage, attendancePage, svcPage, svcGigPage, sessionNotesPage, selected, busy, notifications, importOpen, importModule, importMode, sheetHeaders, importMapping, importKey, mappingFields, mappingKeys, savedMappings, mappingName, importRows, preview, importId, serviceFilters, submissionFilters, studentServices, moreFilters, saved, checklistFor, accountSecrets, groupMessage, feedbackFor, sessionTab, svcFilters, boughtFilters, accountFilters, insightFilters, sessionFilters, providerFilter, sessionWeek, joinLogin, joinLeft, joinShowPassword, joinEdit, serviceParts, studentParts, weeklyParts]);
   useEffect(() => {
     if (module === "students") {
       const g = sessionStorage.getItem("depi-group-search");
@@ -6071,7 +6266,7 @@ See you there!`,
                       </button>
                     )}
                   </div>
-                  {!["administration", "program", "weekly"].includes(module) && !(module === "students" && onlyCoach) && (
+                  {!["administration", "program", "weekly", "service-operations"].includes(module) && !(module === "students" && onlyCoach) && (
                     <div className="toolbar">
                       <label className="search-box">
                         <Search size={17} />
@@ -6137,7 +6332,7 @@ See you there!`,
                         {canTransfer && (<>
                         {/* The portal view has its own two sheet uploads, and the Accounts tab
                             its accounts-sheet upload, so no general import there. */}
-                        {module !== "portal" && module !== "accounts" && <button
+                        {module !== "portal" && module !== "accounts" && module !== "service-operations" && <button
                           className="small-btn"
                           onClick={() => {
                             setImportModule(
@@ -8065,7 +8260,14 @@ See you there!`,
                           .map((c: Row) => ({ value: c.id, label: `${c.label} · ${c.platform} · $${c.credits}` })),
                       )
                     )}
-                    {field("amount", t("Top-up amount (USD)"), "number")}
+                    {choice("kind", t("What is it"), [
+                      { value: "Top-up", label: t("Top-up") },
+                      { value: "Payment", label: t("Payment into the account") },
+                    ])}
+                    {field("amount", form.kind === "Payment" ? t("Amount paid (USD)") : t("Top-up amount (USD)"), "number")}
+                    {form.kind === "Payment" && field("paid_on", t("Paid on"), "date")}
+                    {form.kind === "Payment" &&
+                      choice("method", t("Paid by"), paymentMethods.map((v) => ({ value: v, label: t(v) })))}
                     {field("reference", t("Receipt or transfer reference"))}
                     {field("note", t("Note"), "text", false)}
                     {acc && Number(form.amount) > 0 && (
@@ -8104,6 +8306,26 @@ See you there!`,
                     ) : (
                       <p className="footnote">{t("Leave it empty to remove the link.")}</p>
                     )}
+                  </>
+                );
+              }
+              if (a === "account_problem") {
+                return (
+                  <>
+                    <div className="account-summary">
+                      <div>
+                        <strong>{modal!.label}</strong>
+                        <small>{modal!.platform}</small>
+                      </div>
+                      <Badge value={modal!.status} />
+                    </div>
+                    {choice("problem", t("What is wrong"), accountProblems.map((v) => ({ value: v, label: t(v) })))}
+                    {field("note", t("What happened"))}
+                    <p className="footnote">
+                      {keepsAccounts
+                        ? t("The account is marked as not working, and its status changes with it: not working becomes Access Issue, revoked becomes Blocked, any other problem Under Review. Its students keep their places until the assignment is removed.")
+                        : t("The people who keep the accounts are told at once. Its students keep their places until the assignment is removed.")}
+                    </p>
                   </>
                 );
               }

@@ -2775,6 +2775,42 @@ test("the Service Team supervisor records account top-ups, each a new row in the
   current = { id: "owner", email: "owner@example.com" };
 });
 
+test("the account pool records a payment into an account and a problem with it (16 Nov 2026)", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  await dbExec("DELETE FROM rate_limits");
+  await check("account", { id: "ACC-POOL-1", label: "Kafeel pool 1", platform: "Kafeel", credits: 10 });
+  // A payment adds credit like a top-up, and says when and how it was paid.
+  assert.match((await post("account_topup", { id: "ACC-POOL-1", kind: "Payment", amount: 20, reference: "INV-77", paid_on: "2999-01-01", method: "Card" })).error, /day it was paid/);
+  assert.match((await post("account_topup", { id: "ACC-POOL-1", kind: "Payment", amount: 20, reference: "INV-77", paid_on: "2026-11-15", method: "Cheque" })).error, /how it was paid/);
+  await check("account_topup", { id: "ACC-POOL-1", kind: "Payment", amount: 20, reference: "INV-77", paid_on: "2026-11-15", method: "InstaPay" });
+  assert.equal(Number((await dbRow("SELECT credits FROM accounts WHERE id='ACC-POOL-1'")).credits), 30);
+  const paid = await dbRow("SELECT delta,reason FROM account_credit_ledger WHERE account_id='ACC-POOL-1' AND delta=20");
+  assert.equal(paid.reason, "Payment · InstaPay · INV-77 · paid 2026-11-15");
+
+  // The account's coordinator reports it: the keepers are told, the status stays theirs to change.
+  const coordinator = await dbRow("SELECT id,email FROM users WHERE roles LIKE '%Operations Coordinator%' AND roles NOT LIKE '%Admin%' AND roles NOT LIKE '%Project Operations%' AND active=1 ORDER BY id LIMIT 1");
+  const other = await dbRow("SELECT id,email FROM users WHERE roles LIKE '%Operations Coordinator%' AND roles NOT LIKE '%Admin%' AND roles NOT LIKE '%Project Operations%' AND active=1 AND id<>? ORDER BY id LIMIT 1", coordinator.id);
+  await dbExec("UPDATE accounts SET coordinator_id=? WHERE id='ACC-POOL-1'", coordinator.id);
+  current = { id: "other-login", email: other.email };
+  assert.match((await post("account_problem", { id: "ACC-POOL-1", problem: "Not working", note: "Cannot sign in" })).error, /account's coordinator/);
+  current = { id: "coordinator-login", email: coordinator.email };
+  assert.match((await post("account_problem", { id: "ACC-POOL-1", problem: "Lost", note: "Cannot sign in" })).error, /what is wrong/);
+  assert.match((await post("account_problem", { id: "ACC-POOL-1", problem: "Not working", note: "" })).error, /what happened/);
+  await check("account_problem", { id: "ACC-POOL-1", problem: "Not working", note: "Cannot sign in" });
+  let row = await dbRow("SELECT status,coordinator_state,coordinator_note FROM accounts WHERE id='ACC-POOL-1'");
+  assert.deepEqual([row.status, row.coordinator_state, row.coordinator_note], ["Available", "Does not work", "Not working: Cannot sign in"]);
+  assert.ok((await dbRow("SELECT count(*) n FROM notifications WHERE entity_id='ACC-POOL-1' AND title LIKE '%Not working: Cannot sign in%'")).n > 0, "the keepers are told");
+
+  // A keeper reports the marketplace revoked it: the account is blocked too.
+  current = { id: "owner", email: "owner@example.com" };
+  await check("account_problem", { id: "ACC-POOL-1", problem: "Revoked by the marketplace", note: "Kafeel closed the account" });
+  row = await dbRow("SELECT status,coordinator_note FROM accounts WHERE id='ACC-POOL-1'");
+  assert.deepEqual([row.status, row.coordinator_note], ["Blocked", "Revoked by the marketplace: Kafeel closed the account"]);
+  assert.ok(await dbRow("SELECT id FROM audit_events WHERE action='account_problem' AND entity_id='ACC-POOL-1'"), "audited");
+  // Its students keep their places: releasing one is still account_unlock.
+  await dbExec("UPDATE accounts SET coordinator_id=NULL WHERE id='ACC-POOL-1'");
+});
+
 test("groups keep a WhatsApp link, accounts can have a second coordinator, and the keepers unblock them", async () => {
   current = { id: "owner", email: "owner@example.com" };
   await dbExec("DELETE FROM rate_limits");
