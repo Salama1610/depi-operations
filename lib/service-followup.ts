@@ -49,8 +49,13 @@ export const accountsPerStudent = 3;
 /** The most students one account buys from, one service each. */
 export const studentsPerAccount = 2;
 
-/** The accounts a student is linked to: as an account's first student, or through a service it buys. */
-export const studentAccountsSql = `SELECT id account_id FROM accounts WHERE student_id=? UNION SELECT account_id FROM service_links WHERE student_id=? AND account_id IS NOT NULL`;
+/**
+ * The accounts a student is linked to: as an account's first student, or through
+ * a service it buys. A retired account is off the system and does not count
+ * (17 November 2026): a student whose second Kafeel account was retired was
+ * taken for a holder of three and got no replacement.
+ */
+export const studentAccountsSql = `SELECT id account_id FROM accounts WHERE student_id=? AND status<>'Retired' UNION SELECT l.account_id FROM service_links l JOIN accounts a ON a.id=l.account_id WHERE l.student_id=? AND l.account_id IS NOT NULL AND a.status<>'Retired'`;
 
 /** How many students an account buys from, as SQL on an accounts alias. */
 /**

@@ -4510,6 +4510,57 @@ test("an account buys from two students at most, never two of the same job profi
 });
 
 
+test("a retired account no longer counts among a student's three, so the catch-up gives them another", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const group = await dbRow(
+    `SELECT g.id FROM groups g WHERE g.status='Active' AND g.id NOT LIKE 'DEMO-%' AND coalesce(g.delivery_model,'Regular')<>'Industry'
+       AND (SELECT count(*) FROM students s WHERE s.group_id=g.id AND s.lifecycle='Active' AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=s.id))>=1
+     ORDER BY g.id LIMIT 1`,
+  );
+  const pupil = await dbRow(
+    "SELECT s.id FROM students s WHERE s.group_id=? AND s.lifecycle='Active' AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=s.id) ORDER BY s.id LIMIT 1",
+    group.id,
+  );
+  const serviceGroup = await asServiceGroup(group.id, "DKH5_DRT2_S1");
+  await dbExec("UPDATE students SET group_id=?,job_profile=? WHERE id=?", serviceGroup, "Retired Holder Profile", pupil.id);
+  // Only the accounts of this test are free.
+  const parked = (await dbRows("SELECT id FROM accounts WHERE status='Available'")).map((a) => a.id);
+  if (parked.length) await dbExec(`UPDATE accounts SET status='Under Review' WHERE id IN (${parked.map(() => "?").join(",")})`, ...parked);
+  for (const [id, platform] of [["ACC-RET-K1", "Kafeel"], ["ACC-RET-N1", "Nafezly"], ["ACC-RET-K2", "Kafeel"], ["ACC-RET-F1", "Kafeel"], ["ACC-RET-F2", "Kafeel"], ["ACC-RET-F3", "Kafeel"]])
+    await check("account", { id, label: id.toLowerCase() + "@example.org", platform, credits: 10 });
+  const at = new Date().toISOString();
+  const link = async (id, slot, platform, account) => {
+    const host = platform === "Kafiil" ? "kafiil.com" : "nafezly.com";
+    await dbExec(
+      "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,account_id,submitted_at,updated_at) VALUES(?,?,?,?,?,?,'Valid','{}',?,'Locked',NULL,'staff-quality',?,1,?,?,?)",
+      id, pupil.id, slot, `https://${host}/services/${id}`, `${host}/services/${id}`, platform, at, at, account, at, at,
+    );
+    if (account) await dbExec("UPDATE accounts SET student_id=?,service_link_id=?,linked_at=? WHERE id=?", pupil.id, id, at, account);
+  };
+  // Two live accounts and a retired one: three on paper, two in fact. A fourth service waits.
+  await link("SLK-RET-1", 1, "Kafiil", "ACC-RET-K1");
+  await link("SLK-RET-2", 2, "Nafezly", "ACC-RET-N1");
+  await link("SLK-RET-3", 3, "Kafiil", "ACC-RET-K2");
+  await dbExec("UPDATE accounts SET status='Retired' WHERE id='ACC-RET-K2'");
+  await link("SLK-RET-4", 4, "Kafiil", null);
+  const swept = await check("account_link_sweep", {});
+  assert.ok(swept.linked >= 1, JSON.stringify(swept));
+  const fourth = await dbRow("SELECT l.account_id,a.status,a.platform FROM service_links l JOIN accounts a ON a.id=l.account_id WHERE l.id='SLK-RET-4'");
+  assert.ok(fourth, "the waiting service has an account now");
+  assert.deepEqual([fourth.status, fourth.platform], ["Available", "Kafeel"]);
+  assert.ok(["ACC-RET-F1", "ACC-RET-F2", "ACC-RET-F3"].includes(fourth.account_id), "a free account, never the retired one");
+  // The student now has three live accounts and no more: nothing further is linked.
+  const live = await dbRows("SELECT DISTINCT account_id FROM service_links l JOIN accounts a ON a.id=l.account_id WHERE l.student_id=? AND a.status<>'Retired'", pupil.id);
+  assert.equal(live.length, 3);
+
+  await dbExec("UPDATE service_links SET account_id=NULL WHERE student_id=?", pupil.id);
+  await dbExec("UPDATE accounts SET student_id=NULL,service_link_id=NULL,coordinator_2_id=NULL,status='Retired' WHERE id LIKE 'ACC-RET-%'");
+  await dbExec("DELETE FROM service_links WHERE student_id=?", pupil.id);
+  if (parked.length) await dbExec(`UPDATE accounts SET status='Available' WHERE id IN (${parked.map(() => "?").join(",")})`, ...parked);
+  await dbExec("UPDATE students SET group_id=?,job_profile=NULL WHERE id=?", group.id, pupil.id);
+});
+
 test("the quality team checks each held session's attendance register, which Coach and Project Operations read", async () => {
   await dbExec("DELETE FROM rate_limits");
   current = { id: "owner", email: "owner@example.com" };

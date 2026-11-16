@@ -3161,4 +3161,13 @@ export const ar: Record<string, string> = {
   "{v0} still open with our QC · {v1} our verdict came after · {v2} never reached our QC": "{v0} مفتوحة عند جودتنا · {v1} قرارنا جاء بعدها · {v2} لم تصل إلى جودتنا",
   "Which": "أيها",
   "All of them": "الكل",
+  // Accounts left to use (17 Nov 2026)
+  "Accounts left to use": "الحسابات المتبقية للاستخدام",
+  "Places left": "الأماكن المتبقية",
+  "Accounts with a free place": "حسابات بها مكان فارغ",
+  "Empty": "فارغ",
+  "One student": "طالب واحد",
+  "Full": "ممتلئ",
+  "Not usable now": "غير صالح الآن",
+  "A place is one student on an account: an account takes two students with different job profiles. Only accounts that are Available take a new student; access issues, blocked and under-review accounts are counted apart.": "المكان هو طالب واحد على حساب: يستوعب الحساب طالبين بوظيفتين مختلفتين. لا يقبل طالبًا جديدًا إلا الحساب المتاح؛ وتُحسب حسابات مشكلة الدخول والمحظورة وقيد المراجعة بشكل منفصل.",
 };

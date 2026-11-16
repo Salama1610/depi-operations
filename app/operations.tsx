@@ -11,6 +11,7 @@ import {
 import { ProgramFlow } from "./program-flow";
 import { WeeklyProgress } from "./weekly-progress";
 import { acceptedServicePlatforms, buysServices } from "@/lib/domain/service-links";
+import { accountPlaces } from "@/lib/domain/account-places";
 import { accountReviewRows, reviewColumns, reviewDropdowns, reviewHowTo, reviewInputColumns, studentColumns, studentServiceRows } from "@/lib/domain/account-review";
 import { PortalView } from "./portal-view";
 // The dashboard and its charts load only when someone opens it.
@@ -4030,6 +4031,25 @@ See you there!`,
             );
           })}
         </div>
+        {keepsAccounts &&
+          panel(
+            t("Accounts left to use"),
+            <>
+              {generic(accountPlaces(accounts, ["Kafeel", "Nafezly"]) as Row[], [
+                { key: "platform", label: t("Marketplace"), render: (r) => <strong>{r.platform}</strong> },
+                { key: "places", label: t("Places left"), render: (r) => <Cue tone={r.places ? "ok" : "bad"}>{r.places}</Cue> },
+                { key: "withPlace", label: t("Accounts with a free place"), render: (r) => r.withPlace },
+                { key: "empty", label: t("Empty"), render: (r) => r.empty },
+                { key: "oneStudent", label: t("One student"), render: (r) => r.oneStudent },
+                { key: "full", label: t("Full"), render: (r) => r.full },
+                { key: "notUsable", label: t("Not usable now"), render: (r) => (r.notUsable ? <Cue tone="warn">{r.notUsable}</Cue> : 0) },
+                { key: "retired", label: t("Retired"), render: (r) => r.retired },
+              ])}
+              <p className="footnote" style={{ padding: "0 16px 12px" }}>
+                {t("A place is one student on an account: an account takes two students with different job profiles. Only accounts that are Available take a new student; access issues, blocked and under-review accounts are counted apart.")}
+              </p>
+            </>,
+          )}
         <Tabs defaultValue={openRequests.length ? "requests" : "pool"}>
           <TabsList>
             <TabsTrigger value="pool">
