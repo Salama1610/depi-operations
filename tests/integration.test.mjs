@@ -2848,6 +2848,27 @@ test("a supervisor of another team sees and orders only their own groups' accoun
   }
 });
 
+test("the keepers set any account student's order status, and Done waits for the price (16 Nov 2026)", async () => {
+  current = { id: "owner", email: "owner@example.com" };
+  await dbExec("DELETE FROM rate_limits");
+  const pupil = await dbRow("SELECT s.id,g.coordinator FROM students s JOIN groups g ON g.id=s.group_id WHERE s.lifecycle='Active' AND g.coordinator IS NOT NULL AND g.coordinator<>'staff-nour' AND g.supervisor<>'staff-nour' AND g.id NOT LIKE 'DEMO-%' ORDER BY s.id DESC LIMIT 1");
+  await check("account", { id: "ACC-KEEP-1", label: "keep-one@example.org", platform: "Kafeel", credits: 20 });
+  await dbExec("UPDATE accounts SET student_id=?,coordinator_id=? WHERE id='ACC-KEEP-1'", pupil.id, pupil.coordinator);
+  const before = await dbRow("SELECT team FROM users WHERE id='staff-nour'");
+  await dbExec("UPDATE users SET team='Service Team' WHERE id='staff-nour'");
+  current = { id: "supervisor-login", email: "staff-nour@example.invalid" };
+  try {
+    await check("account_service_status", { account_id: "ACC-KEEP-1", student_id: pupil.id, status: "Buy" });
+    await check("account_order_cost", { account_id: "ACC-KEEP-1", student_id: pupil.id, amount: "4" });
+    await check("account_service_status", { account_id: "ACC-KEEP-1", student_id: pupil.id, status: "Done" });
+    assert.equal((await dbRow("SELECT status FROM account_orders WHERE account_id='ACC-KEEP-1'")).status, "Done");
+  } finally {
+    current = { id: "owner", email: "owner@example.com" };
+    await dbExec("UPDATE users SET team=? WHERE id='staff-nour'", before.team);
+    await dbExec("UPDATE accounts SET student_id=NULL,coordinator_id=NULL,status='Retired' WHERE id='ACC-KEEP-1'");
+  }
+});
+
 test("groups keep a WhatsApp link, accounts can have a second coordinator, and the keepers unblock them", async () => {
   current = { id: "owner", email: "owner@example.com" };
   await dbExec("DELETE FROM rate_limits");

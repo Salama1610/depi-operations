@@ -586,11 +586,27 @@ export async function POST(req: Request) {
     const key = x.request_id || uid("REQ");
     ensure(typeof key === "string" && key.length < 150, "Invalid request key.");
     let sid = x.student_id;
+    // The people who keep the accounts (Project Operations, Abdullah Waheed)
+    // work every account student's orders and places, not only their own
+    // groups' (16 November 2026): for those actions their student is read
+    // without the group scope.
+    const accountWork = ["account_service_status", "account_order_cost", "account_order", "account_order_status", "account_students"].includes(x.action);
+    const keeperStudent = (id: string) =>
+      stmt(
+        "SELECT s.*,g.track,g.coordinator,g.supervisor,g.coach,g.policy_id,g.status group_status FROM students s JOIN groups g ON g.id=s.group_id WHERE s.id=?",
+        id,
+      )
+        .first()
+        .then((row: any) => {
+          ensure(row, "Student not found within your assigned scope.");
+          return row;
+        });
+    const lookUp = (id: string) => (accountWork && keepsAccounts(u) ? keeperStudent(id) : student(u, id));
     // Read together, one trip. A student outside the person's scope still
     // refuses below, after the replay check, as it always has.
     const [prior, studentRead]: [any, { row?: any; error?: unknown }] = await Promise.all([
       stmt("SELECT actor FROM audit_events WHERE request_id=?", key).first(),
-      sid ? student(u, sid).then((row) => ({ row }), (error) => ({ error })) : Promise.resolve({}),
+      sid ? lookUp(sid).then((row) => ({ row }), (error) => ({ error })) : Promise.resolve({}),
     ]);
     if (prior) {
       ensure(
@@ -3466,7 +3482,7 @@ export async function POST(req: Request) {
           ensure(a, "Account not found.");
           ensure(mayOrder(a), "Only this account's coordinator, its keepers or the leaders record its orders.");
           const which = await orderStudent(a, x.student_id, u);
-          const pupil = await student(u, which.student_id);
+          const pupil = await lookUp(which.student_id);
           const orderRef = String(x.order_ref || "").trim();
           ensure(orderRef.length <= 120, "Keep the order number under 120 characters.");
           const amount = x.amount === "" || x.amount === null || x.amount === undefined ? null : Number(x.amount);

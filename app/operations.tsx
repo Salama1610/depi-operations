@@ -3762,6 +3762,7 @@ See you there!`,
             </a>
           )}
           {setsServiceStatus(r) && servicePicker(r)}
+          {setsServiceStatus(r) && costCell([r])}
         </span>
       );
     };
@@ -3961,7 +3962,8 @@ See you there!`,
       rows.length ? (
         <span className="svc-cell">
           {rows.map((r) => {
-            const value = r.latest?.amount === null || r.latest?.amount === undefined ? "" : String(Number(r.latest.amount));
+            const latest = r.latest ?? latestOrderOf(r);
+            const value = latest?.amount === null || latest?.amount === undefined ? "" : String(Number(latest.amount));
             const label = t("Price paid for service {v0}", { v0: r.service_slot || 1 });
             return setsServiceStatus(r) ? (
               <label key={r.id + ":" + r.student_id + ":" + value} className="svc-cost-field">
@@ -4786,6 +4788,7 @@ See you there!`,
                                 <small className="table-subline">{t("Not tied to one service")}</small>
                               )}
                               {setsServiceStatus(r) && servicePicker(r)}
+                              {setsServiceStatus(r) && costCell([r])}
                               <small className="table-subline">{r.linked_by ? t("Linked by {v0}", { v0: owner(r.linked_by) }) : t("Linked automatically")}{r.linked_at ? " · " + fmt(r.linked_at) : ""}</small>
                               {secondStudent(r)}
                             </span>
