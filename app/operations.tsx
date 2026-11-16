@@ -231,7 +231,6 @@ const moduleAction: Row = {
   students: "student",
   groups: "group",
   sessions: "session",
-  accounts: "account_request",
   gigs: "gig",
   cases: "case",
   work: "task",
@@ -267,6 +266,8 @@ const titles: Row = {
   staff: "Manage staff access",
   account_topup: "Record a top-up or payment",
   account_problem: "Report a problem with the account",
+  account_students: "Change the account's students",
+  account_coordinators: "Change the account's coordinators",
   account_coordinator: "Assign to a coordinator",
   session_coach: "Change the coach for one session",
   group_contact: "Log a group message",
@@ -3654,11 +3655,6 @@ See you there!`,
     const requests: Row[] = d.requests || [];
     const money = (v: any) => "$" + moneyFormat.format(Number(v || 0));
     const attention = ["Blocked", "Access Issue", "Funding Block", "Under Review", "Locked"];
-    const activeReservation = (requestId: string) =>
-      (d.reservations || []).find(
-        (z: Row) => z.request_id === requestId && z.status === "Active" && z.expires_at > new Date().toISOString(),
-      );
-    const requestStage = (r: Row) => (r.status === "Submitted" && activeReservation(r.id) ? "Reserved" : r.status);
     // The student an account is the key for (linked automatically after two
     // approved services); locked until Taha or Abdelrahman Salama release it.
     const keyStudent = (r: Row) => (r.student_id ? name(r.student_id) : "");
@@ -3950,37 +3946,38 @@ See you there!`,
       ) : (
         "—"
       );
-    // What the coordinator paid for each service and the marketplace they
-    // bought it on (Taha, 2 November 2026): saved on the service's order when
-    // the field is left.
-    const costCell = (rows: Row[], key: "amount" | "bought_on") =>
+    // What the coordinator paid for each service (Taha, 2 November 2026),
+    // picked from 1 to 20 USD (16 November 2026) and saved on the service's
+    // order as soon as it is chosen. A price saved earlier outside that range
+    // still shows as it is.
+    const prices = Array.from({ length: 20 }, (_, i) => String(i + 1));
+    const costCell = (rows: Row[]) =>
       rows.length ? (
         <span className="svc-cell">
           {rows.map((r) => {
-            const value = r.latest?.[key] ?? "";
-            const label = key === "amount" ? t("Price paid for service {v0}", { v0: r.service_slot || 1 }) : t("Where service {v0} was bought", { v0: r.service_slot || 1 });
+            const value = r.latest?.amount === null || r.latest?.amount === undefined ? "" : String(Number(r.latest.amount));
+            const label = t("Price paid for service {v0}", { v0: r.service_slot || 1 });
             return setsServiceStatus(r) ? (
-              <label key={r.id + ":" + value} className="svc-cost-field">
+              <label key={r.id + ":" + r.student_id + ":" + value} className="svc-cost-field">
                 {rows.length > 1 && <small className="svc-platform">{t("Service {v0}", { v0: r.service_slot || 1 })}</small>}
-                <input
-                  type={key === "amount" ? "number" : "text"}
-                  min={key === "amount" ? 0 : undefined}
-                  step={key === "amount" ? "0.01" : undefined}
-                  list={key === "bought_on" ? "svc-bought-on" : undefined}
-                  dir={key === "amount" ? "ltr" : undefined}
-                  defaultValue={String(value)}
+                <select
+                  dir="ltr"
+                  defaultValue={value}
                   aria-label={label}
-                  placeholder={key === "amount" ? "0" : t("Marketplace")}
                   disabled={busy}
-                  onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-                  onBlur={(e) => {
-                    const next = e.target.value.trim();
-                    if (next !== String(value)) quick("account_order_cost", { account_id: r.id, student_id: r.student_id, [key]: next });
+                  onChange={(e) => {
+                    if (e.target.value !== value) quick("account_order_cost", { account_id: r.id, student_id: r.student_id, amount: e.target.value });
                   }}
-                />
+                >
+                  <option value="">—</option>
+                  {value && !prices.includes(value) && <option value={value}>{"$" + value}</option>}
+                  {prices.map((p) => (
+                    <option key={p} value={p}>{"$" + p}</option>
+                  ))}
+                </select>
               </label>
             ) : (
-              <span key={r.id}>{value === "" ? "—" : String(value)}</span>
+              <span key={r.id + ":" + r.student_id}>{value === "" ? "—" : "$" + value}</span>
             );
           })}
         </span>
@@ -4024,16 +4021,6 @@ See you there!`,
       .filter((r) => accountFilters.linked === "All" || (accountFilters.linked === "Linked" ? Boolean(r.student_id) : !r.student_id))
       .filter((r) => accountFilters.word === "All" || (accountFilters.word === "None" ? !r.coordinator_state : r.coordinator_state === accountFilters.word))
       .sort(accountSorts[accountFilters.sort] || accountSorts.platform);
-    const requestRows = requests
-      .filter(qMatch)
-      .filter((r) => accountFilters.platform === "All" || r.platform === accountFilters.platform)
-      .filter((r) =>
-        accountFilters.request === "All"
-          ? true
-          : accountFilters.request === "Open"
-            ? r.status === "Submitted"
-            : requestStage(r) === accountFilters.request,
-      );
     const openRequests = requests.filter((r) => r.status === "Submitted");
     if (serviceOps) {
       content = !followsServices ? (
@@ -4131,7 +4118,6 @@ See you there!`,
                       "Service 3 Platform": s.rows[2]?.service_platform || s.rows[2]?.platform || "",
                       "Service 3 Status": s.rows[2] ? orderSheetWord(s.rows[2].state) : "",
                       "Price Paid": s.rows.map((r: Row) => r.latest?.amount ?? "").filter((v: any) => v !== "").join(" | "),
-                      "Bought On": s.rows.map((r: Row) => r.latest?.bought_on || "").filter(Boolean).join(" | "),
                     }))
                   }
                 >
@@ -4168,9 +4154,6 @@ See you there!`,
                   </button>
                 ))}
               </div>
-              <datalist id="svc-bought-on">
-                {["Kafiil", "Nafezly", "Khamsat", "Mostaql", "Fiverr", "Upwork"].map((v) => <option key={v} value={v} />)}
-              </datalist>
               {panel(
                 t("Gigs to buy · {v0}", { v0: svcShown.length }),
                 svcShown.length
@@ -4195,8 +4178,7 @@ See you there!`,
                           { key: "account", label: t("Account"), render: (r) => <span>{accountsCell([r])}<small className="table-subline">{r.platform}</small></span> },
                           { key: "password", label: t("Password"), render: (r) => passwordsCell([r]) },
                           { key: "state", label: t("Order state"), render: (r) => serviceStateCell(r) },
-                          { key: "amount", label: t("Price paid"), render: (r) => costCell([r], "amount") },
-                          { key: "bought_on", label: t("Bought on"), render: (r) => costCell([r], "bought_on") },
+                          { key: "amount", label: t("Price paid"), render: (r) => costCell([r]) },
                         ]),
                       [svcGigPage, setSvcGigPage],
                     )
@@ -4283,7 +4265,6 @@ See you there!`,
                       "Service 3 Platform": s.rows[2]?.service_platform || s.rows[2]?.platform || "",
                       "Service 3 Status": s.rows[2] ? orderSheetWord(s.rows[2].state) : "",
                       "Price Paid": s.rows.map((r: Row) => r.latest?.amount ?? "").filter((v: any) => v !== "").join(" | "),
-                      "Bought On": s.rows.map((r: Row) => r.latest?.bought_on || "").filter(Boolean).join(" | "),
                     }))
                   }
                 >
@@ -4320,9 +4301,6 @@ See you there!`,
                   </button>
                 ))}
               </div>
-              <datalist id="svc-bought-on">
-                {["Kafiil", "Nafezly", "Khamsat", "Mostaql", "Fiverr", "Upwork"].map((v) => <option key={v} value={v} />)}
-              </datalist>
               {panel(
                 t("Students with a client account · {v0}", { v0: studentLines.length }),
                 studentLines.length ? (
@@ -4347,7 +4325,6 @@ See you there!`,
                           <th className="svc-state">{t("Service 2")}</th>
                           <th className="svc-state">{t("Service 3")}</th>
                           <th className="svc-cost">{t("Price paid")}</th>
-                          <th className="svc-cost">{t("Bought on")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -4373,8 +4350,7 @@ See you there!`,
                             <td>{serviceStateCell(s.rows[0])}</td>
                             <td>{serviceStateCell(s.rows[1])}</td>
                             <td>{serviceStateCell(s.rows[2])}</td>
-                            <td>{costCell(s.rows, "amount")}</td>
-                            <td>{costCell(s.rows, "bought_on")}</td>
+                            <td>{costCell(s.rows)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -4416,12 +4392,6 @@ See you there!`,
                       .sort((a, b) => a.label.localeCompare(b.label)),
                   ]}
                 />
-                <Pick
-                  label={t("Bought on")}
-                  value={boughtFilters.where}
-                  onChange={(where) => setBoughtFilters({ ...boughtFilters, where })}
-                  options={[{ value: "All", label: t("All") }, ...[...new Set(boughtAll.map((o) => o.bought_on).filter(Boolean))].sort().map((v) => ({ value: String(v), label: String(v) }))]}
-                />
                 <button
                   type="button"
                   className="small-btn"
@@ -4436,7 +4406,6 @@ See you there!`,
                       Account: o.account_label,
                       "Account platform": o.account_platform,
                       Service: o.service_url || "",
-                      "Bought on": o.bought_on || "",
                       Price: o.amount ?? "",
                       Status: orderSheetWord(o.status),
                     }))
@@ -4484,7 +4453,6 @@ See you there!`,
                               "—"
                             ),
                         },
-                        { key: "bought_on", label: t("Bought on"), render: (o) => o.bought_on || "—" },
                         { key: "amount", label: t("Price paid"), render: (o) => (o.amount === null || o.amount === undefined || o.amount === "" ? "—" : money(o.amount)) },
                         {
                           key: "status",
@@ -4515,7 +4483,6 @@ See you there!`,
           <span><strong>{money(accounts.filter((a) => a.status === "Available").reduce((n, a) => n + Number(a.credits || 0), 0))}</strong>{t("Credit available")}</span>
           <span><strong>{accounts.filter((a) => a.status === "Assigned").length}</strong>{t("Assigned to students")}</span>
           <span className={accounts.some((a) => attention.includes(a.status)) ? "is-warning" : ""}><strong>{accounts.filter((a) => attention.includes(a.status)).length}</strong>{t("Need attention")}</span>
-          <span><strong>{openRequests.length}</strong>{t("Requests waiting")}</span>
         </div>
         <div className="account-capacity">
           {controlledPlatforms.map((platform) => {
@@ -4564,13 +4531,10 @@ See you there!`,
               </p>
             </>,
           )}
-        <Tabs defaultValue={openRequests.length ? "requests" : "pool"}>
+        <Tabs defaultValue="pool">
           <TabsList>
             <TabsTrigger value="pool">
               {t("Account pool")}{" "}<span className="count">{accounts.length}</span>
-            </TabsTrigger>
-            <TabsTrigger value="requests">
-              {t("Requests")}{" "}<span className="count">{openRequests.length}</span>
             </TabsTrigger>
             {(keepsAccounts || can(user.roles, ["Project Operations"])) && (
               <TabsTrigger value="credit">
@@ -4845,6 +4809,8 @@ See you there!`,
                     // by side pushed the table's columns off the screen. Only the
                     // releases a finished student asks for stay in sight.
                     const go = (action: string, form: Row) => () => open(action, form);
+                    // Students and coordinators change only while nothing was ordered through the account.
+                    const orderedOn = (a: Row) => accountOrders.some((o) => o.account_id === a.id && o.status !== "Cancelled");
                     const base = { id: r.id, label: r.label, platform: r.platform };
                     const money = t("Money"), state = t("Status and problems"), people = t("Students and coordinators");
                     const actions: RowAction[] = [
@@ -4861,20 +4827,15 @@ See you there!`,
                           ]
                         : []),
                       ...(managesAccounts ? [{ key: "manage", group: state, label: t("Manage"), icon: <Settings2 size={14} />, onClick: () => open("account_status", r) }] : []),
-                      ...(assignsAccounts && !r.student_id
-                        ? [{ key: "assign", group: people, label: r.coordinator_id ? t("Reassign") : t("Assign"), icon: <Users size={14} />, onClick: go("account_coordinator", { id: r.id, account_ids: [r.id], coordinator_id: r.coordinator_id || "", slot: "first" }) }]
-                        : []),
-                      ...(assignsAccounts && r.coordinator_id
-                        ? [{ key: "second-coordinator", group: people, label: r.coordinator_2_id ? t("Change second coordinator") : t("Add a second coordinator"), icon: <Users size={14} />, onClick: go("account_coordinator", { id: r.id, account_ids: [r.id], coordinator_id: r.coordinator_2_id || "", slot: "second" }) }]
-                        : []),
-                      ...(unlocks
-                        ? [{ key: "assignment", group: people, label: t("Change assignment"), icon: <Link2 size={14} />, onClick: go("account_assign", { ...base, key_student: r.student_id || "", service_link_id: r.service_link_id || "", coordinator_id: r.coordinator_id || "", student_id: "" }) }]
-                        : []),
-                      ...(unlocks && r.student_id
-                        ? [{ key: "unlock", group: people, label: t("Remove assignment"), icon: <Unlock size={14} />, onClick: go("account_unlock", { ...base, key_student: r.student_id, reason: "", student_id: "" }) }]
-                        : []),
-                      ...(unlocks && r.second
-                        ? [{ key: "unlock-second", group: people, label: t("Remove the second student"), icon: <Unlock size={14} />, onClick: go("account_unlock", { ...base, key_student: r.second.student_id, reason: "", student_id: r.second.student_id }) }]
+                      ...((assignsAccounts || unlocks) && !orderedOn(r)
+                        ? [
+                            ...(unlocks
+                              ? [{ key: "students", group: people, label: t("Change the students"), icon: <Users size={14} />, onClick: go("account_students", { ...base, student_id: r.student_id || "", service_link_id: r.service_link_id || "", student_2_id: r.second?.student_id || "", service_2_id: r.second?.service_link_id || "" }) }]
+                              : []),
+                            ...(assignsAccounts
+                              ? [{ key: "coordinators", group: people, label: t("Change the coordinators"), icon: <Link2 size={14} />, onClick: go("account_coordinators", { ...base, coordinator_id: r.coordinator_id || "", coordinator_2_id: r.coordinator_2_id || "" }) }]
+                              : []),
+                          ]
                         : []),
                     ];
                     return (
@@ -4909,84 +4870,6 @@ See you there!`,
                   <button className="small-btn" onClick={() => open("task_bank")} title={t("A ready-made service order coordinators pick when they request a client account")}>{t("Add approved task")}</button>
                 )}
               </div>,
-            )}
-          </TabsContent>
-          <TabsContent value="requests">
-            <div className="filter-row">
-              <Pick label={t("Marketplace")} value={accountFilters.platform} onChange={(platform) => setAccountFilters({ ...accountFilters, platform })} options={["All", ...controlledPlatforms]} />
-              <Pick
-                label={t("Showing")}
-                value={accountFilters.request}
-                onChange={(request) => setAccountFilters({ ...accountFilters, request })}
-                options={[
-                  { value: "Open", label: t("Waiting for an account") },
-                  { value: "Reserved", label: t("Reserved") },
-                  { value: "Assigned", label: t("Assigned") },
-                  { value: "All", label: t("Every request") },
-                ]}
-              />
-            </div>
-            {panel(
-              t("Account requests"),
-              requestRows.length ? (
-                generic(
-                  requestRows,
-                  [
-                    studentCol,
-                    {
-                      key: "task",
-                      label: t("Service"),
-                      render: (r) => <span><strong>{r.task}</strong><small className="table-subline">{r.created_at ? new Date(r.created_at).toLocaleDateString() : ""}</small></span>,
-                    },
-                    { key: "platform", label: t("Marketplace") },
-                    { key: "value", label: t("Credit needed"), render: (r) => money(r.value) },
-                    {
-                      key: "status",
-                      label: t("Progress"),
-                      render: (r) => {
-                        const stage = requestStage(r);
-                        const steps = ["Submitted", "Reserved", "Assigned"];
-                        const at = steps.indexOf(stage);
-                        const hold = activeReservation(r.id);
-                        return (
-                          <span className="request-flow">
-                            {at < 0 ? (
-                              <Badge value={stage} />
-                            ) : (
-                              steps.map((step, i) => (
-                                <i key={step} className={i < at ? "is-past" : i === at ? "is-now" : ""}>{t(step)}</i>
-                              ))
-                            )}
-                            {hold && stage === "Reserved" && (
-                              <small className="table-subline">
-                                {t("Held until {v0}", { v0: new Date(hold.expires_at).toLocaleTimeString(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", { hour: "numeric", hour12: true, minute: "2-digit", timeZone: "Africa/Cairo" }) })}
-                              </small>
-                            )}
-                          </span>
-                        );
-                      },
-                    },
-                  ],
-                  (r) => {
-                    if (r.status !== "Submitted" || !can(user.roles, ["Higher Board"])) return null;
-                    const reservation = activeReservation(r.id);
-                    return reservation ? (
-                      <button
-                        className="primary small"
-                        onClick={() => open("allocate", { request: r.id, student_id: r.student_id, reservation_id: reservation.id, account: reservation.account_id })}
-                      >
-                        {t("Approve allocation")}
-                      </button>
-                    ) : (
-                      <button className="small-btn" onClick={() => open("reserve_account", { request: r.id, student_id: r.student_id })}>
-                        {t("Reserve account")}
-                      </button>
-                    );
-                  },
-                )
-              ) : (
-                <Empty title={requests.length ? t("No request matches these filters") : t("No account requests yet")} />
-              ),
             )}
           </TabsContent>
         </Tabs>
@@ -8401,6 +8284,75 @@ See you there!`,
                       />
                     </label>
                     <p className="footnote">{t("A student holds three accounts at most, each a different one, and an account buys from two students at most. Choosing a student fills in their coordinator; you can change it.")}</p>
+                  </>
+                );
+              }
+              if (a === "account_students") {
+                // Both students at once (16 November 2026): the service groups' active students and each one's approved services.
+                const pool = students.filter((s) => s.lifecycle === "Active" && buysServices(s.group_id));
+                const servicesOf = (id: string) => serviceLinks.filter((l) => l.student_id === id && l.qc_status === "Locked");
+                if (!serviceListsReady) return <p className="footnote">{t("Loading the service links…")}</p>;
+                const studentPick = (key: string, serviceKey: string, label: string) => (
+                  <>
+                    <label className="field">
+                      {label}
+                      <SearchableSelect
+                        label={label}
+                        value={form[key] || ""}
+                        placeholder={t("No student")}
+                        onChange={(v) => setForm({ ...form, [key]: v || "", [serviceKey]: "" })}
+                        options={[{ value: "", label: t("No student") }, ...pool.map((s) => ({ value: s.id, label: `${s.name} · ${s.id} · ${s.group_id}` }))]}
+                      />
+                    </label>
+                    {form[key] && (
+                      <label className="field">
+                        {t("Service")}
+                        <Pick
+                          bare
+                          label={t("Service")}
+                          value={form[serviceKey] || ""}
+                          onChange={(v) => setForm({ ...form, [serviceKey]: v })}
+                          options={[{ value: "", label: t("Choose the service") }, ...servicesOf(form[key]).map((l) => ({ value: l.id, label: `${l.platform} · ${t("service {v0}", { v0: l.slot })}` }))]}
+                        />
+                      </label>
+                    )}
+                  </>
+                );
+                return (
+                  <>
+                    <div className="account-summary">
+                      <div>
+                        <strong>{modal!.label}</strong>
+                        <small>{modal!.platform}</small>
+                      </div>
+                    </div>
+                    {studentPick("student_id", "service_link_id", t("First student"))}
+                    {studentPick("student_2_id", "service_2_id", t("Second student"))}
+                    <p className="footnote">{t("Both students are saved together, each with the service the account buys, and each student's group coordinator works them on the account. Two students of the same job profile never share an account. Leave both empty to free the account.")}</p>
+                  </>
+                );
+              }
+              if (a === "account_coordinators") {
+                const coordinators = [
+                  { value: "", label: t("No coordinator") },
+                  ...staff
+                    .filter((u: Row) => {
+                      const team: string[] | null = d.teamCoordinators ?? null;
+                      return u.active !== false && u.active !== 0 && heldRoles(u).includes("Operations Coordinator") && (!team || team.includes(u.id));
+                    })
+                    .map((u: Row) => ({ value: u.id, label: u.name })),
+                ];
+                return (
+                  <>
+                    <div className="account-summary">
+                      <div>
+                        <strong>{modal!.label}</strong>
+                        <small>{modal!.platform}</small>
+                      </div>
+                    </div>
+                    {choice("coordinator_id", t("First coordinator"), coordinators, false)}
+                    {choice("coordinator_2_id", t("Second coordinator"), coordinators, false)}
+                    <p className="footnote">{t("Both coordinators are saved together. A student's own group coordinator still works them, whoever is written here.")}</p>
                   </>
                 );
               }

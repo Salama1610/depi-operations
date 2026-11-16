@@ -3564,6 +3564,106 @@ export async function POST(req: Request) {
         }
         break;
       }
+      case "account_students":
+      case "account_coordinators": {
+        // An account's two students, or its two coordinators, change together
+        // and only while nothing has been ordered through it (16 November 2026):
+        // a change of one alone left the pair out of step, and an order ties the
+        // account to the students it was bought for.
+        const a: any = await stmt("SELECT * FROM accounts WHERE id=?", id).first();
+        ensure(a && a.status !== "Retired", "Choose an active client account.");
+        const ordered: any = await stmt("SELECT id FROM account_orders WHERE account_id=? AND status<>'Cancelled' LIMIT 1", id).first();
+        ensure(!ordered, "This account already has an order, so its students and coordinators stay as they are.");
+        const named = (v: unknown) => (v ? String(v) : null);
+        if (x.action === "account_coordinators") {
+          permit(u, ["Team Supervisor"]);
+          const first = named(x.coordinator_id);
+          const second = named(x.coordinator_2_id);
+          ensure(first || !second, "Choose the first coordinator before a second one.");
+          ensure(!first || first !== second, "Choose two different coordinators.");
+          const team = await teamCoordinators(u);
+          // A supervisor who does not keep the accounts works only on accounts free or with their own team.
+          if (!keepsAccounts(u))
+            ensure([a.coordinator_id, a.coordinator_2_id].every((c: any) => !c || (team || []).includes(c)), "This account is with another team's coordinator.");
+          for (const person of [first, second].filter(Boolean) as string[]) {
+            const row: any = await stmt("SELECT id,roles FROM users WHERE id=? AND active=1", person).first();
+            ensure(row && JSON.parse(row.roles).includes("Operations Coordinator"), "Choose an active coordinator.");
+            ensure(!team || team.includes(person), "Choose a coordinator from your own team.");
+          }
+          auditPrevious = { coordinator_id: a.coordinator_id, coordinator_2_id: a.coordinator_2_id };
+          auditValue = { account_id: id, coordinator_id: first, coordinator_2_id: second };
+          jobs.push(stmt("UPDATE accounts SET coordinator_id=?,coordinator_2_id=? WHERE id=?", first, second, id));
+          break;
+        }
+        ensure(unlocksAccounts(u), "Only the people allowed to change account assignments can do this.");
+        const picks = [
+          { student: named(x.student_id), service: named(x.service_link_id) },
+          { student: named(x.student_2_id), service: named(x.service_2_id) },
+        ];
+        ensure(picks[0].student || !picks[1].student, "Choose the first student before a second one.");
+        ensure(!picks[0].student || picks[0].student !== picks[1].student, "Choose two different students.");
+        const chosen: any[] = [];
+        for (const pick of picks) {
+          if (!pick.student) continue;
+          const pupil: any = await stmt(
+            "SELECT s.id,s.name,s.lifecycle,s.group_id,lower(trim(coalesce(s.job_profile,''))) profile,g.coordinator FROM students s JOIN groups g ON g.id=s.group_id WHERE s.id=?",
+            pick.student,
+          ).first();
+          ensure(pupil, "Student not found.");
+          ensure(pupil.lifecycle === "Active", "Choose an active student.");
+          ensure(String(pupil.id).startsWith("DEMO-") === String(id).startsWith("DEMO-"), "Demo accounts are for demo students only, and real accounts for real students.");
+          ensure(String(id).startsWith("DEMO-") || buysServices(pupil.group_id), "Client accounts are for the students of the service groups only.");
+          const others = (await all(studentAccountsSql, pupil.id, pupil.id)).filter((r: any) => r.account_id !== id).length;
+          ensure(others < accountsPerStudent, `${pupil.name} already has three accounts. Remove one of them first.`);
+          const heldPlatforms = (await all(`SELECT platform FROM accounts WHERE id IN (SELECT account_id FROM (${studentAccountsSql}) y) AND id<>?`, pupil.id, pupil.id, id)).map((r: any) => String(r.platform));
+          ensure(
+            accountMixProblem(heldPlatforms, a.platform) !== "same" || !(await hasFreePlace(otherMarketplace(String(a.platform)), String(id).startsWith("DEMO-"))),
+            accountMixMessage(a.platform),
+          );
+          ensure(pick.service, "Choose the service this account buys from each student.");
+          const link: any = await stmt("SELECT id,student_id FROM service_links WHERE id=?", pick.service).first();
+          ensure(link && link.student_id === pupil.id, "Choose one of this student's services.");
+          const taken: any = await stmt(
+            "SELECT id FROM accounts WHERE service_link_id=? AND id<>? UNION SELECT account_id FROM service_links WHERE id=? AND account_id IS NOT NULL AND account_id<>?",
+            link.id, id, link.id, id,
+          ).first();
+          ensure(!taken, "Another account is already linked to this service.");
+          chosen.push({ ...pupil, service: link.id });
+        }
+        // Two students of the same job profile never share an account.
+        ensure(chosen.length < 2 || !chosen[0].profile || chosen[0].profile !== chosen[1].profile, "The two students have the same job profile. Choose students of different job profiles.");
+        const [first, second] = chosen;
+        // Each student's own group coordinator works them on the account.
+        const coordinatorOne = first ? first.coordinator || null : a.coordinator_id;
+        const coordinatorTwo = second && second.coordinator && second.coordinator !== coordinatorOne ? second.coordinator : first ? null : a.coordinator_2_id;
+        const held: any[] = await all("SELECT id,student_id FROM service_links WHERE account_id=?", id);
+        auditPrevious = { student_id: a.student_id, service_link_id: a.service_link_id, students: held.map((l: any) => l.student_id), coordinator_id: a.coordinator_id, coordinator_2_id: a.coordinator_2_id };
+        auditValue = { account_id: id, students: chosen.map((c) => c.id), services: chosen.map((c) => c.service), coordinator_id: coordinatorOne, coordinator_2_id: coordinatorTwo };
+        const keeps = first && first.id === a.student_id;
+        jobs.push(
+          stmt("UPDATE service_links SET account_id=NULL WHERE account_id=?", id),
+          stmt(
+            "UPDATE accounts SET student_id=?,service_link_id=?,linked_at=?,linked_by=?,coordinator_id=?,coordinator_2_id=? WHERE id=?",
+            first?.id || null,
+            first?.service || null,
+            first ? (keeps ? a.linked_at || t : t) : null,
+            first ? (keeps ? a.linked_by || u.id : u.id) : null,
+            coordinatorOne,
+            coordinatorTwo,
+            id,
+          ),
+          ...chosen.map((c) => stmt("UPDATE service_links SET account_id=? WHERE id=?", id, c.service)),
+        );
+        for (const c of chosen)
+          if (c.coordinator)
+            jobs.push(
+              stmt(
+                "INSERT OR IGNORE INTO notifications VALUES(?,?,?,?,?,?,?,?,?)",
+                uid("NTF"), c.coordinator, `Client account ${a.label} is now for ${c.name}`, "student", c.id, "Information", `account-students:${id}:${c.id}:${t}`, t, null,
+              ),
+            );
+        break;
+      }
       case "account_assign": {
         // Taha, Abdelrahman Salama and whoever else holds "account-unlock"
         // give an account to a student (and one of their approved services)

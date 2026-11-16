@@ -4452,6 +4452,72 @@ test("by hand, a student takes three accounts on one marketplace, and not a four
   await dbExec("UPDATE students SET group_id=? WHERE id=?", group.id, learner.id);
 });
 
+test("an account's two students, or two coordinators, change together and only with no order yet (16 Nov 2026)", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const { scopes } = await dbRow("SELECT scopes FROM users WHERE email='owner@example.com'");
+  await dbExec("UPDATE users SET scopes=? WHERE email='owner@example.com'", JSON.stringify([...new Set([...JSON.parse(scopes || "[]"), "account-unlock"])]));
+  const group = await dbRow(
+    `SELECT g.id,g.coordinator FROM groups g WHERE g.status='Active' AND g.id NOT LIKE 'DEMO-%' AND coalesce(g.delivery_model,'Regular')<>'Industry'
+       AND (SELECT count(*) FROM students s WHERE s.group_id=g.id AND s.lifecycle='Active' AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=s.id))>=3
+     ORDER BY g.id DESC LIMIT 1`,
+  );
+  const pupils = (await dbRows(
+    "SELECT s.id,s.group_id,s.job_profile FROM students s WHERE s.group_id=? AND s.lifecycle='Active' AND NOT EXISTS (SELECT 1 FROM service_links l WHERE l.student_id=s.id) ORDER BY s.id LIMIT 3",
+    group.id,
+  ));
+  const serviceGroup = await asServiceGroup(group.id, "CAI5_DRT3_S1");
+  const [one, two, same] = pupils.map((p) => p.id);
+  for (const [id, profile] of [[one, "Data Analyst"], [two, "Web Developer"], [same, "Data Analyst"]])
+    await dbExec("UPDATE students SET group_id=?,job_profile=? WHERE id=?", serviceGroup, profile, id);
+  const at = new Date().toISOString();
+  for (const [link, student] of [["SLK-TWO-1", one], ["SLK-TWO-2", two], ["SLK-TWO-3", same]])
+    await dbExec(
+      "INSERT INTO service_links(id,student_id,slot,url,normalized_url,platform,auto_status,auto_result,auto_checked_at,qc_status,qc_comment,qc_actor,qc_at,revision,account_id,submitted_at,updated_at) VALUES(?,?,1,?,?,'Kafiil','Valid','{}',?,'Locked',NULL,'staff-quality',?,1,NULL,?,?)",
+      link, student, `https://kafiil.com/service/${link}`, `kafiil.com/service/${link}`, at, at, at, at,
+    );
+  await check("account", { id: "ACC-TWO-1", label: "two-one@example.org", platform: "Kafeel", credits: 30 });
+  try {
+    // Both students at once, each with their service; each one's group coordinator comes with them.
+    assert.match((await post("account_students", { id: "ACC-TWO-1", student_id: one, service_link_id: "SLK-TWO-1", student_2_id: same, service_2_id: "SLK-TWO-3" })).error, /same job profile/);
+    assert.match((await post("account_students", { id: "ACC-TWO-1", student_id: one, service_link_id: "SLK-TWO-1", student_2_id: one, service_2_id: "SLK-TWO-1" })).error, /two different students/);
+    assert.match((await post("account_students", { id: "ACC-TWO-1", student_id: one, service_link_id: "SLK-TWO-1", student_2_id: two })).error, /Choose the service/);
+    await check("account_students", { id: "ACC-TWO-1", student_id: one, service_link_id: "SLK-TWO-1", student_2_id: two, service_2_id: "SLK-TWO-2" });
+    let a = await dbRow("SELECT student_id,service_link_id,coordinator_id,coordinator_2_id FROM accounts WHERE id='ACC-TWO-1'");
+    assert.deepEqual([a.student_id, a.service_link_id, a.coordinator_id, a.coordinator_2_id], [one, "SLK-TWO-1", group.coordinator, null], "one group: one coordinator for both");
+    const links = await dbRows("SELECT id FROM service_links WHERE account_id='ACC-TWO-1' ORDER BY id");
+    assert.deepEqual(links.map((l) => l.id), ["SLK-TWO-1", "SLK-TWO-2"]);
+    // Swapped in one step: the second student becomes the first.
+    await check("account_students", { id: "ACC-TWO-1", student_id: two, service_link_id: "SLK-TWO-2", student_2_id: one, service_2_id: "SLK-TWO-1" });
+    assert.equal((await dbRow("SELECT student_id FROM accounts WHERE id='ACC-TWO-1'")).student_id, two);
+
+    // Both coordinators at once.
+    const other = await dbRow("SELECT id FROM users WHERE roles LIKE '%Operations Coordinator%' AND active=1 AND id<>? ORDER BY id LIMIT 1", group.coordinator);
+    assert.match((await post("account_coordinators", { id: "ACC-TWO-1", coordinator_id: "", coordinator_2_id: other.id })).error, /first coordinator before/);
+    assert.match((await post("account_coordinators", { id: "ACC-TWO-1", coordinator_id: other.id, coordinator_2_id: other.id })).error, /two different coordinators/);
+    await check("account_coordinators", { id: "ACC-TWO-1", coordinator_id: other.id, coordinator_2_id: group.coordinator });
+    a = await dbRow("SELECT coordinator_id,coordinator_2_id FROM accounts WHERE id='ACC-TWO-1'");
+    assert.deepEqual([a.coordinator_id, a.coordinator_2_id], [other.id, group.coordinator]);
+
+    // Once something is ordered through it, neither changes.
+    await check("account_service_status", { account_id: "ACC-TWO-1", student_id: two, status: "Buy" });
+    assert.match((await post("account_students", { id: "ACC-TWO-1" })).error, /already has an order/);
+    assert.match((await post("account_coordinators", { id: "ACC-TWO-1", coordinator_id: group.coordinator })).error, /already has an order/);
+    // A cancelled order does not count.
+    await dbExec("UPDATE account_orders SET status='Cancelled' WHERE account_id='ACC-TWO-1'");
+    await check("account_students", { id: "ACC-TWO-1" });
+    a = await dbRow("SELECT student_id,coordinator_id FROM accounts WHERE id='ACC-TWO-1'");
+    assert.equal(a.student_id, null, "both left empty: the account is free");
+    assert.equal((await dbRow("SELECT count(*) n FROM service_links WHERE account_id='ACC-TWO-1'")).n, 0);
+    assert.ok(await dbRow("SELECT id FROM audit_events WHERE action='account_students' AND entity_id='ACC-TWO-1'"), "audited");
+  } finally {
+    await dbExec("UPDATE service_links SET account_id=NULL WHERE account_id='ACC-TWO-1'");
+    await dbExec("UPDATE accounts SET student_id=NULL,service_link_id=NULL,coordinator_id=NULL,coordinator_2_id=NULL,status='Retired' WHERE id='ACC-TWO-1'");
+    for (const p of pupils) await dbExec("UPDATE students SET group_id=?,job_profile=? WHERE id=?", p.group_id, p.job_profile, p.id);
+    await dbExec("UPDATE users SET scopes=? WHERE email='owner@example.com'", scopes);
+  }
+});
+
 test("an account buys from two students at most, never two of the same job profile, and orders say which student", async () => {
   await dbExec("DELETE FROM rate_limits");
   current = { id: "owner", email: "owner@example.com" };
