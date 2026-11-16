@@ -49,6 +49,7 @@ export function PortalCoachStudents() {
           "Assigned students": c.assigned,
           Started: c.started,
           Graduated: c.graduated,
+          "Graduated (%)": c.graduated_pct,
           "Not started": c.not_started,
           "Not on the portal": c.no_status,
           "Not started or not on the portal": c.not_moving,
@@ -113,6 +114,7 @@ export function PortalCoachStudents() {
                   <th>{t("Not started")}</th>
                   <th>{t("Graduated")}</th>
                   <th>{t("No portal status")}</th>
+                  <th>{t("Graduated (%)")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -121,11 +123,17 @@ export function PortalCoachStudents() {
                     <td><strong>{coachName(c)}</strong></td>
                     <td><bdi dir="ltr">{c.groups}</bdi></td>
                     {counts(c)}
+                    <td>
+                      <span className="grad-share">
+                        <span className="grad-share-bar" aria-hidden="true"><span style={{ inlineSize: c.graduated_pct + "%" }} /></span>
+                        <strong><bdi dir="ltr">{c.graduated_pct}%</bdi></strong>
+                      </span>
+                    </td>
                   </tr>
                 ))}
                 {!coaches.length && (
                   <tr>
-                    <td colSpan={7}>{t("Nothing in this list.")}</td>
+                    <td colSpan={8}>{t("Nothing in this list.")}</td>
                   </tr>
                 )}
               </tbody>
@@ -134,6 +142,7 @@ export function PortalCoachStudents() {
                   <th>{t("Total")}</th>
                   <td />
                   {counts(data.total)}
+                  <td><strong><bdi dir="ltr">{data.total.assigned ? Math.round((data.total.graduated / data.total.assigned) * 100) : 0}%</bdi></strong></td>
                 </tr>
               </tfoot>
             </table>

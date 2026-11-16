@@ -21,7 +21,8 @@ export function portalStanding(finalStatus: unknown): PortalStanding {
 }
 
 type Counts = { assigned: number; started: number; not_started: number; graduated: number; no_status: number };
-export type CoachStudentsRow = Counts & { coach_id: string | null; coach_name: string | null; groups: number };
+/** One coach: their groups' students by where they stand, and the share graduated (16 November 2026). */
+export type CoachStudentsRow = Counts & { coach_id: string | null; coach_name: string | null; groups: number; graduated_pct: number };
 /** One group: its students by where they stand, and the share graduated (13 November 2026). */
 export type GroupStudentsRow = Counts & { group_id: string; coach_id: string | null; coach_name: string | null; graduated_pct: number };
 
@@ -62,7 +63,7 @@ export function coachStudentCounts(
     total[standing]++;
   }
   const coaches: CoachStudentsRow[] = [...rows.values()]
-    .map(({ groupIds, ...row }) => ({ ...row, groups: groupIds.size }))
+    .map(({ groupIds, ...row }) => ({ ...row, groups: groupIds.size, graduated_pct: row.assigned ? Math.round((row.graduated / row.assigned) * 100) : 0 }))
     .sort((a, b) => Number(!a.coach_id) - Number(!b.coach_id) || String(a.coach_name ?? a.coach_id).localeCompare(String(b.coach_name ?? b.coach_id)));
   // Each group's share of graduates, the highest first.
   const groups: GroupStudentsRow[] = [...byGroup.values()]

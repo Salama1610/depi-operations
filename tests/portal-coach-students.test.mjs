@@ -37,14 +37,14 @@ test("each coach's students are counted once, and a group without a coach comes 
     ],
   );
   assert.deepEqual(coaches.map((c) => c.coach_name), ["Amal", "Zeina", null]);
-  assert.deepEqual(coaches[1], { coach_id: "C2", coach_name: "Zeina", groups: 2, assigned: 4, started: 2, not_started: 0, graduated: 1, no_status: 1 });
-  assert.deepEqual(coaches[0], { coach_id: "C1", coach_name: "Amal", groups: 1, assigned: 1, started: 0, not_started: 1, graduated: 0, no_status: 0 });
-  assert.deepEqual(coaches[2], { coach_id: null, coach_name: null, groups: 1, assigned: 1, started: 0, not_started: 0, graduated: 0, no_status: 1 });
+  assert.deepEqual(coaches[1], { coach_id: "C2", coach_name: "Zeina", groups: 2, assigned: 4, started: 2, not_started: 0, graduated: 1, no_status: 1, graduated_pct: 25 });
+  assert.deepEqual(coaches[0], { coach_id: "C1", coach_name: "Amal", groups: 1, assigned: 1, started: 0, not_started: 1, graduated: 0, no_status: 0, graduated_pct: 0 });
+  assert.deepEqual(coaches[2], { coach_id: null, coach_name: null, groups: 1, assigned: 1, started: 0, not_started: 0, graduated: 0, no_status: 1, graduated_pct: 0 });
   assert.deepEqual(total, { assigned: 6, started: 2, not_started: 1, graduated: 1, no_status: 2 });
 });
 
 test("the coaches are ranked from the furthest behind: students not moving, as a share, and gigs left waiting", () => {
-  const row = (coach_id, assigned, not_started, no_status) => ({ coach_id, coach_name: coach_id, groups: 1, assigned, started: assigned - not_started - no_status, not_started, graduated: 0, no_status });
+  const row = (coach_id, assigned, not_started, no_status) => ({ coach_id, coach_name: coach_id, groups: 1, assigned, started: assigned - not_started - no_status, not_started, graduated: 0, no_status, graduated_pct: 0 });
   const today = new Date("2026-11-08T12:00:00Z");
   const ranking = rankCoaches(
     [row("A", 10, 8, 1), row("B", 40, 10, 0), row("C", 10, 2, 0), row(null, 5, 5, 0)],
@@ -92,6 +92,31 @@ test("each group's share of graduates, the highest first (13 Nov 2026)", () => {
     [
       ["G2", "Zeina", 2, 2, 100],
       ["G1", "Amal", 3, 1, 33],
+    ],
+  );
+});
+
+test("each coach's share of graduates across their groups (16 Nov 2026)", () => {
+  const { coaches } = coachStudentCounts(
+    [
+      { id: "S1", group_id: "G1", coach_id: "C1", coach_name: "Amal" },
+      { id: "S2", group_id: "G1", coach_id: "C1", coach_name: "Amal" },
+      { id: "S3", group_id: "G3", coach_id: "C1", coach_name: "Amal" },
+      { id: "S4", group_id: "G2", coach_id: "C2", coach_name: "Zeina" },
+      { id: "S5", group_id: "G9", coach_id: null, coach_name: null },
+    ],
+    [
+      { student_id: "S1", final_status: "Graduated" },
+      { student_id: "S3", final_status: "Graduated" },
+      { student_id: "S4", final_status: "Started" },
+    ],
+  );
+  assert.deepEqual(
+    coaches.map((c) => [c.coach_id, c.groups, c.assigned, c.graduated, c.graduated_pct]),
+    [
+      ["C1", 2, 3, 2, 67],
+      ["C2", 1, 1, 0, 0],
+      [null, 1, 1, 0, 0],
     ],
   );
 });
