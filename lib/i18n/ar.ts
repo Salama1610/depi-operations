@@ -3196,4 +3196,8 @@ export const ar: Record<string, string> = {
   "Bank transfer": "تحويل بنكي",
   "InstaPay": "إنستاباي",
   "Vodafone Cash": "فودافون كاش",
+  // The account pool's Actions menu (16 Nov 2026).
+  "Money": "المال",
+  "Status and problems": "الحالة والمشكلات",
+  "Students and coordinators": "الطلاب والمنسقون",
 };

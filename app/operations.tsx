@@ -13,6 +13,7 @@ import { WeeklyProgress } from "./weekly-progress";
 import { acceptedServicePlatforms, buysServices } from "@/lib/domain/service-links";
 import { accountPlaces } from "@/lib/domain/account-places";
 import { followsServiceRow, seesEveryServiceRow } from "@/lib/domain/service-rows";
+import { RowActions, type RowAction } from "@/components/row-actions";
 import { accountReviewRows, reviewColumns, reviewDropdowns, reviewHowTo, reviewInputColumns, studentColumns, studentServiceRows } from "@/lib/domain/account-review";
 import { PortalView } from "./portal-view";
 // The dashboard and its charts load only when someone opens it.
@@ -4826,67 +4827,60 @@ See you there!`,
                         ),
                     },
                   ],
-                  (r) =>
-                    r.status === "Retired" ? null : (
-                      <div className="detail-actions">
-                        {keepsAccounts && (
-                          <button className="small-btn" onClick={() => open("account_topup", { id: r.id, kind: "Top-up" })}>{t("Top up")}</button>
-                        )}
-                        {keepsAccounts && (
-                          <button className="small-btn" onClick={() => open("account_topup", { id: r.id, kind: "Payment", paid_on: today() })}>
-                            <CreditCard size={14} /> {t("Record a payment")}
-                          </button>
-                        )}
-                        {wordOn(r) && (
-                          <button className="small-btn" onClick={() => open("account_problem", { id: r.id, label: r.label, platform: r.platform, status: r.status, problem: "", note: "" })}>
-                            <TriangleAlert size={14} /> {t("Report a problem")}
-                          </button>
-                        )}
-                        {wordOn(r) && (
-                          <button className="small-btn" onClick={() => open("account_state", { id: r.id, label: r.label, platform: r.platform, state: r.coordinator_state || "", note: r.coordinator_note || "", student_id: "" })}>
-                            {t("Update status")}
-                          </button>
-                        )}
-                        {assignsAccounts && !r.student_id && (
-                          <button className="small-btn" onClick={() => open("account_coordinator", { id: r.id, account_ids: [r.id], coordinator_id: r.coordinator_id || "", slot: "first" })}>
-                            {r.coordinator_id ? t("Reassign") : t("Assign")}
-                          </button>
-                        )}
-                        {unlocks && (
-                          <button className="small-btn" onClick={() => open("account_assign", { id: r.id, label: r.label, platform: r.platform, key_student: r.student_id || "", service_link_id: r.service_link_id || "", coordinator_id: r.coordinator_id || "", student_id: "" })}>
-                            {t("Change assignment")}
-                          </button>
-                        )}
+                  (r) => {
+                    if (r.status === "Retired") return null;
+                    // One Actions menu per account (16 November 2026): the buttons side
+                    // by side pushed the table's columns off the screen. Only the
+                    // releases a finished student asks for stay in sight.
+                    const go = (action: string, form: Row) => () => open(action, form);
+                    const base = { id: r.id, label: r.label, platform: r.platform };
+                    const money = t("Money"), state = t("Status and problems"), people = t("Students and coordinators");
+                    const actions: RowAction[] = [
+                      ...(keepsAccounts
+                        ? [
+                            { key: "topup", group: money, label: t("Top up"), icon: <Plus size={14} />, onClick: go("account_topup", { id: r.id, kind: "Top-up" }) },
+                            { key: "payment", group: money, label: t("Record a payment"), icon: <CreditCard size={14} />, onClick: go("account_topup", { id: r.id, kind: "Payment", paid_on: today() }) },
+                          ]
+                        : []),
+                      ...(wordOn(r)
+                        ? [
+                            { key: "problem", group: state, label: t("Report a problem"), icon: <TriangleAlert size={14} />, onClick: go("account_problem", { ...base, status: r.status, problem: "", note: "" }) },
+                            { key: "state", group: state, label: t("Update status"), icon: <CheckCheck size={14} />, onClick: go("account_state", { ...base, state: r.coordinator_state || "", note: r.coordinator_note || "", student_id: "" }) },
+                          ]
+                        : []),
+                      ...(managesAccounts ? [{ key: "manage", group: state, label: t("Manage"), icon: <Settings2 size={14} />, onClick: () => open("account_status", r) }] : []),
+                      ...(assignsAccounts && !r.student_id
+                        ? [{ key: "assign", group: people, label: r.coordinator_id ? t("Reassign") : t("Assign"), icon: <Users size={14} />, onClick: go("account_coordinator", { id: r.id, account_ids: [r.id], coordinator_id: r.coordinator_id || "", slot: "first" }) }]
+                        : []),
+                      ...(assignsAccounts && r.coordinator_id
+                        ? [{ key: "second-coordinator", group: people, label: r.coordinator_2_id ? t("Change second coordinator") : t("Add a second coordinator"), icon: <Users size={14} />, onClick: go("account_coordinator", { id: r.id, account_ids: [r.id], coordinator_id: r.coordinator_2_id || "", slot: "second" }) }]
+                        : []),
+                      ...(unlocks
+                        ? [{ key: "assignment", group: people, label: t("Change assignment"), icon: <Link2 size={14} />, onClick: go("account_assign", { ...base, key_student: r.student_id || "", service_link_id: r.service_link_id || "", coordinator_id: r.coordinator_id || "", student_id: "" }) }]
+                        : []),
+                      ...(unlocks && r.student_id
+                        ? [{ key: "unlock", group: people, label: t("Remove assignment"), icon: <Unlock size={14} />, onClick: go("account_unlock", { ...base, key_student: r.student_id, reason: "", student_id: "" }) }]
+                        : []),
+                      ...(unlocks && r.second
+                        ? [{ key: "unlock-second", group: people, label: t("Remove the second student"), icon: <Unlock size={14} />, onClick: go("account_unlock", { ...base, key_student: r.second.student_id, reason: "", student_id: r.second.student_id }) }]
+                        : []),
+                    ];
+                    return (
+                      <div className="pool-actions">
                         {unlocks && r.student_id && gigsDone(r.portal) && (
-                          <button className="small-btn release-done" onClick={() => open("account_unlock", { id: r.id, label: r.label, platform: r.platform, key_student: r.student_id, reason: r.portal?.graduated ? "Graduated on the portal" : "3 gigs approved on the portal", student_id: "" })}>
+                          <button className="small-btn release-done" onClick={go("account_unlock", { ...base, key_student: r.student_id, reason: r.portal?.graduated ? "Graduated on the portal" : "3 gigs approved on the portal", student_id: "" })}>
                             <Unlock size={14} /> {t("Gigs done: give the account to someone else")}
                           </button>
                         )}
                         {unlocks && r.second && gigsDone(r.second.portal) && (
-                          <button className="small-btn release-done" onClick={() => open("account_unlock", { id: r.id, label: r.label, platform: r.platform, key_student: r.second.student_id, reason: r.second.portal?.graduated ? "Graduated on the portal" : "3 gigs approved on the portal", student_id: r.second.student_id })}>
+                          <button className="small-btn release-done" onClick={go("account_unlock", { ...base, key_student: r.second.student_id, reason: r.second.portal?.graduated ? "Graduated on the portal" : "3 gigs approved on the portal", student_id: r.second.student_id })}>
                             <Unlock size={14} /> {t("Second student's gigs done: free their place")}
                           </button>
                         )}
-                        {unlocks && r.student_id && (
-                          <button className="small-btn" onClick={() => open("account_unlock", { id: r.id, label: r.label, platform: r.platform, key_student: r.student_id, reason: "", student_id: "" })}>
-                            <Unlock size={14} /> {t("Remove assignment")}
-                          </button>
-                        )}
-                        {unlocks && r.second && (
-                          <button className="small-btn" onClick={() => open("account_unlock", { id: r.id, label: r.label, platform: r.platform, key_student: r.second.student_id, reason: "", student_id: r.second.student_id })}>
-                            <Unlock size={14} /> {t("Remove the second student")}
-                          </button>
-                        )}
-                        {assignsAccounts && r.coordinator_id && (
-                          <button className="small-btn" onClick={() => open("account_coordinator", { id: r.id, account_ids: [r.id], coordinator_id: r.coordinator_2_id || "", slot: "second" })}>
-                            {r.coordinator_2_id ? t("Change second coordinator") : t("Add a second coordinator")}
-                          </button>
-                        )}
-                        {managesAccounts && (
-                          <button className="small-btn" onClick={() => open("account_status", r)}>{t("Manage")}</button>
-                        )}
+                        <RowActions actions={actions} label={t("Actions")} />
                       </div>
-                    ),
+                    );
+                  },
                 ))
               ) : (
                 <Empty title={accounts.length ? t("No account matches these filters") : t("No client accounts yet. The people who keep the accounts add them one at a time or upload the accounts sheet; top-ups are then recorded on the Credit tracker.")} />
