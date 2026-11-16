@@ -3226,4 +3226,6 @@ export const ar: Record<string, string> = {
   "Choose the service this account buys from each student.": "اختر الخدمة التي يشتريها هذا الحساب من كل طالب.",
   "The two students have the same job profile. Choose students of different job profiles.": "الطالبان من نفس المسار الوظيفي. اختر طالبين من مسارين مختلفين.",
   "Choose the price paid before marking the order Done or uploading the POH.": "اختر السعر المدفوع قبل تحديد الطلب كمكتمل أو رفع إثبات الشراء.",
+  "Both students are saved together, each with the service the account buys, and each student's group coordinator works them on the account. Two students of the same job profile never share an account. Leave the second empty to take the second student off, or both empty to free the account.": "يُحفظ الطالبان معًا، كلٌّ مع الخدمة التي يشتريها الحساب، ويتابع كلَّ طالب منسقُ مجموعته على الحساب. لا يشترك طالبان من نفس المسار الوظيفي في حساب واحد. اترك الثاني فارغًا لإزالة الطالب الثاني، أو الاثنين فارغين لتحرير الحساب.",
+  "Both coordinators are saved together; choose No coordinator to take one off. A student's own group coordinator still works them, whoever is written here.": "يُحفظ المنسقان معًا؛ اختر بدون منسق لإزالة أحدهما. يظل منسق مجموعة الطالب هو من يتابعه، أيًّا كان المكتوب هنا.",
 };

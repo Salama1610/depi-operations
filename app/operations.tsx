@@ -4835,9 +4835,10 @@ See you there!`,
                           ]
                         : []),
                       ...(managesAccounts ? [{ key: "manage", group: state, label: t("Manage"), icon: <Settings2 size={14} />, onClick: () => open("account_status", r) }] : []),
-                      ...((assignsAccounts || unlocks) && !orderedOn(r)
+                      // Project Operations and Abdullah Waheed (the keepers) change them even after an order (16 November 2026).
+                      ...((assignsAccounts || unlocks || keepsAccounts) && (!orderedOn(r) || keepsAccounts)
                         ? [
-                            ...(unlocks
+                            ...(unlocks || keepsAccounts
                               ? [{ key: "students", group: people, label: t("Change the students"), icon: <Users size={14} />, onClick: go("account_students", { ...base, student_id: r.student_id || "", service_link_id: r.service_link_id || "", student_2_id: r.second?.student_id || "", service_2_id: r.second?.service_link_id || "" }) }]
                               : []),
                             ...(assignsAccounts
@@ -8336,7 +8337,7 @@ See you there!`,
                     </div>
                     {studentPick("student_id", "service_link_id", t("First student"))}
                     {studentPick("student_2_id", "service_2_id", t("Second student"))}
-                    <p className="footnote">{t("Both students are saved together, each with the service the account buys, and each student's group coordinator works them on the account. Two students of the same job profile never share an account. Leave both empty to free the account.")}</p>
+                    <p className="footnote">{t("Both students are saved together, each with the service the account buys, and each student's group coordinator works them on the account. Two students of the same job profile never share an account. Leave the second empty to take the second student off, or both empty to free the account.")}</p>
                   </>
                 );
               }
@@ -8360,7 +8361,7 @@ See you there!`,
                     </div>
                     {choice("coordinator_id", t("First coordinator"), coordinators, false)}
                     {choice("coordinator_2_id", t("Second coordinator"), coordinators, false)}
-                    <p className="footnote">{t("Both coordinators are saved together. A student's own group coordinator still works them, whoever is written here.")}</p>
+                    <p className="footnote">{t("Both coordinators are saved together; choose No coordinator to take one off. A student's own group coordinator still works them, whoever is written here.")}</p>
                   </>
                 );
               }

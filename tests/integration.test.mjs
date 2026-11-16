@@ -4499,12 +4499,22 @@ test("an account's two students, or two coordinators, change together and only w
     a = await dbRow("SELECT coordinator_id,coordinator_2_id FROM accounts WHERE id='ACC-TWO-1'");
     assert.deepEqual([a.coordinator_id, a.coordinator_2_id], [other.id, group.coordinator]);
 
-    // Once something is ordered through it, neither changes.
+    // Once something is ordered through it, only the keepers change it.
     await check("account_service_status", { account_id: "ACC-TWO-1", student_id: two, status: "Buy" });
-    assert.match((await post("account_students", { id: "ACC-TWO-1" })).error, /already has an order/);
-    assert.match((await post("account_coordinators", { id: "ACC-TWO-1", coordinator_id: group.coordinator })).error, /already has an order/);
-    // A cancelled order does not count.
-    await dbExec("UPDATE account_orders SET status='Cancelled' WHERE account_id='ACC-TWO-1'");
+    const supervisor = await dbRow("SELECT id,email,team,scopes FROM users WHERE id='staff-nour'");
+    await dbExec("UPDATE users SET team='Target Team',scopes=? WHERE id='staff-nour'", JSON.stringify(["account-unlock"]));
+    current = { id: "supervisor-login", email: "staff-nour@example.invalid" };
+    assert.match((await post("account_students", { id: "ACC-TWO-1" })).error, /already has an order/, "an unlock holder who does not keep the accounts");
+    assert.match((await post("account_coordinators", { id: "ACC-TWO-1", coordinator_id: group.coordinator })).error, /already has an order|another team/);
+    await dbExec("UPDATE users SET team=?,scopes=? WHERE id='staff-nour'", supervisor.team, supervisor.scopes);
+    current = { id: "owner", email: "owner@example.com" };
+    // A keeper takes the student with the open order off: that order is cancelled, the other stays.
+    await check("account_students", { id: "ACC-TWO-1", student_id: one, service_link_id: "SLK-TWO-1" });
+    const left = await dbRow("SELECT status,note FROM account_orders WHERE account_id='ACC-TWO-1' AND student_id=?", two);
+    assert.equal(left.status, "Cancelled");
+    assert.match(left.note, /taken off the account/);
+    assert.equal((await dbRow("SELECT count(*) n FROM service_links WHERE account_id='ACC-TWO-1'")).n, 1, "only the first student's service");
+    await check("account_coordinators", { id: "ACC-TWO-1", coordinator_id: group.coordinator, coordinator_2_id: "" });
     await check("account_students", { id: "ACC-TWO-1" });
     a = await dbRow("SELECT student_id,coordinator_id FROM accounts WHERE id='ACC-TWO-1'");
     assert.equal(a.student_id, null, "both left empty: the account is free");

@@ -3576,8 +3576,12 @@ export async function POST(req: Request) {
         // account to the students it was bought for.
         const a: any = await stmt("SELECT * FROM accounts WHERE id=?", id).first();
         ensure(a && a.status !== "Retired", "Choose an active client account.");
-        const ordered: any = await stmt("SELECT id FROM account_orders WHERE account_id=? AND status<>'Cancelled' LIMIT 1", id).first();
-        ensure(!ordered, "This account already has an order, so its students and coordinators stay as they are.");
+        // The people who keep the accounts (Project Operations, Abdullah Waheed)
+        // change them even after an order (16 November 2026); everyone else only before one.
+        if (!keepsAccounts(u)) {
+          const ordered: any = await stmt("SELECT id FROM account_orders WHERE account_id=? AND status<>'Cancelled' LIMIT 1", id).first();
+          ensure(!ordered, "This account already has an order, so its students and coordinators stay as they are.");
+        }
         const named = (v: unknown) => (v ? String(v) : null);
         if (x.action === "account_coordinators") {
           permit(u, ["Team Supervisor"]);
@@ -3599,7 +3603,7 @@ export async function POST(req: Request) {
           jobs.push(stmt("UPDATE accounts SET coordinator_id=?,coordinator_2_id=? WHERE id=?", first, second, id));
           break;
         }
-        ensure(unlocksAccounts(u), "Only the people allowed to change account assignments can do this.");
+        ensure(unlocksAccounts(u) || keepsAccounts(u), "Only the people allowed to change account assignments can do this.");
         const picks = [
           { student: named(x.student_id), service: named(x.service_link_id) },
           { student: named(x.student_2_id), service: named(x.service_2_id) },
@@ -3644,6 +3648,21 @@ export async function POST(req: Request) {
         auditPrevious = { student_id: a.student_id, service_link_id: a.service_link_id, students: held.map((l: any) => l.student_id), coordinator_id: a.coordinator_id, coordinator_2_id: a.coordinator_2_id };
         auditValue = { account_id: id, students: chosen.map((c) => c.id), services: chosen.map((c) => c.service), coordinator_id: coordinatorOne, coordinator_2_id: coordinatorTwo };
         const keeps = first && first.id === a.student_id;
+        // A student who leaves the account keeps their finished orders in the
+        // history; an order still open for them is cancelled and its credit
+        // given back, as when an account moves to another student.
+        const staying = new Set(chosen.map((c) => c.id));
+        const leaving = [...new Set([a.student_id, ...held.map((l: any) => l.student_id)].filter((sid) => sid && !staying.has(sid)))];
+        for (const sid of leaving) {
+          for (const open of await all("SELECT id FROM account_orders WHERE account_id=? AND student_id=? AND status NOT IN ('Done','Proof Uploaded','Cancelled')", id, sid))
+            jobs.push(...(await orderCreditJobs(id, String((open as any).id), 0, u.id, t)));
+          jobs.push(
+            stmt(
+              "UPDATE account_orders SET status='Cancelled',note=COALESCE(note||' · ','')||?,cancelled_at=?,updated_at=? WHERE account_id=? AND student_id=? AND status NOT IN ('Done','Proof Uploaded','Cancelled')",
+              "Closed: the student was taken off the account.", t, t, id, sid,
+            ),
+          );
+        }
         jobs.push(
           stmt("UPDATE service_links SET account_id=NULL WHERE account_id=?", id),
           stmt(
