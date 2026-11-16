@@ -14,7 +14,16 @@ import { csvCell, ensure } from "./domain/rules.ts";
  * Only the parts of OOXML that matter for tabular data are produced or read.
  */
 
-export type Sheet = { name: string; rows: any[]; columns?: string[] };
+/** A column whose cells offer a fixed list to pick from (an Excel drop-down). */
+export type Dropdown = { column: string; options: string[]; prompt?: string };
+
+/**
+ * `columns` fixes the column order. `dropdowns` give those columns a pick list
+ * that refuses anything else; `inputColumns` are shaded, for the people who
+ * fill the sheet in; `filter` adds Excel's filter buttons to the header row
+ * (16 November 2026, for the account review sheet).
+ */
+export type Sheet = { name: string; rows: any[]; columns?: string[]; dropdowns?: Dropdown[]; inputColumns?: string[]; filter?: boolean };
 
 export function toCSV(rows: any[]) {
   const keys = Object.keys(rows[0] || { id: "" });
@@ -52,14 +61,16 @@ function cellValue(v: any) {
   return v;
 }
 
-function worksheetXml(rows: any[], columns?: string[]) {
+function worksheetXml(rows: any[], columns?: string[], extras: { dropdowns?: Dropdown[]; inputColumns?: string[]; filter?: boolean } = {}) {
   const keys = columns || Object.keys(rows[0] || { id: "" });
+  const input = new Set(extras.inputColumns || []);
   const data = [keys, ...rows.map((r) => keys.map((k) => cellValue(r[k])))];
   const widths = keys.map((k, j) =>
     Math.min(60, Math.max(10, ...data.slice(0, 500).map((row) => String(row[j] ?? "").length + 2))),
   );
-  const cell = (v: any, ref: string, header: boolean) => {
-    const style = header ? ' s="1"' : "";
+  const cell = (v: any, ref: string, header: boolean, shaded: boolean) => {
+    // 1 bold, 2 shaded, 3 bold and shaded (the shaded columns are the ones to fill in).
+    const style = header ? (shaded ? ' s="3"' : ' s="1"') : shaded ? ' s="2"' : "";
     if (v === "" || v === null || v === undefined) return "";
     if (typeof v === "number" && Number.isFinite(v)) return `<c r="${ref}"${style}><v>${v}</v></c>`;
     if (typeof v === "boolean") return `<c r="${ref}" t="b"${style}><v>${v ? 1 : 0}</v></c>`;
@@ -70,25 +81,47 @@ function worksheetXml(rows: any[], columns?: string[]) {
     `<dimension ref="A1:${col(Math.max(keys.length - 1, 0))}${data.length}"/>` +
     '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' +
     "<cols>" +
-    widths.map((w, j) => `<col min="${j + 1}" max="${j + 1}" width="${w}" customWidth="1"/>`).join("") +
+    widths.map((w, j) => `<col min="${j + 1}" max="${j + 1}" width="${w}" customWidth="1"${input.has(keys[j]) ? ' style="2"' : ""}/>`).join("") +
     "</cols><sheetData>" +
     data
       .map(
         (row, i) =>
-          `<row r="${i + 1}">` + row.map((v, j) => cell(v, `${col(j)}${i + 1}`, i === 0)).join("") + "</row>",
+          `<row r="${i + 1}">` + row.map((v, j) => cell(v, `${col(j)}${i + 1}`, i === 0, input.has(keys[j]))).join("") + "</row>",
       )
       .join("") +
-    "</sheetData></worksheet>"
+    "</sheetData>" +
+    (extras.filter && keys.length ? `<autoFilter ref="A1:${col(keys.length - 1)}${data.length}"/>` : "") +
+    dataValidationsXml(keys, data.length, extras.dropdowns) +
+    "</worksheet>"
   );
+}
+
+/** Drop-down lists: a cell in the column takes one of the options, and Excel refuses anything else. */
+function dataValidationsXml(keys: string[], lastRow: number, dropdowns?: Dropdown[]) {
+  if (!dropdowns?.length) return "";
+  const items = dropdowns.map((d) => {
+    const at = keys.indexOf(d.column);
+    ensure(at >= 0, "A drop-down needs a column of the sheet.");
+    ensure(d.options.length > 0 && d.options.every((o) => o && !o.includes(",")), "A drop-down option cannot be empty or hold a comma.");
+    const list = d.options.join(",");
+    ensure(list.length <= 255, "A drop-down list is limited to 255 characters.");
+    const prompt = d.prompt ? ` showInputMessage="1" promptTitle="Choose" prompt="${xml(d.prompt.slice(0, 255))}"` : "";
+    return (
+      `<dataValidation type="list" allowBlank="1" showErrorMessage="1" errorStyle="stop" errorTitle="Choose from the list" error="${xml(
+        ("Pick one of: " + d.options.join(", ")).slice(0, 255),
+      )}"${prompt} sqref="${col(at)}2:${col(at)}${Math.max(lastRow, 2)}"><formula1>"${xml(list)}"</formula1></dataValidation>`
+    );
+  });
+  return `<dataValidations count="${items.length}">${items.join("")}</dataValidations>`;
 }
 
 const STYLES =
   '<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
   '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>' +
-  '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>' +
+  '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFF2CC"/><bgColor indexed="64"/></patternFill></fill></fills>' +
   '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
   '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
-  '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>' +
+  '<cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="0" fillId="2" borderId="0" xfId="0" applyFill="1"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs>' +
   '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
   "</styleSheet>";
 
@@ -134,7 +167,7 @@ export function toWorkbook(sheets: Sheet[]) {
     "xl/styles.xml": strToU8(STYLES),
   };
   named.forEach((s, i) => {
-    files[`xl/worksheets/sheet${i + 1}.xml`] = strToU8(worksheetXml(s.rows, s.columns));
+    files[`xl/worksheets/sheet${i + 1}.xml`] = strToU8(worksheetXml(s.rows, s.columns, { dropdowns: s.dropdowns, inputColumns: s.inputColumns, filter: s.filter }));
   });
   return zipSync(files);
 }

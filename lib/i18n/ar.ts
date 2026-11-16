@@ -3147,4 +3147,7 @@ export const ar: Record<string, string> = {
   "Rejected on the portal": "مرفوضة على البوابة",
   "Second student's gigs done: free their place": "اكتملت جيجز الطالب الثاني: حرر مكانه",
   "{v0} more approved gigs needed": "يحتاج {v0} جيجز معتمدة أخرى",
+  // Account review sheet (16 Nov 2026)
+  "Download the review sheet": "تنزيل شيت المراجعة",
+  "One row per account and student, with drop-downs for Project Operations and Abdullah Waheed: the account buys this service, or cancel it. Follows the filters above.": "صف لكل حساب وطالب، مع قوائم منسدلة لعمليات المشروع وعبدالله وحيد: الحساب يشتري هذه الخدمة أو يُلغى. يتبع الفلاتر أعلاه.",
 };

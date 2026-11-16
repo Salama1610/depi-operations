@@ -11,6 +11,7 @@ import {
 import { ProgramFlow } from "./program-flow";
 import { WeeklyProgress } from "./weekly-progress";
 import { acceptedServicePlatforms } from "@/lib/domain/service-links";
+import { accountReviewRows, reviewColumns, reviewDropdowns, reviewHowTo, reviewInputColumns } from "@/lib/domain/account-review";
 import { PortalView } from "./portal-view";
 // The dashboard and its charts load only when someone opens it.
 const Dashboard = lazy(() => import("./dashboard").then((m) => ({ default: m.Dashboard })));
@@ -3786,6 +3787,22 @@ See you there!`,
       link.click();
       setTimeout(() => URL.revokeObjectURL(link.href), 1000);
     };
+    // The review sheet (16 November 2026): the rows on screen, one per account and
+    // student, with drop-downs for Project Operations and Abdullah Waheed to say
+    // whether the account buys that service or should be cancelled.
+    const downloadReview = () => {
+      const rows = accountReviewRows(svcShown, { owner: (id) => owner(id as string), provider: (g) => groupOfRow(g as string)?.provider || "" });
+      const data = toWorkbook([
+        { name: "Account review", rows, columns: Object.values(reviewColumns), dropdowns: reviewDropdowns, inputColumns: reviewInputColumns, filter: true },
+        { name: "How to fill in", rows: reviewHowTo },
+      ]);
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(new Blob([data as BlobPart], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+      link.download = `account-review-${today()}.xlsx`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    };
+    const sendsReview = can(user.roles, ["Project Operations", "Operations Systems / Admin", "Team Supervisor", "Higher Board"]);
     // The status words of the team's sheet, for the download.
     const orderSheetWord = (state: string) =>
       ({ Buy: "Buy", "In Progress": "In Progress", Done: "Done", "Proof Uploaded": "Upload POH", Cancelled: "Canceled" } as Record<string, string>)[state] || "";
@@ -4562,6 +4579,17 @@ See you there!`,
                 >
                   <Download size={14} /> {t("Download as Excel")}
                 </button>
+                {sendsReview && (
+                  <button
+                    type="button"
+                    className="small-btn"
+                    disabled={!svcShown.length}
+                    title={t("One row per account and student, with drop-downs for Project Operations and Abdullah Waheed: the account buys this service, or cancel it. Follows the filters above.")}
+                    onClick={downloadReview}
+                  >
+                    <Download size={14} /> {t("Download the review sheet")}
+                  </button>
+                )}
                 {JSON.stringify(svcFilters) !== JSON.stringify({ q: "", status: "All", coordinator: "All", supervisor: "All", group: "All", platform: "All" }) && (
                   <button type="button" className="small-btn" onClick={() => setSvcFilters({ q: "", status: "All", coordinator: "All", supervisor: "All", group: "All", platform: "All" })}>
                     {t("Clear filters")}
