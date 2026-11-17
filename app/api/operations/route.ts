@@ -33,6 +33,7 @@ import {
 } from "@/lib/server";
 import { accountStates, accountsPerStudent, buysServices, hasFreePlace, linkAccountKey, promoteRepeatStmt, repeatPurchases, serviceFixCategory, studentAccountsSql, serviceFixStatements, serviceFollowUpSweep, submissionStatus, taskProgressStates } from "@/lib/service-followup";
 import { accountMixMessage, accountMixProblem, otherMarketplace } from "@/lib/domain/student-accounts";
+import { mergeKey, mergeProblem } from "@/lib/domain/session-merge";
 import { demoPeople, demoPlan, demoStudentEmail, isDemo, sameSide } from "@/lib/demo";
 import {
   ensure,
@@ -1456,7 +1457,7 @@ export async function POST(req: Request) {
         for (const step of ordered)
           jobs.push(
             stmt(
-              "UPDATE sessions SET coach_id=?,starts_at=?,session_day=?,status='Scheduled',confirmed_at=NULL,coach_confirmed_at=NULL,coordinator_confirmed_at=NULL,coach_unavailable=NULL,coordinator_unavailable=NULL,cancel_reason=NULL,updated_at=? WHERE id=?",
+              "UPDATE sessions SET merge_key=NULL,coach_id=?,starts_at=?,session_day=?,status='Scheduled',confirmed_at=NULL,coach_confirmed_at=NULL,coordinator_confirmed_at=NULL,coach_unavailable=NULL,coordinator_unavailable=NULL,cancel_reason=NULL,updated_at=? WHERE id=?",
               step.coach || null,
               step.startsAt,
               step.day,
@@ -1650,21 +1651,34 @@ export async function POST(req: Request) {
           ensure(coach && !String(coach.id).startsWith("system-"), "Choose an active member of staff.");
         }
         ensure(coachId !== session.coach_id, "This coach is already on the session.");
-        const clash: any = await stmt(
-          "SELECT group_id FROM sessions WHERE coach_id=? AND session_day=? AND status<>'Cancelled' AND id<>?",
+        // A merge (17 November 2026): one coach teaching two groups together at the
+        // same time, labelled so. Without it a coach has one session a day.
+        const already: any[] = await all(
+          "SELECT id,group_id,starts_at FROM sessions WHERE coach_id=? AND session_day=? AND status<>'Cancelled' AND id<>?",
           coachId,
           session.session_day,
           id,
-        ).first();
-        ensure(!clash, `This coach already has a session that day (${clash?.group_id}).`);
+        );
+        ensure(!already.length || x.merge === true, `This coach already has a session that day (${already[0]?.group_id}). Tick Merge to have them teach both groups together at the same time.`);
+        if (already.length) {
+          const problem = mergeProblem(session, already);
+          ensure(!problem, problem || "");
+        }
+        const mergedKey = already.length ? mergeKey(coachId, session.session_day) : null;
         auditPrevious = session;
+        if (mergedKey) {
+          auditValue = { ...auditValue, merged_with: already.map((o) => o.group_id) };
+          // The coach's own session is keyed first, then this one joins it.
+          jobs.push(stmt(`UPDATE sessions SET merge_key=? WHERE id IN (${already.map(() => "?").join(",")})`, mergedKey, ...already.map((o) => o.id)));
+        }
         jobs.push(
           held
             ? // Held: only who held it changes; its confirmations stay as they were.
-              stmt("UPDATE sessions SET coach_id=?,updated_at=? WHERE id=?", coachId, t, id)
+              stmt("UPDATE sessions SET coach_id=?,merge_key=?,updated_at=? WHERE id=?", coachId, mergedKey, t, id)
             : stmt(
-                "UPDATE sessions SET coach_id=?,coach_confirmed_at=NULL,coach_unavailable=NULL,status='Scheduled',confirmed_at=NULL,updated_at=? WHERE id=?",
+                "UPDATE sessions SET coach_id=?,merge_key=?,coach_confirmed_at=NULL,coach_unavailable=NULL,status='Scheduled',confirmed_at=NULL,updated_at=? WHERE id=?",
                 coachId,
+                mergedKey,
                 t,
                 id,
               ),

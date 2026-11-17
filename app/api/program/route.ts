@@ -18,6 +18,7 @@ import {
 import { isDemo, sameSide } from "@/lib/demo";
 import { can, dataTransferRefusal, dataTransferRoles, ensure } from "@/lib/domain/rules";
 import { cairoDay } from "@/lib/domain/programme-week";
+import { mergeKey, mergeProblem } from "@/lib/domain/session-merge";
 import { toCSV, toXLSX } from "@/lib/spreadsheet";
 
 export const dynamic = "force-dynamic";
@@ -1232,20 +1233,41 @@ export async function POST(req: Request) {
                 t,
               ));
           const upcoming = await all(
-            `SELECT id,group_id,session_day,coach_id FROM sessions WHERE group_id IN (${marks}) AND session_day>=? AND starts_at>? AND status IN ('Scheduled','Confirmed')`,
+            `SELECT id,group_id,session_day,coach_id,starts_at FROM sessions WHERE group_id IN (${marks}) AND session_day>=? AND starts_at>? AND status IN ('Scheduled','Confirmed')`,
             ...groupIds,
             from,
             t,
           );
           const moving = new Set(upcoming.map((s: any) => s.id));
+          // A merge (17 November 2026): the coach teaches this group together with
+          // another one at the same time. Without it a coach has one session a day.
+          const merging = x.merge === true && !removing;
+          const inMerge = new Map<string, string>(); // session id → its day
           for (const s of removing ? [] : upcoming) {
-            const clash: any = await stmt(
-              "SELECT id,group_id FROM sessions WHERE coach_id=? AND session_day=? AND status<>'Cancelled'",
+            const already: any[] = await all(
+              "SELECT id,group_id,starts_at FROM sessions WHERE coach_id=? AND session_day=? AND status<>'Cancelled' AND id<>?",
               owner.id,
               s.session_day,
-            ).first();
-            ensure(!clash || moving.has(clash.id), `${owner.name} already has a session on ${s.session_day} (${clash?.group_id}).`);
+              s.id,
+            );
+            const outside = already.filter((c) => !moving.has(c.id));
+            const together = upcoming.filter((o: any) => o.id !== s.id && o.session_day === s.session_day && o.group_id !== s.group_id);
+            if (!outside.length && !together.length) continue;
+            const peer = outside[0] || together[0];
+            ensure(merging, `${owner.name} already has a session on ${s.session_day} (${peer.group_id}). Tick Merge to have them teach both groups together at the same time.`);
+            const problem = mergeProblem(s, [...outside, ...together]);
+            ensure(!problem, problem || "");
+            inMerge.set(s.id, s.session_day);
+            for (const o of [...outside, ...together]) inMerge.set(o.id, s.session_day);
           }
+          // Stale keys off the sessions that no longer merge, then the merged ones keyed, then the coach.
+          const unmerged = [...moving].filter((id) => !inMerge.has(id));
+          if (unmerged.length)
+            jobs.push(stmt(`UPDATE sessions SET merge_key=NULL WHERE id IN (${unmerged.map(() => "?").join(",")}) AND merge_key IS NOT NULL`, ...unmerged));
+          const byDay = new Map<string, string[]>();
+          for (const [sid, day] of inMerge) byDay.set(day, [...(byDay.get(day) || []), sid]);
+          for (const [day, ids] of byDay)
+            jobs.push(stmt(`UPDATE sessions SET merge_key=? WHERE id IN (${ids.map(() => "?").join(",")})`, mergeKey(owner.id, day), ...ids));
           jobs.push(stmt(
             `UPDATE sessions SET coach_id=?,coach_confirmed_at=NULL,coach_unavailable=NULL,status='Scheduled',confirmed_at=NULL,updated_at=? WHERE group_id IN (${marks}) AND session_day>=? AND starts_at>? AND status IN ('Scheduled','Confirmed')`,
             removing ? null : owner.id,

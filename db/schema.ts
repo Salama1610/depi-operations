@@ -357,6 +357,8 @@ export const sessions = sqliteTable(
     // When the coordinator marked it done, before its scheduled end.
     endedAt: text("ended_at"),
     endedBy: text("ended_by"),
+    // Shared by the sessions one coach teaches together at the same time (a merge).
+    mergeKey: text("merge_key"),
   },
   (t) => [
     uniqueIndex("one_active_session_per_group_week")
@@ -364,7 +366,7 @@ export const sessions = sqliteTable(
       .where(sql`${t.status} <> 'Cancelled'`),
     uniqueIndex("one_active_coach_session_per_day")
       .on(t.coachId, t.sessionDay)
-      .where(sql`${t.coachId} IS NOT NULL AND ${t.status} <> 'Cancelled'`),
+      .where(sql`${t.coachId} IS NOT NULL AND ${t.status} <> 'Cancelled' AND ${t.mergeKey} IS NULL`),
     index("idx_sessions_start").on(t.startsAt),
   ],
 );

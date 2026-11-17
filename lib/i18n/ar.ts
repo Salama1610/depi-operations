@@ -2680,6 +2680,12 @@ export const ar: Record<string, string> = {
   "Not checked yet · {v0}": "لم تُراجع بعد · {v0}",
   "Waiting for our quality team": "بانتظار فريق الجودة لدينا",
   "These gigs are waiting for our quality team. They are listed so you can see what is coming; nothing is asked of you on the portal until they are checked.": "هذه الجيجات بانتظار فريق الجودة لدينا. تظهر هنا لتعرف ما هو قادم؛ ولا يُطلب منك شيء على البوابة حتى تتم مراجعتها.",
+  // A merge: one coach, two groups, the same time (17 Nov 2026).
+  "Merge": "دمج",
+  "One coach teaching these groups together, at the same time": "مدرّب واحد يدرّس هذه المجموعات معًا في الوقت نفسه",
+  "Merge: this coach teaches this group together with another group, at the same time": "دمج: يدرّس هذا المدرّب هذه المجموعة مع مجموعة أخرى في الوقت نفسه",
+  "Merge: this coach teaches this session together with their other group, at the same time": "دمج: يدرّس هذا المدرّب هذه الحصة مع مجموعته الأخرى في الوقت نفسه",
+  "Use it when the coach already has a session on one of this group's days. Both sessions must start at the same time; each is labelled Merge on the schedule.": "استخدمه حين يكون للمدرّب حصة في أحد أيام هذه المجموعة. يجب أن تبدأ الحصتان في الوقت نفسه، وتُوسم كل منهما بكلمة دمج في الجدول.",
   // Repeat purchases (17 Nov 2026).
   "Preview repeat purchases": "معاينة الشراء المتكرر",
   "Use the places left for repeat purchases": "استخدام الأماكن المتبقية للشراء المتكرر",

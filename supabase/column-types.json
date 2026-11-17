@@ -224,7 +224,8 @@
     "coach_unavailable": "text",
     "coordinator_id": "text",
     "ended_at": "timestamptz",
-    "ended_by": "text"
+    "ended_by": "text",
+    "merge_key": "text"
   },
   "attendance": {
     "id": "text",

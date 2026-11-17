@@ -5070,6 +5070,57 @@ test("a student who is not on gigs is linked to an account by hand without a ser
   }
 });
 
+test("Coach Operations merge one coach onto two groups at the same time, labelled; otherwise a coach has one session a day (17 Nov 2026)", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  current = { id: "owner", email: "owner@example.com" };
+  const [g1, g2, g3] = (await dbRows("SELECT g.id,g.coach FROM groups g WHERE g.status='Active' AND g.id NOT LIKE 'DEMO-%' ORDER BY g.id LIMIT 3"));
+  const day = new Date(Date.now() + 300 * 86400000).toISOString().slice(0, 10);
+  // A second coach (with the Coach role, which a group's coach needs).
+  const other = (await dbRow("SELECT id FROM users WHERE roles LIKE '%\"Coach\"%' AND active=1 AND id<>'staff-coach' ORDER BY id LIMIT 1")).id;
+  const nine = day + "T09:00:00.000Z";
+  const noon = day + "T12:00:00.000Z";
+  const key = "MRG-staff-coach-" + day;
+  const session = (id, group, startsAt, coach) =>
+    dbExec("INSERT INTO sessions(id,group_id,coach_id,title,starts_at,session_day,duration_minutes,status,week,updated_at) VALUES(?,?,?,?,?,?,180,'Scheduled',91,?)", id, group.id, coach, "Merge " + id, startsAt, day, new Date().toISOString());
+  await session("SES-MRG-1", g1, nine, "staff-coach");
+  await session("SES-MRG-2", g2, nine, other);
+  await session("SES-MRG-3", g3, noon, null);
+  current = { id: "staff-coach-ops", email: "staff-coach-ops@example.invalid" };
+  try {
+    // One session: a coach with a session that day is refused unless it is a merge.
+    assert.match((await post("session_coach", { id: "SES-MRG-2", coach_id: "staff-coach", reason: "Cover the day" })).error, /already has a session that day.*Merge/);
+    // A merge is the same start time: this one is at noon, the coach teaches at nine.
+    assert.match((await post("session_coach", { id: "SES-MRG-3", coach_id: "staff-coach", reason: "Cover the day", merge: true })).error, /same start time/);
+    assert.equal((await dbRow("SELECT merge_key FROM sessions WHERE id='SES-MRG-1'")).merge_key, null);
+    await check("session_coach", { id: "SES-MRG-2", coach_id: "staff-coach", reason: "Teach both groups together", merge: true });
+    const merged = await dbRows("SELECT id,coach_id,merge_key FROM sessions WHERE id IN ('SES-MRG-1','SES-MRG-2') ORDER BY id");
+    assert.deepEqual(merged.map((m) => [m.coach_id, m.merge_key]), [["staff-coach", key], ["staff-coach", key]]);
+    // It is on the schedule, labelled, for the people who read it.
+    const seen = (await (await api.GET()).json()).sessions.filter((s) => s.merge_key === key).map((s) => s.group_id).sort();
+    assert.deepEqual(seen, [g1.id, g2.id].sort());
+    // Another session that day is still refused: the coach is busy.
+    assert.match((await post("session_coach", { id: "SES-MRG-3", coach_id: "staff-coach", reason: "Cover the day" })).error, /already has a session that day/);
+    // Another coach for one of them takes it out of the merge.
+    await check("session_coach", { id: "SES-MRG-2", coach_id: other, reason: "Back to their own coach" });
+    assert.equal((await dbRow("SELECT merge_key FROM sessions WHERE id='SES-MRG-2'")).merge_key, null);
+
+    // A group's coach: the same, for every session of the group from a day.
+    const body = { group_ids: [g2.id], owner_type: "Coach", owner: "staff-coach", from: day, reason: "One coach for both groups" };
+    assert.match((await programPost("bulk_group_owner", body)).error, /already has a session on .*Merge/);
+    await programCheck("bulk_group_owner", { ...body, merge: true });
+    const after = await dbRows("SELECT id,coach_id,merge_key FROM sessions WHERE id IN ('SES-MRG-1','SES-MRG-2') ORDER BY id");
+    assert.deepEqual(after.map((m) => [m.coach_id, m.merge_key]), [["staff-coach", key], ["staff-coach", key]]);
+    // And the key goes when the group's coach changes again.
+    await programCheck("bulk_group_owner", { ...body, owner: other, reason: "Back to their own coach" });
+    assert.equal((await dbRow("SELECT merge_key FROM sessions WHERE id='SES-MRG-2'")).merge_key, null);
+  } finally {
+    await dbExec("DELETE FROM attendance WHERE session_id LIKE 'SES-MRG-%'");
+    await dbExec("DELETE FROM sessions WHERE id LIKE 'SES-MRG-%'");
+    for (const g of [g1, g2, g3]) await dbExec("UPDATE groups SET coach=? WHERE id=?", g.coach, g.id);
+    current = { id: "owner", email: "owner@example.com" };
+  }
+});
+
 test("the quality team checks each held session's attendance register, which Coach and Project Operations read", async () => {
   await dbExec("DELETE FROM rate_limits");
   current = { id: "owner", email: "owner@example.com" };

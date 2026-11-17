@@ -12,6 +12,7 @@ test('spreadsheet export neutralizes formula injection',()=>assert.equal(csvCell
 import {validatePolicy} from '../lib/domain/rules.ts';
 import {accountPlaces} from '../lib/domain/account-places.ts';
 import {verifyServiceLink,normalizeServiceSlots} from '../lib/domain/service-links.ts';
+import { mergeKey, mergeProblem } from "../lib/domain/session-merge.ts";
 test('policy rejects invalid percentages, inverted thresholds and fractional counts',()=>{assert.throws(()=>validatePolicy({target:110}));assert.throws(()=>validatePolicy({criticalAttendance:80,riskAttendance:70}));assert.throws(()=>validatePolicy({gigCount:2.5}));assert.throws(()=>validatePolicy({sessionMinutes:179.5}));assert.throws(()=>validatePolicy({unknown:5}));assert.equal(validatePolicy({contactDays:3}).contactDays,3)});
 test('service links accept only direct service pages on the approved marketplaces',()=>{const k=verifyServiceLink('https://www.kafiil.com/service/123-arabic-%D8%AE%D8%AF%D9%85%D8%A9?utm_source=x#top');assert.equal(k.status,'Needs Review');assert.equal(k.normalizedUrl,'https://kafiil.com/service/123-arabic-%D8%AE%D8%AF%D9%85%D8%A9');assert.equal(k.serviceId,'123');const upgraded=verifyServiceLink('http://kafiil.com/service/123-service');assert.equal(upgraded.status,'Needs Review');assert.equal(upgraded.normalizedUrl,'https://kafiil.com/service/123-service');assert.equal(verifyServiceLink('http://example.com/service/123-service').status,'Failed');const nafezly=verifyServiceLink('https://nafezly.com/service/56713-%D8%AA%D8%B5%D9%85%D9%8A%D9%85-powerpoint');assert.equal(nafezly.status,'Needs Review');assert.equal(nafezly.platform,'Nafezly');assert.equal(nafezly.serviceId,'56713');assert.equal(verifyServiceLink('https://nafezly.com/about').status,'Failed');assert.equal(verifyServiceLink('https://example.com/service/123-service').status,'Failed');assert.equal(verifyServiceLink('https://127.0.0.1/service/123-service').status,'Failed');assert.equal(verifyServiceLink('https://khamsat.com/design/logo/987-logo-design').status,'Needs Review');assert.equal(verifyServiceLink('https://khamsat.com/design/logo/no-id').status,'Failed');});
 test('service slots reject duplicates after tracking parameters are removed',()=>assert.throws(()=>normalizeServiceSlots(['https://kafiil.com/service/1-logo?x=1','https://kafiil.com/service/1-logo?x=2','https://nafezly.com/service/3-c']),/different/));
@@ -47,4 +48,13 @@ test('places left are counted by marketplace: two to a free account, one to a ha
   assert.deepEqual(kafeel,{platform:'Kafeel',places:3,withPlace:2,empty:1,oneStudent:1,full:1,notUsable:3,retired:1,total:6});
   assert.deepEqual(nafezly,{platform:'Nafezly',places:1,withPlace:1,empty:0,oneStudent:1,full:1,notUsable:0,retired:0,total:2});
   assert.equal(accountPlaces([],['Kafeel'])[0].places,0);
+});
+
+test("a merge is one coach teaching other groups together at the same time", () => {
+  assert.equal(mergeKey("C1", "2026-12-01"), "MRG-C1-2026-12-01");
+  const nine = "2026-12-01T09:00:00.000Z";
+  assert.equal(mergeProblem({ group_id: "G1", starts_at: nine }, []), null, "nothing to merge with");
+  assert.equal(mergeProblem({ group_id: "G1", starts_at: nine }, [{ group_id: "G2", starts_at: "2026-12-01T09:00:00Z" }]), null, "the same moment, written two ways");
+  assert.match(mergeProblem({ group_id: "G1", starts_at: nine }, [{ group_id: "G2", starts_at: "2026-12-01T12:00:00.000Z" }]), /same start time/);
+  assert.match(mergeProblem({ group_id: "G1", starts_at: nine }, [{ group_id: "G1", starts_at: nine }]), /itself/);
 });

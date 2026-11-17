@@ -3262,9 +3262,16 @@ See you there!`,
             render: (r) => {
               const id = r.coach_id || groups.find((g) => g.id === r.group_id)?.coach;
               const reach = id && id !== user.id ? reachOf(id) : null;
+              const merged = r.merge_key ? sessions.filter((o) => o.merge_key === r.merge_key && o.id !== r.id).map((o) => o.group_id) : [];
               return (
                 <span>
                   {owner(r.coach_id || id)}
+                  {r.merge_key && (
+                    <small className="table-subline">
+                      <Cue tone="info" title={t("One coach teaching these groups together, at the same time")}>{t("Merge")}</Cue>
+                      {merged.length > 0 && <> {t("with {v0}", { v0: merged.join(", ") })}</>}
+                    </small>
+                  )}
                   {reach && (
                     <small className="table-subline reach-links">
                       <a href={reach.tel} dir="ltr" title={t("Call the coach")}><Phone size={12} /> {reach.shown}</a>
@@ -7199,6 +7206,10 @@ See you there!`,
                     ) : (
                       choice("coach_id", t("Coach or coordinator"), coaches.map((c: Row) => ({ value: c.id, label: c.name + (isCoordinator(c) ? " · " + t("Coordinator") : c.title ? " · " + c.title : "") })))
                     )}
+                    <label className="check">
+                      <Checkbox checked={!!form.merge} onCheckedChange={(v) => setForm({ ...form, merge: v === true })} />
+                      {t("Merge: this coach teaches this session together with their other group, at the same time")}
+                    </label>
                     {field("reason", t("Why this session needs another coach"))}
                   </>
                 );
@@ -7428,6 +7439,11 @@ See you there!`,
                         onChange={(e) => setForm({ ...form, from: e.target.value })}
                       />
                     </label>
+                    <label className="check">
+                      <Checkbox checked={!!form.merge} onCheckedChange={(v) => setForm({ ...form, merge: v === true })} />
+                      {t("Merge: this coach teaches this group together with another group, at the same time")}
+                    </label>
+                    {form.merge && <p className="footnote">{t("Use it when the coach already has a session on one of this group's days. Both sessions must start at the same time; each is labelled Merge on the schedule.")}</p>}
                     {field("reason", t("Reason for the change"))}
                   </>
                 );
