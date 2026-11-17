@@ -3485,6 +3485,13 @@ export async function POST(req: Request) {
           ).first();
           // Done and the POH come after the price paid is written (16 November 2026).
           const priced = (o: any) => o && o.amount !== null && o.amount !== undefined && o.amount !== "";
+          // The service's last order has its POH (17 November 2026): it is finished, so Done is not a
+          // step for it, and refusing for "the price" of an order that does not exist yet sent people in circles.
+          if (!current && (to === "Done" || to === "Proof Uploaded"))
+            ensure(
+              !(await stmt("SELECT id FROM account_orders WHERE account_id=? AND student_id=? LIMIT 1", a.id, pupil.student_id).first()),
+              "This service's last order is finished. To buy it again choose Buy or In progress: that starts a new order with its own price. The people who keep the accounts can take the POH back.",
+            );
           if (to === "Done" || to === "Proof Uploaded") ensure(priced(current), "Choose the price paid before marking the order Done or uploading the POH.");
           const stamps = (from: any) => ({
             done: to === "Done" || to === "Proof Uploaded" ? from?.done_at || t : from?.done_at || null,
@@ -3545,7 +3552,8 @@ export async function POST(req: Request) {
           "In Progress": ["Done", "Cancelled"],
           Done: ["Proof Uploaded", "Cancelled", "In Progress"],
           Cancelled: ["In Progress"],
-          "Proof Uploaded": [],
+          // The people who keep the accounts take a POH back to Done (17 November 2026): marked by mistake.
+          "Proof Uploaded": keepsAccounts(u) ? ["Done"] : [],
         };
         ensure((allowed[order.status] || []).includes(to), `An order that is ${order.status} cannot become ${to}.`);
         if (to === "Done" || to === "Proof Uploaded") ensure(order.amount !== null && order.amount !== undefined && order.amount !== "", "Choose the price paid before marking the order Done or uploading the POH.");
@@ -3562,11 +3570,11 @@ export async function POST(req: Request) {
         jobs.push(
           stmt(
             `UPDATE account_orders SET status=?,proof_id=?,note=COALESCE(?,note),updated_at=?,
-               done_at=CASE WHEN ?='Done' THEN ? ELSE done_at END,
-               proof_at=CASE WHEN ?='Proof Uploaded' THEN ? ELSE proof_at END,
+               done_at=CASE WHEN ?='Done' THEN COALESCE(done_at,?) ELSE done_at END,
+               proof_at=CASE WHEN ?='Proof Uploaded' THEN ? WHEN ?='Done' THEN NULL ELSE proof_at END,
                cancelled_at=CASE WHEN ?='Cancelled' THEN ? WHEN ?='In Progress' THEN NULL ELSE cancelled_at END
              WHERE id=?`,
-            to, proofId, note || null, t, to, t, to, t, to, t, to, id,
+            to, proofId, note || null, t, to, t, to, t, to, to, t, to, order.id,
           ),
         );
         break;

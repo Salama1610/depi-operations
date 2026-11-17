@@ -3693,6 +3693,11 @@ See you there!`,
       const latest = latestOrderOf(r);
       const choose = (status: string) => {
         if (!status || status === latest?.status) return;
+        // After the POH the order is finished (17 November 2026): Done is not a step for it.
+        if (status === "Done" && latest?.status === "Proof Uploaded") {
+          toast.error(t("This order is finished. To buy this service again choose Buy or In progress: that starts a new order with its own price."));
+          return;
+        }
         // Done and the POH need the price paid first (16 November 2026).
         if ((status === "Done" || status === "Proof Uploaded") && (latest?.amount === null || latest?.amount === undefined || latest?.amount === "")) {
           toast.error(t("Choose the price paid before marking the order Done or uploading the POH."));
@@ -3723,6 +3728,12 @@ See you there!`,
             <a className="table-subline text-link" href={"/api/files?id=" + latest.proof_id} target="_blank" rel="noreferrer">
               {t("Open the proof")} <ExternalLink size={11} />
             </a>
+          )}
+          {/* The people who keep the accounts take a POH marked by mistake back to Done (17 November 2026). */}
+          {keepsAccounts && latest?.status === "Proof Uploaded" && (
+            <button type="button" className="student-link-btn" disabled={busy} title={t("Puts this order back to Done, with its price; the POH is taken off it")} onClick={() => quick("account_order_status", { id: latest.id, status: "Done" })}>
+              {t("Take the POH back")}
+            </button>
           )}
         </span>
       );

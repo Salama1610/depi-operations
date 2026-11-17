@@ -2686,6 +2686,10 @@ export const ar: Record<string, string> = {
   "Merge: this coach teaches this group together with another group, at the same time": "دمج: يدرّس هذا المدرّب هذه المجموعة مع مجموعة أخرى في الوقت نفسه",
   "Merge: this coach teaches this session together with their other group, at the same time": "دمج: يدرّس هذا المدرّب هذه الحصة مع مجموعته الأخرى في الوقت نفسه",
   "Use it when the coach already has a session on one of this group's days. Both sessions must start at the same time; each is labelled Merge on the schedule.": "استخدمه حين يكون للمدرّب حصة في أحد أيام هذه المجموعة. يجب أن تبدأ الحصتان في الوقت نفسه، وتُوسم كل منهما بكلمة دمج في الجدول.",
+  // A finished order, and taking its POH back (17 Nov 2026).
+  "This order is finished. To buy this service again choose Buy or In progress: that starts a new order with its own price.": "هذا الطلب منتهٍ. لشراء هذه الخدمة مرة أخرى اختر «شراء» أو «قيد التنفيذ»: يبدأ ذلك طلبًا جديدًا بسعره الخاص.",
+  "Take the POH back": "سحب إثبات الشراء",
+  "Puts this order back to Done, with its price; the POH is taken off it": "يعيد هذا الطلب إلى «تم» مع سعره، ويُزال عنه إثبات الشراء",
   // Repeat purchases (17 Nov 2026).
   "Preview repeat purchases": "معاينة الشراء المتكرر",
   "Use the places left for repeat purchases": "استخدام الأماكن المتبقية للشراء المتكرر",

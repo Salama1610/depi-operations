@@ -5121,6 +5121,64 @@ test("Coach Operations merge one coach onto two groups at the same time, labelle
   }
 });
 
+test("a coordinator moves a Kafeel gig through every status; the keepers take a POH back; an old Done order with no price only needs its price (17 Nov 2026)", async () => {
+  await dbExec("DELETE FROM rate_limits");
+  const owner = { id: "owner", email: "owner@example.com" };
+  current = owner;
+  const g = await dbRow("SELECT g.id,g.coordinator,u.email FROM groups g JOIN users u ON u.id=g.coordinator WHERE g.status='Active' AND g.id NOT LIKE 'DEMO-%' AND u.roles NOT LIKE '%Team Supervisor%' AND u.roles NOT LIKE '%Project Operations%' AND EXISTS (SELECT 1 FROM students s WHERE s.group_id=g.id AND s.lifecycle='Active') ORDER BY g.id LIMIT 1");
+  const s = await dbRow("SELECT id FROM students WHERE group_id=? AND lifecycle='Active' ORDER BY id LIMIT 1", g.id);
+  await check("account", { id: "ACC-KAFGIG-1", label: "kafgig-1@example.org", platform: "Kafeel", credits: 0 });
+  await dbExec("UPDATE accounts SET student_id=?,coordinator_id=? WHERE id='ACC-KAFGIG-1'", s.id, g.coordinator);
+  const statuses = async () => (await dbRows("SELECT status,amount FROM account_orders WHERE account_id='ACC-KAFGIG-1' ORDER BY created_at")).map((o) => o.status + (o.amount === null ? "" : ":" + Number(o.amount)));
+  const set = (status) => post("account_service_status", { account_id: "ACC-KAFGIG-1", student_id: s.id, status });
+  const coordinator = { id: "coordinator-login", email: g.email };
+  current = coordinator;
+  try {
+    assert.equal((await set("Buy")).error, undefined);
+    assert.equal((await set("In Progress")).error, undefined);
+    // Done and the POH come after the price.
+    assert.match((await set("Done")).error, /price paid/);
+    await check("account_order_cost", { account_id: "ACC-KAFGIG-1", student_id: s.id, amount: "5" });
+    assert.equal((await set("Done")).error, undefined);
+    assert.equal((await set("Proof Uploaded")).error, undefined);
+    assert.deepEqual(await statuses(), ["Proof Uploaded:5"]);
+    // The order is finished: Done is not a step for it, and the refusal says so rather than asking for a price it has.
+    assert.match((await set("Done")).error, /last order is finished/);
+    // The people who keep the accounts take a POH marked by mistake back to Done: the same order. A coordinator does not.
+    const order = await dbRow("SELECT id FROM account_orders WHERE account_id='ACC-KAFGIG-1'");
+    assert.match((await post("account_order_status", { id: order.id, status: "Done" })).error, /cannot become Done/);
+    current = owner;
+    await check("account_order_status", { id: order.id, status: "Done" });
+    assert.deepEqual(await statuses(), ["Done:5"]);
+    const back = await dbRow("SELECT done_at,proof_at FROM account_orders WHERE id=?", order.id);
+    assert.ok(back.done_at && !back.proof_at, "Done stays, the POH time goes");
+    current = coordinator;
+    assert.equal((await set("Proof Uploaded")).error, undefined);
+    // After a finished order the next pick starts a new one, with its own price.
+    assert.equal((await set("In Progress")).error, undefined);
+    assert.deepEqual(await statuses(), ["Proof Uploaded:5", "In Progress"]);
+    // An order that was Done before the price rule has no price: it needs its price, then it moves on.
+    await dbExec("DELETE FROM account_orders WHERE account_id='ACC-KAFGIG-1'");
+    const at = new Date().toISOString();
+    await dbExec("INSERT INTO account_orders(id,account_id,student_id,coordinator,status,created_at,updated_at,done_at) VALUES('ORD-KAFGIG-1','ACC-KAFGIG-1',?,?,'Done',?,?,?)", s.id, g.coordinator, at, at, at);
+    assert.match((await set("Proof Uploaded")).error, /price paid/);
+    await check("account_order_cost", { account_id: "ACC-KAFGIG-1", student_id: s.id, amount: "8" });
+    assert.equal((await set("Proof Uploaded")).error, undefined);
+    assert.deepEqual(await statuses(), ["Proof Uploaded:8"]);
+  } finally {
+    await dbExec("DELETE FROM account_orders WHERE account_id='ACC-KAFGIG-1'");
+    await dbExec("UPDATE accounts SET student_id=NULL,coordinator_id=NULL,status='Retired' WHERE id='ACC-KAFGIG-1'");
+    current = owner;
+  }
+});
+
+test("the One gig per row table keeps each row's account id: its status, price and password read it (17 Nov 2026)", () => {
+  const source = fs.readFileSync("app/operations.tsx", "utf8");
+  // The table's key is apart (rowKey); an id of "account:student" is no account, and every change from that tab failed.
+  assert.ok(!/\.\.\.r, id: r\.id \+ ":" \+ r\.student_id/.test(source), "the row id is the account id");
+  assert.ok(/\.\.\.r, rowKey: r\.id \+ ":" \+ r\.student_id/.test(source));
+});
+
 test("the quality team checks each held session's attendance register, which Coach and Project Operations read", async () => {
   await dbExec("DELETE FROM rate_limits");
   current = { id: "owner", email: "owner@example.com" };
