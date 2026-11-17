@@ -1,7 +1,7 @@
 import { failure } from "@/lib/errors";
 import { actor, all, permit, rateLimit } from "@/lib/server";
 import { sameSide } from "@/lib/demo";
-import { portalGigStage } from "@/lib/domain/portal-figures";
+import { portalGigStage, portalWaitsForCoachSql } from "@/lib/domain/portal-figures";
 import { proofKey, proofKeySql } from "@/lib/domain/portal-review";
 import { reviewNotes } from "@/lib/portal-review-notes";
 import { portalCoachSql } from "@/lib/portal-coaches";
@@ -10,9 +10,11 @@ export const dynamic = "force-dynamic";
 
 // The coach's Gigs tab: every portal gig of the coach's students that our
 // quality team has approved or rejected, for the coach to carry out on the
-// ministry portal. Each gig comes with its link and proof link, and the
-// student's portal record (the portal's ID, name, email, phone and round) so
-// the coach finds them there. Reviewers' names are not sent.
+// ministry portal, and (17 November 2026) the ones still waiting for the coach
+// on the portal that our quality team has not checked yet, to see what is
+// coming. Each gig comes with its link and proof link, and the student's
+// portal record (the portal's ID, name, email, phone and round) so the coach
+// finds them there. Reviewers' names are not sent.
 
 async function inChunks<T>(ids: string[], read: (slice: string[]) => Promise<T[]>) {
   const slices: string[][] = [];
@@ -41,11 +43,14 @@ export async function GET() {
       rateLimit("coach-gigs:" + u.id, 60, 60),
       // The students of the groups this coach carries out on the portal: the
       // portal's own coach for the group, from its Coaches sheet, or the group's
-      // coach here when the sheet names nobody with an account (3 November 2026).
+      // coach here when the sheet names nobody with an account (3 November 2026);
+      // and the groups assigned to them in our system, whatever the sheet says
+      // (17 November 2026), so a coach always sees their own groups' gigs.
       all(
         `SELECT s.id,s.name,s.group_id FROM students s JOIN groups g ON g.id=s.group_id
          WHERE s.lifecycle='Active' AND COALESCE(g.delivery_model,'Regular')<>'Industry' AND ${sameSide(u, "g.id")}
-           AND ${portalCoachSql("g")}=?`,
+           AND (g.coach=? OR ${portalCoachSql("g")}=?)`,
+        u.id,
         u.id,
       ),
       latest("students"),
@@ -70,9 +75,10 @@ export async function GET() {
           all(
             `SELECT z.portal_gig_id,z.portal_student_id,z.title,z.url,z.proof_url,z.price,z.created_on,z.status,z.trainer_status,z.provider_status,z.auditor_status,
                     r.status qc_status,r.comment qc_comment,r.reviewed_at qc_reviewed_at
-             FROM portal_gigs z JOIN portal_gig_reviews r ON r.proof_key=${proofKeySql("z")} AND r.status IN ('Approved','Rejected')
+             FROM portal_gigs z LEFT JOIN portal_gig_reviews r ON r.proof_key=${proofKeySql("z")}
              WHERE z.batch_id=? AND z.portal_student_id IN (${marks(slice)})
-             ORDER BY r.reviewed_at`,
+               AND (r.status IN ('Approved','Rejected') OR (coalesce(r.status,'Pending')='Pending' AND ${portalWaitsForCoachSql("z")}))
+             ORDER BY coalesce(r.reviewed_at,z.created_on)`,
             gigsBatch,
             ...slice,
           ),
@@ -96,7 +102,8 @@ export async function GET() {
         auditor_status: g.auditor_status || null,
         // Still waiting for the coach on the portal, the rule every count uses.
         waiting: portalGigStage(g) === "coach",
-        qc_status: g.qc_status,
+        // Pending: our quality team has not decided it yet (view only for the coach).
+        qc_status: g.qc_status === "Approved" || g.qc_status === "Rejected" ? g.qc_status : "Pending",
         qc_comment: g.qc_comment || null,
         qc_at: g.qc_reviewed_at || null,
         qc_notes: notes.get(proofKey(g)) || [],

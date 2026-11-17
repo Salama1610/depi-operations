@@ -2676,6 +2676,10 @@ export const ar: Record<string, string> = {
   "Why the amount is being changed": "سبب تعديل الرصيد",
   "This changes the amount by {v0}": "يغيّر هذا الرصيد بمقدار {v0}",
   "It is recorded in the credit history as a correction, with the reason. A top-up or payment adds credit; this sets the amount the account really holds, down as well as up.": "يُسجَّل في سجل الرصيد كتصحيح مع السبب. الشحن أو الدفعة يضيفان رصيدًا؛ أما هذا فيضبط المبلغ الذي يحتفظ به الحساب فعلًا، بالزيادة أو النقصان.",
+  // The coach sees the gigs not checked yet (17 Nov 2026).
+  "Not checked yet · {v0}": "لم تُراجع بعد · {v0}",
+  "Waiting for our quality team": "بانتظار فريق الجودة لدينا",
+  "These gigs are waiting for our quality team. They are listed so you can see what is coming; nothing is asked of you on the portal until they are checked.": "هذه الجيجات بانتظار فريق الجودة لدينا. تظهر هنا لتعرف ما هو قادم؛ ولا يُطلب منك شيء على البوابة حتى تتم مراجعتها.",
   // Repeat purchases (17 Nov 2026).
   "Preview repeat purchases": "معاينة الشراء المتكرر",
   "Use the places left for repeat purchases": "استخدام الأماكن المتبقية للشراء المتكرر",

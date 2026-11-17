@@ -4234,7 +4234,9 @@ test("the Quality Lead and Coach Operations read the gap between the portal's gi
   // What the panel says is in the coach's tab is what the coach sees waiting there.
   current = { id: "coach-login", email: "staff-coach@example.invalid" };
   const seen = await (await coachGigs.GET()).json();
-  assert.deepEqual(seen.gigs.filter((g) => g.waiting).map((g) => g.id).sort(), ["GAP-2", "GAP-8", "GAP-9"]);
+  // The coach also sees the gigs our QC has not checked yet (17 Nov 2026), view only; the panel counts the checked ones.
+  assert.deepEqual(seen.gigs.filter((g) => g.waiting && g.qc_status !== "Pending").map((g) => g.id).sort(), ["GAP-2", "GAP-8", "GAP-9"]);
+  assert.ok(seen.gigs.filter((g) => g.qc_status === "Pending").every((g) => g.waiting), "a not-checked gig is listed only while it waits for the coach");
 
   // The next sheet: the portal moves on. The coach approves GAP-1 and GAP-10 before our QC looked,
   // rejects GAP-2 before our verdict, and GAP-9 changed after it. The portal rejects GAP-8.
@@ -4248,7 +4250,8 @@ test("the Quality Lead and Coach Operations read the gap between the portal's gi
   ]);
   current = { id: "coach-login", email: "staff-coach@example.invalid" };
   const after = await (await coachGigs.GET()).json();
-  assert.deepEqual(after.gigs.filter((g) => g.waiting).map((g) => g.id), [], "a gig the portal settled stops waiting for the coach, whatever its coach status");
+  assert.deepEqual(after.gigs.filter((g) => g.waiting && g.qc_status !== "Pending").map((g) => g.id), [], "a gig the portal settled stops waiting for the coach, whatever its coach status");
+  assert.deepEqual(after.gigs.filter((g) => g.qc_status === "Pending").map((g) => g.id), ["GAP-3"], "an edited gig still waits for the coach, and not yet for our QC (view only)");
   assert.equal(after.gigs.find((g) => g.id === "GAP-8").waiting, false);
 
   // Those gigs leave our QC's list and load, with nothing written.
@@ -5995,7 +5998,9 @@ test("a coach's Gigs tab lists the portal gigs our QC decided, with links and th
   const view = await (await coachGigs.GET()).json();
   assert.equal(view.error, undefined, view.error);
   const mine = view.gigs.filter((g) => g.student.portal_id === "GUID-CG-1");
-  assert.deepEqual(mine.map((g) => [g.id, g.qc_status]).sort(), [["CG-1", "Approved"], ["CG-2", "Rejected"]], "only the gigs our QC decided");
+  // The gigs our QC decided, and the one it has not checked yet, which the coach sees but is asked nothing about (17 Nov 2026).
+  assert.deepEqual(mine.map((g) => [g.id, g.qc_status]).sort(), [["CG-1", "Approved"], ["CG-2", "Rejected"], ["CG-3", "Pending"]]);
+  assert.equal(mine.find((g) => g.id === "CG-3").qc_comment, null);
   const one = mine.find((g) => g.id === "CG-1");
   assert.equal(one.url, "https://example.org/gig-1");
   assert.equal(one.proof_url, "https://example.org/proof-1");
@@ -6006,6 +6011,19 @@ test("a coach's Gigs tab lists the portal gigs our QC decided, with links and th
   assert.equal(one.student.round_code, pupil.group_id);
   assert.deepEqual(one.student.proofs, ["https://example.org/student-proof"]);
   assert.ok(!/staff-quality|reviewer/.test(JSON.stringify(view)), "no reviewer named");
+  // A gig the portal has moved past is not waiting with anyone: it leaves the not-checked list.
+  await dbExec("UPDATE portal_gigs SET status='Rejected' WHERE portal_gig_id='CG-3'");
+  assert.ok(!(await (await coachGigs.GET()).json()).gigs.some((g) => g.id === "CG-3"), "decided on the portal");
+  await dbExec("UPDATE portal_gigs SET status='Pending' WHERE portal_gig_id='CG-3'");
+  // A different coach on the portal's Coaches sheet sees the group's gigs too, and our system's coach keeps them (17 Nov 2026).
+  const portalCoach = await dbRow("SELECT id,email FROM users WHERE active=1 AND roles LIKE '%\"Coach\"%' AND id<>'staff-coach' AND id NOT LIKE 'DEMO-%' ORDER BY id LIMIT 1");
+  await dbExec("INSERT INTO portal_coaches(group_id,coach_name,coach_email,coach_user_id,uploaded_by,uploaded_at) VALUES(?,?,?,?,?,?)", pupil.group_id, "Portal coach", portalCoach.email, portalCoach.id, "owner", at);
+  const ofStudent = async () => (await (await coachGigs.GET()).json()).gigs.filter((g) => g.student.portal_id === "GUID-CG-1").length;
+  assert.equal(await ofStudent(), 3, "the coach assigned here still sees their group's gigs");
+  current = { id: "portal-coach-login", email: portalCoach.email };
+  assert.equal(await ofStudent(), 3, "and the portal's coach sees them too");
+  await dbExec("DELETE FROM portal_coaches WHERE group_id=?", pupil.group_id);
+  current = { id: "coach-login", email: "staff-coach@example.invalid" };
   current = { id: "coordinator", email: "staff-sara@example.invalid" };
   assert.ok((await (await coachGigs.GET()).json()).error, "coaches only");
   current = { id: "owner", email: "owner@example.com" };

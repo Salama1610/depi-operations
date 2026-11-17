@@ -1,7 +1,8 @@
 "use client";
 
 // The coach's Gigs tab (see app/api/coach-gigs): the portal gigs our quality
-// team has approved or rejected, each with its gig link and proof link, the
+// team has approved or rejected, and those it has not checked yet (view only,
+// 17 November 2026), each with its gig link and proof link, the
 // verdict and comment, and the student's portal record (the portal's ID,
 // name, email, phone and round) so the coach finds them on the ministry
 // portal and carries the decision out there. Nothing here changes a record.
@@ -41,7 +42,7 @@ export function CoachGigsNotice({ onOpen }: { onOpen: () => void }) {
   const [waiting, setWaiting] = useState<number | null>(null);
   useEffect(() => {
     loadGigs()
-      .then((gigs) => setWaiting(gigs.filter((g) => g.waiting).length))
+      .then((gigs) => setWaiting(gigs.filter((g) => g.waiting && g.qc_status !== "Pending").length))
       .catch(() => setWaiting(null));
   }, []);
   if (!waiting) return null;
@@ -61,7 +62,7 @@ export function CoachGigs() {
   const day = (value?: string) => (value ? new Date(value).toLocaleDateString(tag, { timeZone: "Africa/Cairo", day: "numeric", month: "short" }) : "—");
   const [gigs, setGigs] = useState<Row[] | null>(null);
   const [error, setError] = useState("");
-  const [verdict, setVerdict] = useState<"Approved" | "Rejected" | "All">("Approved");
+  const [verdict, setVerdict] = useState<"Approved" | "Rejected" | "Pending" | "All">("Approved");
   const [state, setState] = useState<"waiting" | "all">("waiting");
   const [group, setGroup] = useState("All");
   const [query, setQuery] = useState("");
@@ -104,7 +105,8 @@ export function CoachGigs() {
   );
   const approved = base.filter((g) => g.qc_status === "Approved");
   const rejected = base.filter((g) => g.qc_status === "Rejected");
-  const list = verdict === "All" ? base : verdict === "Approved" ? approved : rejected;
+  const notChecked = base.filter((g) => g.qc_status === "Pending");
+  const list = verdict === "All" ? base : verdict === "Approved" ? approved : verdict === "Rejected" ? rejected : notChecked;
 
   return (
     <div className="coach-gigs">
@@ -141,6 +143,7 @@ export function CoachGigs() {
           [
             ["Approved", t("Approved by QC · {v0}", { v0: approved.length })],
             ["Rejected", t("Rejected by QC · {v0}", { v0: rejected.length })],
+            ["Pending", t("Not checked yet · {v0}", { v0: notChecked.length })],
             ["All", t("All · {v0}", { v0: base.length })],
           ] as const
         ).map(([value, label]) => (
@@ -149,10 +152,13 @@ export function CoachGigs() {
           </button>
         ))}
       </div>
+      {verdict === "Pending" && (
+        <p className="footnote">{t("These gigs are waiting for our quality team. They are listed so you can see what is coming; nothing is asked of you on the portal until they are checked.")}</p>
+      )}
       {list.length ? (
         <ul className="coach-gigs-list">
           {list.map((g) => (
-            <li key={g.id} className={g.qc_status === "Approved" ? "is-ok" : "is-bad"}>
+            <li key={g.id} className={g.qc_status === "Approved" ? "is-ok" : g.qc_status === "Pending" ? "is-pending" : "is-bad"}>
               <div className="coach-gigs-student">
                 <strong>{g.student.name || g.student.portal_name || "—"}</strong>
                 <small>
@@ -208,8 +214,12 @@ export function CoachGigs() {
                 </span>
               </div>
               <div className="coach-gigs-verdict">
-                <span className={"cue " + (g.qc_status === "Approved" ? "is-ok" : "is-bad")}>
-                  {g.waiting ? (g.qc_status === "Approved" ? t("Approve it on the portal") : t("Reject it on the portal")) : g.qc_status === "Approved" ? t("Approved by QC") : t("Rejected by QC")}
+                <span className={"cue " + (g.qc_status === "Approved" ? "is-ok" : g.qc_status === "Pending" ? "" : "is-bad")}>
+                  {g.qc_status === "Pending"
+                    ? t("Waiting for our quality team")
+                    : g.waiting
+                      ? g.qc_status === "Approved" ? t("Approve it on the portal") : t("Reject it on the portal")
+                      : g.qc_status === "Approved" ? t("Approved by QC") : t("Rejected by QC")}
                 </span>
                 {(g.qc_notes || []).length ? (
                   <QcThread notes={g.qc_notes} className="coach-progress-qc" />
