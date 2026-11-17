@@ -2669,6 +2669,13 @@ export const ar: Record<string, string> = {
   "no approved service yet": "لا توجد خدمة معتمدة بعد",
   "No service yet: the account is kept for the student": "لا توجد خدمة بعد: يُحفظ الحساب للطالب",
   "A student who is not on gigs yet can be the first student without a service: the account is kept for them and takes their first approved service. A second student needs one.": "يمكن ربط طالب لم يبدأ الجيجات بعد كطالب أول دون خدمة: يُحفظ الحساب له ويأخذ أول خدمة معتمدة له. أما الطالب الثاني فيحتاج إلى خدمة.",
+  // Changing the amount in an account (17 Nov 2026).
+  "Change the amount": "تعديل الرصيد",
+  "Change the amount in the account": "تعديل الرصيد في الحساب",
+  "Amount now in the account (USD)": "الرصيد الموجود الآن في الحساب (دولار)",
+  "Why the amount is being changed": "سبب تعديل الرصيد",
+  "This changes the amount by {v0}": "يغيّر هذا الرصيد بمقدار {v0}",
+  "It is recorded in the credit history as a correction, with the reason. A top-up or payment adds credit; this sets the amount the account really holds, down as well as up.": "يُسجَّل في سجل الرصيد كتصحيح مع السبب. الشحن أو الدفعة يضيفان رصيدًا؛ أما هذا فيضبط المبلغ الذي يحتفظ به الحساب فعلًا، بالزيادة أو النقصان.",
   // Repeat purchases (17 Nov 2026).
   "Preview repeat purchases": "معاينة الشراء المتكرر",
   "Use the places left for repeat purchases": "استخدام الأماكن المتبقية للشراء المتكرر",

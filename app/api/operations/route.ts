@@ -2260,6 +2260,28 @@ export async function POST(req: Request) {
         );
         break;
       }
+      case "account_credit_change": {
+        // The amount in an account is set to what it really holds (17 November
+        // 2026, Abdullah Waheed and Taha): a top-up only adds, so a balance that
+        // was wrong, or credit spent outside the system, could not be put right.
+        // The people who keep the accounts do it, with a reason; it is one more
+        // row in the credit history (a Correction), never an edit of an earlier one.
+        permit(u, ["Team Supervisor", "Higher Board", "Project Operations", "Operations Systems / Admin"]);
+        ensure(keepsAccounts(u), "The amount in an account is changed by the Service Team's supervisor, Project Operations or Higher Board.");
+        const a: any = await stmt("SELECT * FROM accounts WHERE id=?", id).first();
+        ensure(a && a.status !== "Retired", "Choose an active client account.");
+        const target = Math.round(Number(x.amount) * 100) / 100;
+        ensure(x.amount !== "" && x.amount !== null && Number.isFinite(target) && target >= 0 && target <= 100000, "Enter the amount now in the account, in USD.");
+        const why = String(x.reason || "").trim();
+        ensure(why.length >= 3, "Say why the amount is being changed.");
+        const delta = Math.round((target - Number(a.credits || 0)) * 100) / 100;
+        ensure(delta !== 0, "The account already holds that amount.");
+        auditPrevious = a;
+        auditValue = { account_id: id, credits: target, change: delta };
+        // The balance moves by the change, as every other credit movement does.
+        jobs.push(...creditMovement(id, delta, `Correction · ${why.slice(0, 300)}`, u.id, t));
+        break;
+      }
       case "account_status": {
         // The people who keep the accounts change their status, unblocking
         // included; every change needs a reason and is audited.

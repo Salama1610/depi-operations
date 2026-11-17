@@ -12,7 +12,7 @@ import { ProgramFlow } from "./program-flow";
 import { WeeklyProgress } from "./weekly-progress";
 import { acceptedServicePlatforms, buysServices } from "@/lib/domain/service-links";
 import { accountPlaces } from "@/lib/domain/account-places";
-import { followsServiceRow, seesEveryServiceRow } from "@/lib/domain/service-rows";
+import { filterServiceRows, followsServiceRow, rowCoordinator, rowSupervisor, seesEveryServiceRow } from "@/lib/domain/service-rows";
 import { RowActions, type RowAction } from "@/components/row-actions";
 import { accountReviewRows, reviewColumns, reviewDropdowns, reviewHowTo, reviewInputColumns, studentColumns, studentServiceRows } from "@/lib/domain/account-review";
 import { PortalView } from "./portal-view";
@@ -265,6 +265,7 @@ const titles: Row = {
   student_services_submit: "Submit service links for this student",
   staff: "Manage staff access",
   account_topup: "Record a top-up or payment",
+  account_credit_change: "Change the amount in the account",
   account_problem: "Report a problem with the account",
   account_students: "Change the account's students",
   account_coordinators: "Change the account's coordinators",
@@ -1545,7 +1546,7 @@ export default function Operations({ module: initialModule }: { module: string }
         </TableHeader>
         <TableBody>
           {rows.map((r, i) => (
-            <TableRow key={r.id || i}>
+            <TableRow key={r.rowKey || r.id || i}>
               {cols.map((c) => (
                 <TableCell key={c.key}>
                   {c.render ? c.render(r) : String(r[c.key] ?? "—")}
@@ -1712,6 +1713,8 @@ export default function Operations({ module: initialModule }: { module: string }
       ? "Payment"
       : /^Top-up/.test(e.reason || "")
       ? "Top-up"
+      : /^Correction/.test(e.reason || "")
+        ? "Correction"
       : /^Opening/.test(e.reason || "")
         ? "Opening balance"
         : Number(e.delta) < 0
@@ -3787,20 +3790,12 @@ See you there!`,
           orders,
           latest: orders[0] || null,
           state: orders[0]?.status || "No order yet",
-          supervisor: groupOfRow(a.student_group)?.supervisor || "",
+          supervisor: rowSupervisor(a, groupOfRow),
         };
       });
-    const svcShown = serviceRows.filter((r) => {
-      const q = String(svcFilters.q || "").trim().toLowerCase();
-      return (
-        (!q || [r.student_name, r.student_id, r.label, r.service_url].some((v) => String(v || "").toLowerCase().includes(q))) &&
-        (svcFilters.status === "All" || r.state === svcFilters.status) &&
-        (svcFilters.coordinator === "All" || r.coordinator_id === svcFilters.coordinator || r.coordinator_2_id === svcFilters.coordinator) &&
-        (svcFilters.supervisor === "All" || r.supervisor === svcFilters.supervisor) &&
-        (svcFilters.group === "All" || r.student_group === svcFilters.group) &&
-        (svcFilters.platform === "All" || r.platform === svcFilters.platform)
-      );
-    });
+    // The rows the other filters leave, which the state tiles count; then the order state on top (17 November 2026).
+    const svcBase = filterServiceRows(serviceRows, svcFilters, groupOfRow, "status");
+    const svcShown = svcFilters.status === "All" ? svcBase : svcBase.filter((r) => r.state === svcFilters.status);
     const stateWord = (state: string) => (state === "No order yet" ? t("No order yet") : orderWord(state));
     // Bought services: every order done or with its proof uploaded, newest first.
     const boughtAll = accountOrders
@@ -4030,24 +4025,9 @@ See you there!`,
       .filter((r) => accountFilters.word === "All" || (accountFilters.word === "None" ? !r.coordinator_state : r.coordinator_state === accountFilters.word))
       .sort(accountSorts[accountFilters.sort] || accountSorts.platform);
     const openRequests = requests.filter((r) => r.status === "Submitted");
-    if (serviceOps) {
-      content = !followsServices ? (
-        <Empty title={t("No gigs to buy yet: your students have no client account.")} />
-      ) : (
-        <Tabs defaultValue="by-gig">
-          <TabsList>
-            <TabsTrigger value="by-gig">
-              {t("One gig per row")}{" "}<span className="count">{svcShown.length}</span>
-            </TabsTrigger>
-            <TabsTrigger value="by-student">
-              {t("One student per row")}{" "}<span className="count">{studentLines.length}</span>
-            </TabsTrigger>
-            <TabsTrigger value="bought">
-              {t("Bought services")}{" "}<span className="count">{boughtRows.length}</span>
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="by-gig">
-              {/* Every service with a client account, and where its coordinator's latest order stands. */}
+    // The filters and the state tiles of Service operations, the same in both views (one copy, 17 November 2026).
+    const svcControls = (
+      <>
               <div className="filter-row">
                 <label className="search-box">
                   <Search size={15} />
@@ -4073,7 +4053,7 @@ See you there!`,
                   onChange={(coordinator) => setSvcFilters({ ...svcFilters, coordinator })}
                   options={[
                     { value: "All", label: t("Every coordinator") },
-                    ...[...new Set(serviceRows.flatMap((r) => [r.coordinator_id, r.coordinator_2_id]).filter(Boolean))]
+                    ...[...new Set(serviceRows.map((r) => rowCoordinator(r, groupOfRow)).filter(Boolean))]
                       .map((id) => ({ value: String(id), label: owner(String(id)) }))
                       .sort((a, b) => a.label.localeCompare(b.label)),
                   ]}
@@ -4157,16 +4137,37 @@ See you there!`,
                     aria-pressed={svcFilters.status === state}
                     onClick={() => setSvcFilters({ ...svcFilters, status: svcFilters.status === state ? "All" : state })}
                   >
-                    <strong>{svcShown.filter((r) => r.state === state).length}</strong>
+                    <strong>{svcBase.filter((r) => r.state === state).length}</strong>
                     {stateWord(state)}
                   </button>
                 ))}
               </div>
+      </>
+    );
+    if (serviceOps) {
+      content = !followsServices ? (
+        <Empty title={t("No gigs to buy yet: your students have no client account.")} />
+      ) : (
+        <Tabs defaultValue="by-gig">
+          <TabsList>
+            <TabsTrigger value="by-gig">
+              {t("One gig per row")}{" "}<span className="count">{svcShown.length}</span>
+            </TabsTrigger>
+            <TabsTrigger value="by-student">
+              {t("One student per row")}{" "}<span className="count">{studentLines.length}</span>
+            </TabsTrigger>
+            <TabsTrigger value="bought">
+              {t("Bought services")}{" "}<span className="count">{boughtRows.length}</span>
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="by-gig">
+              {/* Every service with a client account, and where its coordinator's latest order stands. */}
+              {svcControls}
               {panel(
                 t("Gigs to buy · {v0}", { v0: svcShown.length }),
                 svcShown.length
                   ? paginate(
-                      svcShown.map((r) => ({ ...r, id: r.id + ":" + r.student_id })),
+                      svcShown.map((r) => ({ ...r, rowKey: r.id + ":" + r.student_id })),
                       (pageRows) =>
                         generic(pageRows, [
                           {
@@ -4196,120 +4197,7 @@ See you there!`,
           </TabsContent>
           <TabsContent value="by-student">
               {/* Every service with a client account, and where its coordinator's latest order stands. */}
-              <div className="filter-row">
-                <label className="search-box">
-                  <Search size={15} />
-                  <input value={svcFilters.q} placeholder={t("Student, ID, account or link")} onChange={(e) => setSvcFilters({ ...svcFilters, q: e.target.value })} />
-                </label>
-                <Pick
-                  label={t("Order state")}
-                  value={svcFilters.status}
-                  onChange={(status) => setSvcFilters({ ...svcFilters, status })}
-                  options={[
-                    { value: "All", label: t("Every state") },
-                    { value: "No order yet", label: t("No order yet") },
-                    { value: "Buy", label: t("Buy") },
-                    { value: "In Progress", label: t("In progress") },
-                    { value: "Done", label: t("Done, POH still to upload") },
-                    { value: "Proof Uploaded", label: t("POH uploaded") },
-                    { value: "Cancelled", label: t("Canceled") },
-                  ]}
-                />
-                <Pick
-                  label={t("Coordinator")}
-                  value={svcFilters.coordinator}
-                  onChange={(coordinator) => setSvcFilters({ ...svcFilters, coordinator })}
-                  options={[
-                    { value: "All", label: t("Every coordinator") },
-                    ...[...new Set(serviceRows.flatMap((r) => [r.coordinator_id, r.coordinator_2_id]).filter(Boolean))]
-                      .map((id) => ({ value: String(id), label: owner(String(id)) }))
-                      .sort((a, b) => a.label.localeCompare(b.label)),
-                  ]}
-                />
-                {leadsAll && (
-                  <Pick
-                    label={t("Supervisor")}
-                    value={svcFilters.supervisor}
-                    onChange={(supervisor) => setSvcFilters({ ...svcFilters, supervisor })}
-                    options={[
-                      { value: "All", label: t("All supervisors") },
-                      ...[...new Set(serviceRows.map((r) => r.supervisor).filter(Boolean))].map((id) => ({ value: String(id), label: owner(String(id)) })),
-                    ]}
-                  />
-                )}
-                <Pick
-                  label={t("Group")}
-                  value={svcFilters.group}
-                  onChange={(group) => setSvcFilters({ ...svcFilters, group })}
-                  options={[{ value: "All", label: t("All groups") }, ...[...new Set(serviceRows.map((r) => r.student_group).filter(Boolean))].sort().map((g) => ({ value: String(g), label: String(g) }))]}
-                />
-                <Pick
-                  label={t("Marketplace")}
-                  value={svcFilters.platform}
-                  onChange={(platform) => setSvcFilters({ ...svcFilters, platform })}
-                  options={[{ value: "All", label: t("All") }, ...[...new Set(serviceRows.map((r) => r.platform).filter(Boolean))].map((v) => ({ value: String(v), label: String(v) }))]}
-                />
-                <button
-                  type="button"
-                  className="small-btn"
-                  disabled={!studentLines.length}
-                  onClick={() =>
-                    // The sheet's layout, without the passwords.
-                    downloadSheet(studentLines, "service-status", (s: Row) => ({
-                      Coordinator: s.coordinator,
-                      NameEn: s.name,
-                      "Student ID": s.id,
-                      Phone: s.phone,
-                      Email: s.email,
-                      "Current Group Code": s.group,
-                      "Training Provider": s.provider,
-                      "Kafiil Services URL": s.kafeel.map((r: Row) => r.service_url || "").join(" | "),
-                      "Kafeel Account": s.kafeel.map((r: Row) => r.label).join(" | "),
-                      "Nafezly Services URL": s.nafezly.map((r: Row) => r.service_url || "").join(" | "),
-                      "Nafezly Account": s.nafezly.map((r: Row) => r.label).join(" | "),
-                      "Service 1 Platform": s.rows[0]?.service_platform || s.rows[0]?.platform || "",
-                      "Service 1 Status": s.rows[0] ? orderSheetWord(s.rows[0].state) : "",
-                      "Service 2 Platform": s.rows[1]?.service_platform || s.rows[1]?.platform || "",
-                      "Service 2 Status": s.rows[1] ? orderSheetWord(s.rows[1].state) : "",
-                      "Service 3 Platform": s.rows[2]?.service_platform || s.rows[2]?.platform || "",
-                      "Service 3 Status": s.rows[2] ? orderSheetWord(s.rows[2].state) : "",
-                      "Price Paid": s.rows.map((r: Row) => r.latest?.amount ?? "").filter((v: any) => v !== "").join(" | "),
-                    }))
-                  }
-                >
-                  <Download size={14} /> {t("Download as Excel")}
-                </button>
-                {sendsReview && (
-                  <button
-                    type="button"
-                    className="small-btn"
-                    disabled={!svcShown.length}
-                    title={t("One row per account and student, with drop-downs for Project Operations and Abdullah Waheed: the account buys this service, or cancel it. Follows the filters above.")}
-                    onClick={downloadReview}
-                  >
-                    <Download size={14} /> {t("Download the review sheet")}
-                  </button>
-                )}
-                {JSON.stringify(svcFilters) !== JSON.stringify({ q: "", status: "All", coordinator: "All", supervisor: "All", group: "All", platform: "All" }) && (
-                  <button type="button" className="small-btn" onClick={() => setSvcFilters({ q: "", status: "All", coordinator: "All", supervisor: "All", group: "All", platform: "All" })}>
-                    {t("Clear filters")}
-                  </button>
-                )}
-              </div>
-              <div className="mini-stats service-status-stats">
-                {["No order yet", "Buy", "In Progress", "Done", "Proof Uploaded", "Cancelled"].map((state) => (
-                  <button
-                    key={state}
-                    type="button"
-                    className="mini-stat-btn"
-                    aria-pressed={svcFilters.status === state}
-                    onClick={() => setSvcFilters({ ...svcFilters, status: svcFilters.status === state ? "All" : state })}
-                  >
-                    <strong>{svcShown.filter((r) => r.state === state).length}</strong>
-                    {stateWord(state)}
-                  </button>
-                ))}
-              </div>
+              {svcControls}
               {panel(
                 t("Students with a client account · {v0}", { v0: studentLines.length }),
                 studentLines.length ? (
@@ -4571,6 +4459,7 @@ See you there!`,
                   { value: "Service charged", label: t("Services charged") },
                   { value: "Refund", label: t("Refunds") },
                   { value: "Opening balance", label: t("Opening balances") },
+                  { value: "Correction", label: t("Corrections") },
                 ]}
               />
             </div>
@@ -4829,6 +4718,7 @@ See you there!`,
                         ? [
                             { key: "topup", group: money, label: t("Top up"), icon: <Plus size={14} />, onClick: go("account_topup", { id: r.id, kind: "Top-up" }) },
                             { key: "payment", group: money, label: t("Record a payment"), icon: <CreditCard size={14} />, onClick: go("account_topup", { id: r.id, kind: "Payment", paid_on: today() }) },
+                            { key: "amount", group: money, label: t("Change the amount"), icon: <Settings2 size={14} />, onClick: go("account_credit_change", { id: r.id, amount: String(Number(r.credits || 0)) }) },
                           ]
                         : []),
                       ...(wordOn(r)
@@ -8141,6 +8031,31 @@ See you there!`,
                       ],
                       false,
                     )}
+                  </>
+                );
+              }
+              if (a === "account_credit_change") {
+                const acc = (d.accounts || []).find((c: Row) => c.id === form.id);
+                const now = Number(acc?.credits || 0);
+                const change = Math.round((Number(form.amount) - now) * 100) / 100;
+                return (
+                  <>
+                    <div className="account-summary">
+                      <div>
+                        <strong>{acc?.label}</strong>
+                        <small>{acc?.id} · {acc?.platform}</small>
+                      </div>
+                      <Badge value={acc?.status} />
+                      <span className="account-credit">{"$" + now.toLocaleString("en-US", { maximumFractionDigits: 2 })}<small>{t("credit now")}</small></span>
+                    </div>
+                    {field("amount", t("Amount now in the account (USD)"), "number")}
+                    {field("reason", t("Why the amount is being changed"))}
+                    {form.amount !== "" && form.amount !== undefined && Number.isFinite(change) && change !== 0 && (
+                      <p className="footnote">
+                        {t("This changes the amount by {v0}", { v0: (change > 0 ? "+$" : "-$") + Math.abs(change).toLocaleString("en-US", { maximumFractionDigits: 2 }) })}
+                      </p>
+                    )}
+                    <p className="footnote">{t("It is recorded in the credit history as a correction, with the reason. A top-up or payment adds credit; this sets the amount the account really holds, down as well as up.")}</p>
                   </>
                 );
               }

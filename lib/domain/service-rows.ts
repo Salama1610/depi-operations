@@ -35,3 +35,39 @@ export function followsServiceRow(u: Person, row: ServiceRow, groupOf: (id: stri
   if (can(rolesOf(u), ["Operations Coordinator"]) && (row.student_coordinator_id ?? group?.coordinator) === u.id) return true;
   return false;
 }
+
+/** The filters on the Service operations screen. "All" or empty means no filter. */
+export type ServiceFilters = { q?: string; status?: string; coordinator?: string; supervisor?: string; group?: string; platform?: string };
+
+/**
+ * The coordinator a row is shown under (17 November 2026): the student's group
+ * coordinator, whoever is written on the account, the same one the Coordinator
+ * column shows and followsServiceRow follows. The filter used to match the
+ * coordinators written on the account, so a student's row came up under the
+ * wrong person.
+ */
+export const rowCoordinator = (row: ServiceRow & { student_coordinator_id?: unknown }, groupOf: (id: string) => Group | undefined) =>
+  String(row.student_coordinator_id ?? groupOf(String(row.student_group ?? ""))?.coordinator ?? "");
+
+/** The supervisor of the student's group. */
+export const rowSupervisor = (row: ServiceRow, groupOf: (id: string) => Group | undefined) => String(groupOf(String(row.student_group ?? ""))?.supervisor ?? "");
+
+/**
+ * The rows that pass the filters. `skip: "status"` leaves the order-state
+ * filter out: the state tiles count the rows the other filters leave, so each
+ * tile shows how many there are in that state rather than 0 for every state but
+ * the one chosen.
+ */
+export function filterServiceRows<T extends Record<string, any>>(rows: T[], filters: ServiceFilters, groupOf: (id: string) => Group | undefined, skip?: "status"): T[] {
+  const off = (v?: string) => !v || v === "All";
+  const q = String(filters.q ?? "").trim().toLowerCase();
+  return rows.filter(
+    (r) =>
+      (!q || [r.student_name, r.student_id, r.label, r.service_url].some((v) => String(v ?? "").toLowerCase().includes(q))) &&
+      (skip === "status" || off(filters.status) || r.state === filters.status) &&
+      (off(filters.coordinator) || rowCoordinator(r, groupOf) === filters.coordinator) &&
+      (off(filters.supervisor) || rowSupervisor(r, groupOf) === filters.supervisor) &&
+      (off(filters.group) || String(r.student_group ?? "") === filters.group) &&
+      (off(filters.platform) || r.platform === filters.platform),
+  );
+}

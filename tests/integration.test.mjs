@@ -2767,6 +2767,22 @@ test("the Service Team supervisor records account top-ups, each a new row in the
   assert.equal(Number(history[2].balance_after), 75.5);
   assert.equal(history[1].reason, "Top-up · TRX-1001 · October budget");
   assert.equal(history[1].actor, "staff-nour");
+  // The amount is set to what the account really holds, down as well as up, with a reason (17 Nov 2026).
+  assert.match((await post("account_credit_change", { id: "ACC-TOPUP-1", amount: 60, reason: "" })).error, /why/);
+  assert.match((await post("account_credit_change", { id: "ACC-TOPUP-1", amount: -5, reason: "typo" })).error, /amount now/);
+  assert.match((await post("account_credit_change", { id: "ACC-TOPUP-1", amount: "", reason: "typo" })).error, /amount now/);
+  assert.match((await post("account_credit_change", { id: "ACC-TOPUP-1", amount: 75.5, reason: "no change" })).error, /already holds/);
+  await check("account_credit_change", { id: "ACC-TOPUP-1", amount: 60.25, reason: "Spent outside the system" });
+  assert.equal(Number((await dbRow("SELECT credits FROM accounts WHERE id='ACC-TOPUP-1'")).credits), 60.25);
+  const fixed = await dbRow("SELECT delta,balance_after,reason,actor FROM account_credit_ledger WHERE account_id='ACC-TOPUP-1' AND reason LIKE 'Correction%'");
+  assert.deepEqual([Number(fixed.delta), Number(fixed.balance_after), fixed.reason, fixed.actor], [-15.25, 60.25, "Correction · Spent outside the system", "staff-nour"]);
+  await check("account_credit_change", { id: "ACC-TOPUP-1", amount: 75.5, reason: "Put back" });
+  assert.equal(Number((await dbRow("SELECT credits FROM accounts WHERE id='ACC-TOPUP-1'")).credits), 75.5);
+  assert.ok(await dbRow("SELECT id FROM audit_events WHERE action='account_credit_change' AND entity_id='ACC-TOPUP-1'"), "audited");
+  // Someone who does not keep the accounts cannot.
+  await dbExec("UPDATE users SET team='Target Team' WHERE id='staff-nour'");
+  assert.match((await post("account_credit_change", { id: "ACC-TOPUP-1", amount: 10, reason: "no" })).error, /Service Team's supervisor/);
+  await dbExec("UPDATE users SET team='Service Team' WHERE id='staff-nour'");
   // The supervisor sees the pool and the history in the workspace.
   const data = await (await api.GET()).json();
   assert.ok(data.accounts.some((a) => a.id === "ACC-TOPUP-1"));
